@@ -6058,6 +6058,10 @@ func runRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T, cut string, p
 		profileDomain = []bool{true}
 	}
 	bootstrap := runtimeFileShellGitMappedBootstrap(t, profileDomain...)
+	fourWorkRounds := len(profileDomain) > 1 && profileDomain[1]
+	if fourWorkRounds {
+		bootstrap = runtimeMappedFourRoundBootstrap(t, bootstrap)
+	}
 	if processStage != "resume" {
 		runtimeTestPrepareNativeValidationThroughOwners(t, bootstrap, deliverable)
 		if err := runs.Create(ctx, &runmodel.Run{
@@ -6143,6 +6147,8 @@ func runRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T, cut string, p
 			}
 		}
 	}
+	workCalls := 0
+	checkedWorkBoundary := false
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
@@ -6152,6 +6158,9 @@ func runRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T, cut string, p
 		}
 		if command.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
 			response, responseErr := runtimeFileShellGitSemanticResult(command)
+			if fourWorkRounds {
+				response, responseErr = runtimeMappedFourRoundSemantic(command)
+			}
 			if responseErr != nil {
 				t.Errorf("semantic candidate: %v", responseErr)
 				result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
@@ -6171,6 +6180,39 @@ func runRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T, cut string, p
 		coverageKey := string(command.Decision.Focus.CoverageWorkItemIDs[0])
 		candidateAttempts[coverageKey+"/"+string(action)] = append(candidateAttempts[coverageKey+"/"+string(action)], command.CandidateAttempt)
 		candidate, candidateErr := runtimeFileShellGitCandidate(command)
+		if fourWorkRounds && !checkedWorkBoundary && coverageKey == "cwi-edit" && action == runtimecontract.ConvergenceStateNeedValidation {
+			checkedWorkBoundary = true
+			original, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+			if err != nil || original.RuntimeState == nil {
+				t.Fatal("ordinary boundary unavailable", err)
+			}
+			st := original.RuntimeState
+			if workCalls != 4 || len(st.ImplementationWork.Rounds) != 4 {
+				t.Fatal("ordinary validation preceded four effects")
+			}
+			for _, row := range st.Facts.Coverage {
+				if row.State == runtimecontract.RuntimeCoverageItemStateSatisfied || row.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStateSettled || len(row.HistoricalAcceptanceProofs) > 0 {
+					t.Fatal("work granted terminal credit")
+				}
+				if row.ID == "cwi-file" && row.HistoricalBehavior == nil {
+					t.Fatal("work lost original historical effect")
+				}
+			}
+			for _, e := range st.Facts.Evidence.Accepted {
+				if e.Validation != nil || e.Kind == runtimecontract.EvidenceKindValidation {
+					t.Fatal("work substituted ordinary proof")
+				}
+			}
+			if content, err := os.ReadFile(filepath.Join(deliverable, "main.go")); err != nil || string(content) != "package main\n// edited\n" {
+				t.Fatal("work did not actually change original historical file", err)
+			}
+		}
+		if fourWorkRounds {
+			if command.CandidateManifest.ImplementationWorkingBinding != nil {
+				workCalls++
+				candidate, candidateErr = runtimeMappedWorkCandidate(command, workCalls)
+			}
+		}
 		if candidateErr != nil {
 			t.Errorf("candidate for %s/%s: %v", focusID, action, candidateErr)
 			failure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: candidateErr.Error()}
@@ -6309,6 +6351,16 @@ func runRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T, cut string, p
 		t.Fatalf("persisted file-shell-git run=%+v err=%v", persisted, err)
 	}
 	state := persisted.RuntimeState
+	if fourWorkRounds {
+		if workCalls != 4 || len(state.ImplementationWork.Rounds) != 4 || !checkedWorkBoundary {
+			t.Fatalf("four mapped real work rounds missing: calls=%d rounds=%d", workCalls, len(state.ImplementationWork.Rounds))
+		}
+		for _, round := range state.ImplementationWork.Rounds {
+			if round.CompletedReceiptSetHash == "" || round.CoverageWorkItemID != "cwi-edit" {
+				t.Fatal("work receipt chain lost")
+			}
+		}
+	}
 	for _, row := range state.Facts.Coverage {
 		if row.ID != "cwi-file" {
 			continue
@@ -6343,6 +6395,9 @@ func runRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T, cut string, p
 	}
 	for _, key := range []string{"cwi-file/" + string(runtimecontract.ConvergenceStateNeedStateChange), "cwi-edit/" + string(runtimecontract.ConvergenceStateNeedStateChange), "cwi-edit/" + string(runtimecontract.ConvergenceStateNeedValidation)} {
 		want := 1
+		if fourWorkRounds && key == "cwi-edit/"+string(runtimecontract.ConvergenceStateNeedStateChange) {
+			want = 4
+		}
 		if processStage == "resume" && strings.HasPrefix(key, "cwi-file/") {
 			want = 0
 		}

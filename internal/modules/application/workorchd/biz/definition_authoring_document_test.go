@@ -46,7 +46,7 @@ func TestAuthoringParserDiagnosticRetainsWireWithoutProviderFailure(t *testing.T
 
 func authoringTestDocumentResult(t *testing.T, command llmevents.CompleteProviderDocumentCommand, payload []byte) llmevents.CompleteProviderDocumentResult {
 	t.Helper()
-	if command.Request.PromptContext != nil && command.Request.PromptContext.SchemaVersion == workspace.DefinitionAuthoringOwnerBoundV2 {
+	if command.Request.PromptContext != nil && workspace.OwnerBoundAuthoringWire(command.Request.PromptContext.SchemaVersion) {
 		payload = testkit.OwnerBoundFixtureDocument(payload)
 	}
 	hash, err := command.RequestHash()

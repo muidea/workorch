@@ -38,6 +38,7 @@ func TestRuntimeBootstrapStartupSealRejectsCoordinatedSourceOmission(t *testing.
 	verification := spec.Verifications[0]
 	verification.ID, verification.ObligationID = "shared-B-verification", second.ID
 	spec.Verifications = append(spec.Verifications, verification)
+	spec.EvidencePurposeMappings = requiredPurposeMappingsFixture(t, candidate)
 	for _, kind := range []string{workspacemodel.GoalReviewDimensionCoverage, workspacemodel.GoalReviewNegativePath, workspacemodel.GoalReviewRegression, workspacemodel.GoalReviewResourceEnvironment, workspacemodel.GoalReviewTraceability, workspacemodel.GoalReviewVerifierFeasibility} {
 		ids, err := spec.RequiredReviewRequirementIDs(kind)
 		if err != nil {
@@ -81,6 +82,12 @@ func TestRuntimeBootstrapStartupSealRejectsCoordinatedSourceOmission(t *testing.
 	}
 	for _, name := range []string{"coordinated delete B", "remove inventory"} {
 		t.Run(name, func(t *testing.T) {
+			if name == "remove inventory" {
+				if _, err := activationcore.RuntimeBootstrapWithSourceObligations(goal, dod, startup.DefinitionRevision, startup.StartupInputHash, nil, activation, nil); err == nil {
+					t.Fatal("required Profile source missing inventory accepted at bootstrap")
+				}
+				return
+			}
 			var forged *runtimecontract.RuntimeSourceObligationInventory
 			if name == "coordinated delete B" {
 				value := inventory.Clone()

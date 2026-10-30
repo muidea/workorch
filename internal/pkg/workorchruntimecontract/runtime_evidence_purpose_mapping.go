@@ -134,6 +134,9 @@ func validateRuntimeEvidencePurposeMappingSources(inventory RuntimeSourceObligat
 // opt-in, not inferred from paths, operation names, or criterion prose. Both
 // original declarations remain unchanged and must independently be executable.
 func ValidateRuntimeEvidencePurposeMappings(inventory RuntimeSourceObligationInventory, profiles []RuntimeProfileContract) error {
+	if err := validateRequiredRuntimeEvidencePurposes(inventory.EvidencePurposeMappings, profiles); err != nil {
+		return err
+	}
 	if len(inventory.EvidencePurposeMappings) == 0 {
 		return nil
 	}
@@ -152,27 +155,8 @@ func ValidateRuntimeEvidencePurposeMappings(inventory RuntimeSourceObligationInv
 			}
 			history = runtimeProfileEvidencePurposeSource(mapping)
 		}
-		effect, err := CompileRuntimeSourceEvidencePolicy(history.SourceScope, history.SourceID, profiles, nil)
-		if err != nil {
+		if err := validateRuntimeEvidencePurposePolicies(mapping, history, acceptance, profiles); err != nil {
 			return err
-		}
-		current, err := CompileRuntimeSourceEvidencePolicy(acceptance.SourceScope, acceptance.SourceID, profiles, nil)
-		if err != nil {
-			return err
-		}
-		if !slices.Equal(effect.RequiredEvidenceKinds, []string{EvidenceKindStateChange}) || effect.ImplementationWorkPolicy != nil ||
-			effect.ValidationFailureRepairConvergence != nil || len(effect.AcceptedStepKinds) == 0 {
-			return fmt.Errorf("evidence purpose historical source must retain an ordinary state-change-only declaration")
-		}
-		for _, kind := range effect.AcceptedStepKinds {
-			descriptor, found := RuntimeOperationDescriptorForKind(kind)
-			if !found || descriptor.HistoricalEffectProofContractRef == "" {
-				return fmt.Errorf("evidence purpose historical source lacks published owner purpose contract")
-			}
-		}
-		if !slices.Contains(current.RequiredEvidenceKinds, EvidenceKindValidation) || (current.ImplementationWorkPolicy != nil && mapping.ContractRef != RuntimeProfileDeliverableEvidencePurposeV2) ||
-			!slices.Contains(current.AcceptedStepKinds, RuntimeBlockKindManagedValidationSession) {
-			return fmt.Errorf("evidence purpose acceptance source requires independent ordinary owner-attested validation")
 		}
 	}
 	return nil
@@ -347,4 +331,92 @@ func validateRuntimeEvidencePurposeMappingCoverageValidated(inventory RuntimeSou
 		}
 	}
 	return nil
+}
+
+func validateRuntimeEvidencePurposePolicies(mapping RuntimeEvidencePurposeMapping, history, acceptance RuntimeDefinitionSource, profiles []RuntimeProfileContract) error {
+	effect, err := CompileRuntimeSourceEvidencePolicy(history.SourceScope, history.SourceID, profiles, nil)
+	if err != nil {
+		return err
+	}
+	current, err := CompileRuntimeSourceEvidencePolicy(acceptance.SourceScope, acceptance.SourceID, profiles, nil)
+	if err != nil {
+		return err
+	}
+	if !slices.Equal(effect.RequiredEvidenceKinds, []string{EvidenceKindStateChange}) || effect.ImplementationWorkPolicy != nil ||
+		effect.ValidationFailureRepairConvergence != nil || len(effect.AcceptedStepKinds) == 0 {
+		return fmt.Errorf("evidence purpose historical source must retain an ordinary state-change-only declaration")
+	}
+	for _, kind := range effect.AcceptedStepKinds {
+		descriptor, found := RuntimeOperationDescriptorForKind(kind)
+		if !found || descriptor.HistoricalEffectProofContractRef == "" {
+			return fmt.Errorf("evidence purpose historical source lacks published owner purpose contract")
+		}
+	}
+	if !slices.Contains(current.RequiredEvidenceKinds, EvidenceKindValidation) || (current.ImplementationWorkPolicy != nil && mapping.ContractRef != RuntimeProfileDeliverableEvidencePurposeV2) ||
+		!slices.Contains(current.AcceptedStepKinds, RuntimeBlockKindManagedValidationSession) {
+		return fmt.Errorf("evidence purpose acceptance source requires independent ordinary owner-attested validation")
+	}
+	return nil
+}
+
+// RuntimeEvidencePurposeAcceptanceEligible qualifies a single proposed edge's
+// declarations only. Required-set completeness and full graph are separate gates.
+func RuntimeEvidencePurposeAcceptanceEligible(m RuntimeEvidencePurposeMapping, profiles []RuntimeProfileContract, sourceID string) bool {
+	if m.ContractRef != RuntimeProfileDeliverableEvidencePurposeV2 || validateRuntimeProfileEvidencePurposeSource(m, profiles) != nil || sourceID == "" {
+		return false
+	}
+	return validateRuntimeEvidencePurposePolicies(m, runtimeProfileEvidencePurposeSource(m), RuntimeDefinitionSource{SourceScope: "dodItem", SourceID: sourceID}, profiles) == nil
+}
+
+// ValidateRuntimeEvidencePurposePresealCoverage checks the full dependency graph
+// before admission. No compiled binding, proof, or validation token is returned.
+func ValidateRuntimeEvidencePurposePresealCoverage(i RuntimeSourceObligationInventory, profiles []RuntimeProfileContract, items []RuntimeCoverageItem) error {
+	if err := ValidateRuntimeEvidencePurposeMappings(i, profiles); err != nil {
+		return err
+	}
+	result := slices.Clone(items)
+	for n := range result {
+		result[n] = result[n].Normalized()
+	}
+	sources := map[string]RuntimeDefinitionSource{}
+	for _, s := range RuntimeEvidencePurposeSources(i) {
+		sources[s.CandidateItemRef] = s
+	}
+	resolve := func(ref string) (int, error) {
+		source := sources[ref]
+		idx, count := -1, 0
+		for n, item := range result {
+			if item.SourceScope == source.SourceScope && item.SourceID == source.SourceID && item.TargetText == strings.TrimSpace(source.Text) {
+				idx = n
+				count++
+			}
+		}
+		if count != 1 {
+			return -1, fmt.Errorf("purpose dependency graph requires unique original source %s", ref)
+		}
+		return idx, nil
+	}
+	for n := range result {
+		result[n].HistoricalAcceptance = nil
+	}
+	for _, m := range i.EvidencePurposeMappings {
+		h, err := resolve(m.HistoricalItemRef)
+		if err != nil {
+			return err
+		}
+		a, err := resolve(m.AcceptanceItemRef)
+		if err != nil {
+			return err
+		}
+		if !slices.Contains(result[a].PrerequisiteCoverageWorkItemIDs, result[h].ID) {
+			result[a].PrerequisiteCoverageWorkItemIDs = append(result[a].PrerequisiteCoverageWorkItemIDs, result[h].ID)
+		}
+		// Only the dependency endpoint is needed for this local two-purpose graph.
+		// No inventory hash, checks, binding or historical proof is manufactured.
+		result[h].HistoricalAcceptance = &RuntimeHistoricalAcceptanceSource{AcceptanceCoverageWorkItemID: result[a].ID}
+	}
+	if err := ValidateRuntimeCoverageItemDependencies(result); err != nil {
+		return err
+	}
+	return validateRuntimeHistoricalAcceptanceDependencyClosure(result)
 }

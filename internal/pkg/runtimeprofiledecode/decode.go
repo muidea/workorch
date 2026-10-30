@@ -29,6 +29,7 @@ func Decode(value any) []runtimecontract.RuntimeProfileContract {
 			contract.DeliverableExpectations = append(contract.DeliverableExpectations, runtimecontract.RuntimeDeliverableExpectation{
 				ID: String(item["id"]), Required: Bool(item["required"]),
 				EvidenceRole: String(item["evidenceRole"]), Description: String(item["description"]),
+				RequiredEvidencePurposeContractRef: String(item["requiredEvidencePurposeContractRef"]),
 			})
 		}
 		for _, item := range MapSlice(profile["coverageDependencies"]) {

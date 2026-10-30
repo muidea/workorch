@@ -8,12 +8,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"github.com/muidea/workorch/internal/pkg/bootstrapcompiler"
 	"sort"
-	"strconv"
 	"strings"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/bootstrapcompiler"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -40,6 +39,7 @@ func Compile(candidate workspacemodel.DefinitionAdmissionCandidate) (workspacemo
 			return clarification(candidate, workspacemodel.DefinitionAdmissionSpecificationIncomplete, refs, "goal_specification_incomplete"), nil
 		}
 	} else {
+
 		// An opted-in cross-source Profile needs a reviewed/confirmed graph;
 		// ordinary legacy all_of candidates must not invent one at activation.
 		for _, profile := range candidate.RuntimeProfileContracts {
@@ -79,6 +79,11 @@ func Compile(candidate workspacemodel.DefinitionAdmissionCandidate) (workspacemo
 	}
 	if err := runtimecontract.ValidateRuntimeProfileContracts(candidate.RuntimeProfileContracts); err != nil {
 		return clarification(candidate, workspacemodel.DefinitionAdmissionProfileContractInvalid, runtimeProfileRefs(candidate.RuntimeProfileContracts), "runtime_profile_contract_invalid"), nil
+	}
+	if candidate.Specification == nil {
+		if required, err := runtimecontract.RequiredRuntimeEvidencePurposes(candidate.RuntimeProfileContracts); err != nil || len(required) > 0 {
+			return clarification(candidate, workspacemodel.DefinitionAdmissionSpecificationIncomplete, []string{"required-evidence-purpose/missing-specification"}, "goal_specification_incomplete"), nil
+		}
 	}
 	if err := runtimecontract.ValidateRuntimeImplementationWorkAvailability(candidate.RuntimeProfileContracts); err != nil {
 		return clarification(candidate, workspacemodel.DefinitionAdmissionProfileContractInvalid, runtimeProfileRefs(candidate.RuntimeProfileContracts), "implementation_work_protocol_unavailable"), nil
@@ -215,60 +220,7 @@ func specificationVerificationProfileMatches(candidate workspacemodel.Definition
 // after-image order: user, template, generated are materialized in that order.
 // Formal references encode their original ordinal. Unknown identities fail closed.
 func specificationDoDSources(items []workspacemodel.DefinitionCandidateItem) (map[string]string, bool) {
-	result := make(map[string]string, len(items))
-	groups := map[string]map[int]string{"user": {}, "template": {}, "generated": {}}
-	derived, formal := false, false
-	formalOrdinals := make(map[int]bool)
-	for _, item := range items {
-		if strings.HasPrefix(item.CandidateItemRef, "derived-dod:") {
-			derived = true
-			parts := strings.Split(item.CandidateItemRef, ":")
-			if len(parts) != 3 {
-				return nil, false
-			}
-			group, exists := groups[parts[1]]
-			ordinal, err := strconv.Atoi(parts[2])
-			if !exists || err != nil || ordinal < 1 || parts[2] != fmt.Sprintf("%06d", ordinal) || group[ordinal] != "" {
-				return nil, false
-			}
-			group[ordinal] = item.CandidateItemRef
-			continue
-		}
-		formal = true
-		parts := strings.Split(item.CandidateItemRef, ":item:")
-		if len(parts) != 2 || !strings.HasPrefix(parts[0], "dod:") || len(parts[0]) <= len("dod:") {
-			return nil, false
-		}
-		ordinal, err := strconv.Atoi(parts[1])
-		if err != nil || ordinal < 1 || parts[1] != fmt.Sprintf("%06d", ordinal) || formalOrdinals[ordinal] {
-			return nil, false
-		}
-		formalOrdinals[ordinal] = true
-		result[item.CandidateItemRef] = fmt.Sprintf("dod-%03d", ordinal)
-	}
-	if derived && formal {
-		return nil, false
-	}
-	if derived {
-		ordinal := 0
-		for _, kind := range []string{"user", "template", "generated"} {
-			for n := 1; n <= len(groups[kind]); n++ {
-				ref := groups[kind][n]
-				if ref == "" {
-					return nil, false
-				}
-				ordinal++
-				result[ref] = fmt.Sprintf("dod-%03d", ordinal)
-			}
-		}
-	} else {
-		for n := 1; n <= len(items); n++ {
-			if !formalOrdinals[n] {
-				return nil, false
-			}
-		}
-	}
-	return result, len(result) == len(items)
+	return workspacemodel.SpecificationDoDSources(items)
 }
 
 // CompileProfileOwnerFactBindings derives the exact pre-seal manifest from a

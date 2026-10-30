@@ -38,6 +38,9 @@ func RuntimeBootstrapWithSourceObligations(goal *GoalInput, dod *DoDInput, defin
 	if err != nil {
 		return nil, err
 	}
+	if err := runtimecontract.ValidateRuntimeSourceObligationApplicability(inventory, activation.ExecutionContract.ProfileContracts); err != nil {
+		return nil, err
+	}
 	if inventory != nil {
 		if inventory.DefinitionRevision != definitionRevision || inventory.StartupInputHash != startupInputHash {
 			return nil, fmt.Errorf("runtime source obligations do not bind sealed Definition")

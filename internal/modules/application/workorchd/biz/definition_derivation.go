@@ -89,7 +89,7 @@ func (b *Biz) deriveDefinitionAcceptanceBound(ctx context.Context, id common.Wor
 	}
 	providerBindingHash := definitionProviderBindingHash(configuration)
 	identity.ProviderBindingHash = providerBindingHash
-	pending := workspace.DefinitionDerivationRequest{WireContractRef: workspace.DefinitionAuthoringOwnerBoundV2, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBoundV2, "derive"), RequestID: requestID, Input: record.Input.Clone(), Template: record.TemplateSnapshot.Clone(), Resources: resources, ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(resources), ProviderBindingHash: providerBindingHash}
+	pending := workspace.DefinitionDerivationRequest{WireContractRef: workspace.DefinitionAuthoringOwnerBoundV3, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBoundV3, "derive"), RequestID: requestID, Input: record.Input.Clone(), Template: record.TemplateSnapshot.Clone(), Resources: resources, ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(resources), ProviderBindingHash: providerBindingHash}
 	pending.PermitID = pending.ExpectedPermitID()
 	command, err := specifications.DerivationCommand(pending, configuration.DefaultChat)
 	if err != nil {

@@ -24,6 +24,7 @@ import (
 	application "github.com/muidea/workorch/internal/modules/application/workorchd"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/testkit"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
 	"github.com/muidea/workorch/internal/pkg/runtimeprofiledecode"
@@ -392,22 +393,16 @@ func implementationWorkFullflowAuthoringMapping(record *workspace.DefinitionAuth
 	if matches != 1 {
 		return m, fmt.Errorf("public work proposal lacks its exact original user acceptance source")
 	}
-	for _, p := range b.ProfileContracts {
-		if p.ID != "software-dev" {
-			continue
-		}
-		for _, source := range p.DeliverableExpectations {
-			if source.ID == "source_change" && source.Required {
-				m.EvidencePurposeMappings = append(m.EvidencePurposeMappings, workspace.GoalEvidencePurposeMapping{
-					ContractRef:       runtimecontract.RuntimeProfileDeliverableEvidencePurposeV2,
-					HistoricalItemRef: runtimecontract.RuntimeProfileDeliverablePurposeRef(p.ID, source.ID), AcceptanceItemRef: consumer,
-					HistoricalProfileID: p.ID, HistoricalDeliverableID: source.ID, HistoricalProfileHash: runtimecontract.StableRuntimeProfileContractsHash([]runtimecontract.RuntimeProfileContract{p}), HistoricalText: source.Description})
-			}
-		}
+	m.ProfileAcceptanceSelections = nil
+	m.EvidencePurposeMappings = nil
+	m, err = testkit.SelectProfileAcceptance(d, m, consumer)
+	if err != nil {
+		return m, err
 	}
-	if len(m.EvidencePurposeMappings) != 1 {
+	if len(m.EvidencePurposeMappings)+len(m.ProfileAcceptanceSelections) != 1 {
 		return m, fmt.Errorf("public work proposal lacks unique Profile deliverable source")
 	}
+
 	// Only explicit test Profile declarations authorize these exact mappings.
 	// The default Profile has no forced two-round or repair guards; these rules
 	// belong only to the explicitly declared synthetic project.

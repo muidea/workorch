@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 )
@@ -38,13 +39,19 @@ func Audit(m workspace.DefinitionAuthoringMapping) (workspace.DefinitionAuthorin
 	o := workspace.DefinitionProviderObservation{Content: payload, ObservedBytes: uint64(len(payload)), SHA256: hex.EncodeToString(sum[:]), Observed: true, Complete: true, Saved: true}
 	return workspace.DefinitionAuthoringSuccessByteAudit{Document: o, Wire: o.Clone()}, nil
 }
-func Proposal(d workspace.DefinitionDerivationRequest, v workspace.DefinitionAuthoringVerificationMapping) (workspace.DefinitionAuthoringMapping, workspace.DefinitionAuthoringSuccessByteAudit, workspace.GoalSpecification, error) {
+func Proposal(d workspace.DefinitionDerivationRequest, v workspace.DefinitionAuthoringVerificationMapping, consumers ...string) (workspace.DefinitionAuthoringMapping, workspace.DefinitionAuthoringSuccessByteAudit, workspace.GoalSpecification, error) {
 	m, err := Mapping(d, v)
 	if err != nil {
 		return m, workspace.DefinitionAuthoringSuccessByteAudit{}, workspace.GoalSpecification{}, err
 	}
+	if len(consumers) > 0 {
+		m, err = SelectProfileAcceptance(d, m, consumers[0])
+		if err != nil {
+			return m, workspace.DefinitionAuthoringSuccessByteAudit{}, workspace.GoalSpecification{}, err
+		}
+	}
 	a, err := Audit(m)
-	if err == nil && d.WireContractRef == workspace.DefinitionAuthoringOwnerBoundV2 {
+	if err == nil && workspace.OwnerBoundAuthoringWire(d.WireContractRef) {
 		raw := OwnerBoundFixtureDocument(a.Document.Content)
 		sum := sha256.Sum256(raw)
 		o := workspace.DefinitionProviderObservation{Content: raw, ObservedBytes: uint64(len(raw)), SHA256: hex.EncodeToString(sum[:]), Observed: true, Complete: true, Saved: true}
@@ -55,4 +62,26 @@ func Proposal(d workspace.DefinitionDerivationRequest, v workspace.DefinitionAut
 	}
 	s, err := workspace.CompileDefinitionAuthoringMapping(d, m)
 	return m, a, s, err
+}
+
+// SelectProfileAcceptance is an explicit synthetic provider choice supplied by
+// the scenario, never a production default or a first-candidate heuristic.
+func SelectProfileAcceptance(d workspace.DefinitionDerivationRequest, m workspace.DefinitionAuthoringMapping, consumer string) (workspace.DefinitionAuthoringMapping, error) {
+	profiles, err := workspace.AuthoringProfileContracts(d)
+	if err != nil {
+		return m, err
+	}
+	required, err := runtimecontract.RequiredRuntimeEvidencePurposes(profiles)
+	if err != nil {
+		return m, err
+	}
+	for _, r := range required {
+		if d.WireContractRef == workspace.DefinitionAuthoringOwnerBoundV3 {
+			m.ProfileAcceptanceSelections = append(m.ProfileAcceptanceSelections, workspace.DefinitionProfileAcceptanceSelection{SourceRef: r.HistoricalItemRef, AcceptanceItemRef: consumer})
+		} else {
+			r.AcceptanceItemRef = consumer
+			m.EvidencePurposeMappings = append(m.EvidencePurposeMappings, workspace.GoalEvidencePurposeMapping(r))
+		}
+	}
+	return m, nil
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/bootstrapcompiler"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -55,7 +56,35 @@ func ValidateSpecificationExecutionProofMappings(spec workspacemodel.GoalSpecifi
 	if err := runtimecontract.ValidateRuntimeEvidencePurposeMappings(inventory, profiles); err != nil {
 		return err
 	}
-	return runtimecontract.ValidateRuntimeExecutionProofMappings(inventory, profiles)
+	if err := runtimecontract.ValidateRuntimeExecutionProofMappings(inventory, profiles); err != nil {
+		return err
+	}
+	if len(inventory.EvidencePurposeMappings) == 0 {
+		return nil
+	}
+	// Compile the same complete Profile dependency graph as startup. This is a
+	// pure pre-seal check, not an activation or a persisted proof.
+	goalText := inventory.Sources[0].Text
+	if goalText == "" {
+		for _, r := range spec.Requirements {
+			if len(r.SourceItemRefs) == 1 && r.SourceItemRefs[0] == spec.GoalItemRef {
+				goalText = r.Text
+			}
+		}
+	}
+	texts := make([]string, len(dodItems))
+	for _, item := range dodItems {
+		for n := range texts {
+			if resolved[item.CandidateItemRef] == fmt.Sprintf("dod-%03d", n+1) {
+				texts[n] = item.Text
+			}
+		}
+	}
+	compiled, err := bootstrapcompiler.CompileCoverage(&bootstrapcompiler.GoalInput{Text: goalText}, &bootstrapcompiler.DoDInput{Items: texts}, runtimecontract.RuntimeActivationContext{ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: profiles}})
+	if err != nil {
+		return err
+	}
+	return runtimecontract.ValidateRuntimeEvidencePurposePresealCoverage(inventory, profiles, compiled.CoverageItems)
 }
 
 // SpecificationVerificationApplies 复用 Workspace 的确认后来源映射与中立 Profile matcher。

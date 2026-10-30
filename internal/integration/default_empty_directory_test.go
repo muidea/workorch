@@ -1,6 +1,7 @@
 package integration_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -94,11 +96,20 @@ func TestSameCWIImplementationWorkProductionAvailabilityBlocksBeforeRun(t *testi
 	testEmptyDirectoryProduction(t, true)
 }
 
-func testEmptyDirectoryProduction(t *testing.T, requireImplementationWork bool) {
+func TestRequiredProfilePurposePublicAuthoringHTTP(t *testing.T) {
+	for _, missing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("missing_%t", missing), func(t *testing.T) { testEmptyDirectoryProduction(t, false, true, missing) })
+	}
+}
+
+func testEmptyDirectoryProduction(t *testing.T, requireImplementationWork bool, authoringOnly ...bool) {
 	ctx := context.Background()
 	storage, directory, configDir := t.TempDir(), t.TempDir(), t.TempDir()
 	repos := workorchrepo.NewWorkspaceScopedFileRepositorySet(storage)
 	provider := &emptyDirectoryProvider{repos: repos}
+	if len(authoringOnly) > 1 {
+		provider.omitPurposeSelections = authoringOnly[1]
+	}
 	proxy := httptest.NewServer(http.HandlerFunc(provider.serveHTTP))
 	t.Cleanup(proxy.Close)
 
@@ -288,6 +299,24 @@ operations = ["responses"]
 		if reviewed.State == "ready_to_confirm" {
 			break
 		}
+		if reviewed.State == "failed" && provider.omitPurposeSelections {
+			current, err := repos.Workspaces.Get(ctx, workspaceID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(current.DefinitionAdmissionCandidates) != 0 || current.StartupInput != nil || current.DefinitionAuthoringConfirmation != nil {
+				t.Fatal("missing relationship reached admission/confirmation")
+			}
+			if calls := provider.snapshot(); len(calls) != 2 || calls[1] != "proposal" {
+				t.Fatalf("missing relationship reached reviews or retried: %v", calls)
+			}
+			if reviewed.Proposal == nil || len(reviewed.Proposal.RequiredEvidencePurposes) != 1 || reviewed.Proposal.RequiredEvidencePurposes[0].AcceptanceItemRef != "" {
+				t.Fatal("missing source not projected")
+			}
+			assertNoRun(t, repos)
+			assertEmptyDeliverable(t, directory)
+			return
+		}
 		if reviewed.State == "failed" || reviewed.State == "preparation_failed" {
 			t.Fatalf("创建编译失败: %+v provider=%v", reviewed, provider.snapshot())
 		}
@@ -399,6 +428,25 @@ operations = ["responses"]
 	}
 	assertNoRun(t, repos)
 	assertEmptyDeliverable(t, directory)
+	if len(authoringOnly) > 0 && authoringOnly[0] {
+		if len(reviewed.Proposal.RequiredEvidencePurposes) != 1 || len(current.DefinitionAdmissionCandidates) != 1 || len(current.DefinitionAdmissionCandidates[0].Specification.EvidencePurposeMappings) != 1 {
+			t.Fatal("required relation not confirmed")
+		}
+		if d := current.DefinitionAuthoring.DerivationRequests[0]; d.WireContractRef != workspace.DefinitionAuthoringOwnerBoundV3 {
+			t.Fatal("new producer did not use v3")
+		}
+		request := current.DefinitionAuthoring.SpecificationRequests[0]
+		if request.Mapping == nil || len(request.Mapping.ProfileAcceptanceSelections) != 1 || len(request.Mapping.EvidencePurposeMappings) != 0 || bytes.Contains(request.SuccessAudit.Document.Content, []byte("HistoricalProfileHash")) {
+			t.Fatal("provider supplied machine mapping metadata")
+		}
+		reopened := workorchrepo.NewWorkspaceScopedFileRepositorySet(storage)
+		restored, err := reopened.Workspaces.Get(ctx, workspaceID)
+		if err != nil || restored.DefinitionAuthoring == nil || restored.DefinitionAuthoring.Validate() != nil {
+			t.Fatal("confirmed source invalid after reopen", err)
+		}
+		assertNoRun(t, reopened)
+		return
+	}
 	productionJSON(t, client, http.MethodPost, path+"/execution-activations", management.WorkspaceExecutionCommandRequest{Intent: "restart", RequestID: "explicit-first-execution"}, nil)
 
 	var first *runmodel.Run
@@ -564,10 +612,11 @@ func startProductionOwners(t *testing.T, ctx context.Context, hub magicevent.Hub
 }
 
 type emptyDirectoryProvider struct {
-	mu              sync.Mutex
-	calls           []string
-	repos           workorchrepo.WorkspaceScopedFileRepositorySet
-	mappingProposal func(*workspace.DefinitionAuthoringRecord) (workspace.DefinitionAuthoringMapping, error)
+	mu                    sync.Mutex
+	calls                 []string
+	repos                 workorchrepo.WorkspaceScopedFileRepositorySet
+	omitPurposeSelections bool
+	mappingProposal       func(*workspace.DefinitionAuthoringRecord) (workspace.DefinitionAuthoringMapping, error)
 }
 
 func (p *emptyDirectoryProvider) snapshot() []string {
@@ -615,6 +664,35 @@ func (p *emptyDirectoryProvider) serveHTTP(w http.ResponseWriter, r *http.Reques
 			if pending.ReviewKind == "" {
 				kind = "proposal"
 				mapping, buildErr := productionMapping(record)
+				if record.DerivationRequests[0].WireContractRef == workspace.DefinitionAuthoringOwnerBoundV3 && p.mappingProposal == nil && buildErr == nil {
+					// Consume the real production prompt catalog, returning only a scenario's
+					// explicit semantic original DoD choice; no full mapping injection hook.
+					mapping.ProfileAcceptanceSelections = nil
+					for _, line := range strings.Split(string(request.Input), "\n") {
+						var catalog struct {
+							Required []struct {
+								Source   struct{ HistoricalItemRef string } `json:"source"`
+								Eligible []string                           `json:"eligibleAcceptanceItemRefs"`
+							} `json:"requiredEvidencePurposes"`
+						}
+						if json.Unmarshal([]byte(line), &catalog) != nil || len(catalog.Required) == 0 {
+							continue
+						}
+						for _, source := range catalog.Required {
+							if !slices.Contains(source.Eligible, "derived-dod:template:000001") {
+								buildErr = fmt.Errorf("fixture acceptance source unavailable")
+								break
+							}
+							mapping.ProfileAcceptanceSelections = append(mapping.ProfileAcceptanceSelections, workspace.DefinitionProfileAcceptanceSelection{SourceRef: source.Source.HistoricalItemRef, AcceptanceItemRef: "derived-dod:template:000001"})
+						}
+					}
+					if len(mapping.ProfileAcceptanceSelections) != 1 {
+						buildErr = fmt.Errorf("production request lacks required source catalog")
+					}
+					if p.omitPurposeSelections {
+						mapping.ProfileAcceptanceSelections = nil
+					}
+				}
 				if p.mappingProposal != nil {
 					mapping, buildErr = p.mappingProposal(record)
 				}
@@ -659,7 +737,7 @@ func (p *emptyDirectoryProvider) serveHTTP(w http.ResponseWriter, r *http.Reques
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	if (kind == "derive" || kind == "proposal" || strings.HasPrefix(kind, "review/")) && len(record.DerivationRequests) == 1 && record.DerivationRequests[0].WireContractRef == workspace.DefinitionAuthoringOwnerBoundV2 {
+	if (kind == "derive" || kind == "proposal" || strings.HasPrefix(kind, "review/")) && len(record.DerivationRequests) == 1 && workspace.OwnerBoundAuthoringWire(record.DerivationRequests[0].WireContractRef) {
 		payload = testkit.OwnerBoundFixtureDocument(payload)
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -764,10 +842,14 @@ func emptyDirectoryRuntimeDocument(input string) ([]byte, string, error) {
 }
 
 func productionMapping(record *workspace.DefinitionAuthoringRecord) (workspace.DefinitionAuthoringMapping, error) {
-	return testkit.Mapping(record.DerivationRequests[0], workspace.DefinitionAuthoringVerificationMapping{
+	m, err := testkit.Mapping(record.DerivationRequests[0], workspace.DefinitionAuthoringVerificationMapping{
 		Declaration: "完整保留默认模板验证约束", Status: workspace.GoalVerificationDeclared,
 		ProfileID: "software-dev", EvidenceRequirementID: "*", Scope: "dodItem",
 	})
+	if err != nil {
+		return m, err
+	}
+	return testkit.SelectProfileAcceptance(record.DerivationRequests[0], m, "derived-dod:template:000001")
 }
 
 func productionJSON(t *testing.T, client *http.Client, method, url string, body, output any) {

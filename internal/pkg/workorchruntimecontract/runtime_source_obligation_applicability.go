@@ -6,6 +6,9 @@ import "fmt"
 // 已封存的 Profile 声明适用性，不从声明存在推导 owner readiness、binding 或 credit。
 func ValidateRuntimeSourceObligationApplicability(inventory *RuntimeSourceObligationInventory, profiles []RuntimeProfileContract) error {
 	if inventory == nil {
+		if err := validateRequiredRuntimeEvidencePurposes(nil, profiles); err != nil {
+			return err
+		}
 		for _, profile := range profiles {
 			for _, requirement := range profile.EvidenceRequirements {
 				for _, rule := range requirement.LineageAssertions {

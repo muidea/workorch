@@ -2,6 +2,8 @@ package biz
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -120,7 +122,7 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 			if profileID == "" || evidenceID == "" {
 				t.Fatal("模板缺少 dodItem proof 合同")
 			}
-			mapping, _, _, err := workspacetestkit.Proposal(record.DerivationRequests[0], workspace.DefinitionAuthoringVerificationMapping{Declaration: "按已封存模板验证", Status: workspace.GoalVerificationDeclared, ProfileID: profileID, EvidenceRequirementID: evidenceID, Scope: "dodItem"})
+			mapping, _, _, err := workspacetestkit.Proposal(record.DerivationRequests[0], workspace.DefinitionAuthoringVerificationMapping{Declaration: "按已封存模板验证", Status: workspace.GoalVerificationDeclared, ProfileID: profileID, EvidenceRequirementID: evidenceID, Scope: "dodItem"}, "derived-dod:template:000001")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -256,6 +258,12 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 	expected := make(map[string]bool)
 	for _, verification := range first.DefinitionSeed.SourceObligations.Verifications {
 		expected[verification.ID] = true
+	}
+	for _, mapping := range first.DefinitionSeed.SourceObligations.EvidencePurposeMappings {
+		if mapping.ContractRef == runtimecontract.RuntimeProfileDeliverableEvidencePurposeV2 {
+			digest := sha256.Sum256([]byte(mapping.HistoricalItemRef))
+			expected["profile-verification-"+hex.EncodeToString(digest[:])] = true
+		}
 	}
 	observed := make(map[string]bool)
 	for _, requirement := range requirements {

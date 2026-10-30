@@ -76,6 +76,7 @@ func assertBuiltinSoftwareDevCandidateAndBootstrap(
 	candidate workspacemodel.DefinitionAdmissionCandidate,
 ) *runtimecontract.RuntimeBootstrap {
 	t.Helper()
+	candidate = withRequiredPurposeSpecificationFixture(t, candidate)
 	var parsedRepair *runtimecontract.RuntimeValidationFailureRepairConvergence
 	for _, profile := range candidate.RuntimeProfileContracts {
 		if profile.ID != "software-dev" {
@@ -141,10 +142,16 @@ func assertBuiltinSoftwareDevCandidateAndBootstrap(
 	}
 	executionContract := runtimeExecutionContract(builtin.ContextHints.Map())
 	executionContract.ProfileContracts = runtimecontract.NormalizeRuntimeProfileContracts(candidate.RuntimeProfileContracts)
-	bootstrap, err := activationcore.RuntimeBootstrap(goal, dod, "definition-builtin-r1", "startup-input-builtin-r1", nil, runtimecontract.RuntimeActivationContext{
+	startup := startupInputForActivationPortTest(candidate)
+	admission := workspacemodel.WorkspaceActivationAdmission{WorkspaceID: candidate.WorkspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision, CandidateHash: candidate.CandidateHash, DefinitionRevision: startup.DefinitionRevision, StartupInputHash: startup.StartupInputHash, State: workspacemodel.WorkspaceActivationEligible}
+	inventory, err := definitionadmission.CompileRuntimeSourceObligationInventory(candidate, startup, admission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrap, err := activationcore.RuntimeBootstrapWithSourceObligations(goal, dod, startup.DefinitionRevision, startup.StartupInputHash, nil, runtimecontract.RuntimeActivationContext{
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "test-provider", ModelID: "test-model"}},
 		ExecutionContract: executionContract,
-	})
+	}, inventory)
 	if err != nil {
 		t.Fatalf("compile admitted builtin software-dev bootstrap: %v", err)
 	}
@@ -331,10 +338,19 @@ func TestBuiltinSoftwareDevExplicitAcceptanceDimensionGetsExactProofClosure(t *t
 	}
 	executionContract := runtimeExecutionContract(builtin.ContextHints.Map())
 	executionContract.ProfileContracts = runtimecontract.NormalizeRuntimeProfileContracts(profiles)
-	bootstrap, err := activationcore.RuntimeBootstrap(goal, dod, "definition-builtin-dimension", "startup-input-builtin-dimension", nil, runtimecontract.RuntimeActivationContext{
+	candidate.RuntimeProfileContracts = executionContract.ProfileContracts
+	candidate.RuntimeProfileContractsHash = runtimecontract.StableRuntimeProfileContractsHash(candidate.RuntimeProfileContracts)
+	candidate = withRequiredPurposeSpecificationFixture(t, candidate)
+	startup := startupInputForActivationPortTest(candidate)
+	admission := workspacemodel.WorkspaceActivationAdmission{WorkspaceID: candidate.WorkspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision, CandidateHash: candidate.CandidateHash, DefinitionRevision: startup.DefinitionRevision, StartupInputHash: startup.StartupInputHash, State: workspacemodel.WorkspaceActivationEligible}
+	inventory, err := definitionadmission.CompileRuntimeSourceObligationInventory(candidate, startup, admission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrap, err := activationcore.RuntimeBootstrapWithSourceObligations(goal, dod, startup.DefinitionRevision, startup.StartupInputHash, nil, runtimecontract.RuntimeActivationContext{
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "test-provider", ModelID: "test-model"}},
 		ExecutionContract: executionContract,
-	})
+	}, inventory)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1022,8 +1038,13 @@ func startupInputForActivationPortTest(candidate workspacemodel.DefinitionAdmiss
 		dodRefs = append(dodRefs, ref)
 		dodTexts = append(dodTexts, item.Text)
 	}
+	specificationHash := ""
+	if candidate.Specification != nil {
+		specificationHash = candidate.Specification.AdmissionHash()
+	}
 	return (workspacemodel.WorkspaceStartupInputContract{
-		WorkspaceID: candidate.WorkspaceID, DefinitionRevision: candidate.GoalInput.SourceIdentity + "|" + candidate.DoDInputs[0].SourceIdentity,
+		SpecificationHash: specificationHash,
+		WorkspaceID:       candidate.WorkspaceID, DefinitionRevision: candidate.GoalInput.SourceIdentity + "|" + candidate.DoDInputs[0].SourceIdentity,
 		GoalDefinitionRef: "goal-item", GoalTextHash: workspacemodel.StableDefinitionTextHash(candidate.GoalInput.Text),
 		DoDDefinitionRefs: dodRefs, DoDItemSetHash: workspacemodel.StableDefinitionStringSetHash(dodTexts),
 		WorkspaceTemplateRef: candidate.WorkspaceTemplateSnapshot.TemplateRef, TemplateRevision: candidate.WorkspaceTemplateSnapshot.Revision,
@@ -1048,6 +1069,7 @@ func TestBuiltinSoftwareDevSpecificationWildcardRemainsApplicableToProductionBoo
 		spec.Obligations = append(spec.Obligations, workspacemodel.GoalSpecificationObligation{ID: "obl-" + id, RequirementID: id, DoDItemRefs: []string{item.CandidateItemRef}, Text: item.Text})
 		spec.Verifications = append(spec.Verifications, workspacemodel.GoalSpecificationVerification{ID: "ver-" + id, ObligationID: "obl-" + id, Declaration: "按默认模板声明验证", Status: workspacemodel.GoalVerificationDeclared, ProfileID: "software-dev", EvidenceRequirementID: "*", Scope: "dodItem"})
 	}
+	spec.EvidencePurposeMappings = requiredPurposeMappingsFixture(t, candidate)
 	hash := spec.ContentHash()
 	for _, kind := range []string{workspacemodel.GoalReviewDimensionCoverage, workspacemodel.GoalReviewNegativePath, workspacemodel.GoalReviewRegression, workspacemodel.GoalReviewResourceEnvironment, workspacemodel.GoalReviewTraceability, workspacemodel.GoalReviewVerifierFeasibility} {
 		ids, err := spec.RequiredReviewRequirementIDs(kind)
@@ -1071,4 +1093,44 @@ func TestBuiltinSoftwareDevSpecificationWildcardRemainsApplicableToProductionBoo
 	if count != len(dod.Items) {
 		t.Fatalf("default template incomplete sources: %d want %d", count, len(dod.Items))
 	}
+}
+
+// These formal-source fixtures explicitly choose their original first criterion
+// as the ordinary consumer. Production authoring must obtain a semantic choice.
+func requiredPurposeMappingsFixture(t *testing.T, c workspacemodel.DefinitionAdmissionCandidate) []workspacemodel.GoalEvidencePurposeMapping {
+	t.Helper()
+	required, err := runtimecontract.RequiredRuntimeEvidencePurposes(c.RuntimeProfileContracts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result []workspacemodel.GoalEvidencePurposeMapping
+	for _, m := range required {
+		m.AcceptanceItemRef = c.DoDInputs[0].CandidateItemRef
+		result = append(result, workspacemodel.GoalEvidencePurposeMapping(m))
+	}
+	return result
+}
+func withRequiredPurposeSpecificationFixture(t *testing.T, c workspacemodel.DefinitionAdmissionCandidate) workspacemodel.DefinitionAdmissionCandidate {
+	t.Helper()
+	if c.Specification != nil {
+		return c
+	}
+	spec := workspacemodel.GoalSpecification{Version: workspacemodel.GoalSpecificationVersionCurrent, GoalItemRef: c.GoalInput.CandidateItemRef, GoalTextHash: workspacemodel.StableDefinitionTextHash(c.GoalInput.Text), Dimensions: []workspacemodel.GoalSpecificationDimension{{ID: "all", Required: true, Activated: true}}}
+	spec.Requirements = append(spec.Requirements, workspacemodel.GoalSpecificationRequirement{ID: "original-goal", DimensionID: "all", Required: true, SourceKind: workspacemodel.GoalRequirementUserExplicit, SourceItemRefs: []string{c.GoalInput.CandidateItemRef}, Text: c.GoalInput.Text})
+	for n, item := range c.DoDInputs {
+		id := fmt.Sprintf("req-%d", n)
+		spec.Requirements = append(spec.Requirements, workspacemodel.GoalSpecificationRequirement{ID: id, DimensionID: "all", Required: true, SourceKind: workspacemodel.GoalRequirementUserExplicit, SourceItemRefs: []string{item.CandidateItemRef}, Text: item.Text})
+		spec.Obligations = append(spec.Obligations, workspacemodel.GoalSpecificationObligation{ID: "obl-" + id, RequirementID: id, DoDItemRefs: []string{item.CandidateItemRef}, Text: item.Text})
+		spec.Verifications = append(spec.Verifications, workspacemodel.GoalSpecificationVerification{ID: "ver-" + id, ObligationID: "obl-" + id, Declaration: "完整独立验证原判据", Status: workspacemodel.GoalVerificationDeclared, ProfileID: "software-dev", EvidenceRequirementID: "*", Scope: "dodItem"})
+	}
+	spec.EvidencePurposeMappings = requiredPurposeMappingsFixture(t, c)
+	for _, kind := range []string{workspacemodel.GoalReviewDimensionCoverage, workspacemodel.GoalReviewNegativePath, workspacemodel.GoalReviewRegression, workspacemodel.GoalReviewResourceEnvironment, workspacemodel.GoalReviewTraceability, workspacemodel.GoalReviewVerifierFeasibility} {
+		ids, err := spec.RequiredReviewRequirementIDs(kind)
+		if err != nil {
+			t.Fatal(err)
+		}
+		spec.Reviews = append(spec.Reviews, workspacemodel.GoalSpecificationCompletenessReview{Kind: kind, Status: workspacemodel.GoalReviewPass, SpecificationHash: spec.ContentHash(), Reason: "explicit synthetic reviewed source relationship", EvidenceRefs: []string{c.GoalInput.CandidateItemRef}, RequirementIDs: ids})
+	}
+	c.Specification = &spec
+	return c.WithHash()
 }

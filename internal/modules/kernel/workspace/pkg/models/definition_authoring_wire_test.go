@@ -140,3 +140,16 @@ func TestOwnerBoundAuthoringClosedSemanticDocumentsAndLegacyIsolation(t *testing
 		t.Fatal("unknown wire selected")
 	}
 }
+
+// Frozen from 439b3428's schema, independently hashed from the original source.
+func TestLegacyOwnerBoundV2WireHashesRemainExact(t *testing.T) {
+	for phase, want := range map[string]string{
+		"derive":       "authoring-wire-sha256:018582e6f647621e4bc358b14e7852b28f5f4168fc282d620c34e61d6243d7ef",
+		"proposal":     "authoring-wire-sha256:81b01904bf5bbb4c85336898d7e53448d4a14ecc2cb2d9e5b8796d6118ad4421",
+		"traceability": "authoring-wire-sha256:b94dbe284446d1fb54e6d8b21ebddb2708b86aa7f700c516a261dcfef4efdc9f",
+	} {
+		if got := AuthoringWireHash(DefinitionAuthoringOwnerBoundV2, phase); got != want {
+			t.Fatalf("%s: old wire identity changed: %s", phase, got)
+		}
+	}
+}

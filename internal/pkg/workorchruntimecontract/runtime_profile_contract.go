@@ -56,10 +56,12 @@ type RuntimeAcceptanceDimension struct {
 }
 
 type RuntimeDeliverableExpectation struct {
-	ID           string
-	Required     bool
-	EvidenceRole string
-	Description  string
+	// Optional opt-in; an empty extension retains legacy snapshot semantics.
+	RequiredEvidencePurposeContractRef string `json:",omitempty"`
+	ID                                 string
+	Required                           bool
+	EvidenceRole                       string
+	Description                        string
 }
 
 type RuntimeProfileEvidenceRequirement struct {
@@ -327,6 +329,9 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 				return fmt.Errorf("runtime profile %q duplicates deliverable expectation %q", profile.ID, item.ID)
 			}
 			seenDeliverables[item.ID] = struct{}{}
+			if item.RequiredEvidencePurposeContractRef != "" && (!item.Required || item.RequiredEvidencePurposeContractRef != RuntimeProfileDeliverableEvidencePurposeV2 || strings.TrimSpace(item.Description) == "") {
+				return fmt.Errorf("runtime deliverable requires a supported required evidence purpose and original text")
+			}
 		}
 		for _, item := range profile.EvidenceRequirements {
 			if item.ID == "" || item.Scope == "" {

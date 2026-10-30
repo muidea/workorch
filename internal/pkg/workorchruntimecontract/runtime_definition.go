@@ -88,6 +88,10 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 			writeHashString(h, fmt.Sprintf("%t", expectation.Required))
 			writeHashString(h, expectation.EvidenceRole)
 			writeHashString(h, expectation.Description)
+			if expectation.RequiredEvidencePurposeContractRef != "" {
+				writeHashString(h, "required-evidence-purpose")
+				writeHashString(h, expectation.RequiredEvidencePurposeContractRef)
+			}
 		}
 		writeHashString(h, fmt.Sprintf("%d", len(profile.EvidenceRequirements)))
 		for _, requirement := range profile.EvidenceRequirements {

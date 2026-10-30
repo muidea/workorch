@@ -1,3 +1,4 @@
+import { AuthoringRequiredEvidencePurposes } from './AuthoringRequiredEvidencePurposes';
 import { Alert, Descriptions, List, Space, Tag, Typography } from 'antd';
 import type { DefinitionAuthoringView } from '../../types';
 import { authoringSourceLabel } from '../../workspaceAuthoring';
@@ -24,6 +25,7 @@ export function AuthoringCandidateProposal({ proposal }: { proposal: NonNullable
     <List dataSource={proposal.resources || []} renderItem={item => <List.Item>{item.id} · {item.ref} · {item.snapshotHash} · {item.required ? 'required' : 'optional'} · {item.available ? 'available' : 'unavailable'}</List.Item>} />
     <Typography.Title level={5}>逐义务验证声明</Typography.Title>
     <List aria-label="逐义务验证声明" dataSource={proposal.verifications || []} renderItem={item => <List.Item><div>{item.id} → obligation {item.obligationId} · {item.status}<pre style={{ whiteSpace: 'pre-wrap' }}>{item.declaration}</pre><div>Profile：{item.profileId || '未绑定'}；evidenceRequirement：{item.evidenceRequirementId || '未绑定'}；scope：{item.scope || '未绑定'}</div></div></List.Item>} />
+    <AuthoringRequiredEvidencePurposes proposal={proposal} />
     <Typography.Title level={5}>六类独立审查（{proposal.reviews?.length || 0}/6）</Typography.Title>
     <List aria-label="独立审查明细" dataSource={proposal.reviews || []} renderItem={item => <List.Item><div><Tag color={item.status === 'PASS' ? 'green' : 'orange'}>{item.status}</Tag>{item.kind}<pre style={{ whiteSpace: 'pre-wrap' }}>{item.reason}</pre><div>required 覆盖：{item.requirementIds?.join('、') || '未提供'}</div><div>依据引用：{item.evidenceRefs?.join('、') || '未提供'}</div><div>审查绑定 proposalHash（字段 specificationHash）：{item.specificationHash}</div></div></List.Item>} />
     {(proposal.executionProofMappings || []).map((item, index) => <div key={`execution-${index}`}>{item.consumerItemRef} · {item.ruleRef} → {item.sourceItemRef} · {item.contractRef}<pre style={{ whiteSpace: 'pre-wrap' }}>{item.consumerGoalText}</pre></div>)}

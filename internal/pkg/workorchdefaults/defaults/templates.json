@@ -619,6 +619,7 @@
             {
               "id": "source_change",
               "required": true,
+              "requiredEvidencePurposeContractRef": "runtime/profile-deliverable-evidence-purpose/v2",
               "evidenceRole": "primary_state_change",
               "description": "Source, configuration, documentation, or workspace state change directly related to Goal"
             },

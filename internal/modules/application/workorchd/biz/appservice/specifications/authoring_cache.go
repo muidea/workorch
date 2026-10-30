@@ -24,10 +24,11 @@ func partitionAuthoringReview(command llmevents.CompleteProviderCommand, input a
 		Specification        workspace.GoalSpecification                     `json:"specification"`
 	}{input.ReviewEvidenceRefs, input.ProposalHash, input.ResourceSnapshotHash, input.Resources, input.ExpectedResources, input.Goal, input.CandidateAcceptance, input.Specification}
 	profiles := struct {
-		Profiles              []runtimecontract.RuntimeProfileContract `json:"profiles"`
-		VerificationOptions   []authoringCandidateVerificationOptions  `json:"sourceApplicableVerificationDeclarations"`
-		ProfileSnapshotHashes []authoringProfileSnapshotHash           `json:"profileSnapshotHashes"`
-	}{input.Profiles, input.VerificationOptions, input.ProfileSnapshotHashes}
+		Profiles                 []runtimecontract.RuntimeProfileContract `json:"profiles"`
+		VerificationOptions      []authoringCandidateVerificationOptions  `json:"sourceApplicableVerificationDeclarations"`
+		ProfileSnapshotHashes    []authoringProfileSnapshotHash           `json:"profileSnapshotHashes"`
+		RequiredEvidencePurposes []authoringRequiredEvidencePurpose       `json:"requiredEvidencePurposes,omitempty"`
+	}{input.Profiles, input.VerificationOptions, input.ProfileSnapshotHashes, input.RequiredEvidencePurposes}
 	phase := struct {
 		RequiredRequirementIDs []string `json:"requiredRequirementIDs"`
 		Kind                   string   `json:"kind"`

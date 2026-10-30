@@ -64,7 +64,7 @@ func Fields(kind string) InputFields {
 	case "dimension":
 		return InputFields{Text: "id description", Boolean: "required"}
 	case "deliverable":
-		return InputFields{Text: "id description evidenceRole", Boolean: "required"}
+		return InputFields{Text: "id description evidenceRole requiredEvidencePurposeContractRef", Boolean: "required"}
 	case "dependency":
 		return InputFields{Text: "id sourceScope sourceRequirementId dependentScope dependentRequirementId", Boolean: "requireSourceSettled", StringList: "triggerEvidenceKinds"}
 	case "recipe":

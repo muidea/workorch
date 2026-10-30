@@ -78,3 +78,35 @@ func TestProfileEvidencePurposeAdmissionConfirmsSnapshotWithoutInventingDoD(t *t
 		t.Fatal("unconfirmed source reached Runtime")
 	}
 }
+
+func TestRequiredProfilePurposeCannotConfirmMissingEvenWithSixPASS(t *testing.T) {
+	c := candidateWithProfileEvidencePurposeMapping()
+	p := &c.RuntimeProfileContracts[0]
+	p.DeliverableExpectations[0].RequiredEvidencePurposeContractRef = runtimecontract.RuntimeProfileDeliverableEvidencePurposeV2
+	c.Specification.EvidencePurposeMappings[0].HistoricalProfileHash = runtimecontract.StableRuntimeProfileContractsHash(c.RuntimeProfileContracts)
+	c.RuntimeProfileContractsHash = runtimecontract.StableRuntimeProfileContractsHash(c.RuntimeProfileContracts)
+	for n := range c.Specification.Reviews {
+		c.Specification.Reviews[n].SpecificationHash = c.Specification.ContentHash()
+	}
+	c = c.WithHash()
+	if result, err := Compile(c); err != nil || result.Disposition != workspace.DefinitionAdmissionAdmittedAllOf {
+		t.Fatal("required source positive rejected", err, result)
+	}
+	c.Specification.EvidencePurposeMappings = nil
+	// Even newly computed six PASS reviews cannot substitute for owner completeness.
+	for n := range c.Specification.Reviews {
+		c.Specification.Reviews[n].SpecificationHash = c.Specification.ContentHash()
+	}
+	c = c.WithHash()
+	if err := ValidateAuthoringVerificationApplicability(*c.Specification, c.DoDInputs, c.RuntimeProfileContracts); err == nil {
+		t.Fatal("reviews bypassed required source")
+	}
+	if result, err := Compile(c); err != nil || result.Disposition == workspace.DefinitionAdmissionAdmittedAllOf {
+		t.Fatal("missing source admitted", err, result)
+	}
+	c.Specification = nil
+	c = c.WithHash()
+	if result, err := Compile(c); err != nil || result.Disposition == workspace.DefinitionAdmissionAdmittedAllOf {
+		t.Fatal("missing specification admitted", err, result)
+	}
+}

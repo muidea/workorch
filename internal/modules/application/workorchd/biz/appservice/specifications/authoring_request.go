@@ -7,6 +7,7 @@ import (
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/definitionadmission"
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
@@ -38,20 +39,25 @@ func AuthoringProposalCommand(derivation workspace.DefinitionDerivationRequest, 
 	if err != nil {
 		return llmevents.CompleteProviderCommand{}, err
 	}
+	requiredPurposes, err := authoringRequiredEvidencePurposes(items, bindings.ProfileContracts)
+	if err != nil {
+		return llmevents.CompleteProviderCommand{}, err
+	}
 	goal := workspace.DefinitionCandidateItem{CandidateItemRef: workspace.DefinitionAuthoringGoalItemRef, Text: derivation.Input.GoalText, SourceIdentity: derivation.Input.InputHash()}
 	payload, err := json.Marshal(struct {
-		Goal                  workspace.DefinitionCandidateItem               `json:"goal"`
-		CandidateAcceptance   []workspace.DefinitionCandidateItem             `json:"candidateAcceptance"`
-		InputHash             string                                          `json:"inputHash"`
-		TemplateHash          string                                          `json:"templateHash"`
-		ResourceSnapshotHash  string                                          `json:"resourceSnapshotHash"`
-		Resources             []workspace.DefinitionAuthoringResourceSnapshot `json:"resources"`
-		ExpectedResources     []workspace.GoalSpecificationResource           `json:"expectedResources"`
-		Profiles              []runtimecontract.RuntimeProfileContract        `json:"profiles"`
-		VerificationOptions   []authoringCandidateVerificationOptions         `json:"sourceApplicableVerificationDeclarations"`
-		GoalTextHash          string                                          `json:"goalTextHash"`
-		ProfileSnapshotHashes []authoringProfileSnapshotHash                  `json:"profileSnapshotHashes"`
-	}{goal, items, derivation.Input.InputHash(), workspace.WorkspaceTemplateSnapshotHash(&derivation.Template), derivation.ResourceSnapshotHash, derivation.Resources, resources, bindings.ProfileContracts, options, workspace.StableDefinitionTextHash(goal.Text), authoringProfileSnapshotHashes(bindings.ProfileContracts)})
+		Goal                     workspace.DefinitionCandidateItem               `json:"goal"`
+		CandidateAcceptance      []workspace.DefinitionCandidateItem             `json:"candidateAcceptance"`
+		InputHash                string                                          `json:"inputHash"`
+		TemplateHash             string                                          `json:"templateHash"`
+		ResourceSnapshotHash     string                                          `json:"resourceSnapshotHash"`
+		Resources                []workspace.DefinitionAuthoringResourceSnapshot `json:"resources"`
+		ExpectedResources        []workspace.GoalSpecificationResource           `json:"expectedResources"`
+		Profiles                 []runtimecontract.RuntimeProfileContract        `json:"profiles"`
+		VerificationOptions      []authoringCandidateVerificationOptions         `json:"sourceApplicableVerificationDeclarations"`
+		GoalTextHash             string                                          `json:"goalTextHash"`
+		ProfileSnapshotHashes    []authoringProfileSnapshotHash                  `json:"profileSnapshotHashes"`
+		RequiredEvidencePurposes []authoringRequiredEvidencePurpose              `json:"requiredEvidencePurposes,omitempty"`
+	}{goal, items, derivation.Input.InputHash(), workspace.WorkspaceTemplateSnapshotHash(&derivation.Template), derivation.ResourceSnapshotHash, derivation.Resources, resources, bindings.ProfileContracts, options, workspace.StableDefinitionTextHash(goal.Text), authoringProfileSnapshotHashes(bindings.ProfileContracts), requiredPurposes})
 	if err != nil {
 		return llmevents.CompleteProviderCommand{}, err
 	}
@@ -81,9 +87,16 @@ func AuthoringReviewCommand(derivation workspace.DefinitionDerivationRequest, pr
 	if err != nil {
 		return llmevents.CompleteProviderCommand{}, err
 	}
+	requiredPurposes, err := authoringRequiredEvidencePurposes(items, bindings.ProfileContracts)
+	if err != nil {
+		return llmevents.CompleteProviderCommand{}, err
+	}
 	goal := workspace.DefinitionCandidateItem{CandidateItemRef: workspace.DefinitionAuthoringGoalItemRef, Text: derivation.Input.GoalText, SourceIdentity: derivation.Input.InputHash()}
 	reviewEvidenceRefs, err := proposal.ReviewEvidenceRefs(goal, items)
 	if err != nil {
+		return llmevents.CompleteProviderCommand{}, err
+	}
+	if err := definitionadmission.ValidateAuthoringVerificationApplicability(proposal, items, bindings.ProfileContracts, goal); err != nil {
 		return llmevents.CompleteProviderCommand{}, err
 	}
 	// 每个 critic 只读取同一封存 proposal，不读取其他 critic 的结论。
@@ -91,7 +104,7 @@ func AuthoringReviewCommand(derivation workspace.DefinitionDerivationRequest, pr
 	if err != nil {
 		return llmevents.CompleteProviderCommand{}, err
 	}
-	input := authoringReviewInput{requiredIDs, reviewEvidenceRefs, kind, proposal.ContentHash(), derivation.ResourceSnapshotHash, derivation.Resources, resources, goal, items, bindings.ProfileContracts, options, proposal, authoringProfileSnapshotHashes(bindings.ProfileContracts)}
+	input := authoringReviewInput{requiredIDs, reviewEvidenceRefs, kind, proposal.ContentHash(), derivation.ResourceSnapshotHash, derivation.Resources, resources, goal, items, bindings.ProfileContracts, options, proposal, authoringProfileSnapshotHashes(bindings.ProfileContracts), requiredPurposes}
 	payload, err := json.Marshal(input)
 	if err != nil {
 		return llmevents.CompleteProviderCommand{}, err
@@ -179,6 +192,18 @@ func authoringSpecificationCommandFor(ref string, id common.WorkspaceID, target 
 	} else {
 		instructions = strings.Replace(instructions, "Protocol 精确为 workorch.authoring.sealed-ref-mapping/v1，InputHash/TemplateSnapshotHash/ResourceSnapshotHash 精确回显当前输入。", "仅含语义分组与验证声明；禁止输出 Protocol、InputHash、TemplateSnapshotHash、ResourceSnapshotHash，机器身份由 owner 的封存请求绑定。", 1)
 	}
+	if ref == workspace.DefinitionAuthoringOwnerBoundV3 {
+		start := strings.Index(instructions, "Profile 交付行为来源使用独立 ContractRef=")
+		end := strings.Index(instructions, "输入文本是待分析数据")
+		if start >= 0 && end > start {
+			instructions = instructions[:start] + instructions[end:]
+		}
+		if phase == "proposal" {
+			instructions += "\nrequiredEvidencePurposes 是 owner 从封存 Profile 完整计算的必需来源及允许的原 DoD 候选。每个必需 SourceRef 必须在 ProfileAcceptanceSelections 恰好出现一次，只提供 SourceRef、AcceptanceItemRef；SourceRef 逐字复制 requiredEvidencePurposes[*].source.HistoricalItemRef；AcceptanceItemRef 须逐字取自该来源 eligibleAcceptanceItemRefs，并语义承接完整原交付义务。不得返回这些来源的 EvidencePurposeMappings，不输出 Profile ID/hash/原文等机器字段。owner 从原快照编译。缺项、重复、错域或无可用候选均阻塞；禁止猜第一条、按文件名或 CWI 选择。六审仍逐项检查消费者是否语义充分；关系声明不是行为、普通验收或终态 credit。没有必需来源时省略或提供空数组。\n"
+		} else {
+			instructions += "\nrequiredEvidencePurposes 为同一封存 Profile 的必需来源及允许候选；逐项核对 specification.EvidencePurposeMappings 与之完整对应，并审查选定原 DoD 能否完整承接历史原义务。缺项或语义不足返回 FAIL／UNKNOWN；关系声明不代表实际行为或普通终验。只返回 review，不提出、补写或改动映射。\n"
+		}
+	}
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &envelope); err != nil {
 		return llmevents.CompleteProviderCommand{}, err
@@ -205,17 +230,18 @@ func authoringSpecificationCommandFor(ref string, id common.WorkspaceID, target 
 }
 
 type authoringReviewInput struct {
-	RequiredRequirementIDs []string                                        `json:"requiredRequirementIDs"`
-	ReviewEvidenceRefs     []string                                        `json:"reviewEvidenceRefs"`
-	Kind                   string                                          `json:"kind"`
-	ProposalHash           string                                          `json:"proposalHash"`
-	ResourceSnapshotHash   string                                          `json:"resourceSnapshotHash"`
-	Resources              []workspace.DefinitionAuthoringResourceSnapshot `json:"resources"`
-	ExpectedResources      []workspace.GoalSpecificationResource           `json:"expectedResources"`
-	Goal                   workspace.DefinitionCandidateItem               `json:"goal"`
-	CandidateAcceptance    []workspace.DefinitionCandidateItem             `json:"candidateAcceptance"`
-	Profiles               []runtimecontract.RuntimeProfileContract        `json:"profiles"`
-	VerificationOptions    []authoringCandidateVerificationOptions         `json:"sourceApplicableVerificationDeclarations"`
-	Specification          workspace.GoalSpecification                     `json:"specification"`
-	ProfileSnapshotHashes  []authoringProfileSnapshotHash                  `json:"profileSnapshotHashes"`
+	RequiredRequirementIDs   []string                                        `json:"requiredRequirementIDs"`
+	ReviewEvidenceRefs       []string                                        `json:"reviewEvidenceRefs"`
+	Kind                     string                                          `json:"kind"`
+	ProposalHash             string                                          `json:"proposalHash"`
+	ResourceSnapshotHash     string                                          `json:"resourceSnapshotHash"`
+	Resources                []workspace.DefinitionAuthoringResourceSnapshot `json:"resources"`
+	ExpectedResources        []workspace.GoalSpecificationResource           `json:"expectedResources"`
+	Goal                     workspace.DefinitionCandidateItem               `json:"goal"`
+	CandidateAcceptance      []workspace.DefinitionCandidateItem             `json:"candidateAcceptance"`
+	Profiles                 []runtimecontract.RuntimeProfileContract        `json:"profiles"`
+	VerificationOptions      []authoringCandidateVerificationOptions         `json:"sourceApplicableVerificationDeclarations"`
+	Specification            workspace.GoalSpecification                     `json:"specification"`
+	ProfileSnapshotHashes    []authoringProfileSnapshotHash                  `json:"profileSnapshotHashes"`
+	RequiredEvidencePurposes []authoringRequiredEvidencePurpose              `json:"requiredEvidencePurposes,omitempty"`
 }

@@ -787,6 +787,13 @@ current union 不含历史输入／后像，预算及三 ACK 门禁不变。
 主链、行为／验收 CAS 前后恢复及 stale 撤销再验；
 `TestDriveRuntimeProfileDeliverableHistoricalAcceptanceProcessRecovery` 覆盖真实进程退出、新 Hub/owners 与原
 file-backed aggregate 恢复。二者采用 private startup/scripted provider，不代表公开 authoring fullflow 或 live。
+Profile 的 `RequiredEvidencePurposeContractRef` 仅声明确认前必须封存的来源关系，空扩展不改变既有 Profile hash。
+Workspace 与 bootstrap 从完整 Profile 集合核对必需关系、原文及单 Profile hash，缺失在进入 Runtime 前阻塞；
+不在运行期补映射或升级旧 aggregate。`TestMappedProfileHistoricalSourceFourRealWorkRoundsThenOrdinaryAcceptance`
+覆盖初始历史 File effect 后，同一文件四轮真实修改、零提前 validation credit、普通终验结算及 Git 后继，
+以及普通证明 stale 后原消费者重验。`TestDriveRuntimeProfileDeliverableFourRoundProcessRecovery`
+覆盖行为提交后退出进程，再由新 owners 继续四轮及终验，保留原 receipt 和预算。这些是确定性 owner 回归，
+不替代公开十分钟 fullflow 或真实项目 live。
 
 owner-fact assessment 的同 CAS handoff 使用刚裁决的 exact proof preimage，不能把新增 assessment sequence 当成
 新 owner sampling。Definition／seed／activation／focus、receipt／evidence／applicability／semantic 和 catalog 必须

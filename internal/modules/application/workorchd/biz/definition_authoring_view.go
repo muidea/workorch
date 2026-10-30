@@ -13,6 +13,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func (b *Biz) ReadDefinitionAuthoringView(ctx context.Context, id common.WorkspaceID) (workorchmanagementcontract.DefinitionAuthoringView, error) {
@@ -137,6 +138,17 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 			for _, item := range items {
 				proposal.Items = append(proposal.Items, workorchmanagementcontract.DefinitionAuthoringItem{Ref: item.CandidateItemRef, Text: item.Text, SourceKind: authoringItemSourceKind(item.CandidateItemRef)})
 			}
+			bindings, err := definitionconfiguration.CompileAuthoring(*derivation)
+			if err != nil {
+				return workorchmanagementcontract.DefinitionAuthoringView{}, err
+			}
+			required, err := runtimecontract.RequiredRuntimeEvidencePurposes(bindings.ProfileContracts)
+			if err != nil {
+				return workorchmanagementcontract.DefinitionAuthoringView{}, err
+			}
+			for _, r := range required {
+				proposal.RequiredEvidencePurposes = append(proposal.RequiredEvidencePurposes, workorchmanagementcontract.DefinitionAuthoringEvidencePurposeMapping{ContractRef: r.ContractRef, HistoricalItemRef: r.HistoricalItemRef, HistoricalProfileID: r.HistoricalProfileID, HistoricalDeliverableID: r.HistoricalDeliverableID, HistoricalProfileHash: r.HistoricalProfileHash, HistoricalText: r.HistoricalText})
+			}
 			var spec *workspace.GoalSpecification
 			for _, request := range record.SpecificationRequests {
 				if request.DerivationPermitID != derivation.PermitID {
@@ -178,6 +190,13 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 					proposal.Obligations = append(proposal.Obligations, workorchmanagementcontract.DefinitionAuthoringObligation{ID: obligation.ID, RequirementID: obligation.RequirementID, DoDItemRefs: slices.Clone(obligation.DoDItemRefs), Text: obligation.Text})
 				}
 				proposal.ProposalHash = spec.ContentHash()
+				for n := range proposal.RequiredEvidencePurposes {
+					for _, m := range spec.EvidencePurposeMappings {
+						if m.HistoricalItemRef == proposal.RequiredEvidencePurposes[n].HistoricalItemRef {
+							proposal.RequiredEvidencePurposes[n].AcceptanceItemRef = m.AcceptanceItemRef
+						}
+					}
+				}
 				for _, mapping := range spec.EvidencePurposeMappings {
 					proposal.EvidencePurposeMappings = append(proposal.EvidencePurposeMappings, workorchmanagementcontract.DefinitionAuthoringEvidencePurposeMapping{ContractRef: mapping.ContractRef, HistoricalItemRef: mapping.HistoricalItemRef, AcceptanceItemRef: mapping.AcceptanceItemRef, HistoricalProfileID: mapping.HistoricalProfileID, HistoricalDeliverableID: mapping.HistoricalDeliverableID, HistoricalProfileHash: mapping.HistoricalProfileHash, HistoricalText: mapping.HistoricalText})
 				}

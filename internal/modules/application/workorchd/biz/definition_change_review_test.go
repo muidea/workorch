@@ -120,7 +120,7 @@ func testDefinitionChangeCandidateReview(t *testing.T, scenario string) {
 					}
 				}
 			}
-			mapping, _, _, err := workspacetestkit.Proposal(*derivation, verification)
+			mapping, _, _, err := workspacetestkit.Proposal(*derivation, verification, "derived-dod:template:000001")
 			if err != nil {
 				t.Fatal(err)
 			}

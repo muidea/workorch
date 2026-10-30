@@ -67,9 +67,20 @@ func stabilityDerivation(t *testing.T, id, goal string, wireRefs ...string) work
 
 func stabilityProposal(t *testing.T, d workspace.DefinitionDerivationRequest) workspace.GoalSpecification {
 	t.Helper()
-	_, audit, _, err := testkit.Proposal(d, workspace.DefinitionAuthoringVerificationMapping{Declaration: "按原义务验证行为；全部适用 owner 与终态约束仍合取", Status: workspace.GoalVerificationDeclared, ProfileID: "software-dev", EvidenceRequirementID: "*", Scope: "dodItem"})
+	m, err := testkit.Mapping(d, workspace.DefinitionAuthoringVerificationMapping{Declaration: "按原义务验证行为；全部适用 owner 与终态约束仍合取", Status: workspace.GoalVerificationDeclared, ProfileID: "software-dev", EvidenceRequirementID: "*", Scope: "dodItem"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	m, err = testkit.SelectProfileAcceptance(d, m, "derived-dod:template:000001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit, err := testkit.Audit(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workspace.OwnerBoundAuthoringWire(d.WireContractRef) {
+		audit.Document.Content = testkit.OwnerBoundFixtureDocument(audit.Document.Content)
 	}
 	raw := audit.Document.Content
 	p, err := ParseAuthoringProposal(raw, d)
@@ -130,7 +141,7 @@ func TestAuthoringStableSingleReferenceRetainsMergedTerminalConsumers(t *testing
 }
 
 func TestAuthoringStabilityReplaysOriginalDocumentsWithoutChangingFailureOrCoverage(t *testing.T) {
-	for _, wire := range []string{"", workspace.DefinitionAuthoringOwnerBoundV2} {
+	for _, wire := range []string{"", workspace.DefinitionAuthoringOwnerBoundV2, workspace.DefinitionAuthoringOwnerBoundV3} {
 		d := stabilityDerivation(t, "ws-review-replay", "保持完整需求与真实失败", wire)
 		p := stabilityProposal(t, d)
 		before, _ := json.Marshal(d)
@@ -179,8 +190,8 @@ func TestAuthoringStabilityReplaysOriginalDocumentsWithoutChangingFailureOrCover
 
 func TestAuthoringStabilityConcurrentWorkspacesPreserveExactContexts(t *testing.T) {
 	// Same Profile, unrelated projects; no shared mutable prompt or candidate.
-	first := stabilityDerivation(t, "ws-project-a", "实现音乐分类项目")
-	second := stabilityDerivation(t, "ws-project-b", "实现库存统计项目")
+	first := stabilityDerivation(t, "ws-project-a", "实现音乐分类项目", workspace.DefinitionAuthoringOwnerBoundV3)
+	second := stabilityDerivation(t, "ws-project-b", "实现库存统计项目", workspace.DefinitionAuthoringOwnerBoundV3)
 	firstProposal, secondProposal := stabilityProposal(t, first), stabilityProposal(t, second)
 	target := runtimecontract.ProviderModelTarget{ProviderID: "mock", ModelID: "model"}
 	var wg sync.WaitGroup
@@ -210,4 +221,50 @@ func TestAuthoringStabilityConcurrentWorkspacesPreserveExactContexts(t *testing.
 		}
 	}
 	wg.Wait()
+}
+
+func TestRequiredPurposeV3ProductionCompilerAndReviewInputs(t *testing.T) {
+	d := stabilityDerivation(t, "ws-v3-required", "保留完整原义务并完成交付", workspace.DefinitionAuthoringOwnerBoundV3)
+	p := stabilityProposal(t, d)
+	if len(p.EvidencePurposeMappings) != 1 || p.EvidencePurposeMappings[0].HistoricalText == "" {
+		t.Fatal("minimal provider choice did not compile full mapping")
+	}
+	target := runtimecontract.ProviderModelTarget{ProviderID: "mock", ModelID: "model"}
+	command, err := AuthoringProposalCommand(d, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var proposalInput struct {
+		Required []authoringRequiredEvidencePurpose `json:"requiredEvidencePurposes"`
+	}
+	if json.Unmarshal(authoringTestPayload(t, command), &proposalInput) != nil || len(proposalInput.Required) != 1 || len(proposalInput.Required[0].EligibleAcceptanceItemRefs) == 0 {
+		t.Fatal("missing required catalog")
+	}
+	if !strings.Contains(command.Request.Schema, "ProfileAcceptanceSelections") {
+		t.Fatal("wrong producer schema")
+	}
+	for _, kind := range ReviewKinds() {
+		review, err := AuthoringReviewCommand(d, p, kind, target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var input struct {
+			Required []authoringRequiredEvidencePurpose `json:"requiredEvidencePurposes"`
+		}
+		for _, section := range review.Request.PromptContext.Sections {
+			if section.ID == "C2.specification-profiles" {
+				if json.Unmarshal([]byte(section.Content), &input) != nil {
+					t.Fatal("invalid review catalog")
+				}
+			}
+		}
+		if !reflect.DeepEqual(input.Required, proposalInput.Required) {
+			t.Fatal("proposal/review required-set drift")
+		}
+	}
+	missing := p.Clone()
+	missing.EvidencePurposeMappings = nil
+	if _, err := AuthoringReviewCommand(d, missing, ReviewKinds()[0], target); err == nil {
+		t.Fatal("sent missing required relation for review")
+	}
 }

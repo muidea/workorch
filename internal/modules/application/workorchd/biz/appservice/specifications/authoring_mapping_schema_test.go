@@ -22,7 +22,15 @@ func TestAuthoringMappingProviderSchemaIsClosedAndDTOAligned(t *testing.T) {
 	if !ok {
 		t.Fatal("缺少 mapping schema")
 	}
-	checkSchemaDTO(t, mapping, reflect.TypeOf(workspace.DefinitionAuthoringMapping{}))
+	// The immutable v1/v2 schema intentionally excludes the v3 extension.
+	typ := reflect.TypeOf(workspace.DefinitionAuthoringMapping{})
+	fields := []reflect.StructField{}
+	for n := 0; n < typ.NumField(); n++ {
+		if typ.Field(n).Name != "ProfileAcceptanceSelections" {
+			fields = append(fields, typ.Field(n))
+		}
+	}
+	checkSchemaDTO(t, mapping, reflect.StructOf(fields))
 	protocol := mapping["properties"].(map[string]any)["Protocol"].(map[string]any)["enum"]
 	if !reflect.DeepEqual(protocol, []any{workspace.DefinitionAuthoringMappingProtocol}) {
 		t.Fatal("mapping schema 协议不是唯一当前版本")

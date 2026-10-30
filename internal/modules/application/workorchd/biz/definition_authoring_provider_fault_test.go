@@ -117,7 +117,7 @@ func TestAuthoringProviderDocumentFaultsPersistAcrossFileReopen(t *testing.T) {
 						t.Error(err)
 						return
 					}
-					if len(record.DerivationRequests) > 0 && record.DerivationRequests[0].WireContractRef == workspace.DefinitionAuthoringOwnerBoundV2 {
+					if len(record.DerivationRequests) > 0 && workspace.OwnerBoundAuthoringWire(record.DerivationRequests[0].WireContractRef) {
 						payload = testkit.OwnerBoundFixtureDocument(payload)
 					}
 					if call == failureCall {

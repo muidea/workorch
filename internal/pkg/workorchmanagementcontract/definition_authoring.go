@@ -159,22 +159,23 @@ type DefinitionAuthoringReview struct {
 }
 
 type DefinitionAuthoringProposal struct {
-	GoalText                string                                      `json:"goalText"`
-	Version                 uint32                                      `json:"version"`
-	GoalItemRef             string                                      `json:"goalItemRef"`
-	GoalTextHash            string                                      `json:"goalTextHash"`
-	Dimensions              []DefinitionAuthoringDimension              `json:"dimensions"`
-	Requirements            []DefinitionAuthoringRequirement            `json:"requirements"`
-	Obligations             []DefinitionAuthoringObligation             `json:"obligations"`
-	Items                   []DefinitionAuthoringItem                   `json:"items"`
-	Resources               []DefinitionAuthoringResource               `json:"resources,omitempty"`
-	Verifications           []DefinitionAuthoringVerification           `json:"verifications,omitempty"`
-	Reviews                 []DefinitionAuthoringReview                 `json:"reviews,omitempty"`
-	ExecutionProofMappings  []DefinitionAuthoringExecutionProofMapping  `json:"executionProofMappings,omitempty"`
-	EvidencePurposeMappings []DefinitionAuthoringEvidencePurposeMapping `json:"evidencePurposeMappings,omitempty"`
-	ProposalHash            string                                      `json:"proposalHash"`
-	SpecificationHash       string                                      `json:"specificationHash,omitempty"`
-	DerivationPermitID      string                                      `json:"derivationPermitId"`
+	RequiredEvidencePurposes []DefinitionAuthoringEvidencePurposeMapping `json:"requiredEvidencePurposes,omitempty"`
+	GoalText                 string                                      `json:"goalText"`
+	Version                  uint32                                      `json:"version"`
+	GoalItemRef              string                                      `json:"goalItemRef"`
+	GoalTextHash             string                                      `json:"goalTextHash"`
+	Dimensions               []DefinitionAuthoringDimension              `json:"dimensions"`
+	Requirements             []DefinitionAuthoringRequirement            `json:"requirements"`
+	Obligations              []DefinitionAuthoringObligation             `json:"obligations"`
+	Items                    []DefinitionAuthoringItem                   `json:"items"`
+	Resources                []DefinitionAuthoringResource               `json:"resources,omitempty"`
+	Verifications            []DefinitionAuthoringVerification           `json:"verifications,omitempty"`
+	Reviews                  []DefinitionAuthoringReview                 `json:"reviews,omitempty"`
+	ExecutionProofMappings   []DefinitionAuthoringExecutionProofMapping  `json:"executionProofMappings,omitempty"`
+	EvidencePurposeMappings  []DefinitionAuthoringEvidencePurposeMapping `json:"evidencePurposeMappings,omitempty"`
+	ProposalHash             string                                      `json:"proposalHash"`
+	SpecificationHash        string                                      `json:"specificationHash,omitempty"`
+	DerivationPermitID       string                                      `json:"derivationPermitId"`
 }
 
 type DefinitionAuthoringDimension struct {

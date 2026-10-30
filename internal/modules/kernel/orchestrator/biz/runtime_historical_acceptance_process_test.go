@@ -28,6 +28,12 @@ func TestDriveRuntimeProfileDeliverableHistoricalAcceptanceProcessRecovery(t *te
 	runHistoricalAcceptanceProcessRecovery(t)
 }
 
+func TestDriveRuntimeProfileDeliverableFourRoundProcessRecovery(t *testing.T) {
+	t.Setenv("WORKORCH_CROSS_CWI_PROFILE_SOURCE", "1")
+	t.Setenv("WORKORCH_CROSS_CWI_FOUR_ROUNDS", "1")
+	runHistoricalAcceptanceProcessRecovery(t)
+}
+
 func runHistoricalAcceptanceProcessRecovery(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "workorch-cross-cwi-process-original")
 	if err := os.Mkdir(root, 0o700); err != nil {
@@ -71,6 +77,9 @@ func runHistoricalAcceptanceProcessRecovery(t *testing.T) {
 		t.Fatalf("fresh process did not complete original Run: %v", err)
 	}
 	after := second.RuntimeState
+	if os.Getenv("WORKORCH_CROSS_CWI_FOUR_ROUNDS") == "1" && len(after.ImplementationWork.Rounds) != 4 {
+		t.Fatal("fresh process omitted real working rounds")
+	}
 	if err := after.Validate(); err != nil || after.TerminalMaterialSeal == nil {
 		t.Fatalf("fresh process terminal material is invalid: %v", err)
 	}
@@ -159,5 +168,9 @@ func TestCrossCWIHistoricalAcceptanceProcessChild(t *testing.T) {
 	if os.Getenv("WORKORCH_CROSS_CWI_TEST_STAGE") == "" {
 		return // Only the parent explicitly enables the isolated process fixture.
 	}
-	runRuntimeFileBackedFreshFileShellGitAcceptance(t, "after_behavior", os.Getenv("WORKORCH_CROSS_CWI_PROFILE_SOURCE") == "1")
+	if os.Getenv("WORKORCH_CROSS_CWI_FOUR_ROUNDS") == "1" {
+		runRuntimeFileBackedFreshFileShellGitAcceptance(t, "after_behavior", true, true)
+	} else {
+		runRuntimeFileBackedFreshFileShellGitAcceptance(t, "after_behavior", os.Getenv("WORKORCH_CROSS_CWI_PROFILE_SOURCE") == "1")
+	}
 }

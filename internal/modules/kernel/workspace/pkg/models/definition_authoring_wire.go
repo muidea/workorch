@@ -10,14 +10,16 @@ import (
 	"unicode/utf8"
 )
 
-// Empty selects immutable legacy echo wire. Only a new reservation may select v2.
+// Empty selects immutable legacy echo wire. Only a new reservation selects a new version.
+const DefinitionAuthoringOwnerBoundV3 = "workorch.authoring.owner-bound/v3"
+
 const DefinitionAuthoringOwnerBoundV2 = "workorch.authoring.owner-bound/v2"
 
 const authoringDeriveSemanticSchema = `{"type":"object","additionalProperties":false,"required":["AdditionalItems"],"properties":{"AdditionalItems":{"type":"array","maxItems":128,"items":{"type":"string"}}}}`
 const authoringReviewSemanticSchema = `{"type":"object","additionalProperties":false,"required":["review"],"properties":{"review":{"type":"object","additionalProperties":false,"required":["Status","Reason","EvidenceRefs","RequirementIDs"],"properties":{"Status":{"type":"string","enum":["PASS","FAIL","UNKNOWN"]},"Reason":{"type":"string"},"EvidenceRefs":{"type":"array","items":{"type":"string"}},"RequirementIDs":{"type":"array","items":{"type":"string"}}}}}}`
 
 func AuthoringWireSchema(ref, phase string) (string, error) {
-	if ref != DefinitionAuthoringOwnerBoundV2 {
+	if !OwnerBoundAuthoringWire(ref) {
 		return "", fmt.Errorf("unsupported owner-bound authoring wire")
 	}
 	switch phase {
@@ -31,6 +33,9 @@ func AuthoringWireSchema(ref, phase string) (string, error) {
 		}
 		mapping := schema["properties"].(map[string]any)["mapping"].(map[string]any)
 		fields := mapping["properties"].(map[string]any)
+		if ref == DefinitionAuthoringOwnerBoundV3 {
+			fields["ProfileAcceptanceSelections"] = map[string]any{"type": "array", "maxItems": 512, "items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"SourceRef", "AcceptanceItemRef"}, "properties": map[string]any{"SourceRef": map[string]any{"type": "string"}, "AcceptanceItemRef": map[string]any{"type": "string"}}}}
+		}
 		for _, k := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash"} {
 			delete(fields, k)
 		}
@@ -84,6 +89,11 @@ func DecodeAuthoringMappingFor(d DefinitionDerivationRequest, payload []byte) (D
 	for k, v := range authoringMappingShape.fields["mapping"].fields {
 		fields[k] = v
 	}
+	if d.WireContractRef == DefinitionAuthoringOwnerBoundV3 {
+		shape := mappingArray(mappingObject(map[string]mappingShape{"SourceRef": mappingString, "AcceptanceItemRef": mappingString}))
+		shape.optional = true
+		fields["ProfileAcceptanceSelections"] = shape
+	}
 	for _, k := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash"} {
 		delete(fields, k)
 	}
@@ -124,7 +134,7 @@ func decodeAuthoringSemantic(payload []byte, shape mappingShape, out any) error 
 	return decoder.Decode(out)
 }
 func DecodeOwnerBoundDerivation(d DefinitionDerivationRequest, payload []byte) (DefinitionDerivedAcceptance, error) {
-	if d.WireContractRef != DefinitionAuthoringOwnerBoundV2 || validateAuthoringWire(d.WireContractRef, d.WireContractHash, "derive") != nil {
+	if !OwnerBoundAuthoringWire(d.WireContractRef) || validateAuthoringWire(d.WireContractRef, d.WireContractHash, "derive") != nil {
 		return DefinitionDerivedAcceptance{}, fmt.Errorf("derivation wire identity invalid")
 	}
 	var body struct{ AdditionalItems []string }
@@ -135,7 +145,7 @@ func DecodeOwnerBoundDerivation(d DefinitionDerivationRequest, payload []byte) (
 	return p, p.ValidateFor(d.Input, &d.Template)
 }
 func DecodeOwnerBoundReview(r DefinitionAuthoringSpecificationRequest, payload []byte) (GoalSpecificationCompletenessReview, error) {
-	if r.WireContractRef != DefinitionAuthoringOwnerBoundV2 || validateAuthoringWire(r.WireContractRef, r.WireContractHash, r.ReviewKind) != nil {
+	if !OwnerBoundAuthoringWire(r.WireContractRef) || validateAuthoringWire(r.WireContractRef, r.WireContractHash, r.ReviewKind) != nil {
 		return GoalSpecificationCompletenessReview{}, fmt.Errorf("review wire identity invalid")
 	}
 	var body struct {
@@ -179,4 +189,9 @@ func validateOwnerBoundDerivationAudit(r DefinitionDerivationRequest, view bool)
 		return fmt.Errorf("derivation differs from original semantic document")
 	}
 	return nil
+}
+
+// OwnerBoundAuthoringWire identifies immutable supported semantic-only contracts.
+func OwnerBoundAuthoringWire(ref string) bool {
+	return ref == DefinitionAuthoringOwnerBoundV2 || ref == DefinitionAuthoringOwnerBoundV3
 }

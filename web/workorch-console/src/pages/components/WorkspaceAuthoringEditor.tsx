@@ -1,3 +1,4 @@
+import { AuthoringRequiredEvidencePurposes } from './AuthoringRequiredEvidencePurposes';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, App as AntApp, Button, Form, Input, List, Modal, Select, Space, Tag, Typography } from 'antd';
 import type { FormInstance } from 'antd';
@@ -31,6 +32,7 @@ const EditorInputForm = memo(function EditorInputForm({ form, templateOptions, d
 
 const EditorProposal = memo(function EditorProposal({ proposal }: { proposal: NonNullable<DefinitionAuthoringView['proposal']> }) {
   return <>
+    <AuthoringRequiredEvidencePurposes proposal={proposal} />
     <List dataSource={proposal.verifications || []} renderItem={item => <List.Item>{item.id} · {item.status} · {item.declaration}</List.Item>} />
     {proposal.executionProofMappings?.length ? <>
       <Typography.Paragraph>跨源执行证明映射随本规格一并确认；它不代替原准则和普通工程验证。</Typography.Paragraph>

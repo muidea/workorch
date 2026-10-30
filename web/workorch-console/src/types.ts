@@ -124,6 +124,7 @@ export type DefinitionAuthoringView = {
     reviews?: { kind: string; status: string; reason?: string; specificationHash: string; evidenceRefs?: string[]; requirementIds?: string[] }[];
     verifications?: { id: string; obligationId: string; declaration: string; status: string; profileId?: string; evidenceRequirementId?: string; scope?: string }[];
     executionProofMappings?: { contractRef: string; consumerItemRef: string; ruleRef: string; sourceItemRef: string; consumerGoalText?: string }[];
+    requiredEvidencePurposes?: { contractRef: string; historicalItemRef: string; acceptanceItemRef: string; historicalProfileId?: string; historicalDeliverableId?: string; historicalProfileHash?: string; historicalText?: string }[];
     evidencePurposeMappings?: { contractRef: string; historicalItemRef: string; acceptanceItemRef: string; historicalProfileId?: string; historicalDeliverableId?: string; historicalProfileHash?: string; historicalText?: string }[];
   };
   confirmationRecovery?: {
