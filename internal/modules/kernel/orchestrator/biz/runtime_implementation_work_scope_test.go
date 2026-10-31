@@ -108,7 +108,8 @@ func TestImplementationWorkScopeRealOwnerReadOnlyAndRevisionFence(t *testing.T) 
 	if entries, err := os.ReadDir(directory); err != nil || len(entries) != 0 {
 		t.Fatalf("empty scope observation wrote deliverable content: entries=%v err=%v", entries, err)
 	}
-	if err := os.WriteFile(filepath.Join(directory, "implementation.txt"), []byte("implementation.txt"), 0o600); err != nil {
+	const implementationContent = "implementation.txt\r\n  literal [REDACTED] [SECRET] [MASKED] 用户原文\r\n"
+	if err := os.WriteFile(filepath.Join(directory, "implementation.txt"), []byte(implementationContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := acquireRuntimeImplementationWorkScope(ctx, hub, directory, emptyRequest, sources[emptyRequest.RequestID]); !errors.Is(err, runtimecontract.ErrRuntimeImplementationWorkScopeStale) {
@@ -120,12 +121,12 @@ func TestImplementationWorkScopeRealOwnerReadOnlyAndRevisionFence(t *testing.T) 
 		t.Fatalf("single existing target owner scope incomplete: selection=%#v err=%v", singleObserved.Selection, err)
 	}
 
-	if singleObserved.Content == nil || len(singleObserved.Content.Snapshots) != 1 || singleObserved.Content.Snapshots[0].Content != "implementation.txt" || singleObserved.Content.Validate(singleObserved) != nil {
+	if singleObserved.Content == nil || len(singleObserved.Content.Snapshots) != 1 || singleObserved.Content.Snapshots[0].Content != implementationContent || singleObserved.Content.Validate(singleObserved) != nil {
 		t.Fatal("scope lost exact real source content")
 	}
 	frozen := singleObserved.Clone()
 	frozen.Content.Snapshots[0].Content = "altered"
-	if frozen.ValidateForRequest(singleRequest) == nil || singleObserved.Content.Snapshots[0].Content != "implementation.txt" {
+	if frozen.ValidateForRequest(singleRequest) == nil || singleObserved.Content.Snapshots[0].Content != implementationContent {
 		t.Fatal("scope clone mutated original or trusted content hash only")
 	}
 	if singleRequest.RequestID == emptyRequest.RequestID || singleObserved.Selection.ObservedRevision == emptyObserved.Selection.ObservedRevision {
@@ -162,7 +163,11 @@ func TestImplementationWorkScopeRealOwnerReadOnlyAndRevisionFence(t *testing.T) 
 	}
 	for _, name := range []string{"implementation.txt", "acceptance.txt"} {
 		data, err := os.ReadFile(filepath.Join(directory, name))
-		if err != nil || string(data) != name {
+		want := name
+		if name == "implementation.txt" {
+			want = implementationContent
+		}
+		if err != nil || string(data) != want {
 			t.Fatalf("query changed %s: %v", name, err)
 		}
 	}
@@ -175,7 +180,7 @@ func TestImplementationWorkScopeRealOwnerReadOnlyAndRevisionFence(t *testing.T) 
 		t.Fatal(err)
 	}
 	replayed, err := acquireRuntimeImplementationWorkScope(ctx, hub, directory, replayRequest, sources[request.RequestID])
-	if err != nil || !reflect.DeepEqual(observed.Selection, replayed.Selection) || observed.Observation.ObservationID != replayed.Observation.ObservationID {
+	if err != nil || !reflect.DeepEqual(observed.Selection, replayed.Selection) || !reflect.DeepEqual(observed.Content, replayed.Content) || observed.Observation.ObservationID != replayed.Observation.ObservationID {
 		t.Fatalf("fresh owner did not reproduce scope: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(directory, "implementation.txt"), []byte("new revision"), 0o600); err != nil {

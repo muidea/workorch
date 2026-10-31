@@ -1,26 +1,10 @@
 package activationcore
 
-import (
-	"strings"
-
-	"github.com/muidea/workorch/internal/pkg/common"
-)
-
 func CompactContextValue(value any, depth int) any {
-	value = common.RedactSensitiveValue(value)
 	switch typed := value.(type) {
 	case nil:
 		return nil
 	case string:
-		typed = strings.TrimSpace(typed)
-		if strings.Contains(typed, "[REDACTED]") {
-			return map[string]any{
-				"omitted":                         true,
-				"containedRuntimeRedactionMarker": true,
-				"bytes":                           len(typed),
-				"reason":                          "redacted runtime marker content is not reusable repair input; rebuild from current target snapshots or fresh reads",
-			}
-		}
 		if len(typed) > 4096 {
 			return typed[:4096] + "..."
 		}

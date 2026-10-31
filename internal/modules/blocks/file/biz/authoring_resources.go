@@ -105,7 +105,7 @@ func (m *Biz) acquireAuthoringResource(event magicevent.Event, command fileevent
 	if err != nil {
 		return fileevents.AcquireAuthoringResourceResult{}, err
 	}
-	if len(content) > fileevents.AuthoringResourceMaxBytes || int64(len(content)) != openedInfo.Size() || !utf8.Valid(content) || strings.ContainsRune(string(content), 0) || containsRuntimeRedactionMarker(string(content)) || containsAuthoringSensitiveContent(string(content)) {
+	if len(content) > fileevents.AuthoringResourceMaxBytes || int64(len(content)) != openedInfo.Size() || !utf8.Valid(content) || strings.ContainsRune(string(content), 0) || containsAuthoringSensitiveContent(string(content)) {
 		return fileevents.AcquireAuthoringResourceResult{}, fmt.Errorf("%w: authoring resource is incomplete, binary or sensitive", common.ErrInvalidArgument)
 	}
 	// A changed path/symlink after the read is not an authoritative snapshot.

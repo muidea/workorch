@@ -13,7 +13,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestFinalizeShellResultIncludesOutputPreviewOnFailure(t *testing.T) {
+func TestFinalizeShellResultPreservesRawOutputOutsideFailureSummary(t *testing.T) {
 	exit := int64(2)
 	output := RuntimeCommandResult{
 		Status:        "failed",
@@ -31,11 +31,8 @@ func TestFinalizeShellResultIncludesOutputPreviewOnFailure(t *testing.T) {
 	if result.FailureCode != "shell_exit_nonzero" {
 		t.Fatalf("failure code = %q", result.FailureCode)
 	}
-	if !strings.Contains(result.FailureMessage, "stderr=") {
-		t.Fatalf("failure message missing stderr preview: %q", result.FailureMessage)
-	}
-	if !strings.Contains(result.FailureMessage, "FAIL: TestHealthz") {
-		t.Fatalf("failure message missing diagnostic content: %q", result.FailureMessage)
+	if strings.Contains(result.FailureMessage, "stderr=") || strings.Contains(result.FailureMessage, "FAIL: TestHealthz") || result.Stdout != output.Stdout || result.Stderr != output.Stderr {
+		t.Fatal("failure summary copied raw output or original output was changed")
 	}
 	if result.Evidence.Summary == "" || result.Evidence.Summary == "failed" {
 		t.Fatalf("evidence summary should carry diagnostics, got %q", result.Evidence.Summary)
@@ -191,7 +188,7 @@ func TestShellValidationDiagnosticKeepsGenericCodeWithoutBoundedGoClassification
 	}
 }
 
-func TestEnrichShellFailureMessageRedactsSecrets(t *testing.T) {
+func TestEnrichShellFailureMessageKeepsRawOutputOutsideGenericDiagnostic(t *testing.T) {
 	msg := enrichShellFailureMessage("boom", RuntimeCommandResult{
 		ExitCode: 2,
 		Stage:    "shell_command_failed",
@@ -201,7 +198,7 @@ func TestEnrichShellFailureMessageRedactsSecrets(t *testing.T) {
 	if strings.Contains(msg, "sk-abc") || strings.Contains(msg, "supersecretvalue") || strings.Contains(msg, "hunter2") {
 		t.Fatalf("secrets leaked into failure message: %q", msg)
 	}
-	if !strings.Contains(msg, "[REDACTED]") && !strings.Contains(msg, "stderr=") {
-		t.Fatalf("expected redacted stderr preview, got %q", msg)
+	if strings.Contains(msg, "[REDACTED]") || strings.Contains(msg, "stderr=") || !strings.Contains(msg, "exitCode=2") {
+		t.Fatalf("expected only structured failure facts, got %q", msg)
 	}
 }

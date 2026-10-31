@@ -193,7 +193,7 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 	output := shellBaseOutput(request, command, args, executionDirectory, commandNormalization, execCommand)
 	output.Status = "completed"
 	output.Stdout = stdoutText
-	output.Stderr = sanitizeSuccessfulCommandStderr(command, args, exitCode, stdoutText, stderrText)
+	output.Stderr = stderrText
 	output.ExitCode = int64(exitCode)
 	output.DurationMillis = duration.Milliseconds()
 	output.TimeoutMillis = timeout.Milliseconds()

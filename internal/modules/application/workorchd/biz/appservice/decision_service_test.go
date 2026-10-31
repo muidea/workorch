@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -766,8 +765,8 @@ func TestResolveDecisionWithSessionAllowsTargetWorkspaceExternalDependencyConfig
 	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
 		t.Fatalf("decision = %+v, want target workspace config accepted", item)
 	}
-	if rendered := fmt.Sprintf("%#v", item.ResolutionPayload); strings.Contains(strings.ToLower(rendered), "sk-secret") {
-		t.Fatalf("resolutionPayload = %+v, want secret redacted", item.ResolutionPayload)
+	if answer, _ := item.ResolutionPayload.String("answer"); answer != "provider = compatible\nbaseURL = https://api.example.com\napiKey = sk-secret\nmodel = model-a" {
+		t.Fatalf("target workspace answer was rewritten: %q", answer)
 	}
 }
 

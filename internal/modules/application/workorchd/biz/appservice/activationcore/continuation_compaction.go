@@ -1,7 +1,5 @@
 package activationcore
 
-import "github.com/muidea/workorch/internal/pkg/common"
-
 func CompactDecisionPayload(input map[string]any) map[string]any {
 	if len(input) == 0 {
 		return nil
@@ -35,7 +33,7 @@ func CompactDecisionPayload(input map[string]any) map[string]any {
 			ret[key] = CompactFailureContext(context)
 		}
 	}
-	return StripRuntimeLLMBinding(common.RedactSensitiveMap(ret))
+	return StripRuntimeLLMBinding(ret)
 }
 
 func CompactFailureContext(input map[string]any) map[string]any {
@@ -69,5 +67,5 @@ func CompactFailureContext(input map[string]any) map[string]any {
 	if targets := CompactTargetSnapshots(input); len(targets) > 0 {
 		ret["targetSnapshots"] = targets
 	}
-	return StripRuntimeLLMBinding(common.RedactSensitiveMap(ret))
+	return StripRuntimeLLMBinding(ret)
 }

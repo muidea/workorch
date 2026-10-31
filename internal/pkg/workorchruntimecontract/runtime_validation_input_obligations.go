@@ -16,9 +16,9 @@ func validateRuntimeValidationInputObligations(check RuntimeValidationInputCheck
 	return validateRuntimeValidationInputObligationShape(check, true)
 }
 
-// A detached diagnostic preserves reference order even when redaction changes
-// lexical ordering. Only that projection may omit canonical-order validation;
-// cardinality, provenance, findings and conclusion remain mandatory.
+// Historical redacted diagnostics retain their original reference order.
+// New projections preserve exact report content and canonical references;
+// cardinality, provenance, findings and conclusion remain mandatory in both.
 func validateRuntimeValidationInputObligationShape(check RuntimeValidationInputCheckReview, canonicalReferences bool) error {
 	if len(check.Obligations) == 0 || len(check.Obligations) > RuntimeValidationInputReviewMaxObligations {
 		return fmt.Errorf("v2 input review requires a complete bounded obligation mapping")

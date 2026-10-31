@@ -985,22 +985,8 @@ func TestRuntimeAdapterReadMarksCompleteFullTextSafeForPatch(t *testing.T) {
 	}
 }
 
-func TestRuntimeAdapterReadMarksRedactedAndTruncatedContentUnsafeForPatch(t *testing.T) {
+func TestRuntimeAdapterReadMarksTruncatedContentUnsafeForPatch(t *testing.T) {
 	workspace := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workspace, "secret.txt"), []byte("token=[REDACTED]\n"), 0o644); err != nil {
-		t.Fatalf("seed secret file: %v", err)
-	}
-	redacted, err := NewRuntimeAdapter().ReadFile(context.Background(), FileReadRequest{
-		WorkspaceDirectory: workspace,
-		Path:               "secret.txt",
-	})
-	if err != nil {
-		t.Fatalf("read redacted file: %v", err)
-	}
-	if !redacted.Redacted || redacted.ContentComplete || redacted.SafeForPatch || redacted.SafeForFileWrite {
-		t.Fatalf("redacted output = %+v, want unsafe target snapshot", redacted)
-	}
-
 	if err := os.WriteFile(filepath.Join(workspace, "large.txt"), []byte(strings.Repeat("x", defaultMaxReadBytes+1)), 0o644); err != nil {
 		t.Fatalf("seed large file: %v", err)
 	}

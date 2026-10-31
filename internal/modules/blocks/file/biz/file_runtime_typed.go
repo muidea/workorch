@@ -322,14 +322,15 @@ func (a *RuntimeAdapter) ReadFile(ctx context.Context, request FileReadRequest) 
 	} else {
 		truncated = scan.Size > 0
 	}
-	redacted := containsRuntimeRedactionMarker(content)
-	contentComplete := !isBinary && !truncated && !redacted && !ranged
+	// This reader does not redact source bytes. Literal placeholders are part
+	// of the file, not evidence of a transformation or an incomplete read.
+	contentComplete := !isBinary && !truncated && !ranged
 	targetRef := filepath.ToSlash(rel)
 	ret := FileReadResult{
 		Status: "completed", Stage: "file_read", Path: targetRef, TargetRef: targetRef, Exists: true,
 		Content: content, ContentHash: scan.ContentHash, Size: info.Size(),
 		ModifiedAt: info.ModTime().UTC().Format("2006-01-02T15:04:05Z07:00"), LineCount: scan.LineCount,
-		Truncated: truncated, Binary: isBinary, Redacted: redacted, ContentComplete: contentComplete,
+		Truncated: truncated, Binary: isBinary, ContentComplete: contentComplete,
 		SafeForPatch: contentComplete && scan.Size > 0, SafeForFileWrite: contentComplete && scan.Size > 0,
 	}
 	ret.Evidence = runtimecontract.RuntimeOperationEvidence{

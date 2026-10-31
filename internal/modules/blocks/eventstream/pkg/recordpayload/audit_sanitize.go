@@ -21,9 +21,17 @@ const (
 
 // SanitizeAuditPayload is the final Eventstream ingress guard. Typed payload
 // encoders should already omit authority material and credentials; this guard
-// additionally redacts secret-like keys and imposes a deterministic size/depth
-// ceiling before repository persistence and real-time EventHub/SSE fan-out.
+// explicitly omits credential-bearing payloads and imposes a deterministic
+// size/depth ceiling before persistence and EventHub/SSE fan-out. It never masks
+// arbitrary business values or labels a rewritten payload as the original.
 func SanitizeAuditPayload(input workorcheventpayload.Payload) workorcheventpayload.Payload {
+	if auditPayloadContainsCredential(input.Fields, 0) {
+		return workorcheventpayload.New(
+			workorcheventpayload.StringField("payloadSha256", PayloadSHA256(input)),
+			workorcheventpayload.IntField("payloadBytes", int64(len(input.CanonicalString()))),
+			workorcheventpayload.StringField("auditPayloadOmittedReason", "credential_fields_outside_audit_contract"),
+		)
+	}
 	budget := maxAuditPayloadBudget
 	truncated := false
 	fields := sanitizeAuditFields(input.Fields, 0, &budget, &truncated)
@@ -72,10 +80,6 @@ func sanitizeAuditFields(input []workorcheventpayload.Field, depth int, budget *
 		if *budget <= 0 {
 			*truncated = true
 			break
-		}
-		if auditSecretKey(name) {
-			ret = append(ret, workorcheventpayload.StringField(name, "[redacted]"))
-			continue
 		}
 		value, ok := sanitizeAuditValue(field.Value, depth, budget, truncated)
 		if !ok {
@@ -150,13 +154,38 @@ func truncateAuditString(input string, budget *int, truncated *bool) string {
 	return input[:limit] + "..."
 }
 
-func auditSecretKey(key string) bool {
-	normalized := strings.NewReplacer("_", "", "-", "", ".", "").Replace(strings.ToLower(strings.TrimSpace(key)))
-	if normalized == "token" || strings.HasSuffix(normalized, "token") {
+// Only exact credential fields are excluded. Business names such as
+// tokenBudget, secretCount and credentialRef are ordinary audit metadata.
+func auditPayloadContainsCredential(fields []workorcheventpayload.Field, depth int) bool {
+	if depth > maxAuditPayloadDepth {
+		return false
+	}
+	for _, field := range fields[:min(len(fields), maxAuditPayloadFields)] {
+		key := strings.NewReplacer("_", "", "-", "", ".", "", " ", "").Replace(strings.ToLower(field.Name))
+		switch key {
+		case "apikey", "apitoken", "accesstoken", "refreshtoken", "token", "password", "passwd", "secret", "clientsecret", "privatekey", "credential", "credentials", "authorization", "cookie", "setcookie":
+			if field.Value.Kind == workorcheventpayload.ValueString && field.Value.String != "" ||
+				field.Value.Kind == workorcheventpayload.ValueObject && len(field.Value.Object) > 0 ||
+				field.Value.Kind == workorcheventpayload.ValueArray && len(field.Value.Array) > 0 {
+				return true
+			}
+		}
+		if auditValueContainsCredential(field.Value, depth) {
+			return true
+		}
+	}
+	return false
+}
+
+func auditValueContainsCredential(value workorcheventpayload.Value, depth int) bool {
+	if depth >= maxAuditPayloadDepth {
+		return false
+	}
+	if value.Kind == workorcheventpayload.ValueObject && auditPayloadContainsCredential(value.Object, depth+1) {
 		return true
 	}
-	for _, marker := range []string{"password", "passwd", "secret", "credential", "authorization", "accesstoken", "refreshtoken", "apitoken", "apikey", "privatekey", "cookie"} {
-		if strings.Contains(normalized, marker) {
+	for _, item := range value.Array[:min(len(value.Array), maxAuditPayloadArrayItems)] {
+		if auditValueContainsCredential(item, depth+1) {
 			return true
 		}
 	}

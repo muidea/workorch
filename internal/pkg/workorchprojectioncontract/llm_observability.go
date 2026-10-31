@@ -5,7 +5,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-// EventRecord is the immutable, redacted eventstream read projection exposed
+// EventRecord is the immutable, bounded eventstream read projection exposed
 // to application and protocol readers. It is not the eventstream owner's
 // persisted record and cannot be posted back to EventHub.
 type EventRecord struct {

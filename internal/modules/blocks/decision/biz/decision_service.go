@@ -513,7 +513,7 @@ func (s *mutationService) RejectRuntimeGovernanceResolutionProposal(ctx context.
 }
 
 func runtimeGovernanceProposalFromCommand(cmd decisioncontracts.ResolveTicketCommand) (decisionModel.RuntimeGovernanceResolutionProposal, error) {
-	payload := common.RedactSensitivePayload(cmd.Payload)
+	payload := cmd.Payload.Clone()
 	hash, err := runtimeGovernanceProposalPayloadHash(cmd, payload)
 	if err != nil {
 		return decisionModel.RuntimeGovernanceResolutionProposal{}, err
@@ -566,7 +566,7 @@ func resolutionFromResolveCommand(cmd decisioncontracts.ResolveTicketCommand) *d
 		TicketID:           cmd.TicketID,
 		ResolvedAt:         newDecisionResolutionTimestamp(),
 		Type:               cmd.Type,
-		Payload:            common.RedactSensitivePayload(cmd.Payload),
+		Payload:            cmd.Payload.Clone(),
 		ContinuationAction: nonEmptyString(cmd.ContinuationAction, stringPayloadValue(cmd.Payload, "continuationAction")),
 		ResumeRunID:        nonEmptyRunID(cmd.ResumeRunID, common.RunID(stringPayloadValue(cmd.Payload, "resumeRunId"))),
 		SuccessorRunID:     nonEmptyRunID(cmd.SuccessorRunID, common.RunID(stringPayloadValue(cmd.Payload, "successorRunId"))),

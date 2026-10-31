@@ -138,7 +138,7 @@ func resolveDecisionTicket(ctx context.Context, hub magicevent.Hub, ticket *deci
 	if err != nil {
 		return nil, nil, err
 	}
-	return ResolveDecision(ctx, hub, ticket, normalizedType, common.RedactSensitivePayload(normalizedPayload))
+	return ResolveDecision(ctx, hub, ticket, normalizedType, normalizedPayload.Clone())
 }
 
 func prepareDecisionResolution(ticket *decisionmodel.Ticket, resolutionType string, payload workorcheventpayload.Payload, scope common.WorkspaceID) (workorcheventpayload.Payload, string, error) {

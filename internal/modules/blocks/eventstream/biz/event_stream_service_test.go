@@ -1416,9 +1416,9 @@ func TestServiceSanitizesAndBoundsPayloadBeforePersistence(t *testing.T) {
 	if len(encoded) > recordpayload.MaxAuditPayloadBytes || strings.Contains(string(encoded), secret) {
 		t.Fatalf("sanitized payload bytes=%d payload=%s", len(encoded), encoded)
 	}
-	redacted, _ := item.Payload.String("apiToken")
-	if redacted != "[redacted]" {
-		t.Fatalf("secret field = %q, want redacted", redacted)
+	reason, _ := item.Payload.String("auditPayloadOmittedReason")
+	if reason != "credential_fields_outside_audit_contract" {
+		t.Fatalf("missing explicit audit omission: %q", reason)
 	}
 }
 

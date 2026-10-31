@@ -27,8 +27,8 @@ func CanonicalOccurredAt(value string) (string, error) {
 }
 
 // Record is the complete immutable value appended by the Eventstream owner.
-// Protocol projections may redact or reshape it but must not post it back as
-// authority.
+// Protocol projections select contract metadata without rewriting original
+// business values and must not post it back as authority.
 type Record struct {
 	ID           common.EventRecordID
 	Version      string

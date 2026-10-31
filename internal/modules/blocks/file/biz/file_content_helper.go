@@ -111,13 +111,6 @@ func sha256Hex(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func containsRuntimeRedactionMarker(value string) bool {
-	value = strings.ToUpper(value)
-	return strings.Contains(value, "[REDACTED]") ||
-		strings.Contains(value, "[SECRET]") ||
-		strings.Contains(value, "[MASKED]")
-}
-
 // editApprovalRequired identifies paths whose mutation crosses a trust
 // boundary. Change volume is deliberately not a governance signal: a large,
 // workspace-local source edit remains an ordinary Runtime state change and

@@ -128,6 +128,12 @@ func TestAuthoringResourceOwnerRequiresSafeCompleteScopedFile(t *testing.T) {
 	if err != nil || got.ValidateFor(command) != nil || got.Content != "目标与验收说明\n" || queryCount != 2 {
 		t.Fatalf("complete resource snapshot: %+v queries=%d %v", got, queryCount, err)
 	}
+	markerCommand := command
+	markerCommand.ResourceRef = "redacted.txt"
+	markerFact, markerErr := send(authoringApplicationSource, markerCommand)
+	if markerErr != nil || markerFact.Content != "[REDACTED]\n" || markerFact.ValidateFor(markerCommand) != nil {
+		t.Fatalf("literal placeholder was rejected or rewritten: %+v err=%v", markerFact, markerErr)
+	}
 	verify := fileevents.VerifyAuthoringResourceCommand{WorkspaceID: got.WorkspaceID, WorkspaceRevision: got.WorkspaceRevision, AuthoringInputHash: got.AuthoringInputHash, ResourceRef: got.ResourceRef, Content: got.Content, ContentHash: got.ContentHash}
 	sendVerify := func(source string, request fileevents.VerifyAuthoringResourceCommand) error {
 		t.Helper()
@@ -181,7 +187,7 @@ func TestAuthoringResourceOwnerRequiresSafeCompleteScopedFile(t *testing.T) {
 	if _, err := send(authoringApplicationSource, unbound); err == nil {
 		t.Fatal("stale authoring input accepted a resource query")
 	}
-	for _, ref := range []string{"../outside.txt", "/etc/passwd", ".env", "escape.txt", "linked.txt", "linked-copy.txt", "sub/nested-secret.txt", "binary.txt", "redacted.txt", "credentials.txt", "large.txt", "missing.txt", ".git/config", "node_modules/pkg.txt", "requirements.txt/../.env"} {
+	for _, ref := range []string{"../outside.txt", "/etc/passwd", ".env", "escape.txt", "linked.txt", "linked-copy.txt", "sub/nested-secret.txt", "binary.txt", "credentials.txt", "large.txt", "missing.txt", ".git/config", "node_modules/pkg.txt", "requirements.txt/../.env"} {
 		t.Run(ref, func(t *testing.T) {
 			changed := command
 			changed.ResourceRef = ref
@@ -190,7 +196,7 @@ func TestAuthoringResourceOwnerRequiresSafeCompleteScopedFile(t *testing.T) {
 			}
 		})
 	}
-	for _, ref := range []string{".env", "escape.txt", "linked.txt", "binary.txt", "redacted.txt", "credentials.txt", "large.txt", "linked-copy.txt", "sub/nested-secret.txt", "missing.txt"} {
+	for _, ref := range []string{".env", "escape.txt", "linked.txt", "binary.txt", "credentials.txt", "large.txt", "linked-copy.txt", "sub/nested-secret.txt", "missing.txt"} {
 		t.Run("scoped/"+ref, func(t *testing.T) {
 			updated := input.Clone()
 			updated.ResourceRefs[len(updated.ResourceRefs)-1] = ref

@@ -183,7 +183,7 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
   `activationports/runtime_execution_limits_test.go` 与 `activationcore/runtime_execution_limits_test.go` 覆盖无损输入、
   合并、完整准入身份、当前协议重载与 policy 重封存漂移；未知协议、缺字段和扩大默认硬上限拒绝。
 - blocking input-review 详情从 Orchestrator 的 sealed original diagnostic 深拷贝到 audit/outcome DTO；Web 的只读展开项
-  保留全部 check/obligation、输入身份与原因，不受摘要标签的条数截断。脱敏文本及原报告 hash 原样显示，不能据此
+  保留全部 check/obligation、输入身份与原因，不受摘要标签的条数截断。原始报告文本及原报告 hash 保全，终端控制字符仅作可逆展示编码，不能据此
   生成 approval/retry/验收权限，也不能把 review 当作实际 validation 或有效进展。
 - Run heartbeat 区分 `latestActivityAt` 与 `latestEffectiveProgressAt`。事件、LLM 调用及普通 artifact/patch/result 时间只形成
   activity；effective progress 仅使用当前 Run 已被 Orchestrator 接受的 exact committed receipt（CWI proof 或 durable changed

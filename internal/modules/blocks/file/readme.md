@@ -18,6 +18,12 @@ validation verdict。它不解释 Goal/DoD，不调用其它 capability owner，
 
 ## 组件交互及合同
 
+Runtime `file/read` 与 target snapshot 按实际读取保全原文、字节数及全流 SHA256，不进行脱敏、掩码或占位替换。
+正文中的 `[REDACTED]`、`[SECRET]`、`[MASKED]` 是普通文件内容，不能据此设置 `Redacted` 或判定读取不完整。
+完整性仍由真实 binary/truncated/ranged/missing 和字节边界决定；只有完整文本可成为完整 target snapshot。
+既有显式 `redacted` 状态的消费者仍拒绝不完整材料，不回填或升级旧归档。创建期 authoring 同样保全显式资源中的合法占位文本；
+其独立路径、凭据内容与容量拒绝策略不改写原文，也不用于推断 Runtime 文件状态。原始材料通过 owner 读取权限与受限存储保护。
+
 `file/mutation-historical-effect/v1` 是 File edit/write/patch-apply 的显式用途合同。只有原 sealed all-of
 effect+validation binding 派生的 execution context 声明该用途时，owner 才输出 dependency pair v2；否则保持 v1。
 actual input reads 与真实 postcondition 均保全，用途不改变 effect 授权、replay proof 或 receipt 身份反查。

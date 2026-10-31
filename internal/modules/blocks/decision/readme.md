@@ -23,6 +23,9 @@ Decision 的公开 surface 包含 8 个 ordinary command topics、1 个 Runtime 
 本合同尚无可信授权主体 exact approve、Workspace 原 confirmation journal 应用或新 Run 激活入口。ordinary resolution、private 普通 resolved/recovered 转换、Governance auto policy 和 background reconciliation 均不得将此类材料降级为批准。也不发布 ordinary created/resolved 通知；Eventstream 拒绝该 kind 的普通通知。读取复用既有 scoped Get/List，副本 detached；响应丢失后沿原 TicketID/RequestID/version 查询及重放。缺 Resolution 的 open 登记不授任何权力；若出现非本合同 Resolution，登记 fail closed。旧一般票据不迁移为变更提案。
 
 
+用户 resolution payload 按 typed 值深拷贝并以原内容计算幂等身份；不按字段名或正文中的 token/password 等词进行脱敏替换。
+不同原输入不得因掩码而合并为相同 proposal，重放仍核对原 payload/hash；不会自动混入系统配置凭据。
+
 ## 组件交互及合同
 
 | 交互方 | typed command/data/result | 边界 |

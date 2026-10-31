@@ -30,21 +30,6 @@ func CloneStrings(input []string) []string {
 	return append([]string(nil), input...)
 }
 
-func RedactStringMap(input map[string]string) map[string]string {
-	if input == nil {
-		return nil
-	}
-	out := make(map[string]string, len(input))
-	for key, value := range input {
-		if value == "" {
-			out[key] = ""
-			continue
-		}
-		out[key] = "redacted"
-	}
-	return out
-}
-
 func CloneMap(input map[string]any) map[string]any {
 	if input == nil {
 		return nil

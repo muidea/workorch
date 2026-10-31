@@ -540,8 +540,6 @@ func redactCatalogError(err error, secrets ...string) string {
 		text = strings.ReplaceAll(text, "Bearer "+secret, "Bearer "+llmproviderconfig.RedactSecret(secret))
 		text = strings.ReplaceAll(text, "bearer "+secret, "bearer "+llmproviderconfig.RedactSecret(secret))
 	}
-	text = strings.ReplaceAll(text, "Bearer ", "Bearer [redacted] ")
-	text = strings.ReplaceAll(text, "bearer ", "bearer [redacted] ")
 	if len(text) > 512 {
 		text = text[:512]
 	}

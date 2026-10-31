@@ -13,6 +13,15 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func TestShellValidationPreviewDoesNotMaskOriginalText(t *testing.T) {
+	const original = "token=example [REDACTED] password=fixture"
+	output := RuntimeCommandResult{Stdout: original}
+	attachShellValidationObservation(&output, "fixture", nil, "recipe", true)
+	if output.Stdout != original || output.ValidationObservation == nil || output.ValidationObservation.OutputPreview != original {
+		t.Fatal("validation preview masked original tool text")
+	}
+}
+
 func TestRuntimeAdapterPersistsZeroWorkGoTestObservation(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go is not available")

@@ -70,7 +70,7 @@ func attachShellValidationObservation(output *RuntimeCommandResult, command stri
 	}
 	rawOutput := strings.Join([]string{output.Stdout, output.Stderr}, "\n")
 	if preview := strings.TrimSpace(rawOutput); preview != "" {
-		observation.OutputPreview = shellPreview(common.RedactSensitiveString(preview), 2048)
+		observation.OutputPreview = shellPreview(preview, 2048)
 	}
 	observation = observation.Normalized()
 	if conflicts := runtimecontract.RuntimeValidationConflictingChecks(observation); len(conflicts) != 0 {

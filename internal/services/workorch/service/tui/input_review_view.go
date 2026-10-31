@@ -19,9 +19,9 @@ func writeInputReviewFeedback(b *strings.Builder, diagnostic *runtimecontract.Ru
 			b.WriteString("  sensitive diagnostic text redacted; original report reference/hash retained\n")
 		}
 		for _, check := range review.Report.Checks {
-			fmt.Fprintf(b, "  original check=%s conclusion=%s reason=%s inputs=%s\n", check.RequiredCheckRef, check.Conclusion, check.Reason, strings.Join(check.InputTargetRefs, ", "))
+			fmt.Fprintf(b, "  original check=%q conclusion=%s reason=%q inputs=%q\n", check.RequiredCheckRef, check.Conclusion, check.Reason, strings.Join(check.InputTargetRefs, ", "))
 			for _, obligation := range check.Obligations {
-				fmt.Fprintf(b, "    original obligation=%q input coverage=%s reason=%s inputs=%s\n", obligation.CriterionText, obligation.Finding, obligation.Reason, strings.Join(obligation.InputTargetRefs, ", "))
+				fmt.Fprintf(b, "    original obligation=%q input coverage=%s reason=%q inputs=%q\n", obligation.CriterionText, obligation.Finding, obligation.Reason, strings.Join(obligation.InputTargetRefs, ", "))
 			}
 		}
 	}

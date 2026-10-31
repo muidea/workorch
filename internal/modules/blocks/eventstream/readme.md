@@ -15,6 +15,10 @@ high-watermark，以及永久 workspace Eventstream deletion tombstone 的唯一
 EventRecord、SSE 和 projection 都是非权威派生面。本组件不拥有 Workspace、Run、Result、Governance 或 SM-1～SM-4
 状态，不从 audit replay 重建 authority，也不向 Orchestrator 发送 drive/evidence/lifecycle command。
 
+公开审计是有界元数据合同，不是原始诊断存储。普通业务字段、引用和字面量不做关键词脱敏；确切凭据字段超出
+该公开合同则明确不收录整个 payload，记录 auditPayloadOmittedReason、原 payloadBytes 与 payloadSha256，
+不逐字段替换后冒充原文。原有容量/深度边界及 auditPayloadTruncated 标志保持，审计不提供业务权威。
+
 ## 组件交互及合同
 
 | 交互方 | 方向 | typed EventHub 合同 | 调用/授权语义 |

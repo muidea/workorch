@@ -673,10 +673,6 @@ func enrichShellFailureMessage(base string, output RuntimeCommandResult) string 
 		return fmt.Sprintf("复合验证阶段事实：code=%s; stage=%s; exitCode=%d", output.FailureCode, output.Stage, output.ExitCode)
 	}
 	base = strings.TrimSpace(base)
-	// Redact before preview so secrets never enter FailureMessage / RuntimeFacts / LLM context.
-	stderrPreview := shellPreview(common.RedactSensitiveString(output.Stderr), 512)
-	stdoutPreview := shellPreview(common.RedactSensitiveString(output.Stdout), 256)
-	base = common.RedactSensitiveString(base)
 	parts := make([]string, 0, 4)
 	if base != "" {
 		parts = append(parts, base)
@@ -686,11 +682,6 @@ func enrichShellFailureMessage(base string, output RuntimeCommandResult) string 
 	}
 	if stage := strings.TrimSpace(output.Stage); stage != "" && !strings.Contains(base, stage) {
 		parts = append(parts, "stage="+stage)
-	}
-	if stderrPreview != "" {
-		parts = append(parts, "stderr="+stderrPreview)
-	} else if stdoutPreview != "" {
-		parts = append(parts, "stdout="+stdoutPreview)
 	}
 	return strings.Join(parts, "; ")
 }

@@ -17,6 +17,10 @@ Last Verified: 2026-09-10
 原始进程输出和执行细节保留在 Shell-private adapter；跨 owner 只返回有界 evidence、validation observation、effect fact 与
 `RuntimeOperationReceipt`。
 
+原始 stdout/stderr 保持本次实际取得的 bytes，不为脱敏替换，也不按命令名称删除进度行。
+通用 FailureMessage 只携带原失败阶段与退出事实，不塞入改写的工具输出；原输出仍由 owner 受限证据链保全。
+显式 OutputPreview 继续受原预览边界约束，但不进行敏感词替换，不代表完整原始输出或新的验收 credit。
+
 ## 组件交互及合同
 
 | 交互方 | 方向 | concrete typed 合同 |
@@ -119,7 +123,7 @@ Orchestrator 的原事务负责，不增加 SM-1～SM-4 transition、availabilit
   evidence target type、stage/operation、diagnostic targets 与 sealed validation scope；不得使用只覆盖 class/path 的 owner-private
   digest。diagnostic operation kind 必须是实际 sealed Shell operation kind；Shell 不选择匹配 route、repair owner、confirmation
   protocol 或终态。
-- 原始 stdout/stderr、secret 和自由文本 diagnostic 不得进入 Runtime authority；公开 diagnostic 必须有界、脱敏。
+- 原始 stdout/stderr、secret 和自由文本 diagnostic 不得进入 Runtime authority；公开 diagnostic 只提供有界阶段事实及受限原文引用，不用脱敏改写的工具输出充当原文。
 - managed native check 的 failure feedback 从同一 JSON event 关联 check/case 与 assertion location，仅对 sealed validation
   scope 内的唯一相对路径发布 `CheckFailures`（最多 32 项，超限显式标记）。assertion 正文不导出，`DiagnosticHash` 保留
   精确正文身份；新失败附带可选 `validation/check-failure/v2` 诊断协议，`ComparisonHash` 只归一本 owner 当前 scratch

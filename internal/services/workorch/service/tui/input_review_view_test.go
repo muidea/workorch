@@ -2,12 +2,25 @@ package tui
 
 import (
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestInputReviewTerminalEncodingPreservesOriginalControlBytes(t *testing.T) {
+	const original = "原始诊断\r\n\x1b[31m token=example [REDACTED]"
+	diagnostic := &runtimecontract.RuntimeOriginalDiagnostic{ValidationInputReviews: []runtimecontract.RuntimeValidationInputReviewFeedback{{
+		Report: runtimecontract.RuntimeValidationInputReview{Checks: []runtimecontract.RuntimeValidationInputCheckReview{{Reason: original}}},
+	}}}
+	var view strings.Builder
+	writeInputReviewFeedback(&view, diagnostic)
+	if strings.ContainsRune(view.String(), '\x1b') || !strings.Contains(view.String(), strconv.Quote(original)) || diagnostic.ValidationInputReviews[0].Report.Checks[0].Reason != original {
+		t.Fatal("terminal rendering executed or rewrote original diagnostic text")
+	}
+}
 
 func TestInspectAcceptancePreservesCompleteInputReviewAndDoesNotChooseActions(t *testing.T) {
 	diagnostic := &runtimecontract.RuntimeOriginalDiagnostic{OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator, OriginalCode: "validation_input_review_coverage_incomplete", ValidationInputReviews: []runtimecontract.RuntimeValidationInputReviewFeedback{{

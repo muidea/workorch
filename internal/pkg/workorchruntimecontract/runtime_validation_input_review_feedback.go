@@ -10,10 +10,10 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-// RuntimeValidationInputReviewFeedback is a detached, audit-safe projection of
+// RuntimeValidationInputReviewFeedback is a detached, content-preserving projection of
 // an admitted report. No input bytes, execution grants or replacement criteria
 // are included. ReviewRef addresses the original SM-3 document; ReportHash
-// commits its exact report even when sensitive diagnostic text is redacted.
+// commits its exact original report. Text is not rewritten for display.
 type RuntimeValidationInputReviewFeedback struct {
 	ReviewRef          string                       `json:"reviewRef"`
 	ProtocolRef        string                       `json:"protocolRef"`
@@ -44,32 +44,6 @@ func ProjectRuntimeValidationInputReviewFeedback(ref string, binding RuntimeVali
 	f := RuntimeValidationInputReviewFeedback{ReviewRef: ref, ProtocolRef: binding.InputReview.ProtocolRef,
 		CoverageWorkItemID: binding.CoverageWorkItemID, RequirementHash: binding.RequirementHash,
 		ReportHash: StableRuntimeValidationInputReviewHash(report), Report: report.Clone()}
-	safe := func(value string) string {
-		if validateRuntimeInputReviewFeedbackText(value) == nil {
-			return value
-		}
-		f.Redacted = true
-		return "[redacted diagnostic text; sha256:" + RuntimeValidationInputContentHash(value) + "]"
-	}
-	for i := range f.Report.Checks {
-		check := &f.Report.Checks[i]
-		check.Reason = safe(check.Reason)
-		check.RequiredCheckRef = safe(check.RequiredCheckRef)
-		for j := range check.InputTargetRefs {
-			check.InputTargetRefs[j] = safe(check.InputTargetRefs[j])
-		}
-		for j := range check.Obligations {
-			obligation := &check.Obligations[j]
-			obligation.CriterionText = safe(obligation.CriterionText)
-			obligation.Reason = safe(obligation.Reason)
-			for k := range obligation.InputTargetRefs {
-				obligation.InputTargetRefs[k] = safe(obligation.InputTargetRefs[k])
-			}
-			for k := range obligation.ProofConsumerRefs {
-				obligation.ProofConsumerRefs[k] = safe(obligation.ProofConsumerRefs[k])
-			}
-		}
-	}
 	return f, f.Validate()
 }
 
@@ -130,9 +104,6 @@ func (f RuntimeValidationInputReviewFeedback) Validate() error {
 			if value == "" || !utf8.ValidString(value) || len(value) > RuntimeValidationInputReviewMaxScopeBytes {
 				return fmt.Errorf("input review feedback requires bounded complete text")
 			}
-			if err := validateRuntimeInputReviewFeedbackText(value); err != nil {
-				return err
-			}
 		}
 		if f.ProtocolRef != RuntimeValidationInputReviewProtocol {
 			if err := validateRuntimeValidationInputObligationShape(check, !f.Redacted); err != nil {
@@ -141,13 +112,6 @@ func (f RuntimeValidationInputReviewFeedback) Validate() error {
 		}
 	}
 	return nil
-}
-
-func validateRuntimeInputReviewFeedbackText(value string) error {
-	if strings.IndexFunc(value, func(r rune) bool { return (r < 32 && r != '\n' && r != '\t') || r == 127 }) >= 0 {
-		return fmt.Errorf("input review feedback contains unsafe control characters")
-	}
-	return validateRuntimeFeedbackSafeText("input review", value)
 }
 
 func writeRuntimeValidationInputReviewFeedbackHash(h interface{ Write([]byte) (int, error) }, values []RuntimeValidationInputReviewFeedback) {
