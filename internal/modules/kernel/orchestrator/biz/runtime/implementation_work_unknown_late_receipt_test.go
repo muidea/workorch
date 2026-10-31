@@ -42,12 +42,27 @@ func implementationWorkUnknownLateKnown(t *testing.T, sealed RuntimeAggregate) {
 	}
 	execution := call.OperationCall.Request.Execution
 	dispatchID := call.Aggregate.ActiveDispatch.ID
-	unknown, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{Kind: RuntimeInternalEventOperationExecutionOutcomeUnknownObserved, Scope: scope, Transaction: &RuntimeInternalTransactionPayload{OperationOutcomeUnknownID: execution.OperationID}})
+
+	deliveryRequest, found, deliveryErr := CompileOperationResultDeliveryRequest(call.Aggregate, execution.OperationID)
+	if deliveryErr != nil || !found || deliveryRequest.Execution.ExecutionKey != execution.ExecutionKey || deliveryRequest.Execution.Fence != execution.Fence {
+		t.Fatalf("original-result-only projection: %v", deliveryErr)
+	}
+	if !reflect.DeepEqual(call.Aggregate, *repository.aggregate) {
+		t.Fatal("result delivery projection changed authority")
+	}
+	diagnostic := &runtimecontract.RuntimeOriginalDiagnostic{SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: runtimecontract.RuntimeModuleFile, OriginalClass: "result_delivery", OriginalCode: "file_result_dependencies", OriginalMessage: "File operation result unavailable at dependencies", Signature: "original-file-result", OperationID: execution.OperationID, DetailsRef: "workorch://file-operation-results/original/diagnostic", DetailsHash: "original-error-hash", DetailsBytes: 28}
+	unknown, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{Kind: RuntimeInternalEventOperationExecutionOutcomeUnknownObserved, Scope: scope, Transaction: &RuntimeInternalTransactionPayload{OperationOutcomeUnknownID: execution.OperationID, OperationOutcomeDiagnostic: diagnostic}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if unknown.Aggregate.ActiveDispatch != nil || unknown.Aggregate.ImplementationWork.Rounds[0].OutcomeUnknownExecutionKey != execution.ExecutionKey {
 		t.Fatal("unknown claim did not archive original work authority")
+	}
+	if unknown.Aggregate.Facts.Failure == nil || !reflect.DeepEqual(unknown.Aggregate.Facts.Failure.OriginalDiagnostic, diagnostic) {
+		t.Fatal("terminal unknown discarded original failure stage/diagnostic")
+	}
+	if _, found, err := CompileOperationResultDeliveryRequest(unknown.Aggregate, execution.OperationID); err != nil || found {
+		t.Fatal("unknown result projection granted a new call")
 	}
 	budget := unknown.Aggregate.ExecutionBudget.Clone()
 	if _, found, err := controller.QueryOperationReceipt(ctx, scope.WorkspaceID, scope.RunID, dispatchID, execution.OperationID, execution.ExecutionKey, execution.Fence, runtimecontract.RuntimeModuleFile, nil); err == nil || found {

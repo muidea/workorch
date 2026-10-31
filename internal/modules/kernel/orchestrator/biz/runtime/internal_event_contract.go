@@ -218,6 +218,12 @@ func (event RuntimeInternalEvent) validateImplementationWorkScopeEnvelope() erro
 }
 
 func (event RuntimeInternalEvent) validateExecutionTransaction() error {
+	if event.Transaction != nil && event.Transaction.OperationOutcomeDiagnostic != nil {
+		if event.Kind != RuntimeInternalEventOperationExecutionOutcomeUnknownObserved || event.Transaction.OperationOutcomeDiagnostic.OperationID != event.Transaction.OperationOutcomeUnknownID || event.Transaction.OperationOutcomeDiagnostic.Validate() != nil {
+			return common.ErrInvalidArgument
+		}
+	}
+
 	if event.Transaction == nil {
 		return nil
 	}

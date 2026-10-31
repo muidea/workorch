@@ -3,6 +3,7 @@ package file
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,6 +32,7 @@ const StepKindPatchPreview = modulecommon.StepKindPatchPreview
 const StepKindPatchRevert = modulecommon.StepKindPatchRevert
 
 type Biz struct {
+	mutationResultLocks         [64]sync.Mutex
 	preparationInitializationMu sync.Mutex
 	basebiz.Base
 	runtimeAdapter   *RuntimeAdapter
@@ -105,6 +107,7 @@ func (m *Biz) Start() error {
 		{fileevents.TopicExecuteFileListOperation, m.handleFileListOperation, false},
 		{fileevents.TopicExecuteFileReadOperation, m.handleFileReadOperation, false},
 		{fileevents.TopicExecuteFileEditOperation, m.handleFileEditOperation, false},
+		{fileevents.TopicDeliverMutationResult, m.handleDeliverMutationResult, false},
 		{fileevents.TopicExecuteFileWriteOperation, m.handleFileWriteOperation, false},
 		{fileevents.TopicExecutePatchApplyOperation, m.handlePatchApplyOperation, false},
 		{fileevents.TopicExecutePatchPreviewOperation, m.handlePatchPreviewOperation, false},
@@ -327,6 +330,19 @@ func (m *Biz) handleFileEditOperation(event magicevent.Event, result magicevent.
 		setPrerequisiteError(result, err)
 		return
 	}
+	unlockResult := m.lockMutationResult(command.RuntimeOperationExecutionContext)
+	defer unlockResult()
+	store, saved, completed, deliveryErr := m.prepareMutationResult(event.Context(), command.ResultDeliveryProtocolRef, command.RuntimeOperationExecutionContext, operation)
+	if setPrerequisiteError(result, deliveryErr) {
+		return
+	}
+	if store != nil {
+		defer store.close()
+	}
+	if completed {
+		result.Set(fileevents.ExecuteOperationResult{Receipt: saved}, nil)
+		return
+	}
 	beforeWorkspaceRevision := m.workspaceTreeRevision(command.WorkspaceDeliverableDirectory)
 	patchRequest := PatchApplyRequest{
 		WorkspaceDirectory: command.WorkspaceDeliverableDirectory,
@@ -337,17 +353,28 @@ func (m *Biz) handleFileEditOperation(event magicevent.Event, result magicevent.
 		ReplayProof:     command.Execution.ReplayProof,
 	}
 	operationResult, executeErr := m.submitEffectInternalEvent(effectInternalEvent{Kind: effectInternalEventApplyPatch, Patch: &patchRequest})
+	if store != nil {
+		raw, _ := json.Marshal(struct {
+			Result              RuntimeFileOperationResult
+			Read, Postcondition *filePatchReadObservation
+			Error               []byte
+		}{operationResult, operationResult.patchRead, operationResult.patchPostcondition, errorBytes(executeErr)})
+		if _, saveErr := store.write("effect.json", raw); saveErr != nil {
+			setPrerequisiteError(result, mutationDeliveryFailure(store, command.RuntimeOperationExecutionContext, "effect_result_save", saveErr))
+			return
+		}
+	}
 	status := runtimeOperationStatus(executeErr)
 	evidence := fileOperationEvidence(operationResult)
 	dependencies, dependencyErr := filePatchOwnerDependencies(command.RuntimeOperationExecutionContext, operation, operationResult.patchRead)
 	if dependencyErr != nil {
-		setPrerequisiteError(result, dependencyErr)
+		setPrerequisiteError(result, mutationDeliveryFailure(store, command.RuntimeOperationExecutionContext, "dependencies", dependencyErr))
 		return
 	}
 	evidence.OwnerRevisionSet = dependencies
 	evidence.ApplicabilityDependencies, dependencyErr = filePatchApplicabilityDependencies(command.RuntimeOperationExecutionContext, operation, operationResult.patchPostcondition)
 	if dependencyErr != nil {
-		setPrerequisiteError(result, dependencyErr)
+		setPrerequisiteError(result, mutationDeliveryFailure(store, command.RuntimeOperationExecutionContext, "dependencies", dependencyErr))
 		return
 	}
 	var failure *runtimecontract.FailureFact
@@ -359,7 +386,7 @@ func (m *Biz) handleFileEditOperation(event magicevent.Event, result magicevent.
 		governance = fileApprovalRequirement(data.Path, failure.Message, runtimecontract.StepKindFileEdit)
 	}
 	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, operationResult.TargetRefs, evidence, failure, governance, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, status, operationResult, beforeWorkspaceRevision))
-	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
+	committed, err := m.commitMutationResult(event.Context(), store, command.RuntimeOperationExecutionContext, receipt)
 	if err != nil {
 		setPrerequisiteError(result, err)
 		return
@@ -411,6 +438,19 @@ func (m *Biz) handleFileWriteOperation(event magicevent.Event, result magicevent
 		setPrerequisiteError(result, err)
 		return
 	}
+	unlockResult := m.lockMutationResult(command.RuntimeOperationExecutionContext)
+	defer unlockResult()
+	store, saved, completed, deliveryErr := m.prepareMutationResult(event.Context(), command.ResultDeliveryProtocolRef, command.RuntimeOperationExecutionContext, operation)
+	if setPrerequisiteError(result, deliveryErr) {
+		return
+	}
+	if store != nil {
+		defer store.close()
+	}
+	if completed {
+		result.Set(fileevents.ExecuteOperationResult{Receipt: saved}, nil)
+		return
+	}
 	beforeWorkspaceRevision := m.workspaceTreeRevision(command.WorkspaceDeliverableDirectory)
 	patchRequest := PatchApplyRequest{
 		WorkspaceDirectory: command.WorkspaceDeliverableDirectory,
@@ -421,17 +461,28 @@ func (m *Biz) handleFileWriteOperation(event magicevent.Event, result magicevent
 		ReplayProof:     command.Execution.ReplayProof,
 	}
 	operationResult, executeErr := m.submitEffectInternalEvent(effectInternalEvent{Kind: effectInternalEventApplyPatch, Patch: &patchRequest})
+	if store != nil {
+		raw, _ := json.Marshal(struct {
+			Result              RuntimeFileOperationResult
+			Read, Postcondition *filePatchReadObservation
+			Error               []byte
+		}{operationResult, operationResult.patchRead, operationResult.patchPostcondition, errorBytes(executeErr)})
+		if _, saveErr := store.write("effect.json", raw); saveErr != nil {
+			setPrerequisiteError(result, mutationDeliveryFailure(store, command.RuntimeOperationExecutionContext, "effect_result_save", saveErr))
+			return
+		}
+	}
 	status := runtimeOperationStatus(executeErr)
 	evidence := fileOperationEvidence(operationResult)
 	dependencies, dependencyErr := filePatchOwnerDependencies(command.RuntimeOperationExecutionContext, operation, operationResult.patchRead)
 	if dependencyErr != nil {
-		setPrerequisiteError(result, dependencyErr)
+		setPrerequisiteError(result, mutationDeliveryFailure(store, command.RuntimeOperationExecutionContext, "dependencies", dependencyErr))
 		return
 	}
 	evidence.OwnerRevisionSet = dependencies
 	evidence.ApplicabilityDependencies, dependencyErr = filePatchApplicabilityDependencies(command.RuntimeOperationExecutionContext, operation, operationResult.patchPostcondition)
 	if dependencyErr != nil {
-		setPrerequisiteError(result, dependencyErr)
+		setPrerequisiteError(result, mutationDeliveryFailure(store, command.RuntimeOperationExecutionContext, "dependencies", dependencyErr))
 		return
 	}
 	var failure *runtimecontract.FailureFact
@@ -443,7 +494,7 @@ func (m *Biz) handleFileWriteOperation(event magicevent.Event, result magicevent
 		governance = fileApprovalRequirement(data.TargetRef, failure.Message, runtimecontract.StepKindFileWrite)
 	}
 	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, operationResult.TargetRefs, evidence, failure, governance, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, status, operationResult, beforeWorkspaceRevision))
-	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
+	committed, err := m.commitMutationResult(event.Context(), store, command.RuntimeOperationExecutionContext, receipt)
 	if err != nil {
 		setPrerequisiteError(result, err)
 		return
@@ -495,6 +546,19 @@ func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magiceven
 		setPrerequisiteError(result, err)
 		return
 	}
+	unlockResult := m.lockMutationResult(command.RuntimeOperationExecutionContext)
+	defer unlockResult()
+	store, saved, completed, deliveryErr := m.prepareMutationResult(event.Context(), command.ResultDeliveryProtocolRef, command.RuntimeOperationExecutionContext, operation)
+	if setPrerequisiteError(result, deliveryErr) {
+		return
+	}
+	if store != nil {
+		defer store.close()
+	}
+	if completed {
+		result.Set(fileevents.ExecuteOperationResult{Receipt: saved}, nil)
+		return
+	}
 	beforeWorkspaceRevision := m.workspaceTreeRevision(command.WorkspaceDeliverableDirectory)
 	patchRequest := PatchApplyRequest{
 		WorkspaceDirectory: command.WorkspaceDeliverableDirectory,
@@ -507,17 +571,28 @@ func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magiceven
 		ReplayProof:     command.Execution.ReplayProof,
 	}
 	operationResult, executeErr := m.submitEffectInternalEvent(effectInternalEvent{Kind: effectInternalEventApplyPatch, Patch: &patchRequest})
+	if store != nil {
+		raw, _ := json.Marshal(struct {
+			Result              RuntimeFileOperationResult
+			Read, Postcondition *filePatchReadObservation
+			Error               []byte
+		}{operationResult, operationResult.patchRead, operationResult.patchPostcondition, errorBytes(executeErr)})
+		if _, saveErr := store.write("effect.json", raw); saveErr != nil {
+			setPrerequisiteError(result, mutationDeliveryFailure(store, command.RuntimeOperationExecutionContext, "effect_result_save", saveErr))
+			return
+		}
+	}
 	status := runtimeOperationStatus(executeErr)
 	evidence := fileOperationEvidence(operationResult)
 	dependencies, dependencyErr := filePatchOwnerDependencies(command.RuntimeOperationExecutionContext, operation, operationResult.patchRead)
 	if dependencyErr != nil {
-		setPrerequisiteError(result, dependencyErr)
+		setPrerequisiteError(result, mutationDeliveryFailure(store, command.RuntimeOperationExecutionContext, "dependencies", dependencyErr))
 		return
 	}
 	evidence.OwnerRevisionSet = dependencies
 	evidence.ApplicabilityDependencies, dependencyErr = filePatchApplicabilityDependencies(command.RuntimeOperationExecutionContext, operation, operationResult.patchPostcondition)
 	if dependencyErr != nil {
-		setPrerequisiteError(result, dependencyErr)
+		setPrerequisiteError(result, mutationDeliveryFailure(store, command.RuntimeOperationExecutionContext, "dependencies", dependencyErr))
 		return
 	}
 	var failure *runtimecontract.FailureFact
@@ -529,7 +604,7 @@ func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magiceven
 		governance = fileApprovalRequirement(data.TargetRef, failure.Message, runtimecontract.RuntimeBlockKindPatchApply)
 	}
 	receipt := m.newRuntimeOperationReceipt(command.Execution, command.OperationID, status, operationResult.TargetRefs, evidence, failure, governance, fileMutationReceiptObservation(command.WorkspaceDeliverableDirectory, operationResult.TargetRefs, status, operationResult, beforeWorkspaceRevision))
-	committed, err := m.commitRuntimeOperationReceipt(event.Context(), command.WorkspaceID, command.RunID, command.Transaction.AuthoritySnapshotID, command.DispatchID, command.Execution, receipt)
+	committed, err := m.commitMutationResult(event.Context(), store, command.RuntimeOperationExecutionContext, receipt)
 	if err != nil {
 		setPrerequisiteError(result, err)
 		return

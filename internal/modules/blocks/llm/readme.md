@@ -293,8 +293,9 @@ Source observations never authorize writing another target, skipping review or c
 
 ### Runtime 请求渲染与缓存观测
 
-- operations 新请求使用 `operations-render/parameter-cardinality/v3`，由 Orchestrator 在 SM-3 ExpectedDocument 中封存。
-  空引用与 `operations-render/compact-contract/v2` 保留原渲染；transport recovery、进程重载及同合同 correction 继承原引用。LLM 不自行升级，未知引用拒绝。
+- operations 新请求使用 `operations-render/cache-layout/v4`，semantic 新请求使用 `semantic-render/cache-layout/v4`，
+  由 Orchestrator 在 SM-3 ExpectedDocument 中封存。空引用和既有 v2/v3 保留原渲染；transport recovery、进程重载及
+  同合同 correction 继承原引用，包括没有 ExpectedDocument 的旧 session。LLM 不自行升级，未知引用拒绝。
 - v2 的 C0 是通用结构说明和原 effect 指引；C3 保留完整原 schema、wireRules、operationContracts、例子以及精确
   requiredOperationSequence 对应关系，只去除这些值的重复长篇说明。raw-text 与 strict-output 适用同一合同和本地 decoder。
   C1/C2 与 C4/C5 不变；缓存 scope 只认可 owner 的精确 C0/version，继续隔离 Workspace、Profile 内容及模型/transport。
@@ -310,6 +311,18 @@ Source observations never authorize writing another target, skipping review or c
   闭合集合 `maxItems` 为真实可选名称数。动态 MCP 参数保留授权前缀与容量，动态 name 唯一仍由 strict decoder 核验。
   transport schema 与 C3 schema 完全相同；原生结构化输出与 raw text 均遵守完整合同，不以 provider 启用 strict 与否替代本地校验。
   C0 明确 File adapter 单对替换及完整连续原文要求；不是新增多编辑操作或 Profile 权限。v3/version 参与实际缓存身份。
+- v4 只改变 provider-facing C3 纯投影：在同一 user 消息内将相对可复用的 context、instruction/schema 放在易变身份之前，
+  schema 中 manifest/slot 常量靠后。原数组顺序、每份原文、当前身份、全部约束及观察仍完整保留；它们仍是 volatile，
+  不能获得 readiness、receipt、credit 或新的缓存权威。无全局可变状态或跨 Workspace 输入缓存。
+  operations 仅在 `decision.Focus` 和 `context.focus` 精确相等时，用闭合 `FocusRef="context.focus"` 指向仍完整存在的当前
+  focus；不相等时保留原 Focus，并由 integrity 核验当前事实。其它 decision/transaction 字段不精简。
+  仅对相等且没有引用/anchor/ID 的 parameters schema 提取 prompt 内的 `$defs`；有既存定义、引用或无体积收益则保留原 schema。
+  展开引用必须与原 v3 grammar 相等；**native transport schema 与本地 strict decoder 仍消费完整原 v3 grammar**，不要求
+  上游支持新增引用，也不放宽 required、重复参数、slot、variant 或 owner 约束。raw-text prompt 表达同一完整规则。
+  C0～C2、C4～C5 和角色保持原值；operations 继续使用 v3 的精确 C0/cache family，semantic 继续使用既有 C0/cache family。
+  `RenderContractRef` 明确记录 v4，`PromptRenderer` 保留原 C0 vocabulary 身份；不是隐藏渲染版本或按动态 schema 分裂稳定 key。
+  `runtime_cache_layout_test.go`、`runtime_cache_schema_test.go` 覆盖全值/引用展开等价、schema engine 正负例、attempt 1、
+  并发 Workspace/context 隔离、当前 focus/原文完整性及 provider 前预算拒绝。实际缓存收益和模型输出稳定性另需部署验收。
 - `parameter_cardinality` correction 消费 exact manifest、原首错及完整 v1 fact；C4 只投影结构坐标和不可逆值 hash，
   不复制原始 provider 值或诊断 Cause。只能重新生成重复 name 的值以表达完整语义，其余参数/操作 scope 冻结。
   同合同 attempt0/1 保持 C0–C3、schema、wire、rendered stable prefix；LLM 不选择是否重试，不证明修订语义正确，

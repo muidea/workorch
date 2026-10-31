@@ -1,6 +1,7 @@
 package events
 
 const (
+	TopicDeliverMutationResult     = "/file/runtime-operation/deliver-mutation-result"
 	PrerequisiteCommandDestination = "/runtime/prerequisite"
 
 	TopicAcquireRuntimeCapabilities                   = "/file/runtime-prerequisite/acquire-capabilities"

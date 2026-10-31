@@ -413,7 +413,7 @@ func (c *candidateDispatchComponent) markGovernanceResumeExecutionStarted(ctx co
 	return aggregate, grant, nil
 }
 
-func (c *candidateDispatchComponent) markOperationExecutionOutcomeUnknown(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, operationID string) (RuntimeAggregate, error) {
+func (c *candidateDispatchComponent) markOperationExecutionOutcomeUnknown(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, operationID string, diagnostic ...*runtimecontract.RuntimeOriginalDiagnostic) (RuntimeAggregate, error) {
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
@@ -465,6 +465,17 @@ func (c *candidateDispatchComponent) markOperationExecutionOutcomeUnknown(ctx co
 		aggregate.ActiveDispatch = nil
 		retireImplementationWorkRecoveryAuthorizations(&aggregate, dispatch.ID)
 		failure := runtimecontract.FailureFact{Class: runtimecontract.FailureClassOperationOutcomeUnknown, Code: "implementation_work_outcome_unknown", Signature: "implementation-work-unknown/" + dispatch.ID + "/" + operationID, Message: "started owner operation has no trustworthy terminal receipt; physical consumption remains unknown"}
+		if len(diagnostic) > 1 {
+			return RuntimeAggregate{}, common.ErrInvalidArgument
+		}
+		if len(diagnostic) == 1 && diagnostic[0] != nil {
+			d := diagnostic[0]
+			operation, _ := candidateOperationByID(dispatch.Candidate, operationID)
+			if d.OperationID != operationID || d.OwnerModuleID != runtimecontract.RuntimeModuleForOperationKind(operation.Kind) || d.Validate() != nil {
+				return RuntimeAggregate{}, common.ErrInvalidArgument
+			}
+			failure.OriginalDiagnostic = d.CloneOriginal()
+		}
 		if err := replaceRuntimeFailureAuthority(&aggregate.Facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
 			return RuntimeAggregate{}, err
 		}

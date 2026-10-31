@@ -53,19 +53,39 @@ func SemanticExpectedDocument(aggregate RuntimeAggregate) (runtimecontract.Runti
 			return runtimecontract.RuntimeExpectedDocumentContract{}, fmt.Errorf("%w: semantic expected document has no persisted active batch", common.ErrConflict)
 		}
 	}
-	if expected.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
-		for _, obligation := range ledger.Manifest.ProofObligations {
-			if obligation.ImplementationWork != nil {
-				expected.SemanticRenderContractRef = runtimecontract.RuntimeSemanticRenderContractV2
-			}
+	expected.SemanticRenderContractRef = runtimecontract.RuntimeSemanticRenderContractV4
+
+	// Recovery and same-contract correction inherit the exact source request's
+	// renderer. A generation retirement has a different request key, so it may
+	// select the new version without changing any already-sealed session.
+	sourceRequestID := ""
+	if expected.CorrectionAttempt == 1 {
+		sourceLedger := ledger
+		sourceLedger.CorrectionDirective = nil
+		key, err := SemanticRequestIdentityHash(sourceLedger)
+		if err != nil {
+			return runtimecontract.RuntimeExpectedDocumentContract{}, err
 		}
+		sourceRequestID = runtimecontract.StableRuntimeCandidateRequestSessionID(runtimecontract.RuntimeProviderDocumentSemanticPlan, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.AuthorityTransaction(), ledger.StablePrefixHash, ledger.Manifest.Hash, key)
 	}
-	// Reload never upgrades an already-sealed request in place.
+	foundRenderer := false
 	for _, session := range aggregate.CandidateRequestSessions {
-		if session.LogicalRequestID == expected.LogicalRequestID && session.ExpectedDocument != nil {
-			expected.SemanticRenderContractRef = session.ExpectedDocument.SemanticRenderContractRef
+		if session.LogicalRequestID != expected.LogicalRequestID && session.LogicalRequestID != sourceRequestID {
+			continue
 		}
+		if session.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan || session.Transaction != aggregate.Decision.AuthorityTransaction() || session.ManifestHash != ledger.Manifest.Hash {
+			return runtimecontract.RuntimeExpectedDocumentContract{}, fmt.Errorf("%w: semantic renderer lineage scope mismatch", common.ErrConflict)
+		}
+		ref := ""
+		if session.ExpectedDocument != nil {
+			ref = session.ExpectedDocument.SemanticRenderContractRef
+		}
+		if foundRenderer && ref != expected.SemanticRenderContractRef {
+			return runtimecontract.RuntimeExpectedDocumentContract{}, fmt.Errorf("%w: inconsistent semantic renderer lineage", common.ErrConflict)
+		}
+		expected.SemanticRenderContractRef, foundRenderer = ref, true
 	}
+
 	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
 	return expected, nil
 }

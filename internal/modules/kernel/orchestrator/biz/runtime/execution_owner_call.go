@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/governancecheck"
 	"strings"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -226,4 +227,35 @@ func validateOwnerReceiptIdentity(operation runtimecontract.RuntimeOperation, ex
 		return fmt.Errorf("owner receipt does not match claimed execution")
 	}
 	return nil
+}
+
+// CompileOperationResultDeliveryRequest projects only an already claimed
+// execution. This value is for owner-material delivery, never a call token.
+func CompileOperationResultDeliveryRequest(a RuntimeAggregate, operationID string) (RuntimeOperationExecutionRequest, bool, error) {
+	if err := a.Validate(); err != nil {
+		return RuntimeOperationExecutionRequest{}, false, err
+	}
+	if a.ActiveDispatch == nil {
+		return RuntimeOperationExecutionRequest{}, false, nil
+	}
+	op, ok := candidateOperationByID(a.ActiveDispatch.Candidate, operationID)
+	if !ok {
+		return RuntimeOperationExecutionRequest{}, false, nil
+	}
+	execution, ok := operationExecutionRecord(a.ActiveDispatch.OperationExecutions, operationID)
+	if !ok || execution.State != runtimecontract.OperationExecutionClaimed {
+		return RuntimeOperationExecutionRequest{}, false, nil
+	}
+	if _, ok := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(a.OperationReceipts, execution.ExecutionKey, execution.Fence); ok {
+		return RuntimeOperationExecutionRequest{}, false, nil
+	}
+	x := activeDispatchExecution{workspaceID: a.Facts.WorkspaceID, runID: a.Facts.RunID, aggregate: a, dispatch: *a.ActiveDispatch, completed: map[string]struct{}{}}
+	for _, id := range a.ActiveDispatch.CompletedOperationIDs {
+		x.completed[id] = struct{}{}
+	}
+	call, err := x.operationExecutionCallHandoff(op, preparedActiveDispatchOperation{execution: execution, governanceGrant: governancecheck.GrantForExecution(a.OperationGovernanceBindings, execution)})
+	if err != nil {
+		return RuntimeOperationExecutionRequest{}, false, err
+	}
+	return call.Request, true, nil
 }

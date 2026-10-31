@@ -173,9 +173,11 @@ type RuntimeImplementationWorkScopeObservation struct {
 	Request     RuntimeImplementationWorkScopeRequest
 	Selection   RuntimeTargetSelection
 	Observation RuntimePrerequisiteObservation
+	Content     *RuntimeImplementationWorkContent `json:",omitempty"`
 }
 
 func (o RuntimeImplementationWorkScopeObservation) Clone() RuntimeImplementationWorkScopeObservation {
+	o.Content = o.Content.Clone()
 	o.Request = o.Request.Clone()
 	o.Selection.SelectorCandidateRefs = slices.Clone(o.Selection.SelectorCandidateRefs)
 	o.Selection.ProspectiveTargetAllOfConstraintRefs = slices.Clone(o.Selection.ProspectiveTargetAllOfConstraintRefs)
@@ -226,6 +228,11 @@ func (o RuntimeImplementationWorkScopeObservation) ValidateForRequest(request Ru
 	for _, target := range append(append([]string(nil), s.TargetRefs...), s.CandidateTargetRefs...) {
 		if !slices.Contains(request.ManifestBinding.Manifest.TargetRefs, target) {
 			return fmt.Errorf("implementation work scope target is absent from exact owner manifest")
+		}
+	}
+	if o.Content != nil {
+		if err := o.Content.Validate(o); err != nil {
+			return err
 		}
 	}
 	return nil

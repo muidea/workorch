@@ -114,11 +114,21 @@ func testImplementationWorkProductionDriverTargetsWithCardinality(t *testing.T, 
 		if command.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
 			semanticCalls++
 			manifest := command.SemanticManifest
+			if work := manifest.ProofObligations[0].ImplementationWork; work != nil && work.Scope.Content != nil {
+				context := command.SemanticContext.WorkContext
+				if context == nil || context.Validate(manifest) != nil || len(context.PriorRounds) != work.Ordinal-1 {
+					t.Error("semantic request lost exact source or complete CWI work history")
+				}
+				if work.Ordinal == 2 && (context == nil || len(context.PriorRounds) != 1 || context.PriorRounds[0].Intent == nil || context.PriorRounds[0].Intent.Reason == "") {
+					t.Error("second round lost original first-round purpose explanation")
+				}
+			}
 			document := runtimecontract.RuntimeSemanticPlanDocument{SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: command.SemanticContext.PlanStep}
 			if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
 				document.CoverageOrder = []common.CoverageWorkItemID{manifest.CoverageItems[0].ID}
 				if work := manifest.ProofObligations[0].ImplementationWork; work != nil && work.PurposeChoiceOnly {
 					document.ImplementationPurpose = runtimecontract.RuntimeImplementationWorkPurposeEffect
+					document.ImplementationIntent = implementationWorkIntentForTest(manifest)
 				}
 			} else {
 				document.BatchID, document.BatchSequence = command.SemanticContext.BatchID, command.SemanticContext.BatchSequence

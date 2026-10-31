@@ -54,7 +54,14 @@ func buildRuntimeSemanticPrompt(request llmmodels.RuntimeCandidateRequest, prepa
 	if err != nil {
 		return runtimeSemanticPrompt{}, err
 	}
+	if request.ExpectedDocument != nil && request.ExpectedDocument.SemanticRenderContractRef == runtimecontract.RuntimeSemanticRenderContractV4 {
+		authorityJSON, err = cacheLayoutJSON(authorityJSON, "semantic")
+		if err != nil {
+			return runtimeSemanticPrompt{}, err
+		}
+	}
 	tailJSON, err := json.Marshal(runtimeSemanticTailProjection{
+		WorkContext:         prepared.context.WorkContext.Clone(),
 		CoverageProgress:    prepared.context.CoverageProgress,
 		ExecutionHistory:    prepared.context.ExecutionHistory,
 		ExecutionBudget:     prepared.context.ExecutionBudget,

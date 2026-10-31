@@ -913,11 +913,19 @@ ordinary 前驱，state-change-only 不补造来源，明确 `cwi_revalidation_s
   ingress 仍重验 catalog/freshness。Core 不解释参数的业务含义，不重新观察资源，也不新增 owner/correction authority；
   nil/empty 扩展保持旧 archive identity。动态声明只影响 C3。
 - SM-3 的 operations ExpectedDocument 封存 `OperationsRenderContractRef`；fresh authority 默认使用
-  `operations-render/parameter-cardinality/v3`，已封存 `operations-render/compact-contract/v2` 继续原渲染。
+  `operations-render/cache-layout/v4`，已封存空引用、v2/v3 继续原渲染。
   同 authority/manifest 的已封存 session（含空引用 legacy）决定 reload/recovery/correction
   版本，私有 writer 在 CAS 前拒绝版本切换或冲突。引用进入 expected-document hash，空值省略且不改变旧 hash/序列化。
   该引用仅选择 LLM owner 的纯 rendering；manifest/wire、预算、attempt、dispatch 和全部 SM-2 门禁不变。
   SM-1 生命周期与 SM-4 恢复/交付不新增迁移，也不能通过部署升级旧请求或恢复失败 Run。
+- semantic ExpectedDocument 的 fresh intent 使用 `semantic-render/cache-layout/v4`；同 logical request 的 reload/recovery
+  和同 generation、batch、authority、manifest 的 attempt1 继承 attempt0 renderer（包括旧 nil/空引用）。来源 ID 由同一
+  `SemanticRequestIdentityHash` 计算，不扫描其它 generation 的成功结果；匹配 ID 但 document kind/transaction/manifest
+  不一致或同 lineage 版本冲突均拒绝。请求 retirement 后的新 generation 可选择新 renderer，不能修改旧 session。
+  v4 在 LLM owner 内仅重排当前 C3、复用等价 prompt schema 子树和引用精确重复的 Focus；owner 完整输入不删除，
+  native schema/local decoder/manifest/wire/预算不变。SM-3 hash 绑定版本，SM-4 按原版本重放；SM-1/SM-2 无新增迁移、
+  credit 或执行授权。`semantic_cache_renderer_test.go` 与 `runtime_operations_renderer_test.go` 覆盖版本、reload、correction、
+  旧 nil session、foreign scope 和版本冲突；缓存命中不能替代运行及终态验收。
 - `runtime-candidate-parameter-cardinality/v1` 仅处理完整原文中重复的已声明 provider 参数。strict decoder 保留原首错；
   完整 bounded 文档的 bytes/SHA256、每 operation exact wire identity、scope hash、全部参数 name/type/indexes 和单次值 hash
   成为 SM-3 纯事实。未知字段/类型、动态参数、缺 slot/required、重复 slot、歧义 JSON key 或超界不能产生部分纠错事实。
@@ -1596,3 +1604,24 @@ File opt-in edit feasibility 预览同一 edit，核对原输入 before hash、�
 Core 不解释语言/框架/项目语义；具体改法来自原 Profile/project 和完整审查反馈。SM-1/4 不获新决策权。
 验证：`TestInputRevision*`、`TestDriveRuntimeInputReviewRevision*`，后者用真实 File/Shell/Run/Result/Workspace owner，
 仅脚本化 provider，覆盖真实修改→fresh review→validation→ACK 与两处 restart；不等同收费 live 或十分钟公开 fullflow。
+
+### File 原结果交付与内容绑定的工作语义上下文
+
+SM-3 原 sealed dispatch/executionKey/fence 和 Run CAS 仍是 receipt 接纳唯一权威。SM-4 在把已 claimed 的 File 变更判为
+unknown 前，可通过 File-owned `/file/runtime-operation/deliver-mutation-result` 请求交付已保存的完整原 receipt；
+`CompileOperationResultDeliveryRequest` 只是原 claim 的只读投影，不是 physical call token。File 技术 guard、结果文件、
+Found 或普通 response 均不授 effect/evidence/完成；驱动必须重读 Run owner。原回执不存在、确定拒绝或有界交付耗尽仍执行
+原 unknown/预算门禁。工作 unknown 的同一失败 CAS 保留原 owner diagnostic（阶段、受限引用、bytes/hash），终态投影不得
+将它替换为推测底层原因。SM-1 不变、不复活 failed；SM-2 仅消费最终可信事实。
+
+工作 scope 新增可选版本化 `implementation-work-content/v1` exact 原文观察。生产 File adapter 在完整 scope target set
+中读取有界完整正文，并再次真实读 manifest 核对原 revision；容量 128 KiB、缺失/二进制/截断或漂移显式拒绝。
+完整内容随原 scope private event/CAS 冻结，不借修订/重启重读另一个输入。旧封存 scope 不原地升级。
+`SemanticWorkContext` 从原同 CWI 完整 round、sealed dispatch/execution、可信 receipt/version 边和历史原用途理由编译 priorRounds，
+不受通用 16 receipt history suffix 遗漏影响，不另设完成账本。真实内容及 priorRounds 只进入 C4；C0-C2 和稳定前缀不变。
+
+内容绑定请求封存 `semantic-render/owner-work-content/v3`，用途文档只增加最小 typed `implementationIntent`：原 declarationRef、
+exact contentHash、remainingWork、reason。schema、strict decoder、document hash/clone、compiler 与 owner admission 一致。
+代码只检查身份、来源和有限形状；模型的理由不构成语义充分性、readiness、validation 或 CWI credit。
+原 Goal/DoD、Profile、protected inputs、8 轮/4 目标与普通独立验证均保持；业务差异继续在 Profile 和项目上下文。
+必要修复仍走既有 revision/repair/fresh validation，不强制切换终验、不把重复抽样直至 PASS 当成稳定性。

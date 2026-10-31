@@ -74,9 +74,10 @@ type RuntimeInternalTransactionPayload struct {
 	// OperationGovernanceResult is the bounded projection of an exact
 	// governance_required owner receipt. Its dedicated private fact coordinates
 	// SM-2 governance authority and SM-3 dispatch retirement.
-	OperationGovernanceResult *RuntimeOperationExecutionResult
-	OperationOutcomeUnknownID string
-	GovernanceResolution      *runtimecontract.RuntimeGovernanceResolution
+	OperationGovernanceResult  *RuntimeOperationExecutionResult
+	OperationOutcomeUnknownID  string
+	OperationOutcomeDiagnostic *runtimecontract.RuntimeOriginalDiagnostic
+	GovernanceResolution       *runtimecontract.RuntimeGovernanceResolution
 	// GovernanceContinuationDriveLease is an SM-4 successor template sealed in
 	// the same owner-private CAS as a successful governance continuation. The
 	// reducer owns revision/generation/state; the caller supplies only the exact

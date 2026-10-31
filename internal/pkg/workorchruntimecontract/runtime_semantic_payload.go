@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	runtimeSemanticTopLevelFields = []string{"batchCoverageWorkItemIds", "batchId", "batchSequence", "coverageOrder", "definitionSeedHash", "diagnosticMessage", "documentKind", "gapKind", "implementationPurpose", "manifestHash", "offendingItemRefs", "planStep", "prerequisiteClaims", "proposals", "resultKind", "schemaVersion"}
+	runtimeSemanticTopLevelFields = []string{"batchCoverageWorkItemIds", "batchId", "batchSequence", "coverageOrder", "definitionSeedHash", "diagnosticMessage", "documentKind", "gapKind", "implementationPurpose", "implementationIntent", "manifestHash", "offendingItemRefs", "planStep", "prerequisiteClaims", "proposals", "resultKind", "schemaVersion"}
 	runtimeSemanticProposalFields = []string{"coverageWorkItemId", "declarationRef", "operationKind", "operationVariantId", "ownerModuleId", "requiredEvidenceKinds", "target", "validationRecipeId", "validationInputReview"}
 	runtimeSemanticTargetFields   = []string{"exactTargetRefs", "ownerScopeTargetRefs", "ownerSelectorRefs", "policy", "prospectiveConstraintRefs", "prospectiveTargetRefs"}
 )
@@ -28,6 +28,7 @@ type runtimeSemanticPlanPayload struct {
 	BatchCoverageWorkItemIDs []common.CoverageWorkItemID      `json:"batchCoverageWorkItemIds,omitempty"`
 	CoverageOrder            []common.CoverageWorkItemID      `json:"coverageOrder,omitempty"`
 	ImplementationPurpose    RuntimeImplementationWorkPurpose `json:"implementationPurpose,omitempty"`
+	ImplementationIntent     *RuntimeImplementationIntent     `json:"implementationIntent,omitempty"`
 	Proposals                []runtimeSemanticProposalPayload `json:"proposals"`
 }
 
@@ -127,6 +128,7 @@ func DecodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 		PlanStep:              wire.PlanStep,
 		CoverageOrder:         wire.CoverageOrder,
 		ImplementationPurpose: wire.ImplementationPurpose,
+		ImplementationIntent:  wire.ImplementationIntent.Clone(),
 		Proposals:             make([]RuntimeSemanticProofProposal, 0, len(wire.Proposals)),
 	}
 	for _, value := range wire.Proposals {
@@ -184,6 +186,7 @@ func EncodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 		BatchID: document.BatchID, BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), document.BatchCoverageWorkItemIDs...),
 		PlanStep:              document.PlanStep,
 		ImplementationPurpose: document.ImplementationPurpose,
+		ImplementationIntent:  document.ImplementationIntent.Clone(),
 		Proposals:             make([]runtimeSemanticProposalPayload, 0, len(document.Proposals)),
 	}
 	if document.PlanStep == RuntimeSemanticPlanStepCoverageOrder {
@@ -620,6 +623,10 @@ func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifes
 				}
 				properties["implementationPurpose"] = map[string]any{"type": "string", "enum": purposes}
 				normalRequired = append(normalRequired, "implementationPurpose")
+				if work.Scope.Content != nil {
+					properties["implementationIntent"] = map[string]any{"type": "object", "additionalProperties": false, "required": []string{"declarationRef", "contentHash", "remainingWork", "reason"}, "properties": map[string]any{"declarationRef": map[string]any{"const": obligation.DeclarationRef}, "contentHash": map[string]any{"const": work.Scope.Content.Hash()}, "remainingWork": map[string]any{"type": "string", "minLength": 1, "maxLength": 2048}, "reason": map[string]any{"type": "string", "minLength": 1, "maxLength": 2048}}}
+					normalRequired = append(normalRequired, "implementationIntent")
+				}
 			}
 		}
 		attachRuntimeDefinitionGapSchemaForRequest(schema, normalRequired, nil)

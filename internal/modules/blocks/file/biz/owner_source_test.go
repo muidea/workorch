@@ -32,6 +32,7 @@ func TestFileRuntimeOwnerCommandsRejectUntrustedSources(t *testing.T) {
 		payload any
 		handler func(magicevent.Event, magicevent.Result)
 	}{
+		{fileevents.TopicDeliverMutationResult, fileevents.DeliverMutationResultCommand{}, owner.handleDeliverMutationResult},
 		{fileevents.TopicAcquireRuntimeCapabilities, fileevents.AcquireRuntimeCapabilitiesCommand{}, owner.handleRuntimeCapabilities},
 		{fileevents.TopicAcquireRuntimeOperationAdmissibility, fileevents.AcquireRuntimeOperationAdmissibilityCommand{}, owner.handleRuntimeOperationAdmissibility},
 		{fileevents.TopicValidateRuntimeOperationCandidateConformance, fileevents.ValidateRuntimeOperationCandidateConformanceCommand{}, owner.handleRuntimeOperationCandidateConformance},
@@ -142,6 +143,7 @@ func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllTopics(t *testing.T) {
 		{fileevents.TopicAcquireRuntimeTargetSelection, fileevents.PrerequisiteCommandDestination},
 		{fileevents.TopicAcquireWorkspaceManifest, fileevents.PrerequisiteCommandDestination},
 		{fileevents.TopicConfirmRuntimeRepairSurface, fileevents.PrerequisiteCommandDestination},
+		{fileevents.TopicDeliverMutationResult, ModuleID},
 		{fileevents.TopicExecuteFileListOperation, ModuleID},
 		{fileevents.TopicExecuteFileReadOperation, ModuleID},
 		{fileevents.TopicExecuteFileEditOperation, ModuleID},

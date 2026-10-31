@@ -26,7 +26,7 @@ Core 边界与 current union 门禁见 [Evidence Proof Purpose](../../../../docs
 
 | 交互方 | 方向 | typed EventHub 合同 | 调用/授权语义 |
 | --- | --- | --- | --- |
-| `kernel/orchestrator` | Orchestrator → File | 11 个 Runtime read/conformance/feasibility command/result；6 个 sealed execute command，统一 `ExecuteOperationResult` | 接受 exact `kernel/orchestrator` source |
+| `kernel/orchestrator` | Orchestrator → File | 11 个 Runtime read/conformance/feasibility command/result；6 个 sealed execute command，统一 `ExecuteOperationResult`；1 个原结果输送 command/result | 接受 exact `kernel/orchestrator` source |
 | `blocks/git` | Git → File | `AcquireWorkspaceManifestCommand/Result` | Git 在 capability-state/feasibility/effect freshness 中读取 File-owned tree revision；该 topic 额外接受 exact `blocks/git` source |
 | `application/workorchd` | Application → File | `AcquireAuthoringResourceCommand/Result` | 创建期单文件有界只读事实；仅接受 exact Application source，不冒充 Runtime prerequisite；File 再按 Workspace owner 的资源范围合同查当前目录和草稿身份，不信任调用方目录；不替代确认时的漂移复核 |
 | `blocks/workspace` | Workspace → File | `VerifyAuthoringResourceCommand/Result` | Workspace 派生 reserve、确认 journal 和最终准入前分别要求 File 重新观察 exact 内容与当前草稿 revision；Workspace 随后用 revision-CAS 封存，不是资源的持续有效性保证 |
@@ -35,8 +35,8 @@ Core 边界与 current union 门禁见 [Evidence Proof Purpose](../../../../docs
 | `kernel/orchestrator` | File → Orchestrator | `QueryRuntimeOperationReceiptCommand/Result`、`CommitRuntimeOperationReceiptCommand/Result` | replay fence 与 receipt persistence；File 不直接写 Orchestrator state |
 | workspace filesystem | File ↔ filesystem | owner-private `RuntimeAdapter` | effect 只能落在 resolved deliverable root 内 |
 
-File owner 自定义的 24 组入站 command/result（11 组 Runtime read、2 组创建期 read/verify、5 组 STEP04 目录/规格资源/托管配置观察及最终重观察/epoch 查询、6 组 execute）位于 [`pkg/events`](pkg/events)；File 出站使用的 2 组
-receipt query/commit 由 Orchestrator 定义，不计入这 24 组。创建期资源查询与验证、STEP04 观察不属于 SM-1～SM-4；其结果不授予准入。
+File owner 自定义的 26 组入站 command/result（11 组 Runtime read、2 组创建期 read/verify、5 组 STEP04 目录/规格资源/托管配置观察及最终重观察/epoch 查询、1 组 STEP04 资源初始化、6 组 execute、1 组原结果输送）位于 [`pkg/events`](pkg/events)；File 出站使用的 2 组
+receipt query/commit 由 Orchestrator 定义，不计入这 26 组。创建期资源查询与验证、STEP04 观察不属于 SM-1～SM-4；其结果不授予准入。
 `/file/startup-preparation/directories/query` 仅接受 `blocks/workspace`，scope 为原 Workspace/request/payload/revision 及 owner 解析的两个绝对目录。
 Linux 使用无软链接目录描述符、有效凭据 ACL 权限观察和路径重开身份/版本复核，不执行 mkdir、write probe、chmod 或 repair；
 其他平台无法精确观察时明确失败。返回完整结构化身份、权限和原错误 bytes/字节数/SHA256；它是历史时点事实，
@@ -231,3 +231,27 @@ lost-receipt recovery 若确认 sealed 后像，只保留本次实际读取的 `
 返回现有 ReplayProof 并核对 exact reviewed before hash 与变化后像。错配为
 `validation_input_revision_preimage_mismatch / policy_disallowed`，零写入。普通未 opt-in file/edit 保留原 probe 行为。
 实际执行复用原 replay/fence 机制；新 effect 不产生 validation verdict 或 terminal credit，后续独立复审由 Orchestrator 收敛。
+
+### 原 File 变更结果输送 v1（SM-3 / SM-4）
+
+- `file/edit`、`file/write`、`patch/apply` 的生产调用在 Workspace internal directory 中启用
+  `file/mutation-result-delivery/v1`。internal directory 必须在 deliverable tree 外；缺失旧隔离 fixture 的目录不代表生产持久保证。
+- File 在 effect 前排他发布 exact workspace/run/executionKey/fence、完整 execution context 和 sealed operation 的
+  `started.json`；已存在的 guard 只允许核对原身份和交付原材料，绝不授第二次 effect。File owner 在 effect 返回后保存
+  `effect.json`（包括原结果、真实读取/后置观察和原错误 bytes 的可逆编码），构造完整依赖与 feedback 后保存不可变 `receipt.json`。
+  effect 与原结果保存之间的崩溃窗口仍为 unknown；禁止从当前文件重新生成历史 receipt。
+- `/file/runtime-operation/deliver-mutation-result` 为 Orchestrator-only typed command，输入原 execution scope 和 sealed
+  operation，输出仅 `Found`。它不运行 effect、不修改原 receipt、不选择后继。每次先经原 Runtime Query 核验 claim；
+  原 receipt 重交仍走原 Commit/SM-3/CAS/owner/版本/预算门禁。receipt 内容必须完全相等，不能仅凭 hash 授信。
+- 每个 exact key/fence 最多保留两次提交预留（首次＋一次原材料重交）；预留先落盘，不因取消、响应丢失或重启重置。
+  仅 Runtime owner 明确标记的 CAS/transient 错误或 magicCommon v1.5.18 精确 pre-dispatch admission timeout 允许下一次提交；semantic/stale/无证明错误停止重交。取消不继续提交。每次先 Query，
+  最后再 Query；已经提交但响应丢失不重复 evidence、预算或 effect。范围与期限由原 Runtime claim/retirement gate 确定。
+- Linux 存储使用 pinned no-symlink/no-cross-mount directory FD、owner-only directory、0600 regular single-link file、
+  fsync 和 immutable atomic publication；其它平台在 effect 前拒绝此协议。每份材料上限 4 MiB，最多八个完整原错误槽，
+  超限显式报告未保存；不截断、不覆盖。首错及依赖/receipt-build/result-save/query/commit 等阶段保留受限引用、字节数和 SHA256。
+  这些技术材料不是 Runtime 权威；保留至 Workspace 的既有内部资源删除生命周期，不在 restart 自动删除 pending/unknown。
+- SM-4 重启只向 File 请求已保存原材料，随后重读 Run owner。没有完整原 receipt 或交付次数耗尽时仍按原 unknown 收口；
+  failed 不复活，终态后的可信材料只能经过既有 late-receipt 归档合同，不补授工作/validation/终态 credit。
+
+验证：`biz/mutation_result_delivery_test.go` 覆盖三种真实 File handler、原回执重交、CAS 响应丢失、fresh owner、
+提交前真正进程退出及新进程原材料交付、无原材料、语义拒绝、取消、次数保全、restricted storage 与双 Workspace 并发；不等同已部署服务验收。

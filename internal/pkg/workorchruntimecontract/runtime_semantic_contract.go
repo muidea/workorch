@@ -660,6 +660,7 @@ type RuntimeSemanticPlanRequestContext struct {
 	CoverageProgress         RuntimeSemanticCoverageProgress
 	ExecutionHistory         RuntimeSemanticExecutionHistory
 	ExecutionBudget          RuntimeSemanticExecutionBudget
+	WorkContext              *RuntimeSemanticWorkContext
 }
 
 func (c RuntimeSemanticPlanRequestContext) Normalized() RuntimeSemanticPlanRequestContext {
@@ -672,6 +673,7 @@ func (c RuntimeSemanticPlanRequestContext) Normalized() RuntimeSemanticPlanReque
 	c.CoverageProgress = c.CoverageProgress.Clone()
 	c.ExecutionHistory = c.ExecutionHistory.Clone()
 	c.ExecutionBudget = c.ExecutionBudget.Clone()
+	c.WorkContext = c.WorkContext.Clone()
 	for i := range c.ExecutionFeedback {
 		c.ExecutionFeedback[i] = c.ExecutionFeedback[i].Clone()
 	}
@@ -754,6 +756,9 @@ func (c RuntimeSemanticPlanRequestContext) Validate(manifest RuntimeSemanticPlan
 		return err
 	}
 	if err := c.ExecutionBudget.Validate(c, manifest); err != nil {
+		return err
+	}
+	if err := c.WorkContext.Validate(manifest); err != nil {
 		return err
 	}
 	return ValidateRuntimeSemanticExecutionFeedback(c, manifest)
@@ -1831,6 +1836,7 @@ type RuntimeSemanticPlanDocument struct {
 	// is a complete permutation whose dependency edges point backwards.
 	CoverageOrder         []common.CoverageWorkItemID
 	ImplementationPurpose RuntimeImplementationWorkPurpose
+	ImplementationIntent  *RuntimeImplementationIntent `json:",omitempty"`
 	Proposals             []RuntimeSemanticProofProposal
 }
 
@@ -1845,6 +1851,7 @@ func (d RuntimeSemanticPlanDocument) Normalized() RuntimeSemanticPlanDocument {
 	}
 	d.BatchCoverageWorkItemIDs = normalizeOrderedCoverageWorkItemIDs(d.BatchCoverageWorkItemIDs)
 	d.CoverageOrder = normalizeOrderedCoverageWorkItemIDs(d.CoverageOrder)
+	d.ImplementationIntent = d.ImplementationIntent.Clone()
 	d.Proposals = normalizeRuntimeSemanticProofProposals(d.Proposals)
 	return d
 }
@@ -1916,6 +1923,17 @@ func validateRuntimeSemanticPlanDocumentAgainstValidatedManifestUncached(d Runti
 			}
 			purposeWork = obligation.ImplementationWork
 		}
+	}
+	var declaration string
+	if purposeWork != nil {
+		for _, o := range manifest.ProofObligations {
+			if o.ImplementationWork != nil {
+				declaration = o.DeclarationRef
+			}
+		}
+	}
+	if err := validateRuntimeImplementationIntent(d.ImplementationIntent, purposeWork, declaration); err != nil {
+		return err
 	}
 	if purposeWork != nil {
 		if purposeWork.Scope.Request.InputRevision != nil && d.ImplementationPurpose != RuntimeImplementationWorkPurposeEffect {
@@ -2127,6 +2145,9 @@ func StableRuntimeSemanticPlanDocumentHash(document RuntimeSemanticPlanDocument)
 	if document.ImplementationPurpose != "" {
 		writeHashString(h, "implementation-purpose")
 		writeHashString(h, string(document.ImplementationPurpose))
+	}
+	if document.ImplementationIntent != nil {
+		writeHashString(h, implementationWorkRawHash("implementation-intent:", document.ImplementationIntent))
 	}
 	for _, proposal := range document.Proposals {
 		writeHashString(h, StableRuntimeSemanticProofProposalHash(proposal))

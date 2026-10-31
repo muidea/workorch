@@ -29,10 +29,10 @@ func TestOperationsRendererSelectionSurvivesReloadAndCorrection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fresh.OperationsRenderContractRef != rc.RuntimeOperationsRenderContractV3 {
-		t.Fatal("fresh intent did not select v3")
+	if fresh.OperationsRenderContractRef != rc.RuntimeOperationsRenderContractV4 {
+		t.Fatal("fresh intent did not select v4")
 	}
-	for _, renderer := range []string{"", rc.RuntimeOperationsRenderContractV2, rc.RuntimeOperationsRenderContractV3} {
+	for _, renderer := range []string{"", rc.RuntimeOperationsRenderContractV2, rc.RuntimeOperationsRenderContractV3, rc.RuntimeOperationsRenderContractV4} {
 		saved := aggregate
 		expected := fresh
 		expected.OperationsRenderContractRef = renderer

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -118,6 +119,15 @@ func TestImplementationWorkScopeRealOwnerReadOnlyAndRevisionFence(t *testing.T) 
 	if err != nil || singleObserved.Selection.Disposition != runtimecontract.RuntimeTargetSelectionSelected || singleObserved.Selection.CandidateCount != 1 || !reflect.DeepEqual(singleObserved.Selection.TargetRefs, []string{"implementation.txt"}) {
 		t.Fatalf("single existing target owner scope incomplete: selection=%#v err=%v", singleObserved.Selection, err)
 	}
+
+	if singleObserved.Content == nil || len(singleObserved.Content.Snapshots) != 1 || singleObserved.Content.Snapshots[0].Content != "implementation.txt" || singleObserved.Content.Validate(singleObserved) != nil {
+		t.Fatal("scope lost exact real source content")
+	}
+	frozen := singleObserved.Clone()
+	frozen.Content.Snapshots[0].Content = "altered"
+	if frozen.ValidateForRequest(singleRequest) == nil || singleObserved.Content.Snapshots[0].Content != "implementation.txt" {
+		t.Fatal("scope clone mutated original or trusted content hash only")
+	}
 	if singleRequest.RequestID == emptyRequest.RequestID || singleObserved.Selection.ObservedRevision == emptyObserved.Selection.ObservedRevision {
 		t.Fatal("real creation reused the empty scope identity or owner revision")
 	}
@@ -189,5 +199,14 @@ func TestImplementationWorkScopeRealOwnerReadOnlyAndRevisionFence(t *testing.T) 
 	after, _ := json.Marshal(request)
 	if string(before) != string(after) {
 		t.Fatal("read-only adapter changed request")
+	}
+	// Full original bytes are required; an oversized source cannot silently
+	// become a complete input, even when its prefix and inventory are available.
+	if err := os.WriteFile(filepath.Join(directory, "implementation.txt"), []byte(strings.Repeat("x", runtimecontract.RuntimeImplementationWorkContentMaxBytes+1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	tooLarge := compile(policy.TargetSelectorRef, manifest())
+	if partial, err := acquireRuntimeImplementationWorkScope(ctx, hub, directory, tooLarge, sources[tooLarge.RequestID]); err == nil || (partial.Content != nil && partial.Content.Validate(partial) == nil) {
+		t.Fatal("oversized current content became complete semantic input")
 	}
 }

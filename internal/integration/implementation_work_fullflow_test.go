@@ -662,6 +662,21 @@ type implementationWorkFullflowObligation struct {
 
 func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMessage) ([]byte, string, error) {
 	var request struct {
+		Schema struct {
+			Properties struct {
+				Intent *struct {
+					Properties struct {
+						Declaration struct {
+							Value string `json:"const"`
+						} `json:"declarationRef"`
+						Content struct {
+							Value string `json:"const"`
+						} `json:"contentHash"`
+					} `json:"properties"`
+				} `json:"implementationIntent"`
+			} `json:"properties"`
+		} `json:"schema"`
+
 		Step     runtimecontract.RuntimeSemanticPlanStep `json:"planStep"`
 		Batch    string                                  `json:"batchId"`
 		Sequence int                                     `json:"batchSequence"`
@@ -730,6 +745,10 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 			}
 			p.workOrdinal = work.Ordinal
 			document["implementationPurpose"] = purpose
+			if request.Schema.Properties.Intent != nil {
+				decl := request.Schema.Properties.Intent.Properties
+				document["implementationIntent"] = runtimecontract.RuntimeImplementationIntent{DeclarationRef: decl.Declaration.Value, ContentHash: decl.Content.Value, RemainingWork: "scripted original requirement implementation or independent validation", Reason: "bounded deterministic fixture purpose bound to exact supplied content"}
+			}
 			kind += "/" + string(purpose)
 		}
 	} else if request.Step == runtimecontract.RuntimeSemanticPlanStepProofBatch {

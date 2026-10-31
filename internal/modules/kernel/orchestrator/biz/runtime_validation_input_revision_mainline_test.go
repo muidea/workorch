@@ -41,6 +41,7 @@ func runtimeInputRevisionMainlineSemanticDocument(d *runtimecontract.RuntimeSema
 		if w := o.ImplementationWork; w != nil {
 			if w.PurposeChoiceOnly {
 				d.ImplementationPurpose = runtimecontract.RuntimeImplementationWorkPurposeTerminal
+				d.ImplementationIntent = implementationWorkIntentForTest(c.SemanticManifest)
 				if w.Scope.Request.InputRevision != nil {
 					d.ImplementationPurpose = runtimecontract.RuntimeImplementationWorkPurposeEffect
 				}

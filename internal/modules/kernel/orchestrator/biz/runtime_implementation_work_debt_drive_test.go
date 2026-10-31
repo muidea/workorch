@@ -61,7 +61,7 @@ func implementationWorkPurposeDebtDriverFixtureWithDirectory(t *testing.T, empty
 	t.Cleanup(func() { shell.Stop(ctx) })
 	observer := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	observer.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: directory, InternalDirectory: filepath.Join(directory, ".internal")}}, nil)
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: directory, InternalDirectory: filepath.Join(filepath.Dir(directory), filepath.Base(directory)+"-internal")}}, nil)
 	})
 	t.Cleanup(func() { observer.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	a := runtimeAggregate(t, 1)
@@ -206,6 +206,7 @@ func TestImplementationWorkProductionDriverDefersTerminalDebtWithoutFallback(t *
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		manifest := command.SemanticManifest
 		document := runtimecontract.RuntimeSemanticPlanDocument{SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: runtimecontract.RuntimeSemanticPlanStepCoverageOrder, CoverageOrder: []common.CoverageWorkItemID{manifest.CoverageItems[0].ID}, Proposals: []runtimecontract.RuntimeSemanticProofProposal{}, ImplementationPurpose: runtimecontract.RuntimeImplementationWorkPurposeTerminal}
+		document.ImplementationIntent = implementationWorkIntentForTest(manifest)
 		payload, marshalErr := runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(manifest, document)
 		if marshalErr != nil {
 			t.Error(marshalErr)

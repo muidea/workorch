@@ -513,7 +513,7 @@ func runtimeOperationsExpectedDocument(aggregate runtime.RuntimeAggregate, manif
 	// Renderer selection is sealed on the first request of this authority.
 	// A reload, transport recovery or same-contract correction inherits it;
 	// deployment never silently upgrades an unfinished legacy request.
-	renderer := runtimecontract.RuntimeOperationsRenderContractV3
+	renderer := runtimecontract.RuntimeOperationsRenderContractV4
 	foundRenderer := false
 	for _, session := range aggregate.CandidateRequestSessions {
 		if session.DocumentKind != runtimecontract.RuntimeProviderDocumentOperations || session.Transaction != aggregate.Decision.AuthorityTransaction() || session.ManifestHash != manifest.Hash {

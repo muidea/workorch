@@ -429,93 +429,98 @@ func TestProviderAuditRequestBytesPreferAdapterWireMeasurement(t *testing.T) {
 }
 
 func TestRuntimeSemanticPlanProviderUsesSingleCachePipelineAndSafeCorrection(t *testing.T) {
-	base := runtimeSemanticProviderTestRequest(t)
-	base.SemanticContext.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
-	base.SemanticContext.BatchID = ""
-	base.SemanticContext.BatchCoverageWorkItemIDs = nil
-	base.SemanticManifest.CoverageItems[0].PrerequisiteCoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-000"}
-	prerequisite := runtimecontract.RuntimeCoverageItem{ID: "cwi-000", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-000", TargetText: "prerequisite"}
-	base.SemanticManifest.CoverageItems = append(base.SemanticManifest.CoverageItems, prerequisite)
-	base.SemanticManifest.ProofObligations = append(base.SemanticManifest.ProofObligations, runtimecontract.RuntimeSemanticProofObligation{
-		CoverageWorkItemID: "cwi-000", DeclarationRef: "profile/dodItem/dod-000", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
-	})
-	base.SemanticContext.DefinitionSeed.CoverageItems = append(base.SemanticContext.DefinitionSeed.CoverageItems, prerequisite)
-	base.SemanticContext.DefinitionSeed.Slices[0].CoverageWorkItemIDs = append(base.SemanticContext.DefinitionSeed.Slices[0].CoverageWorkItemIDs, "cwi-000")
-	base.SemanticContext.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(base.SemanticContext.DefinitionSeed)
-	base.SemanticManifest.DefinitionSeedHash = base.SemanticContext.DefinitionSeed.Hash
-	base.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(base.SemanticManifest)
-	refreshSemanticProgressForTest(t, &base)
-	initial, err := runtimeProviderRequest(base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if initial.Kind != "runtime_semantic_plan" || initial.RawTextOutput || !strings.Contains(initial.Schema, `"semantic_plan"`) {
-		t.Fatalf("semantic provider request = %+v", initial)
-	}
-	if initial.ContextBudget == nil || initial.ContextBudget.CachePlan == nil || initial.ContextBudget.CachePlan.StablePrefixHash != base.StablePrefixHash {
-		t.Fatalf("semantic cache plan = %+v", initial.ContextBudget)
-	}
-	if got := runtimePromptSectionIDs(initial.PromptContext); !reflect.DeepEqual(got, []string{
-		"C0.runtime-semantic-contract", "C1.goal-dod", "C2.capability-contract", "C3.semantic-authority", "C4.semantic-tail", "C5.acceptance-slices",
-	}) {
-		t.Fatalf("semantic section order = %v", got)
-	}
-	if authority := initial.PromptContext.Sections[3].Content; !strings.Contains(authority, "planning-soul-guidance") {
-		t.Fatalf("semantic C3 lost planning Soul guidance: %s", authority)
-	}
-	if authority := initial.PromptContext.Sections[3].Content; !strings.Contains(authority, "proposals=[]") || !strings.Contains(authority, "must be present and empty") {
-		t.Fatalf("coverage-order instruction contradicts its required empty proposals field: %s", authority)
-	}
+	for _, renderer := range []string{"", runtimecontract.RuntimeSemanticRenderContractV4} {
+		t.Run(renderer, func(t *testing.T) {
+			base := runtimeSemanticProviderTestRequest(t)
+			base.SemanticContext.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+			base.SemanticContext.BatchID = ""
+			base.SemanticContext.BatchCoverageWorkItemIDs = nil
+			base.SemanticManifest.CoverageItems[0].PrerequisiteCoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-000"}
+			prerequisite := runtimecontract.RuntimeCoverageItem{ID: "cwi-000", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-000", TargetText: "prerequisite"}
+			base.SemanticManifest.CoverageItems = append(base.SemanticManifest.CoverageItems, prerequisite)
+			base.SemanticManifest.ProofObligations = append(base.SemanticManifest.ProofObligations, runtimecontract.RuntimeSemanticProofObligation{
+				CoverageWorkItemID: "cwi-000", DeclarationRef: "profile/dodItem/dod-000", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			})
+			base.SemanticContext.DefinitionSeed.CoverageItems = append(base.SemanticContext.DefinitionSeed.CoverageItems, prerequisite)
+			base.SemanticContext.DefinitionSeed.Slices[0].CoverageWorkItemIDs = append(base.SemanticContext.DefinitionSeed.Slices[0].CoverageWorkItemIDs, "cwi-000")
+			base.SemanticContext.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(base.SemanticContext.DefinitionSeed)
+			base.SemanticManifest.DefinitionSeedHash = base.SemanticContext.DefinitionSeed.Hash
+			base.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(base.SemanticManifest)
+			refreshSemanticProgressForTest(t, &base)
+			base.ExpectedDocument = &runtimecontract.RuntimeExpectedDocumentContract{SemanticRenderContractRef: renderer, MaxOutputTokens: base.SemanticContext.ProviderCeiling.EffectiveMaxOutputTokens}
+			initial, err := runtimeProviderRequest(base)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if initial.Kind != "runtime_semantic_plan" || initial.RawTextOutput || !strings.Contains(initial.Schema, `"semantic_plan"`) {
+				t.Fatalf("semantic provider request = %+v", initial)
+			}
+			if initial.ContextBudget == nil || initial.ContextBudget.CachePlan == nil || initial.ContextBudget.CachePlan.StablePrefixHash != base.StablePrefixHash {
+				t.Fatalf("semantic cache plan = %+v", initial.ContextBudget)
+			}
+			if got := runtimePromptSectionIDs(initial.PromptContext); !reflect.DeepEqual(got, []string{
+				"C0.runtime-semantic-contract", "C1.goal-dod", "C2.capability-contract", "C3.semantic-authority", "C4.semantic-tail", "C5.acceptance-slices",
+			}) {
+				t.Fatalf("semantic section order = %v", got)
+			}
+			if authority := initial.PromptContext.Sections[3].Content; !strings.Contains(authority, "planning-soul-guidance") {
+				t.Fatalf("semantic C3 lost planning Soul guidance: %s", authority)
+			}
+			if authority := initial.PromptContext.Sections[3].Content; !strings.Contains(authority, "proposals=[]") || !strings.Contains(authority, "must be present and empty") {
+				t.Fatalf("coverage-order instruction contradicts its required empty proposals field: %s", authority)
+			}
 
-	rejection := &runtimecontract.RuntimeOriginalDiagnostic{
-		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
-		OwnerModuleID: runtimecontract.RuntimeModuleLLM, OriginalClass: "schema", OriginalCode: "missing_target",
-		OriginalMessage: "secret raw provider message must not be rendered", Signature: "semantic/missing-target",
-		TargetRefs: []string{"main.go"}, FieldViolations: []runtimecontract.RuntimeFieldViolation{{Path: "$.coverageOrder", Actual: "cwi-001 before cwi-000", Required: []string{"cwi-000 before cwi-001"}}},
-		SemanticViolations: []runtimecontract.RuntimeSemanticContractViolation{{Kind: runtimecontract.RuntimeSemanticContractViolationDependencyOrder, Path: "$.coverageOrder", RequiredBeforeID: "cwi-000", RequiredAfterID: "cwi-001", ActualBeforePosition: 1, ActualAfterPosition: 0}},
-	}
-	observation := runtimeSemanticCorrectionObservationForProviderTest(rejection)
-	directive := runtimecontract.RuntimeSemanticCorrectionDirective{
-		SchemaVersion: runtimecontract.RuntimeSemanticCorrectionDirectiveSchemaCurrent,
-		PlanStep:      runtimecontract.RuntimeSemanticPlanStepCoverageOrder, ManifestHash: base.SemanticManifest.Hash,
-		DefinitionSeedHash: base.SemanticManifest.DefinitionSeedHash, StablePrefixHash: base.StablePrefixHash,
-		SourceObservationHash: runtimecontract.StableRuntimeSemanticCorrectionObservationHash(*observation), Attempt: 1,
-		Violations: append([]runtimecontract.RuntimeSemanticContractViolation(nil), rejection.SemanticViolations...),
-	}
-	directive.Hash = runtimecontract.StableRuntimeSemanticCorrectionDirectiveHash(directive)
-	retryRequest := base
-	retryRequest.CandidateAttempt = 1
-	retryRequest.SemanticCorrectionObservation = observation
-	retryRequest.SemanticCorrectionDirective = &directive
-	retry, err := runtimeProviderRequest(retryRequest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for idx := 0; idx < 3; idx++ {
-		if initial.PromptContext.Sections[idx].Content != retry.PromptContext.Sections[idx].Content {
-			t.Fatalf("semantic stable section %d drifted between attempts", idx)
-		}
-	}
-	if retry.ContextBudget.CachePlan.StablePrefixHash != initial.ContextBudget.CachePlan.StablePrefixHash {
-		t.Fatal("semantic correction changed stable prefix")
-	}
-	for _, name := range []string{"WorkspaceDefinitionHash", "CapabilityContractHash"} {
-		initialPlan := initial.ContextBudget.CachePlan
-		retryPlan := retry.ContextBudget.CachePlan
-		var initialHash, retryHash string
-		switch name {
-		case "WorkspaceDefinitionHash":
-			initialHash, retryHash = initialPlan.WorkspaceDefinitionHash, retryPlan.WorkspaceDefinitionHash
-		case "CapabilityContractHash":
-			initialHash, retryHash = initialPlan.CapabilityContractHash, retryPlan.CapabilityContractHash
-		}
-		if initialHash == "" || initialHash != retryHash {
-			t.Fatalf("semantic correction changed stable %s: initial=%q retry=%q", name, initialHash, retryHash)
-		}
-	}
-	tail := retry.PromptContext.Sections[4].Content
-	if strings.Contains(tail, rejection.OriginalMessage) || !strings.Contains(tail, `"missing_target"`) || !strings.Contains(tail, `"$.coverageOrder"`) || !strings.Contains(tail, `"requiredBeforeId":"cwi-000"`) {
-		t.Fatalf("semantic correction tail is not provider-safe: %s", tail)
+			rejection := &runtimecontract.RuntimeOriginalDiagnostic{
+				SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
+				OwnerModuleID: runtimecontract.RuntimeModuleLLM, OriginalClass: "schema", OriginalCode: "missing_target",
+				OriginalMessage: "secret raw provider message must not be rendered", Signature: "semantic/missing-target",
+				TargetRefs: []string{"main.go"}, FieldViolations: []runtimecontract.RuntimeFieldViolation{{Path: "$.coverageOrder", Actual: "cwi-001 before cwi-000", Required: []string{"cwi-000 before cwi-001"}}},
+				SemanticViolations: []runtimecontract.RuntimeSemanticContractViolation{{Kind: runtimecontract.RuntimeSemanticContractViolationDependencyOrder, Path: "$.coverageOrder", RequiredBeforeID: "cwi-000", RequiredAfterID: "cwi-001", ActualBeforePosition: 1, ActualAfterPosition: 0}},
+			}
+			observation := runtimeSemanticCorrectionObservationForProviderTest(rejection)
+			directive := runtimecontract.RuntimeSemanticCorrectionDirective{
+				SchemaVersion: runtimecontract.RuntimeSemanticCorrectionDirectiveSchemaCurrent,
+				PlanStep:      runtimecontract.RuntimeSemanticPlanStepCoverageOrder, ManifestHash: base.SemanticManifest.Hash,
+				DefinitionSeedHash: base.SemanticManifest.DefinitionSeedHash, StablePrefixHash: base.StablePrefixHash,
+				SourceObservationHash: runtimecontract.StableRuntimeSemanticCorrectionObservationHash(*observation), Attempt: 1,
+				Violations: append([]runtimecontract.RuntimeSemanticContractViolation(nil), rejection.SemanticViolations...),
+			}
+			directive.Hash = runtimecontract.StableRuntimeSemanticCorrectionDirectiveHash(directive)
+			retryRequest := base
+			retryRequest.CandidateAttempt = 1
+			retryRequest.SemanticCorrectionObservation = observation
+			retryRequest.SemanticCorrectionDirective = &directive
+			retry, err := runtimeProviderRequest(retryRequest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for idx := 0; idx < 4; idx++ {
+				if initial.PromptContext.Sections[idx].Content != retry.PromptContext.Sections[idx].Content {
+					t.Fatalf("semantic stable section %d drifted between attempts", idx)
+				}
+			}
+			if retry.ContextBudget.CachePlan.StablePrefixHash != initial.ContextBudget.CachePlan.StablePrefixHash {
+				t.Fatal("semantic correction changed stable prefix")
+			}
+			for _, name := range []string{"WorkspaceDefinitionHash", "CapabilityContractHash"} {
+				initialPlan := initial.ContextBudget.CachePlan
+				retryPlan := retry.ContextBudget.CachePlan
+				var initialHash, retryHash string
+				switch name {
+				case "WorkspaceDefinitionHash":
+					initialHash, retryHash = initialPlan.WorkspaceDefinitionHash, retryPlan.WorkspaceDefinitionHash
+				case "CapabilityContractHash":
+					initialHash, retryHash = initialPlan.CapabilityContractHash, retryPlan.CapabilityContractHash
+				}
+				if initialHash == "" || initialHash != retryHash {
+					t.Fatalf("semantic correction changed stable %s: initial=%q retry=%q", name, initialHash, retryHash)
+				}
+			}
+			tail := retry.PromptContext.Sections[4].Content
+			if strings.Contains(tail, rejection.OriginalMessage) || !strings.Contains(tail, `"missing_target"`) || !strings.Contains(tail, `"$.coverageOrder"`) || !strings.Contains(tail, `"requiredBeforeId":"cwi-000"`) {
+				t.Fatalf("semantic correction tail is not provider-safe: %s", tail)
+			}
+		})
 	}
 }
 
@@ -1817,88 +1822,95 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 			}
 		}
 	})
-	t.Run("cardinality renderer native and text transport share exact contract", func(t *testing.T) {
+	t.Run("cache layout v4 preserves current authority and strict transport", func(t *testing.T) {
 		wire := runtimeCandidateWireForTest(t, manifest)
 		input := llmmodels.RuntimeCandidateRequest{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix, CandidateManifest: manifest, DefinitionContext: definition, CandidateContext: candidateContext, ExpectedDocument: &runtimecontract.RuntimeExpectedDocumentContract{WireContractHash: wire.Hash, OperationsRenderContractRef: runtimecontract.RuntimeOperationsRenderContractV3}}
-		modern, err := runtimeProviderRequest(input)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if modern.Schema != runtimeCandidateCardinalitySchema(manifest, wire) || modern.ContextBudget.PromptRenderer != "workorch.runtime_candidate_prompt/v3" {
-			t.Fatal("v3 schema/audit diverged")
-		}
-		var current map[string]json.RawMessage
-		if err := json.Unmarshal([]byte(modern.PromptContext.Sections[3].Content), &current); err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Contains(current["outputContract"], []byte(`maxContains`)) {
-			t.Fatal("C3 lacks executable cardinality")
-		}
-		content := "private provider document value"
-		body, err := runtimecontract.EncodeRuntimeCandidatePayloadWithManifest(manifest, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{Kind: runtimecontract.StepKindFileWrite, BindingRefs: []string{facts.Focus.CoverageEvidenceBindings[0].ID}, TargetRefs: []string{selection.ProspectiveTargetRef}, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &content}}}}}}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		body = bytes.Replace(body, []byte(`"string":"private provider document value"}`), []byte(`"string":"private provider document value"},{"name":"content","string":"second private value"}`), 1)
-		_, err = runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, body)
-		var rejected *runtimecontract.RuntimeCandidatePayloadDiagnostic
-		if !errors.As(err, &rejected) || rejected.ParameterCardinality == nil {
-			t.Fatalf("cardinality fixture failed: %v", err)
-		}
-		diagnostic := runtimecontract.RuntimeCandidateFailureDiagnosticFromPayloadDiagnostic(rejected)
-		diagnostic.ManifestHash = manifest.Hash
-		diagnostic.Objectives = []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConsolidateParameters}
-		witness := runtimecontract.RuntimeCandidateCorrectionWitness{Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessParameterCardinality, Path: "$.operations", RejectedValue: runtimecontract.RuntimeCandidateParameterNamesRepeated, AlternativeValue: runtimecontract.RuntimeCandidateParameterNamesUnique, ParameterCardinality: diagnostic.ParameterCardinality.Clone()}
-		observation := &runtimecontract.RuntimeCandidateCorrectionObservation{Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "cardinality", Diagnostic: diagnostic, SealedCorrectionHash: runtimecontract.StableRuntimeCandidateSealedCorrectionHash(manifest.Hash, diagnostic.Objectives, &witness)}
-		correction := &llmmodels.RuntimeCandidateCorrectionInput{ManifestHash: manifest.Hash, Objectives: diagnostic.Objectives, Witness: witness}
-		input.CandidateAttempt, input.CandidateCorrectionObservation, input.CandidateCorrection = 1, observation, correction
-		retry, err := runtimeProviderRequest(input)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for i := 0; i < 4; i++ {
-			if modern.PromptContext.Sections[i].Content != retry.PromptContext.Sections[i].Content {
-				t.Fatalf("bounded retry drifted C%d", i)
-			}
-		}
-		if modern.Schema != retry.Schema || modern.ContextBudget.CachePlan.RenderedStablePrefixHash != retry.ContextBudget.CachePlan.RenderedStablePrefixHash {
-			t.Fatal("retry changed schema or cache prefix")
-		}
-		tail := retry.PromptContext.Sections[4].Content
-		if !strings.Contains(tail, "Only values of the listed repeated names may change") || !strings.Contains(tail, `"parameterCardinality"`) || strings.Contains(tail, content) || strings.Contains(tail, "second private value") {
-			t.Fatal("C4 lost bounded facts or exposed raw values")
-		}
-		changed := correction.Normalized()
-		changed.Witness.ParameterCardinality.DocumentSHA256 = strings.Repeat("0", 64)
-		if changed.ValidateAgainstObservation(manifest, *observation) == nil {
-			t.Fatal("consumer accepted substituted document")
-		}
-		input.CandidateAttempt, input.CandidateCorrectionObservation, input.CandidateCorrection = 0, nil, nil
-		for _, strict := range []bool{false, true} {
-			modern.Config.Capabilities.JSONSchemaResponse = strict
-			modern.RawTextOutput = !strict
-			transport := responsesTextForRequest(modern.Config.Capabilities, modern)
-			if strict && (transport == nil || transport.Format == nil || !transport.Format.Strict) {
-				t.Fatal("v3 native schema was not dispatched")
-			}
-			if !strict && transport != nil {
-				t.Fatal("raw text unexpectedly dispatched native schema")
-			}
-			if responsesCacheSchemaScope(modern) != "runtime/operations-schema/v3" {
-				t.Fatal("v3 cache identity missing")
-			}
-			assertRuntimeSectionCacheWire(t, modern)
-			first, err := runtimeProviderRequest(input)
+		assertRuntimeCacheLayoutOperations(t, input)
+	})
+	for _, renderer := range []string{runtimecontract.RuntimeOperationsRenderContractV3, runtimecontract.RuntimeOperationsRenderContractV4} {
+		t.Run("cardinality renderer native and text transport share exact contract/"+renderer, func(t *testing.T) {
+			wire := runtimeCandidateWireForTest(t, manifest)
+			input := llmmodels.RuntimeCandidateRequest{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix, CandidateManifest: manifest, DefinitionContext: definition, CandidateContext: candidateContext, ExpectedDocument: &runtimecontract.RuntimeExpectedDocumentContract{WireContractHash: wire.Hash, OperationsRenderContractRef: renderer}}
+			modern, err := runtimeProviderRequest(input)
 			if err != nil {
 				t.Fatal(err)
 			}
-			for i := range first.PromptContext.Sections {
-				if first.PromptContext.Sections[i].Content != modern.PromptContext.Sections[i].Content {
-					t.Fatalf("same snapshot C%d drift", i)
+			if modern.Schema != runtimeCandidateCardinalitySchema(manifest, wire) || modern.ContextBudget.PromptRenderer != "workorch.runtime_candidate_prompt/v3" {
+				t.Fatal("v3 schema/audit diverged")
+			}
+			var current map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(modern.PromptContext.Sections[3].Content), &current); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Contains(current["outputContract"], []byte(`maxContains`)) {
+				t.Fatal("C3 lacks executable cardinality")
+			}
+			content := "private provider document value"
+			body, err := runtimecontract.EncodeRuntimeCandidatePayloadWithManifest(manifest, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{Kind: runtimecontract.StepKindFileWrite, BindingRefs: []string{facts.Focus.CoverageEvidenceBindings[0].ID}, TargetRefs: []string{selection.ProspectiveTargetRef}, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &content}}}}}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body = bytes.Replace(body, []byte(`"string":"private provider document value"}`), []byte(`"string":"private provider document value"},{"name":"content","string":"second private value"}`), 1)
+			_, err = runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, body)
+			var rejected *runtimecontract.RuntimeCandidatePayloadDiagnostic
+			if !errors.As(err, &rejected) || rejected.ParameterCardinality == nil {
+				t.Fatalf("cardinality fixture failed: %v", err)
+			}
+			diagnostic := runtimecontract.RuntimeCandidateFailureDiagnosticFromPayloadDiagnostic(rejected)
+			diagnostic.ManifestHash = manifest.Hash
+			diagnostic.Objectives = []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConsolidateParameters}
+			witness := runtimecontract.RuntimeCandidateCorrectionWitness{Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessParameterCardinality, Path: "$.operations", RejectedValue: runtimecontract.RuntimeCandidateParameterNamesRepeated, AlternativeValue: runtimecontract.RuntimeCandidateParameterNamesUnique, ParameterCardinality: diagnostic.ParameterCardinality.Clone()}
+			observation := &runtimecontract.RuntimeCandidateCorrectionObservation{Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "cardinality", Diagnostic: diagnostic, SealedCorrectionHash: runtimecontract.StableRuntimeCandidateSealedCorrectionHash(manifest.Hash, diagnostic.Objectives, &witness)}
+			correction := &llmmodels.RuntimeCandidateCorrectionInput{ManifestHash: manifest.Hash, Objectives: diagnostic.Objectives, Witness: witness}
+			input.CandidateAttempt, input.CandidateCorrectionObservation, input.CandidateCorrection = 1, observation, correction
+			retry, err := runtimeProviderRequest(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < 4; i++ {
+				if modern.PromptContext.Sections[i].Content != retry.PromptContext.Sections[i].Content {
+					t.Fatalf("bounded retry drifted C%d", i)
 				}
 			}
-		}
-	})
+			if modern.Schema != retry.Schema || modern.ContextBudget.CachePlan.RenderedStablePrefixHash != retry.ContextBudget.CachePlan.RenderedStablePrefixHash {
+				t.Fatal("retry changed schema or cache prefix")
+			}
+			tail := retry.PromptContext.Sections[4].Content
+			if !strings.Contains(tail, "Only values of the listed repeated names may change") || !strings.Contains(tail, `"parameterCardinality"`) || strings.Contains(tail, content) || strings.Contains(tail, "second private value") {
+				t.Fatal("C4 lost bounded facts or exposed raw values")
+			}
+			changed := correction.Normalized()
+			changed.Witness.ParameterCardinality.DocumentSHA256 = strings.Repeat("0", 64)
+			if changed.ValidateAgainstObservation(manifest, *observation) == nil {
+				t.Fatal("consumer accepted substituted document")
+			}
+			input.CandidateAttempt, input.CandidateCorrectionObservation, input.CandidateCorrection = 0, nil, nil
+			for _, strict := range []bool{false, true} {
+				modern.Config.Capabilities.JSONSchemaResponse = strict
+				modern.RawTextOutput = !strict
+				transport := responsesTextForRequest(modern.Config.Capabilities, modern)
+				if strict && (transport == nil || transport.Format == nil || !transport.Format.Strict) {
+					t.Fatal("v3 native schema was not dispatched")
+				}
+				if !strict && transport != nil {
+					t.Fatal("raw text unexpectedly dispatched native schema")
+				}
+				if responsesCacheSchemaScope(modern) != "runtime/operations-schema/v3" {
+					t.Fatal("v3 cache identity missing")
+				}
+				assertRuntimeSectionCacheWire(t, modern)
+				first, err := runtimeProviderRequest(input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for i := range first.PromptContext.Sections {
+					if first.PromptContext.Sections[i].Content != modern.PromptContext.Sections[i].Content {
+						t.Fatalf("same snapshot C%d drift", i)
+					}
+				}
+			}
+		})
+	}
 	assertRuntimeSectionCacheWire(t, request)
 	if request.ContextBudget == nil || request.ContextBudget.CachePlan == nil || request.ContextBudget.CachePlan.StablePrefixHash != prefix ||
 		request.ContextBudget.CachePlan.RenderedStablePrefixHash == "" || len(request.PromptContext.Sections) != 6 {

@@ -165,35 +165,38 @@ func validateRuntimeTargetSelectionObservation(prerequisiteID string, selection 
 }
 
 func AcquireAndCommitWorkspaceManifestPrerequisite(ctx context.Context, hub magicevent.Hub, facts runtimecontract.RuntimeFacts, command fileevents.AcquireWorkspaceManifestCommand) (runtimecontract.RuntimeFacts, error) {
+	response, err := AcquireWorkspaceManifestPrerequisite(ctx, hub, command)
+	if err != nil {
+		return runtimecontract.RuntimeFacts{}, err
+	}
+	return runtime.CommitPrerequisiteResult(facts, runtime.PrerequisiteResult{PrerequisiteID: response.Observation.PrerequisiteID, Manifest: &response.Manifest, Observation: &response.Observation})
+}
+func AcquireWorkspaceManifestPrerequisite(ctx context.Context, hub magicevent.Hub, command fileevents.AcquireWorkspaceManifestCommand) (fileevents.AcquireWorkspaceManifestResult, error) {
 	if hub == nil || command.WorkspaceID == "" || command.RunID == "" || command.AuthoritySnapshotID == "" || command.PrerequisiteID == "" || command.WorkspaceDeliverableDirectory == "" {
-		return runtimecontract.RuntimeFacts{}, common.ErrInvalidArgument
+		return fileevents.AcquireWorkspaceManifestResult{}, common.ErrInvalidArgument
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	result := hub.Send(magicevent.NewEventWithContext(fileevents.TopicAcquireWorkspaceManifest, ModuleID, fileevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, command))
 	if result == nil {
-		return runtimecontract.RuntimeFacts{}, common.ErrInvalidArgument
+		return fileevents.AcquireWorkspaceManifestResult{}, common.ErrInvalidArgument
 	}
 	if err := prerequisiteResultError(result); err != nil {
-		return runtimecontract.RuntimeFacts{}, err
+		return fileevents.AcquireWorkspaceManifestResult{}, err
 	}
 	data, magicErr := result.Get()
 	if magicErr != nil {
-		return runtimecontract.RuntimeFacts{}, prerequisiteMagicError(magicErr)
+		return fileevents.AcquireWorkspaceManifestResult{}, prerequisiteMagicError(magicErr)
 	}
 	response, ok := data.(fileevents.AcquireWorkspaceManifestResult)
 	if !ok || !samePrerequisiteResultScope(response.WorkspaceID, response.RunID, response.AuthoritySnapshotID, command.WorkspaceID, command.RunID, command.AuthoritySnapshotID) || response.Manifest.Revision == "" {
-		return runtimecontract.RuntimeFacts{}, fmt.Errorf("workspace manifest prerequisite %q returned an invalid result", command.PrerequisiteID)
+		return fileevents.AcquireWorkspaceManifestResult{}, fmt.Errorf("workspace manifest prerequisite %q returned an invalid result", command.PrerequisiteID)
 	}
 	if err := validateFileWorkspaceManifestObservation(command.PrerequisiteID, response.Manifest, &response.Observation); err != nil {
-		return runtimecontract.RuntimeFacts{}, fmt.Errorf("workspace manifest prerequisite %q: %w", command.PrerequisiteID, err)
+		return fileevents.AcquireWorkspaceManifestResult{}, fmt.Errorf("workspace manifest prerequisite %q: %w", command.PrerequisiteID, err)
 	}
-	return runtime.CommitPrerequisiteResult(facts, runtime.PrerequisiteResult{
-		PrerequisiteID: response.Observation.PrerequisiteID,
-		Manifest:       &response.Manifest,
-		Observation:    &response.Observation,
-	})
+	return response, nil
 }
 
 func validateFileTargetSnapshotObservation(prerequisiteID string, snapshot runtimecontract.TargetSnapshot, observation *runtimecontract.RuntimePrerequisiteObservation) error {

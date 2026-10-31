@@ -58,6 +58,9 @@ func validateRuntimeSemanticContextIntegrity(context runtimecontract.RuntimeSema
 	if json.Unmarshal([]byte(contents["C4"]), &tail) != nil || !reflect.DeepEqual(tail.ExecutionBudget, context.ExecutionBudget) {
 		missing = append(missing, "P3.semantic_execution_budget")
 	}
+	if json.Unmarshal([]byte(contents["C4"]), &tail) != nil || !reflect.DeepEqual(tail.WorkContext, context.WorkContext) {
+		missing = append(missing, "P4.semantic_work_context")
+	}
 	for _, obligation := range manifest.ProofObligations {
 		if obligation.ImplementationWork == nil {
 			continue

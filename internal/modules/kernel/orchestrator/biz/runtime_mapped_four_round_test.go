@@ -87,6 +87,7 @@ func runtimeMappedFourRoundSemantic(command llmevents.RequestRuntimeCandidateCom
 		}
 		if work.PurposeChoiceOnly {
 			d.ImplementationPurpose = runtimecontract.RuntimeImplementationWorkPurposeTerminal
+			d.ImplementationIntent = implementationWorkIntentForTest(m)
 			if work.Ordinal <= 4 {
 				d.ImplementationPurpose = runtimecontract.RuntimeImplementationWorkPurposeEffect
 			}

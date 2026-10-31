@@ -308,6 +308,11 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_request_context_invalid", budgetErr.Error(), nil)
 	}
 	semanticContext.ExecutionBudget = budget
+	workContext, workErr := runtime.SemanticWorkContext(aggregate, manifest)
+	if workErr != nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_work_context_invalid", workErr.Error(), nil)
+	}
+	semanticContext.WorkContext = workContext
 	requestIdentityHash, identityErr := runtime.SemanticRequestIdentityHash(ledger)
 	if identityErr != nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_request_identity_invalid", identityErr.Error(), nil)

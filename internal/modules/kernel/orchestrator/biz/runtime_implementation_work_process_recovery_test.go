@@ -203,7 +203,7 @@ func TestImplementationWorkReceiptProcessChild(t *testing.T) {
 	startRuntimeManagedValidationTestOwner(t, hub)
 	workspace := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	if err := workspace.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
-		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: directory, InternalDirectory: filepath.Join(directory, ".internal")}}, nil)
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: directory, InternalDirectory: filepath.Join(root, "internal")}}, nil)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -297,6 +297,7 @@ func installImplementationWorkProcessProviderForTargets(t *testing.T, hub magice
 				document.CoverageOrder = []common.CoverageWorkItemID{manifest.CoverageItems[0].ID}
 				if work := manifest.ProofObligations[0].ImplementationWork; work != nil && work.PurposeChoiceOnly {
 					document.ImplementationPurpose = runtimecontract.RuntimeImplementationWorkPurposeEffect
+					document.ImplementationIntent = implementationWorkIntentForTest(manifest)
 				}
 			} else {
 				document.BatchID, document.BatchSequence = command.SemanticContext.BatchID, command.SemanticContext.BatchSequence

@@ -1841,6 +1841,7 @@ func cloneRuntimeSemanticPlanBatchFeasibilityResultRaw(in RuntimeSemanticPlanBat
 
 func cloneRuntimeSemanticPlanDocumentRaw(in RuntimeSemanticPlanDocument) RuntimeSemanticPlanDocument {
 	out := in
+	out.ImplementationIntent = in.ImplementationIntent.Clone()
 	out.BatchCoverageWorkItemIDs = cloneRuntimeStateRawSlice(in.BatchCoverageWorkItemIDs, func(item common.CoverageWorkItemID) common.CoverageWorkItemID { return item })
 	out.CoverageOrder = cloneRuntimeStateRawSlice(in.CoverageOrder, func(item common.CoverageWorkItemID) common.CoverageWorkItemID { return item })
 	out.Proposals = cloneRuntimeStateRawSlice(in.Proposals, func(item RuntimeSemanticProofProposal) RuntimeSemanticProofProposal {

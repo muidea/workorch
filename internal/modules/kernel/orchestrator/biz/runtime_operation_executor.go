@@ -241,6 +241,7 @@ func (e eventRuntimeOperationExecutor) executeFileEdit(ctx context.Context, requ
 	command := fileevents.ExecuteFileEditOperationCommand{
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
 		SealedOperation:                  sealedOperation,
+		ResultDeliveryProtocolRef:        fileResultDeliveryProtocol(internalDirectory),
 	}
 	result := e.hub.Send(runtimeOperationExecutionEvent(ctx, fileevents.Contracts(), fileevents.TopicExecuteFileEditOperation, runtimecontract.RuntimeModuleFile, request, command))
 	response, err := fileEditOperationResponse(result)
@@ -258,6 +259,7 @@ func (e eventRuntimeOperationExecutor) executeFileWrite(ctx context.Context, req
 	command := fileevents.ExecuteFileWriteOperationCommand{
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
 		SealedOperation:                  sealedOperation,
+		ResultDeliveryProtocolRef:        fileResultDeliveryProtocol(internalDirectory),
 	}
 	result := e.hub.Send(runtimeOperationExecutionEvent(ctx, fileevents.Contracts(), fileevents.TopicExecuteFileWriteOperation, runtimecontract.RuntimeModuleFile, request, command))
 	response, err := fileWriteOperationResponse(result)
@@ -275,6 +277,7 @@ func (e eventRuntimeOperationExecutor) executePatchApply(ctx context.Context, re
 	command := fileevents.ExecutePatchApplyOperationCommand{
 		RuntimeOperationExecutionContext: runtimeOperationExecutionContext(request, deliverableDirectory, internalDirectory),
 		SealedOperation:                  sealedOperation,
+		ResultDeliveryProtocolRef:        fileResultDeliveryProtocol(internalDirectory),
 	}
 	result := e.hub.Send(runtimeOperationExecutionEvent(ctx, fileevents.Contracts(), fileevents.TopicExecutePatchApplyOperation, runtimecontract.RuntimeModuleFile, request, command))
 	response, err := patchApplyOperationResponse(result)
@@ -416,10 +419,34 @@ func (m *Biz) executeRuntimeActiveDispatch(ctx context.Context, aggregate runtim
 			continue
 		}
 		if operationID, required := runtime.RuntimeOperationOutcomeUnknownTransitionRequired(err); required {
+			// Resolve saved owner material before classifying a claimed operation as
+			// unknown. This path never obtains or spends a physical-call token.
+			if deliveryErr := m.deliverRuntimeOperationResult(ctx, aggregate, operationID); deliveryErr != nil && operationCallErr == nil {
+				operationCallErr = deliveryErr
+			}
+			loaded, loadErr := m.runtimeController.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+			if loadErr != nil {
+				return runtime.RuntimeAggregate{}, loadErr
+			}
+			aggregate = loaded
+			if aggregate.ActiveDispatch == nil {
+				return aggregate, nil
+			}
+			committed := false
+			for _, execution := range aggregate.ActiveDispatch.OperationExecutions {
+				if execution.OperationID == operationID && execution.OwnerReceiptRef != "" {
+					committed = true
+					break
+				}
+			}
+			if committed {
+				operationCallErr = nil
+				continue
+			}
 			observed, observeErr := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 				Kind:        runtime.RuntimeInternalEventOperationExecutionOutcomeUnknownObserved,
 				Scope:       runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
-				Transaction: &runtime.RuntimeInternalTransactionPayload{OperationOutcomeUnknownID: operationID},
+				Transaction: &runtime.RuntimeInternalTransactionPayload{OperationOutcomeUnknownID: operationID, OperationOutcomeDiagnostic: operationResultDiagnostic(aggregate, operationID, operationCallErr)},
 			})
 			if observeErr != nil {
 				return observed.Aggregate, observeErr
@@ -532,4 +559,11 @@ func (m *Biz) executeRuntimeActiveDispatch(ctx context.Context, aggregate runtim
 		aggregate = budget.Aggregate
 	}
 	return runtime.RuntimeAggregate{}, common.ErrConflict
+}
+
+func fileResultDeliveryProtocol(internalDirectory string) string {
+	if internalDirectory != "" {
+		return fileevents.MutationResultDeliveryV1
+	}
+	return ""
 }

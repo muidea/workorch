@@ -284,7 +284,7 @@ func (c *RuntimeController) applyCandidateDispatchTransactionInternalEvent(ctx c
 		if event.Transaction.OperationOutcomeUnknownID == "" {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.candidateDispatch.markOperationExecutionOutcomeUnknown(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.OperationOutcomeUnknownID)
+		aggregate, err := c.candidateDispatch.markOperationExecutionOutcomeUnknown(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.OperationOutcomeUnknownID, event.Transaction.OperationOutcomeDiagnostic)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventDefinitionClarificationDispatchSealed:

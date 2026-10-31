@@ -4,6 +4,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 
@@ -87,7 +88,9 @@ func (m *Biz) handleRuntimeOperationReceipt(event magicevent.Event, result magic
 		// the write fence and makes the following submission fail closed.
 		err := m.withOrchestratorWorkspaceResourceRead(event.Context(), command.WorkspaceID, func(context.Context) error { return nil })
 		if err != nil {
-			result.Set(nil, runtimeOperationMagicFailure(err))
+			var cas *runtime.RuntimeCASConflictError
+			var transient *runtime.RuntimeOwnerTransientError
+			result.Set(nil, runtimeOperationMagicFailure(&runtimecontract.RuntimeReceiptDeliveryError{Retryable: errors.As(err, &cas) || errors.As(err, &transient), Cause: err}))
 			return
 		}
 		committed, err := m.submitRuntimeInternalEvent(event.Context(), runtime.RuntimeInternalEvent{
@@ -98,7 +101,9 @@ func (m *Biz) handleRuntimeOperationReceipt(event magicevent.Event, result magic
 			},
 		})
 		if err != nil {
-			result.Set(nil, runtimeOperationMagicFailure(err))
+			var cas *runtime.RuntimeCASConflictError
+			var transient *runtime.RuntimeOwnerTransientError
+			result.Set(nil, runtimeOperationMagicFailure(&runtimecontract.RuntimeReceiptDeliveryError{Retryable: errors.As(err, &cas) || errors.As(err, &transient), Cause: err}))
 			return
 		}
 		if committed.Receipt == nil {

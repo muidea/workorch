@@ -145,18 +145,31 @@ type ExecuteFileReadOperationCommand struct {
 
 type ExecuteFileEditOperationCommand struct {
 	runtimecontract.RuntimeOperationExecutionContext
-	SealedOperation SealedRuntimeOperation
+	SealedOperation           SealedRuntimeOperation
+	ResultDeliveryProtocolRef string
 }
 
 type ExecuteFileWriteOperationCommand struct {
 	runtimecontract.RuntimeOperationExecutionContext
-	SealedOperation SealedRuntimeOperation
+	SealedOperation           SealedRuntimeOperation
+	ResultDeliveryProtocolRef string
 }
 
 type ExecutePatchApplyOperationCommand struct {
 	runtimecontract.RuntimeOperationExecutionContext
+	SealedOperation           SealedRuntimeOperation
+	ResultDeliveryProtocolRef string
+}
+
+const MutationResultDeliveryV1 = "file/mutation-result-delivery/v1"
+
+// Delivers only previously saved owner material. Missing material never grants
+// a physical call, even when the original execution is still claimed.
+type DeliverMutationResultCommand struct {
+	runtimecontract.RuntimeOperationExecutionContext
 	SealedOperation SealedRuntimeOperation
 }
+type DeliverMutationResultResult struct{ Found bool }
 
 type ExecutePatchPreviewOperationCommand struct {
 	runtimecontract.RuntimeOperationExecutionContext
@@ -169,6 +182,7 @@ type ExecuteOperationResult struct {
 
 func MessageContracts() []eventcontract.MessageContract {
 	return eventcontract.MessageContracts(
+		eventcontract.CommandTopic[DeliverMutationResultCommand, DeliverMutationResultResult]("file", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyExecute, TopicDeliverMutationResult),
 		eventcontract.CommandTopic[ReobservePreparationFilesCommand, ReobservePreparationFilesResult]("file", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicReobservePreparationFiles),
 		eventcontract.CommandTopic[InitializePreparationResourcesCommand, InitializePreparationResourcesResult]("file", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyExecute, TopicInitializePreparationResources),
 		eventcontract.CommandTopic[QueryPreparationEpochCommand, QueryPreparationEpochResult]("file", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicQueryPreparationEpoch),
