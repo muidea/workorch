@@ -34,8 +34,12 @@ type PreparationSkillRegistryObservation struct {
 
 func (b *Biz) ObservePreparationSkillRegistry(ctx context.Context, command workspaceevents.QueryExactConfirmedStartupSnapshotCommand) (PreparationSkillRegistryObservation, error) {
 	value := PreparationSkillRegistryObservation{WorkspaceID: command.WorkspaceID, WorkspaceRevision: command.ExpectedWorkspaceRevision, StartedAt: time.Now().UTC()}
+	observedCtx := ctx
 	fail := func(code string, err error) (PreparationSkillRegistryObservation, error) {
 		value.FailureCode, value.CompletedAt = code, time.Now().UTC()
+		if observedCtx != nil {
+			err = preparationStageContextError(observedCtx, code, err)
+		}
 		return value, err
 	}
 	if b == nil || b.EventHub() == nil || ctx == nil || command.Validate() != nil {
@@ -50,6 +54,7 @@ func (b *Biz) ObservePreparationSkillRegistry(ctx context.Context, command works
 	}
 	bounded, cancel := context.WithTimeout(bound, 3*time.Second)
 	defer cancel()
+	observedCtx = bounded
 	before, err := b.QueryExactConfirmedStartupSnapshot(bounded, command)
 	if err != nil {
 		return fail("seal_unavailable", err)

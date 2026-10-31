@@ -16,7 +16,7 @@ import (
 // same independent gate, including historical records after later mutations.
 func CompileCompletion(w *workspace.Workspace, a workspace.WorkspacePreparationAttempt) (workspace.WorkspacePreparationCompletion, error) {
 	if workspace.ValidatePreparationEvidencePersistence(w) != nil {
-		return workspace.WorkspacePreparationCompletion{}, common.ErrConflict
+		return workspace.WorkspacePreparationCompletion{}, rejectCompletion("evidence_invalid", "workspace", "evidence", common.ErrConflict)
 	}
 	return compileCompletion(w, a)
 }
@@ -24,22 +24,52 @@ func CompileCompletion(w *workspace.Workspace, a workspace.WorkspacePreparationA
 func compileCompletion(w *workspace.Workspace, a workspace.WorkspacePreparationAttempt) (workspace.WorkspacePreparationCompletion, error) {
 	source, err := compileOriginalPreparedSource(w, a)
 	if err != nil {
-		return workspace.WorkspacePreparationCompletion{}, err
+		return workspace.WorkspacePreparationCompletion{}, rejectCompletion("original_source_rejected", "workspace", "source", err)
 	}
 	compiled, err := source.bootstrap(w, a)
 	if err != nil {
-		return workspace.WorkspacePreparationCompletion{}, err
+		return workspace.WorkspacePreparationCompletion{}, rejectCompletion("bootstrap_rejected", "workspace", "bootstrap", err)
 	}
 	return compileCompletionWithBootstrap(w, a, compiled)
 }
 
 func compileCompletionWithBootstrap(w *workspace.Workspace, a workspace.WorkspacePreparationAttempt, compiled OriginalPreparedBootstrap) (workspace.WorkspacePreparationCompletion, error) {
 	if a.Assessment == nil || a.Assessment.Outcome != "checks_passed" || a.NoRunEvaluationVersion != workspace.PreparationNoRunFinalVersion {
-		return workspace.WorkspacePreparationCompletion{}, common.ErrConflict
+		return workspace.WorkspacePreparationCompletion{}, rejectCompletion("checks_incomplete", "workspace", "checks", common.ErrConflict)
 	}
 	stale, err := workspace.PreparationOwnerRevalidationStaleForAttempt(w, a, a.CompletedAt)
 	if err != nil || stale {
-		return workspace.WorkspacePreparationCompletion{}, common.ErrConflict
+		owner := "workspace"
+		code := "owner_observation_incomplete"
+		for _, e := range w.PreparationSealEvidence {
+			if e.Ref != a.SealEvidenceRef {
+				continue
+			}
+			r := e.FinalOwners
+			if r != nil {
+				code = "owner_observation_changed"
+				owner = r.MismatchOwner(w, a)
+				if owner == "" {
+					owner = "workspace"
+				}
+				if r.MatchesOriginal(w, a) && (a.CompletedAt.Before(r.CompletedAt) || !a.CompletedAt.Before(r.StartedAt.Add(workspace.PreparationOwnerRevalidationMaxAge))) {
+					code = "owner_observation_expired"
+				}
+			}
+			switch {
+			case r == nil:
+				code = "owner_observation_incomplete"
+			case r.Souls == nil:
+				owner, code = "soul", "owner_observation_incomplete"
+			case r.Skills == nil:
+				owner, code = "skill", "owner_observation_incomplete"
+			case r.Memory == nil || r.Memory.SelectionSource == nil:
+				owner, code = "memory", "owner_observation_incomplete"
+			case r.MCP == nil:
+				owner, code = "mcpregistry", "owner_observation_incomplete"
+			}
+		}
+		return workspace.WorkspacePreparationCompletion{}, rejectCompletion(code, owner, "final_owner_revalidation", err)
 	}
 	epoch := ""
 	for _, d := range w.PreparationDirectoryEvidence {
@@ -48,14 +78,14 @@ func compileCompletionWithBootstrap(w *workspace.Workspace, a workspace.Workspac
 		}
 	}
 	if epoch == "" {
-		return workspace.WorkspacePreparationCompletion{}, common.ErrConflict
+		return workspace.WorkspacePreparationCompletion{}, rejectCompletion("file_epoch_unavailable", "file", "final_file_revalidation", common.ErrConflict)
 	}
 	stale, err = workspace.PreparationFileRevalidationStaleForAttempt(w, a, a.CompletedAt, epoch)
 	if err != nil || stale {
-		return workspace.WorkspacePreparationCompletion{}, common.ErrConflict
+		return workspace.WorkspacePreparationCompletion{}, rejectCompletion("file_observation_changed_or_expired", "file", "final_file_revalidation", err)
 	}
 	if compiled.Compilation == nil || compiled.FailureCode != "" {
-		return workspace.WorkspacePreparationCompletion{}, common.ErrConflict
+		return workspace.WorkspacePreparationCompletion{}, rejectCompletion("bootstrap_rejected", "workspace", "bootstrap", common.ErrConflict)
 	}
 	c := workspace.WorkspacePreparationCompletion{Version: workspace.PreparationCompletionVersion, RequestID: a.RequestID, PayloadHash: a.PayloadHash, CreationEpoch: a.CreationEpoch, PreparationEpoch: a.PreparationEpoch, Binding: a.Binding, BootstrapHash: compiled.Compilation.BootstrapHash, CompletedAt: a.CompletedAt, ExpiresAt: a.CompletedAt.Add(30 * time.Second), CommittedWorkspaceRevision: a.CommittedWorkspaceRevision}
 	raw, err := json.Marshal(c)

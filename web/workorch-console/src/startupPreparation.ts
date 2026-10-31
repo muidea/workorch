@@ -1,3 +1,5 @@
+export type PreparationObservation = { phase: 'initial' | 'final'; owner: string; stage: string; code: string; startedAt: string; completedAt: string; deadline?: string; attempted: boolean; errorByteCount: number; errorSha256?: string; notSavedReason?: string };
+export type PreparationFinalization = { code: string; owner: string; stage: string };
 export type PreparationCompletion = { version: string; completionId: string; requestId: string; bootstrapHash: string; creationEpoch: string; completedAt: string; expiresAt: string; committedWorkspaceRevision: number };
 export type PreparationCheckRequest = { requestId: string; expectedWorkspaceRevision: number };
 export type PreparationCheck = { id: string; owner: string; required: boolean; state: 'pending' | 'blocked' | 'passed' | 'failed'; reason: string };
@@ -10,6 +12,8 @@ export type PreparationAssessment = {
   outstanding: { id: string; owner: string; state: string; reason: string }[];
 };
 export type PreparationAttempt = {
+  observations?: PreparationObservation[];
+  finalization?: PreparationFinalization;
   definitionCompilation?: {
     compilerVersion: string; snapshotHash: string; manifestHash: string;
     sourceInventoryHash: string; profileContractsHash: string;
@@ -224,6 +228,7 @@ export function validatePreparationView(view: StartupPreparationView, workspaceI
   const seen = new Set<string>();
   let revision = 0;
   for (const a of attempts) {
+    validatePreparationDiagnostics(a);
     if (a.emptySelectionEvaluationVersion !== undefined && (a.state !== 'blocked' || a.evaluationVersion !== 'workorch-preparation-check-evaluation/v1' || a.emptySelectionEvaluationVersion !== 'workorch-preparation-empty-selection-evaluation/v1')) throw new Error('空选择裁决版本无效');
     if (a.executionInputVersion !== undefined && (a.state !== 'blocked' || a.evaluationVersion !== 'workorch-preparation-check-evaluation/v1' || a.executionInputVersion !== 'workorch-preparation-execution-inputs/v1' || !a.sealEvidenceRef)) throw new Error('原执行输入归档版本无效');
     if (a.noRunEvaluationVersion !== undefined && (!validNoRunFinalShape(a))) throw new Error('no-Run 原结算栅栏版本或绑定无效');
@@ -282,7 +287,7 @@ export function validatePreparationView(view: StartupPreparationView, workspaceI
   const completed = new Set<string>(); let completedRevision = 0;
   for (const c of completions) {
     const a = attempts.find(a => a.requestId === c.requestId);
-    if (!a || completed.has(c.requestId) || c.version !== 'workorch-preparation-completion/v1' || !/^preparation-completion-sha256:[0-9a-f]{64}$/.test(c.completionId) || !/^prepared-bootstrap-sha256:[0-9a-f]{64}$/.test(c.bootstrapHash) || c.creationEpoch !== a.creationEpoch || a.preparationEpoch !== 0 || a.assessment?.outcome !== 'checks_passed' || !a.definitionCompilation || a.noRunEvaluationVersion !== 'workorch-preparation-no-run-final-fence/v1' || c.completedAt !== a.completedAt || !Number.isFinite(Date.parse(c.completedAt)) || Date.parse(c.expiresAt) - Date.parse(c.completedAt) !== 30000 || c.committedWorkspaceRevision !== a.committedWorkspaceRevision || c.committedWorkspaceRevision <= completedRevision) throw new Error('准备完成身份无效');
+    if (!a || a.finalization || completed.has(c.requestId) || c.version !== 'workorch-preparation-completion/v1' || !/^preparation-completion-sha256:[0-9a-f]{64}$/.test(c.completionId) || !/^prepared-bootstrap-sha256:[0-9a-f]{64}$/.test(c.bootstrapHash) || c.creationEpoch !== a.creationEpoch || a.preparationEpoch !== 0 || a.assessment?.outcome !== 'checks_passed' || !a.definitionCompilation || a.noRunEvaluationVersion !== 'workorch-preparation-no-run-final-fence/v1' || c.completedAt !== a.completedAt || !Number.isFinite(Date.parse(c.completedAt)) || Date.parse(c.expiresAt) - Date.parse(c.completedAt) !== 30000 || c.committedWorkspaceRevision !== a.committedWorkspaceRevision || c.committedWorkspaceRevision <= completedRevision) throw new Error('准备完成身份无效');
     completed.add(c.requestId); completedRevision = c.committedWorkspaceRevision;
   }
   const expected = completed.has(attempts[attempts.length - 1].requestId) ? 'completed' : attempts[attempts.length - 1].state;
@@ -303,4 +308,37 @@ export function preparationValidityReasonLabel(reason?: string): string {
     file_epoch_changed_or_expired: 'File 进程已变化或原文件观察已到期',
   };
   return reason ? labels[reason] || reason : '';
+}
+
+const finalizationCodes = ['evidence_invalid', 'original_source_rejected', 'bootstrap_rejected', 'checks_incomplete', 'owner_observation_incomplete', 'owner_observation_changed', 'owner_observation_expired', 'file_epoch_unavailable', 'file_observation_changed_or_expired'];
+function validatePreparationDiagnostics(a: PreparationAttempt): void {
+  const f = a.finalization;
+  if (f && (a.state !== 'blocked' || a.assessment?.outcome !== 'checks_passed' || !finalizationCodes.includes(f.code) || !diagnosticIdentity(f.owner) || !diagnosticIdentity(f.stage))) throw new Error('最终结算诊断无效');
+  if (a.observations === undefined) return;
+  if (!Array.isArray(a.observations) || a.observations.length > 24 || a.observations.length > 0 && a.state !== 'blocked') throw new Error('观察诊断集合无效');
+  const seen = new Set<string>();
+  for (const d of a.observations) {
+    const key = `${d.phase}/${d.owner}`;
+    if (seen.has(key) || !['initial', 'final'].includes(d.phase) || !diagnosticIdentity(d.owner) || !diagnosticIdentity(d.stage) || !['observed', 'deadline_exceeded', 'cancelled', 'owner_rejected', 'invalid_result', 'source_drift', 'incomplete', 'budget_exhausted_before_call'].includes(d.code) || !Number.isFinite(Date.parse(d.startedAt)) || !Number.isFinite(Date.parse(d.completedAt)) || Date.parse(d.completedAt) < Date.parse(d.startedAt) || Date.parse(d.startedAt) < Date.parse(a.startedAt) || !a.completedAt || Date.parse(d.completedAt) > Date.parse(a.completedAt) || typeof d.attempted !== 'boolean' || !Number.isSafeInteger(d.errorByteCount) || d.errorByteCount < 0) throw new Error('观察诊断身份或时序无效');
+    seen.add(key);
+    if (d.deadline !== undefined && !Number.isFinite(Date.parse(d.deadline)) || d.code === 'observed' && (!d.attempted || d.errorByteCount !== 0 || d.errorSha256 !== undefined) || d.code === 'budget_exhausted_before_call' && (d.attempted || !d.deadline || Date.parse(d.startedAt) < Date.parse(d.deadline))) throw new Error('观察诊断预算无效');
+    if (d.errorByteCount === 0 ? d.errorSha256 !== undefined && d.errorSha256 !== 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' || d.notSavedReason !== undefined : !/^[0-9a-f]{64}$/.test(d.errorSha256 ?? '')) throw new Error('观察原始错误身份无效');
+    if (d.errorByteCount > 16384 ? d.notSavedReason !== 'error_exceeds_storage_limit' : d.notSavedReason !== undefined) throw new Error('观察诊断存储边界无效');
+  }
+}
+function diagnosticIdentity(value: unknown): value is string { return typeof value === 'string' && value.length > 0 && value.length <= 512 && value.trim() === value && !/[\0\r\n]/.test(value); }
+export function preparationFinalizationLabel(value: PreparationFinalization): string {
+  const labels: Record<string, string> = {
+    owner_observation_incomplete: '最终 owner 事实未完整取得',
+    owner_observation_changed: '最终 owner 事实与原来源不一致',
+    owner_observation_expired: '最终 owner 观察已超出有效窗口',
+    file_observation_changed_or_expired: '最终 File 事实变化或超出有效窗口',
+    file_epoch_unavailable: '最终 File epoch 不可用',
+    evidence_invalid: '原始证据校验未通过', original_source_rejected: '原始来源编译未通过', bootstrap_rejected: '完整 bootstrap 编译未通过', checks_incomplete: '必要检查尚未全部通过',
+  };
+  return `${labels[value.code] ?? value.code}；${value.owner} / ${value.stage}；未生成本次准备回执`;
+}
+export function preparationObservationLabel(d: PreparationObservation): string {
+  const labels: Record<string, string> = { deadline_exceeded: '观察超时', budget_exhausted_before_call: '调用前预算已耗尽', cancelled: '请求取消', source_drift: '来源漂移', invalid_result: '结果结构无效', owner_rejected: 'owner 拒绝', incomplete: '事实不完整', observed: '已取得完整观察' };
+  return `${d.phase === 'final' ? '最终复核' : '初始观察'}：${d.owner} / ${d.stage}；${labels[d.code] ?? d.code}`;
 }

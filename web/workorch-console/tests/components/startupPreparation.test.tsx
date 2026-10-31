@@ -1055,3 +1055,31 @@ describe('准备资源显式初始化', () => {
     expect(workorchApi.recoverStartupPreparationResources).not.toHaveBeenCalled();
   });
 });
+
+describe('STEP04 最终复核失败独立展示', () => {
+  it('单项全部通过时仍展示最终 MCP 失败、无回执，并保持只读', async () => {
+    const view = JSON.parse(readFileSync('../../internal/pkg/workorchmanagementcontract/testdata/startup_preparation_completed.json', 'utf8')) as StartupPreparationView;
+    const a = view.record!.attempts[0];
+    view.record!.completions = [];
+    view.operationState = 'blocked'; view.currentValidity = 'stale'; view.currentValidityReason = 'owner_observation_stale';
+    a.finalization = { code: 'owner_observation_incomplete', owner: 'mcpregistry', stage: 'final_owner_revalidation' };
+    a.observations = [{ phase: 'final', owner: 'mcpregistry', stage: 'registry_after', code: 'deadline_exceeded', startedAt: a.startedAt, completedAt: a.completedAt!, deadline: a.completedAt!, attempted: true, errorByteCount: 30, errorSha256: 'a'.repeat(64) }];
+    expect(() => validatePreparationView(view, 'ws')).not.toThrow();
+    vi.mocked(workorchApi.readStartupPreparation).mockResolvedValue(view);
+    render(wrap()); await act(async () => {});
+    expect(screen.getByText(/最终 owner 事实未完整取得；mcpregistry/)).toBeTruthy();
+    expect(screen.getByText(/最终复核：mcpregistry \/ registry_after；观察超时/)).toBeTruthy();
+    expect(screen.getByText('尚未取得创建准备完成凭据')).toBeTruthy();
+    expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
+    expect(workorchApi.recoverStartupPreparation).not.toHaveBeenCalled();
+    expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
+    for (const mutate of [
+      (v: StartupPreparationView) => { v.record!.attempts[0].finalization!.code = 'ready'; },
+      (v: StartupPreparationView) => { v.record!.attempts[0].observations![0].code = 'ready'; },
+      (v: StartupPreparationView) => { v.record!.attempts[0].observations!.push({ ...v.record!.attempts[0].observations![0] }); },
+      (v: StartupPreparationView) => { v.record!.attempts[0].observations![0].errorByteCount = 16385; },
+      (v: StartupPreparationView) => { v.record!.attempts[0].observations![0].completedAt = '2025-01-01T00:00:00Z'; },
+      (v: StartupPreparationView) => { v.record!.attempts[0].observations![0].code = 'budget_exhausted_before_call'; },
+    ]) { const bad = structuredClone(view); mutate(bad); expect(() => validatePreparationView(bad, 'ws')).toThrow(); }
+  });
+});

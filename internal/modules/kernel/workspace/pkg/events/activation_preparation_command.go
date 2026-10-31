@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -27,6 +28,7 @@ const TopicWorkspacePreparationSettleBlocked = "/workspace/activation-preparatio
 // settings. Workspace captures its own confirmed template/configuration input;
 // this command cannot submit those policies or a compiled-success credential.
 type SettleWorkspacePreparationBlockedCommand struct {
+	Observations                    []workspace.PreparationObservationDiagnostic
 	FinalOwners                     *workspace.PreparationOwnerRevalidation
 	ProcessPolicyFacts              *workspace.PreparationProcessPolicyFacts
 	MCPRegistryFacts                *workspace.PreparationMCPObservationFacts
@@ -47,6 +49,9 @@ type SettleWorkspacePreparationBlockedCommand struct {
 }
 
 func (c SettleWorkspacePreparationBlockedCommand) Validate() error {
+	if workspace.ValidatePreparationObservations(c.Observations, time.Time{}, time.Time{}) != nil {
+		return common.ErrInvalidArgument
+	}
 	if r := c.FinalOwners; r != nil && (r.Validate() != nil || r.WorkspaceID != c.Original.WorkspaceID || r.RequestID != c.Original.RequestID || r.PayloadHash != c.Original.PayloadHash() || c.Original.ExpectedWorkspaceRevision == ^uint64(0) || r.WorkspaceRevision != c.Original.ExpectedWorkspaceRevision+1) {
 		return common.ErrInvalidArgument
 	}

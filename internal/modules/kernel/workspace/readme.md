@@ -222,6 +222,25 @@ MCP 单项可为 `passed/mcp_empty_selection_observed_remaining_checks`。不是
 settlement/recovery 不可更换或为旧操作补挂版本。原 Soul/Skill Registry/Memory（含原模式）/MCP Registry
 四类来源完整时，Application 在同一原请求 deadline 内复用既有只读 typed query 取得最终完整原值；
 不重发 SkillHub status、不刷新 catalog、不连接 MCP、不推理或 embedding。
+本次显式检查使用单一、有限的请求预算；初始观察与最终 owner 复核为同一请求下的独立子预算，
+最终复核不继承初始观察已耗尽的 deadline。结算与投影仍受原请求约束，已有 30 秒 freshness 不变。
+已开始的同步 EventHub handler 必须真实返回；取消不是完成。结算 reducer 后、CAS 前再次检查取消；
+CAS 重试使用当前实际结算时刻重核观察窗口，不重置总预算或重发 MCP/SkillHub 效果。
+
+`SettleWorkspacePreparationBlockedCommand.Observations` 仅携带初始/最终只读观察的不可变诊断，
+不能选择 owner 状态或授予 credit。原 request/payload/revision 由所属 attempt 固定；每个 phase/owner
+最多一条，总计最多 24 条，记录具体子步骤、实际开始/结束、有效 deadline、是否开始及错误分类。
+原错误按 bytes 原样保留并校验长度/SHA256；单条超过 16 KiB 不保存正文，明确记录完整长度/hash
+和 `error_exceeds_storage_limit`，不截断或改写。原始字节只在受限 owner 存储中，公共 view
+返回对应元数据。GET/check 重放/recover 不重查、不续期、不修补这些诊断。
+当全部 required 单项通过而 completion 编译拒绝时，私有 reducer 保存 typed `Finalization`，
+区分来源不完整、完整来源漂移、观察窗口到期、File 和编译拒绝。它只解释失败，不替代全部原值
+反查及 completion 重新编译；带最终拒绝诊断的 attempt 不能同时持有 completion。
+
+Workspace 私有结算内允许复用同一完整原值的纯编译产物。每次仍读取真实 Workspace/Goal/DoD，
+比较完整 detached 原值并执行原 revision fence；变化则重新完整校验。该值只在本次调用 context 内，
+不保存在 Biz、不跨请求/Workspace/重启缓存 source、assessment 或成功，也不改变定义互斥锁域。
+
 `SettleWorkspacePreparationBlockedCommand.FinalOwners` 不含调用方判词，Workspace 精确核验
 Workspace/request/payload/revision 与时间窗，随原 seal 在同一 blocked CAS 保存，clone 隔离且终态不可覆写。
 最终值只忽略观察时间差异，与唯一原 archive 的完整值逐项比较，保留 epoch、revision、顺序、nil/empty、

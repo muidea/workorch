@@ -49,7 +49,7 @@ class PreparationVerifierTest(unittest.TestCase):
         record = {"StartupPreparation": {"Attempts": [attempt]}, "PreparationDirectoryEvidence": [directory],
                   "PreparationResourceEvidence": [{"ContentHash": "resources", "Resources": [{"Observation": copy.deepcopy(observation["Resources"][0])}], "CompletedAt": started}],
                   "PreparationManagedConfigEvidence": [{"Ref": "configs", "Files": None, "CompletedAt": started}],
-                  "PreparationProviderCacheEvidence": [{"Ref": "provider", "Facts": {"Observation": {"Catalog": {"ExpiresAt": "0001-01-01T00:00:00Z", "State": "unavailable", "ErrorCode": "cache_miss", "Revision": ""}}}}]}
+                  "PreparationProviderCacheEvidence": [{"Ref": "provider", "Selection": {"Version": "workorch-preparation-provider-selection"}, "Facts": {"Observation": {"Catalog": {"ExpiresAt": "0001-01-01T00:00:00Z", "State": "unavailable", "ErrorCode": "cache_miss", "Revision": ""}}}}]}
         before = copy.deepcopy(record)
         now = datetime(2026, 10, 27, 0, 0, 2, tzinfo=timezone.utc)
         self.assertEqual(step04.archived_validity(record, now, epoch), "not_evaluated")
@@ -114,12 +114,12 @@ class PreparationVerifierTest(unittest.TestCase):
         result["record"]["attempts"][0]["binding"]["manifestHash"] = "caller"
         self.assertEqual(data[0]["preparation"]["record"]["attempts"][0]["binding"]["manifestHash"], "manifest")
 
-    def test_read_validity_uses_exact_archived_deadline_without_rewriting_history(self):
+    def test_catalog_age_is_diagnostic_without_rewriting_history(self):
         record = {"StartupPreparation": {"Attempts": [{"ProviderCacheEvidenceRef": "old"}]},
-                  "PreparationProviderCacheEvidence": [{"Ref": "old", "Facts": {"Observation": {"Catalog": {"ExpiresAt": "2026-10-27T10:26:11.477474208+08:00"}}}}]}
+                  "PreparationProviderCacheEvidence": [{"Ref": "old", "Selection": {"Version": "workorch-preparation-provider-selection"}, "Facts": {"Observation": {"Catalog": {"ExpiresAt": "2026-10-27T10:26:11.477474208+08:00"}}}}]}
         original = copy.deepcopy(record)
         self.assertEqual(step04.archived_validity(record, datetime(2026, 10, 27, 2, 26, 11, tzinfo=timezone.utc)), "not_evaluated")
-        self.assertEqual(step04.archived_validity(record, datetime(2026, 10, 27, 2, 26, 12, tzinfo=timezone.utc)), "stale")
+        self.assertEqual(step04.archived_validity(record, datetime(2026, 10, 27, 2, 26, 12, tzinfo=timezone.utc)), "not_evaluated")
         self.assertEqual(record, original)
         cold = copy.deepcopy(record)
         cold["PreparationProviderCacheEvidence"][0]["Facts"]["Observation"]["Catalog"] = {
@@ -130,7 +130,9 @@ class PreparationVerifierTest(unittest.TestCase):
             step04.archived_validity(cold, datetime.now(timezone.utc))
         for mutation in (lambda r: r["PreparationProviderCacheEvidence"].clear(),
                          lambda r: r["PreparationProviderCacheEvidence"].append(copy.deepcopy(r["PreparationProviderCacheEvidence"][0])),
-                         lambda r: r["PreparationProviderCacheEvidence"][0].update(Ref="different-operation")):
+                         lambda r: r["PreparationProviderCacheEvidence"][0].update(Ref="different-operation"),
+                         lambda r: r["PreparationProviderCacheEvidence"][0].pop("Selection"),
+                         lambda r: r["PreparationProviderCacheEvidence"][0]["Selection"].update(Version="unsupported-contract")):
             changed = copy.deepcopy(record)
             mutation(changed)
             with self.assertRaises(RuntimeError):
@@ -345,9 +347,9 @@ class PreparationVerifierTest(unittest.TestCase):
                   "StartupPreparation": {"Attempts": [{"SealEvidenceRef": "original", "ExecutionInputVersion": version, "ExpectedWorkspaceRevision": 5, "ProviderCacheEvidenceRef": "provider"}]}}
         target = {"providerId": "ai-proxy", "modelId": "step02-fixture"}
         record["PreparationProviderCacheEvidence"] = [{"Ref": "provider", "Facts": {"Observation": {
-            "Configuration": {"Version": "workorch-preparation-provider-configuration/v2", "DefaultChat": target},
+            "Configuration": {"Version": "workorch-preparation-provider-configuration", "DefaultChat": target},
             "OwnerEpoch": "frozen-owner", "Catalog": {"ErrorCode": "cache_miss"}}},
-            "Selection": {"Version": "workorch-preparation-provider-selection/v2", "Source": "llm_owner_default", "Selection": {"target": target}, "OwnerEpoch": "frozen-owner", "FailureCode": ""}}]
+            "Selection": {"Version": "workorch-preparation-provider-selection", "Source": "llm_owner_default", "Selection": {"target": target}, "OwnerEpoch": "frozen-owner", "FailureCode": ""}}]
         inputs = {"Version": version, "Template": copy.deepcopy(template),
                   "Process": {"Version": version, "WorkspaceID": "ws", "WorkspaceRevision": 6, "Before": policy, "After": copy.deepcopy(policy)},
                   "Configuration": {"Directory": "project", "InternalDirectory": "internal", "TemplateID": "confirmed", "ProfileID": "profile", "ContextHints": {}, "EvidencePolicies": None, "DefaultLLMSelection": None, "DefaultSoulID": "selected", "SoulBindings": None}}
@@ -363,8 +365,12 @@ class PreparationVerifierTest(unittest.TestCase):
             lambda r, b: r["PreparationSealEvidence"][0]["ExecutionInputs"]["Configuration"].update(ContextHints={"changed": True}),
             lambda r, b: b.update(defaultSoulId="other"),
             lambda r, b: r["PreparationProviderCacheEvidence"][0]["Selection"]["Selection"]["target"].update(modelId="neighbor"),
-            lambda r, b: r["PreparationProviderCacheEvidence"][0]["Selection"].update(Version="workorch-preparation-provider-selection/v1"),
+            lambda r, b: r["PreparationProviderCacheEvidence"][0]["Selection"].update(Version="unsupported-contract"),
             lambda r, b: r["PreparationProviderCacheEvidence"][0]["Selection"].update(OwnerEpoch="other"),
+            lambda r, b: r["PreparationProviderCacheEvidence"][0]["Facts"]["Observation"]["Configuration"]["DefaultChat"].update(modelId="other"),
+            lambda r, b: r["PreparationProviderCacheEvidence"][0]["Facts"]["Observation"]["Configuration"].update(Version="unsupported-contract"),
+            lambda r, b: r["PreparationProviderCacheEvidence"][0]["Selection"].update(Source="invented_default"),
+            lambda r, b: r["PreparationProviderCacheEvidence"][0]["Selection"].update(FailureCode="source_binding_conflict"),
         ):
             bad_record, bad_bindings = copy.deepcopy(record), copy.deepcopy(bindings)
             with self.assertRaises((RuntimeError, KeyError)):

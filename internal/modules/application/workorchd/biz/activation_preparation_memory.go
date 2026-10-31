@@ -26,7 +26,7 @@ func (b *Biz) ObservePreparationMemoryInventory(ctx context.Context, id common.W
 	bounded, cancel := context.WithTimeout(bound, 2*time.Second)
 	defer cancel()
 	if err := bounded.Err(); err != nil {
-		return memorymodel.PreparationInventory{}, err
+		return memorymodel.PreparationInventory{}, preparationStageContextError(bounded, "inventory", err)
 	}
 	started := time.Now().UTC()
 	ev := magicevent.NewEventWithContext(memoryevents.TopicObservePreparationInventory, ModuleID, memoryevents.CommandDestination, magicevent.NewHeader(), bounded, c)
@@ -36,13 +36,16 @@ func (b *Biz) ObservePreparationMemoryInventory(ctx context.Context, id common.W
 		return memorymodel.PreparationInventory{}, common.ErrConflict
 	}
 	if err := r.Error(); err != nil {
-		return memorymodel.PreparationInventory{}, err
+		return memorymodel.PreparationInventory{}, preparationStageContextError(bounded, "inventory", err)
 	}
 	// Keep the concrete *def.Error return; assigning its nil value to the
 	// earlier error interface would box nil and falsely reject a valid read.
 	data, getErr := r.Get()
 	v, ok := data.(memoryevents.ObservePreparationInventoryResult)
-	if getErr != nil || !ok {
+	if getErr != nil {
+		return memorymodel.PreparationInventory{}, preparationStageContextError(bounded, "inventory_result", getErr)
+	}
+	if !ok {
 		return memorymodel.PreparationInventory{}, fmt.Errorf("%w: invalid preparation inventory result type", common.ErrConflict)
 	}
 	if v.ValidateFor(c) != nil {
@@ -50,9 +53,6 @@ func (b *Biz) ObservePreparationMemoryInventory(ctx context.Context, id common.W
 	}
 	if v.Inventory.ObservedAt.Before(started) || v.Inventory.ObservedAt.After(time.Now().UTC()) {
 		return memorymodel.PreparationInventory{}, fmt.Errorf("%w: preparation inventory outside observation interval", common.ErrConflict)
-	}
-	if err := bounded.Err(); err != nil {
-		return memorymodel.PreparationInventory{}, err
 	}
 	return v.Inventory.Clone(), nil
 }

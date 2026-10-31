@@ -86,13 +86,29 @@ type preparationHTTPSkillRepository struct {
 	finalChange string
 }
 
+func TestPreparationHTTPLargeSpecificationsCompleteWithoutAdditionalInference(t *testing.T) {
+	for _, scenario := range []string{"step04_workflow_large_68", "step04_workflow_large_128"} {
+		t.Run(scenario, func(t *testing.T) { testAuthoringHTTPFileBackedScenario(t, scenario) })
+	}
+}
+
+func TestPreparationHTTPFinalMCPFailurePreservesPassedChecklistAndOriginalRecovery(t *testing.T) {
+	for _, scenario := range []string{"step04_workflow_final_mcp_before", "step04_workflow_final_mcp_after", "step04_workflow_final_mcp_cancelled"} {
+		t.Run(scenario, func(t *testing.T) { testAuthoringHTTPFileBackedScenario(t, scenario) })
+	}
+}
+
 type preparationHTTPMCPRepository struct {
+	failAt  int
+	failure error
 	repository.MCPRegistryRepository
 	reads *atomic.Int32
 }
 
 func (r *preparationHTTPMCPRepository) Load(ctx context.Context) (*mcpmodel.RegistrySnapshot, error) {
-	r.reads.Add(1)
+	if int(r.reads.Add(1)) == r.failAt {
+		return nil, r.failure
+	}
 	return r.MCPRegistryRepository.Load(ctx)
 }
 
@@ -174,7 +190,15 @@ func TestAuthoringHTTPStep03TicketDeliveryRecovery(t *testing.T) {
 func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 	ctx := context.Background()
 	preparationWorkflow := strings.HasPrefix(scenario, "step04_workflow")
-	emptySelection := scenario == "step04_workflow_empty_selection"
+	finalMCPFailure := strings.HasPrefix(scenario, "step04_workflow_final_mcp_")
+	largeCount := 0
+	if scenario == "step04_workflow_large_68" {
+		largeCount = 68
+	}
+	if scenario == "step04_workflow_large_128" {
+		largeCount = 128
+	}
+	emptySelection := scenario == "step04_workflow_empty_selection" || finalMCPFailure || largeCount > 0
 	finalSkillUnavailable := scenario == "step04_workflow_final_skill_unavailable"
 	finalSkillChanged := scenario == "step04_workflow_final_skill_drift" || finalSkillUnavailable
 	wantSkillReads := int32(4)
@@ -225,11 +249,21 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		t.Fatal(err)
 	}
 	template := workspace.WorkspaceTemplate{ID: "http-template", Name: "模板", DoDItems: []string{"模板验收"}, ContextHints: hints}
+	if largeCount > 0 {
+		template.DoDItems = nil
+		for i := 0; i < largeCount-2; i++ {
+			template.DoDItems = append(template.DoDItems, fmt.Sprintf("合成验收 %03d", i))
+		}
+	}
 	if emptySelection {
 		// Explicit, reviewed fixture policy, never production defaults or a
 		// post-confirmation repair of an incomplete original template.
 		values := template.ContextHints.Map()
-		values["acceptanceSlicePolicy"] = map[string]any{"schemaVersion": "workorch.acceptance_slice_policy", "maxWorkItems": 4, "maxFocuses": 64, "maxCandidateContextItems": 4, "completionPolicy": "all_required_items_accepted", "resultPolicy": "slice_result_allowed"}
+		maxFocuses := 64
+		if largeCount > 0 {
+			maxFocuses = 128
+		}
+		values["acceptanceSlicePolicy"] = map[string]any{"schemaVersion": "workorch.acceptance_slice_policy", "maxWorkItems": 4, "maxFocuses": maxFocuses, "maxCandidateContextItems": 4, "completionPolicy": "all_required_items_accepted", "resultPolicy": "slice_result_allowed"}
 		declaration := values["profileContracts"].(map[string]any)["generic"].(map[string]any)["evidenceRequirements"].([]any)[0].(map[string]any)
 		fact := map[string]any{"ownerModuleId": runtimecontract.RuntimeModuleShell, "factKind": string(runtimecontract.RuntimeOwnerFactSelectableValidationSurface), "operationKind": runtimecontract.RuntimeBlockKindManagedValidationSession}
 		declaration["requiredOwnerFacts"] = []any{fact}
@@ -506,7 +540,18 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		var preparationMemory *memoryowner.Biz
 		var preparationMCP *mcpowner.Biz
 		if preparationWorkflow {
-			preparationMCP, err = mcpowner.New(hub, nil, mcpowner.Dependencies{Registry: &preparationHTTPMCPRepository{MCPRegistryRepository: filerepository.NewMCPRegistryRepository(filepath.Join(storage, "system", "mcp-registry.json")), reads: &preparationMCPReads}, EventHub: hub})
+			mcpRepository := &preparationHTTPMCPRepository{MCPRegistryRepository: filerepository.NewMCPRegistryRepository(filepath.Join(storage, "system", "mcp-registry.json")), reads: &preparationMCPReads}
+			if finalMCPFailure {
+				mcpRepository.failAt = 3
+				mcpRepository.failure = fmt.Errorf("原始 MCP read\x00\r\n: %w", context.DeadlineExceeded)
+				if scenario == "step04_workflow_final_mcp_after" {
+					mcpRepository.failAt = 4
+				}
+				if scenario == "step04_workflow_final_mcp_cancelled" {
+					mcpRepository.failure = context.Canceled
+				}
+			}
+			preparationMCP, err = mcpowner.New(hub, nil, mcpowner.Dependencies{Registry: mcpRepository, EventHub: hub})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1150,7 +1195,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 	if scenario == "review_fail" || scenario == "review_unknown" {
 		wantState = "review_blocked"
 	}
-	if ready.State != wantState || ready.Proposal == nil || len(ready.Proposal.Reviews) != 6 || len(ready.Proposal.Items) != 3 || physicalCalls.Load() != 8 {
+	if ready.State != wantState || ready.Proposal == nil || len(ready.Proposal.Reviews) != 6 || len(ready.Proposal.Items) != len(template.DoDItems)+2 || physicalCalls.Load() != 8 {
 		t.Fatalf("compile: %+v calls=%d", ready, physicalCalls.Load())
 	}
 	for _, review := range ready.Proposal.Reviews {
@@ -1438,9 +1483,67 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			t.Fatal(err)
 		}
 		preparationMemoryModeEnabled.Store(true)
+		preparationStarted := time.Now()
 		first := preparationHTTPWorkflowRequest(t, baseURL, http.MethodPost, preparationPath+"/check", intent)
+		if largeCount > 0 {
+			t.Logf("%d-item full HTTP preparation: %s", largeCount, time.Since(preparationStarted))
+		}
 		if finalSkillChanged && first.Preparation.CurrentValidity != "stale" {
 			t.Fatal("real final owner drift/unavailability did not stale current validity")
+		}
+		if finalMCPFailure {
+			a := first.Preparation.Record.Attempts[0]
+			if first.Preparation.OperationState != "blocked" || first.Preparation.CurrentValidity != "stale" || a.Assessment == nil || a.Assessment.Outcome != "checks_passed" || a.Assessment.RequiredCount != a.Assessment.PassedRequiredCount || len(first.Preparation.Record.Completions) != 0 || a.Finalization == nil || a.Finalization.Code != "owner_observation_incomplete" || a.Finalization.Owner != "mcpregistry" {
+				t.Fatalf("final MCP failure obscured or granted M3: %+v", first)
+			}
+			wantStage, wantCode := "registry_before", "deadline_exceeded"
+			if scenario == "step04_workflow_final_mcp_after" {
+				wantStage = "registry_after"
+			}
+			if scenario == "step04_workflow_final_mcp_cancelled" {
+				wantCode = "cancelled"
+			}
+			stored, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var diagnostic *workspace.PreparationObservationDiagnostic
+			for i := range stored.StartupPreparation.Attempts[0].Observations {
+				d := &stored.StartupPreparation.Attempts[0].Observations[i]
+				if d.Phase == "final" && d.Owner == "mcpregistry" {
+					diagnostic = d
+				}
+			}
+			if diagnostic == nil || diagnostic.Stage != wantStage || diagnostic.Code != wantCode || !diagnostic.Attempted || len(diagnostic.ErrorBytes) == 0 || diagnostic.Validate() != nil {
+				t.Fatalf("precise raw failure missing: %+v", diagnostic)
+			}
+			final := stored.PreparationSealEvidence[0].FinalOwners
+			if final == nil || final.MCP != nil || final.Souls == nil || final.Skills == nil || final.Memory == nil {
+				t.Fatal("other final facts discarded")
+			}
+			beforeReads := preparationMCPReads.Load()
+			for pass := 0; pass < 2; pass++ {
+				for _, action := range []string{"", "/check", "/recover"} {
+					method := http.MethodPost
+					if action == "" {
+						method = http.MethodGet
+					}
+					again := preparationHTTPWorkflowRequest(t, baseURL, method, preparationPath+action, intent)
+					if !reflect.DeepEqual(first.Preparation.Record, again.Preparation.Record) {
+						t.Fatal("replay renewed observations or rewrote rejection")
+					}
+				}
+				if pass == 0 {
+					closeOwners()
+					baseURL, routine, closeOwners = open()
+				}
+			}
+			restored, err := repositories.Workspaces.Get(ctx, stored.ID)
+			if err != nil || !reflect.DeepEqual(stored.StartupPreparation, restored.StartupPreparation) || preparationMCPReads.Load() != beforeReads || physicalCalls.Load() != baselineCalls {
+				t.Fatal("reopen/replay lost raw diagnostic or repeated effect", err)
+			}
+			assertNoRuns()
+			return
 		}
 		if emptySelection {
 			// The sole current contract consumes configured LLM defaults. A cold
@@ -1451,6 +1554,9 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			attempt := first.Preparation.Record.Attempts[0]
 			if attempt.Assessment == nil || attempt.Assessment.Outcome != "checks_passed" || attempt.Assessment.PassedRequiredCount != attempt.Assessment.RequiredCount || len(attempt.Assessment.Outstanding) != 0 || first.Compilation == nil || first.Compilation.FailureCode != "" || first.Compilation.BootstrapHash == "" {
 				t.Fatalf("completion lacks all required checks and original compilation: %+v", first)
+			}
+			if largeCount > 0 && attempt.DefinitionCompilation.ObligationCount < largeCount {
+				t.Fatal("large fixture was not fully compiled")
 			}
 			for _, check := range attempt.Checks {
 				if check.Required && check.State != "passed" {

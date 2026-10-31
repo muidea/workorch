@@ -153,21 +153,20 @@ def archived_validity(record, now, current_file_epoch=None):
     attempt = record["StartupPreparation"]["Attempts"][-1]
     matches = [e for e in record["PreparationProviderCacheEvidence"] if e["Ref"] == attempt["ProviderCacheEvidenceRef"]]
     require(len(matches) == 1, "missing or ambiguous original cache observation")
+    require(matches[0].get("Selection", {}).get("Version") == "workorch-preparation-provider-selection",
+            "missing current provider configuration selection")
     catalog = matches[0]["Facts"]["Observation"]["Catalog"]
     expires = catalog["ExpiresAt"]
     if expires == "0001-01-01T00:00:00Z":
         require(catalog["State"] == "unavailable" and catalog["ErrorCode"] == "cache_miss" and not catalog["Revision"],
                 "missing deadline is not an exact cold cache miss")
-        cache_stale = False  # Known absence is still blocked, never current.
     else:
         require(expires, "fixture lost original cache deadline")
-        cache_stale = now >= datetime.fromisoformat(expires.replace("Z", "+00:00"))
-    if matches[0].get("Selection", {}).get("Version") == "workorch-preparation-provider-selection/v2":
-        cache_stale = False  # v2 consumes configuration; catalog is original diagnostic only.
-    # Legacy verifier unit inputs have no File archive. The production fixture
-    # separately requires the new version on every original explicit check.
+        datetime.fromisoformat(expires.replace("Z", "+00:00"))
+    # The current selection consumes frozen owner configuration. Catalog age is
+    # diagnostic only; File still retains its original deadline and process fence.
     file_stale = archived_file_stale(record, now, current_file_epoch) if record.get("PreparationDirectoryEvidence") else False
-    return "stale" if cache_stale or file_stale else "not_evaluated"
+    return "stale" if file_stale else "not_evaluated"
 
 
 def validate_blocked(view, workspace_id, intent, admitted, expected_outstanding=(), previous_attempts=(), expected_validity="not_evaluated", completion_expected=False):
@@ -257,8 +256,8 @@ def validate_execution_inputs(record, soul_bindings):
         provider = providers[0]
         configuration, selection = provider["Facts"]["Observation"]["Configuration"], provider["Selection"]
         target = {"providerId": "ai-proxy", "modelId": "step02-fixture"}
-        require(configuration["Version"] == "workorch-preparation-provider-configuration/v2" and
-                configuration["DefaultChat"] == target and selection["Version"] == "workorch-preparation-provider-selection/v2" and
+        require(configuration["Version"] == "workorch-preparation-provider-configuration" and
+                configuration["DefaultChat"] == target and selection["Version"] == "workorch-preparation-provider-selection" and
                 selection["Source"] == "llm_owner_default" and selection["Selection"] == {"target": target} and not selection["FailureCode"] and
                 selection["OwnerEpoch"] == provider["Facts"]["Observation"]["OwnerEpoch"] and
                 provider["Facts"]["Observation"]["Catalog"]["ErrorCode"] == "cache_miss",

@@ -1,3 +1,4 @@
+import { preparationFinalizationLabel, preparationObservationLabel } from '../../startupPreparation';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Descriptions, List, Modal, Space, Tag, Typography } from 'antd';
 import { workorchApi } from '../../api';
@@ -163,6 +164,8 @@ function PreparationPanel({ workspaceId }: { workspaceId: string }) {
       { key: 'm3', label: 'M3', children: view.record?.completions?.length ? `创建准备已完成（历史 M3）：${view.record.completions[0].completionId}；执行仍需独立启动` : '尚未取得创建准备完成凭据' },
       { key: 'request', label: '最近检查请求', children: last?.requestId || '未检查' },
       { key: 'all-of', label: '整体 required 检查', children: last?.assessment ? `原检查通过 ${last.assessment.passedRequiredCount}/${last.assessment.requiredCount}；${last.assessment.outcome === 'blocked' ? `仍有 ${last.assessment.outstanding.length} 项未通过` : '原 required 检查均通过；完成结算仍需完整 bootstrap 和 no-Run CAS'}` : '未保存整体裁决（不从旧单项记录补造）' },
+      { key: 'finalization', label: '最终结算', children: last?.finalization ? preparationFinalizationLabel(last.finalization) : '未记录最终结算拒绝；是否完成以本次准备回执为准' },
+      { key: 'observation-diagnostics', label: '观察失败定位', children: last?.observations?.filter(d => d.code !== 'observed').map(preparationObservationLabel).join('；') || '未记录观察失败；不从旧记录推断原因' },
       { key: 'definition-compile', label: '封存来源纯编译', children: last?.definitionCompilation ? `已编译 ${last.definitionCompilation.sourceCount} 个来源、${last.definitionCompilation.obligationCount} 个义务；非完整 bootstrap，不代表 ready 或 M3` : '未保存编译摘要（不回填旧记录）' },
       { key: 'execution-inputs', label: '原执行策略输入', children: last?.executionInputVersion ? '已归档原模板、Workspace 策略、对话语言与修复上限；非完整 bootstrap，不代表 ready 或 M3' : '未保存原输入（不借用当前配置补造）' },
       { key: 'evaluation', label: '逐项裁决', children: last?.evaluationVersion ? '原检查时点的单项结论；passed 不代表当前仍有效、整体 ready 或 M3' : '原版阻塞记录（不回填单项通过）' },

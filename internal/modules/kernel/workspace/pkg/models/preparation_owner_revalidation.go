@@ -68,8 +68,19 @@ func (r PreparationOwnerRevalidation) Validate() error {
 // Each comparison retains full original values (including epoch, nil/empty,
 // ordering and provenance). Observation times are not content identities.
 func (r PreparationOwnerRevalidation) MatchesOriginal(w *Workspace, a WorkspacePreparationAttempt) bool {
+	matches, _ := r.matchOriginalOwner(w, a)
+	return matches
+}
+
+// MismatchOwner is diagnostic only; callers still use the complete original
+// comparison and independent freshness gate to decide whether to reject.
+func (r PreparationOwnerRevalidation) MismatchOwner(w *Workspace, a WorkspacePreparationAttempt) string {
+	_, owner := r.matchOriginalOwner(w, a)
+	return owner
+}
+func (r PreparationOwnerRevalidation) matchOriginalOwner(w *Workspace, a WorkspacePreparationAttempt) (bool, string) {
 	if w == nil || r.Validate() != nil || r.WorkspaceID != w.ID || r.RequestID != a.RequestID || r.PayloadHash != a.PayloadHash || a.ExpectedWorkspaceRevision == ^uint64(0) || r.WorkspaceRevision != a.ExpectedWorkspaceRevision+1 || r.CompletedAt.After(a.CompletedAt) || r.StartedAt.Before(a.StartedAt) || r.Souls == nil || r.Skills == nil || r.Memory == nil || r.MCP == nil {
-		return false
+		return false, "workspace"
 	}
 	soul, skill, memory, mcp := false, false, false, false
 	counts := [4]int{}
@@ -123,7 +134,12 @@ func (r PreparationOwnerRevalidation) MatchesOriginal(w *Workspace, a WorkspaceP
 		before.StartedAt, before.CompletedAt = after.StartedAt, after.CompletedAt
 		mcp = reflect.DeepEqual(before, after)
 	}
-	return counts == [4]int{1, 1, 1, 1} && soul && skill && memory && mcp
+	for i, matched := range []bool{soul, skill, memory, mcp} {
+		if counts[i] != 1 || !matched {
+			return false, []string{"soul", "skill", "memory", "mcpregistry"}[i]
+		}
+	}
+	return true, ""
 }
 
 // A historical match is not a lease. This reports only known absence/drift or

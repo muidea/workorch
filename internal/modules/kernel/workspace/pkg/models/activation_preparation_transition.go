@@ -85,6 +85,7 @@ func ValidatePreparationRecordTransition(current, next *Workspace, cas bool) err
 	b.MemoryInventoryEvidenceRef = a.MemoryInventoryEvidenceRef
 	b.MCPRegistryEvidenceRef = a.MCPRegistryEvidenceRef
 	b.SealEvidenceRef = a.SealEvidenceRef
+	b.Observations, b.Finalization = a.Observations, a.Finalization
 	b.Assessment = a.Assessment
 	b.DefinitionCompilation = a.DefinitionCompilation
 	b.ExecutionInputVersion = a.ExecutionInputVersion

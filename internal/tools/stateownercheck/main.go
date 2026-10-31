@@ -142,7 +142,11 @@ var observedCommandStateFields = map[string]bool{
 // command/model/field triple, never as a model-wide grant. The settlement stores
 // the original Run retirement observation and cannot choose a retirement phase.
 var observedCommandCarrierFields = map[string]bool{
-	"internal/modules/kernel/workspace/pkg/events:SettleWorkspacePreparationBlockedCommand|internal/modules/blocks/run/pkg/models:WorkspaceRetirementFence|Phase": true,
+	// Observation route and failed read step are immutable diagnostics only.
+	// This exact command/model/field registration cannot carry target states.
+	"internal/modules/kernel/workspace/pkg/events:SettleWorkspacePreparationBlockedCommand|internal/modules/kernel/workspace/pkg/models:PreparationObservationDiagnostic|Phase": true,
+	"internal/modules/kernel/workspace/pkg/events:SettleWorkspacePreparationBlockedCommand|internal/modules/kernel/workspace/pkg/models:PreparationObservationDiagnostic|Stage": true,
+	"internal/modules/kernel/workspace/pkg/events:SettleWorkspacePreparationBlockedCommand|internal/modules/blocks/run/pkg/models:WorkspaceRetirementFence|Phase":               true,
 }
 
 // observedStateCarrierFields is narrower than a carrier-type grant. Use it

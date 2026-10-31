@@ -21,7 +21,7 @@ type WorkspacePreparationCompletion struct {
 }
 
 func (c WorkspacePreparationCompletion) ValidateFor(a WorkspacePreparationAttempt) error {
-	if c.Version != PreparationCompletionVersion || !boundedPreparationIdentity(c.CompletionID) || !boundedPreparationIdentity(c.BootstrapHash) || c.RequestID != a.RequestID || c.PayloadHash != a.PayloadHash || c.Binding != a.Binding || c.CreationEpoch != a.CreationEpoch || c.PreparationEpoch != 0 || a.PreparationEpoch != 0 || c.CommittedWorkspaceRevision != a.CommittedWorkspaceRevision || !c.CompletedAt.Equal(a.CompletedAt) || c.ExpiresAt.Sub(c.CompletedAt) != 30*time.Second || a.State != WorkspacePreparationBlocked || a.NoRunEvaluationVersion != PreparationNoRunFinalVersion || a.Assessment == nil || a.Assessment.Outcome != "checks_passed" || a.DefinitionCompilation == nil || a.OwnerRevalidationVersion != PreparationOwnerRevalidationVersion {
+	if a.Finalization != nil || c.Version != PreparationCompletionVersion || !boundedPreparationIdentity(c.CompletionID) || !boundedPreparationIdentity(c.BootstrapHash) || c.RequestID != a.RequestID || c.PayloadHash != a.PayloadHash || c.Binding != a.Binding || c.CreationEpoch != a.CreationEpoch || c.PreparationEpoch != 0 || a.PreparationEpoch != 0 || c.CommittedWorkspaceRevision != a.CommittedWorkspaceRevision || !c.CompletedAt.Equal(a.CompletedAt) || c.ExpiresAt.Sub(c.CompletedAt) != 30*time.Second || a.State != WorkspacePreparationBlocked || a.NoRunEvaluationVersion != PreparationNoRunFinalVersion || a.Assessment == nil || a.Assessment.Outcome != "checks_passed" || a.DefinitionCompilation == nil || a.OwnerRevalidationVersion != PreparationOwnerRevalidationVersion {
 		return common.ErrConflict
 	}
 	return nil

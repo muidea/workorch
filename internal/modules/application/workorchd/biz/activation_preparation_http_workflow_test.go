@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
-	"time"
 
 	management "github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
@@ -21,7 +20,7 @@ func preparationHTTPWorkflowRequest(t *testing.T, baseURL, method, path string, 
 		t.Fatal(err)
 	}
 	request.Header.Set("Content-Type", "application/json")
-	response, err := (&http.Client{Timeout: 5 * time.Second}).Do(request)
+	response, err := (&http.Client{Timeout: preparationTotalBudget}).Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -407,3 +407,14 @@ owner Stop → Hub TerminateChecked。缺少 DrainingHub 的装配明确拒绝�
 [`docs/50-product-interface/service-acceptance.md`](../../../../docs/50-product-interface/service-acceptance.md) 与
 [`deployed-convergence-scenarios.md`](../../../../docs/50-product-interface/deployed-convergence-scenarios.md) 验收；它们不替代
 上表的组件级合同测试。
+
+### STEP04 观察预算与失败投影
+
+显式准备检查的单一请求预算为 45 秒，初始观察 12 秒、最终 owner 复核 10 秒、
+Workspace 结算 15 秒，各自受原请求 deadline 限制，不因子阶段、CAS 或恢复重置总预算。
+初始与最终为兄弟 context；不得把接近截止的初始 context 传给最终复核。同步 handler 已开始后
+仍等待真实返回，不以取消冒充完成。超过预算的原身份继续通过 owner 对账。
+观察诊断只记录具体读步骤与已知结果，原错误 bytes 随受限 owner 记录保存；不得将其写入通用日志。
+公共 HTTP/准备页分别呈现 required 单项、最终结算拒绝、历史 completion、当前有效性与 ActiveRunID。
+原窗口仍为 30 秒；结构编译和 HTTP 200 均不代表就绪。GET/原操作重放不补查、不重新执行效果。
+此变更属于 Workspace 准备事务，不改变 Runtime SM-1～SM-4，也不新增 Run 或模型调用。

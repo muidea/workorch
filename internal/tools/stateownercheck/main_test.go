@@ -1037,3 +1037,33 @@ func writePrivateDispatcherFixture(t *testing.T, source, internalEventType, sink
 	}
 	return root
 }
+
+func TestPreparationObservationDiagnosticsCannotCarryTargetState(t *testing.T) {
+	for _, command := range []string{"SettleWorkspacePreparationBlockedCommand", "ChangePreparationCommand"} {
+		for _, fields := range []string{"Phase string; Stage string", "Phase string; Stage string; State string", "Phase string; Stage string; TargetPhase string", "Phase string; Stage string; DesiredState string"} {
+			t.Run(command+"/"+fields, func(t *testing.T) {
+				root := newEmptyVerificationRepository(t)
+				for path, source := range map[string]string{
+					"internal/modules/kernel/workspace/pkg/models/observation.go": "package models\ntype PreparationObservationDiagnostic struct { " + fields + " }\n",
+					"internal/modules/kernel/workspace/pkg/events/messages.go":    "package events\nimport models \"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models\"\ntype " + command + " struct { Observations []models.PreparationObservationDiagnostic }\n",
+				} {
+					file := filepath.Join(root, path)
+					if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(file, []byte(source), 0644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				err := verifyCrossOwnerCommandContracts(root)
+				if command == "SettleWorkspacePreparationBlockedCommand" && fields == "Phase string; Stage string" {
+					if err != nil {
+						t.Fatal("immutable diagnostic rejected", err)
+					}
+				} else if err == nil {
+					t.Fatal("foreign command or sibling authority accepted")
+				}
+			})
+		}
+	}
+}

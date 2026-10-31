@@ -31,6 +31,8 @@ type PreparationRecordView struct {
 }
 
 type PreparationAttemptView struct {
+	Observations                    []PreparationObservationView          `json:"observations,omitempty"`
+	Finalization                    *PreparationFinalizationView          `json:"finalization,omitempty"`
 	ExecutionInputVersion           string                                `json:"executionInputVersion,omitempty"`
 	DefinitionCompilation           *PreparationDefinitionCompilationView `json:"definitionCompilation,omitempty"`
 	Assessment                      *PreparationAssessmentView            `json:"assessment,omitempty"`
@@ -201,6 +203,9 @@ func (v StartupPreparationView) ValidateFor(workspaceID string) error {
 	lastRevision := uint64(0)
 	seen := make(map[string]bool, len(v.Record.Attempts))
 	for _, a := range v.Record.Attempts {
+		if validatePreparationDiagnosticViews(a) != nil {
+			return common.ErrConflict
+		}
 		if a.ExecutionInputVersion != "" && (a.State != "blocked" || a.EvaluationVersion != "workorch-preparation-check-evaluation/v1" || a.ExecutionInputVersion != "workorch-preparation-execution-inputs/v1" || a.SealEvidenceRef == "") {
 			return common.ErrConflict
 		}
@@ -541,6 +546,9 @@ func validatePreparationCompletionViews(r *PreparationRecordView) error {
 		found := false
 		for _, a := range r.Attempts {
 			if a.RequestID == c.RequestID {
+				if a.Finalization != nil {
+					return common.ErrConflict
+				}
 				found = a.State == "blocked" && a.NoRunEvaluationVersion == "workorch-preparation-no-run-final-fence/v1" && a.Assessment != nil && a.Assessment.Outcome == "checks_passed" && a.DefinitionCompilation != nil && a.CompletedAt != nil && c.CompletedAt.Equal(*a.CompletedAt) && c.CreationEpoch == a.CreationEpoch && a.PreparationEpoch == 0 && c.CommittedWorkspaceRevision == a.CommittedWorkspaceRevision
 			}
 		}

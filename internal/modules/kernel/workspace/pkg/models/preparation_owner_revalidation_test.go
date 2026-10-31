@@ -167,3 +167,19 @@ func TestPreparationOwnerRevalidationScopeWindowAndNoRenewal(t *testing.T) {
 		t.Fatal("projection changed history")
 	}
 }
+
+func TestPreparationOwnerRevalidationIdentifiesFullSourceDriftWithoutChangingOriginals(t *testing.T) {
+	w, r := ownerRevalidationFixture(t)
+	if r.MismatchOwner(w, w.StartupPreparation.Attempts[0]) != "" {
+		t.Fatal("unchanged source classified as drift")
+	}
+	changed := r.Clone()
+	changed.Skills.Catalog.OwnerEpoch = "skill-preparation-epoch:" + strings.Repeat("B", 26)
+	changed.Skills.ReobservedCatalog.OwnerEpoch = changed.Skills.Catalog.OwnerEpoch
+	if changed.Validate() != nil || changed.MismatchOwner(w, w.StartupPreparation.Attempts[0]) != "skill" || changed.MatchesOriginal(w, w.StartupPreparation.Attempts[0]) {
+		t.Fatal("full Skill source drift was not identified")
+	}
+	if !r.MatchesOriginal(w, w.StartupPreparation.Attempts[0]) {
+		t.Fatal("diagnostic modified the original source")
+	}
+}

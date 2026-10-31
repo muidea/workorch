@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"reflect"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -36,10 +37,16 @@ func (m *Biz) queryExactConfirmedStartupSnapshot(ctx context.Context, command wo
 	if m == nil || m.manager == nil || m.workspaces == nil || m.goals == nil || m.dods == nil || ctx == nil || command.Validate() != nil {
 		return workspaceevents.QueryExactConfirmedStartupSnapshotResult{}, common.ErrInvalidArgument
 	}
+	if err := ctx.Err(); err != nil {
+		return workspaceevents.QueryExactConfirmedStartupSnapshotResult{}, err
+	}
 	m.deletionIngressMu.RLock()
 	defer m.deletionIngressMu.RUnlock()
 	m.manager.definitionMu.Lock()
 	defer m.manager.definitionMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return workspaceevents.QueryExactConfirmedStartupSnapshotResult{}, err
+	}
 	bound, err := common.BindRuntimeWorkspaceContext(ctx, command.WorkspaceID)
 	if err != nil {
 		return workspaceevents.QueryExactConfirmedStartupSnapshotResult{}, err
@@ -51,14 +58,23 @@ func (m *Biz) queryExactConfirmedStartupSnapshot(ctx context.Context, command wo
 	if w.Revision != command.ExpectedWorkspaceRevision || workspaceDeletionRejectsMutation(w) != nil {
 		return workspaceevents.QueryExactConfirmedStartupSnapshotResult{}, common.ErrConflict
 	}
-	if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
-		return workspaceevents.QueryExactConfirmedStartupSnapshotResult{}, common.ErrConflict
+	reads, _ := ctx.Value(preparationExactReadsKey{}).(*preparationExactReads)
+	if reads == nil || !reflect.DeepEqual(reads.workspace, w) {
+		if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
+			return workspaceevents.QueryExactConfirmedStartupSnapshotResult{}, common.ErrConflict
+		}
 	}
 	goal, dod, err := m.currentExecutionDefinitions(bound, w.ID)
 	if err != nil {
 		return workspaceevents.QueryExactConfirmedStartupSnapshotResult{}, err
 	}
-	snapshot, err := startuppreparation.FromOwnerPersistence(w, goal, dod)
+	var snapshot startuppreparation.ExactConfirmedStartupSnapshot
+	if reads.matches(w, goal, dod) {
+		snapshot = reads.snapshot.Clone()
+		reads.hits++
+	} else {
+		snapshot, err = startuppreparation.FromOwnerPersistence(w, goal, dod)
+	}
 	if err != nil {
 		return workspaceevents.QueryExactConfirmedStartupSnapshotResult{}, err
 	}
@@ -67,6 +83,13 @@ func (m *Biz) queryExactConfirmedStartupSnapshot(ctx context.Context, command wo
 	current, err := m.workspaces.Get(bound, w.ID)
 	if err != nil || current.Revision != w.Revision {
 		return workspaceevents.QueryExactConfirmedStartupSnapshotResult{}, common.ErrConflict
+	}
+	if err := ctx.Err(); err != nil {
+		return workspaceevents.QueryExactConfirmedStartupSnapshotResult{}, err
+	}
+	if reads != nil {
+		// Repository results are detached; store only after the final fence.
+		reads.workspace, reads.goal, reads.dod, reads.snapshot = w, goal, dod, snapshot.Clone()
 	}
 	return workspaceevents.QueryExactConfirmedStartupSnapshotResult{Snapshot: snapshot}, nil
 }

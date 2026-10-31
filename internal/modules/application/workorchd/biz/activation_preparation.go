@@ -119,6 +119,17 @@ func startupPreparationView(response workspaceevents.QueryWorkspacePreparationSt
 					AuthoringConfigurationHash: binding.AuthoringConfigurationHash, SnapshotHash: binding.SnapshotHash, ManifestHash: binding.ManifestHash, CheckPolicyVersion: binding.CheckPolicyVersion, CompilerVersion: binding.CompilerVersion,
 				},
 			}
+			if f := a.Finalization; f != nil {
+				attempt.Finalization = &workorchmanagementcontract.PreparationFinalizationView{Code: f.Code, Owner: f.Owner, Stage: f.Stage}
+			}
+			for _, d := range a.Observations {
+				value := workorchmanagementcontract.PreparationObservationView{Phase: d.Phase, Owner: d.Owner, Stage: d.Stage, Code: d.Code, StartedAt: d.StartedAt, CompletedAt: d.CompletedAt, Attempted: d.Attempted, ErrorByteCount: d.ErrorByteCount, ErrorSHA256: d.ErrorSHA256, NotSavedReason: d.NotSavedReason}
+				if !d.Deadline.IsZero() {
+					deadline := d.Deadline
+					value.Deadline = &deadline
+				}
+				attempt.Observations = append(attempt.Observations, value)
+			}
 			if c := a.DefinitionCompilation; c != nil {
 				attempt.DefinitionCompilation = &workorchmanagementcontract.PreparationDefinitionCompilationView{
 					CompilerVersion: c.CompilerVersion, SnapshotHash: c.SnapshotHash, ManifestHash: c.ManifestHash,
@@ -158,6 +169,8 @@ func (b *Biz) CheckStartupPreparation(ctx context.Context, workspaceID common.Wo
 	if b == nil || b.EventHub() == nil || ctx == nil || workspaceID == "" || request.Validate() != nil {
 		return workorchmanagementcontract.PreparationOperationView{}, common.ErrInvalidArgument
 	}
+	ctx, stop := context.WithTimeout(ctx, preparationTotalBudget)
+	defer stop()
 	defer preparationtrace.Start(ctx, workspaceID, request.RequestID, "http_check", request.ExpectedWorkspaceRevision)()
 
 	if err := ctx.Err(); err != nil {
@@ -195,6 +208,9 @@ func (b *Biz) CheckStartupPreparation(ctx context.Context, workspaceID common.Wo
 		}
 		response = settled
 	}
+	if err := ctx.Err(); err != nil {
+		return workorchmanagementcontract.PreparationOperationView{}, err
+	}
 	finishProjection := preparationtrace.Start(ctx, workspaceID, request.RequestID, "response_compilation", response.State.WorkspaceRevision)
 	defer finishProjection()
 	view, projectionErr := startupPreparationView(response.State)
@@ -230,6 +246,9 @@ func (b *Biz) CheckStartupPreparation(ctx context.Context, workspaceID common.Wo
 	// observations before returning; never upgrade the owner's epoch-unknown or
 	// stale projection and never acquire/renew any resource here.
 	if err := projectPreparationResponseExpiry(&operation.Preparation, w, time.Now().UTC()); err != nil {
+		return workorchmanagementcontract.PreparationOperationView{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return workorchmanagementcontract.PreparationOperationView{}, err
 	}
 	return operation, operation.ValidateFor(string(workspaceID), request)

@@ -41,7 +41,7 @@ func TestPreparationPureCompilationBoundary(t *testing.T) {
 		paths = append(paths, more...)
 	}
 	allowed := map[string]bool{
-		"time": true,
+		"time": true, "errors": true,
 		"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract":                   true,
 		"github.com/muidea/workorch/internal/pkg/bootstrapcompiler":                            true,
 		"github.com/muidea/workorch/internal/pkg/runtimeprojection":                            true,

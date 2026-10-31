@@ -40,9 +40,12 @@ type WorkspacePreparationBinding struct {
 }
 
 type WorkspacePreparationAttempt struct {
-	ExecutionInputVersion      string                            `json:",omitempty"`
-	DefinitionCompilation      *PreparationDefinitionCompilation `json:",omitempty"`
-	Assessment                 *PreparationAssessment            `json:",omitempty"`
+	// Restricted owner diagnostics; public projections expose metadata only.
+	Observations               []PreparationObservationDiagnostic `json:",omitempty"`
+	Finalization               *PreparationFinalization           `json:",omitempty"`
+	ExecutionInputVersion      string                             `json:",omitempty"`
+	DefinitionCompilation      *PreparationDefinitionCompilation  `json:",omitempty"`
+	Assessment                 *PreparationAssessment             `json:",omitempty"`
 	SealEvidenceRef            string
 	MCPRegistryEvidenceRef     string
 	RequestID                  string
@@ -102,7 +105,8 @@ type WorkspacePreparationCheckResult struct {
 type WorkspacePreparationCheckState string
 
 // WorkspacePreparationRecord stores bounded operation identities only. Raw
-// resources, credentials, provider clients and diagnostic text cannot enter it.
+// resources, credentials and provider clients cannot enter it. Bounded raw
+// observation errors are restricted owner data, excluded from public DTOs.
 // Reads never create this record or resume an accepted/unknown attempt.
 type WorkspacePreparationRecord struct {
 	Completions []WorkspacePreparationCompletion `json:",omitempty"`
@@ -118,6 +122,11 @@ func (r WorkspacePreparationRecord) Clone() WorkspacePreparationRecord {
 		if r.Attempts[i].DefinitionCompilation != nil {
 			value := *r.Attempts[i].DefinitionCompilation
 			r.Attempts[i].DefinitionCompilation = &value
+		}
+		r.Attempts[i].Observations = ClonePreparationObservations(r.Attempts[i].Observations)
+		if f := r.Attempts[i].Finalization; f != nil {
+			v := *f
+			r.Attempts[i].Finalization = &v
 		}
 		r.Attempts[i].Checks = slices.Clone(r.Attempts[i].Checks)
 		if r.Attempts[i].Assessment != nil {
@@ -231,6 +240,12 @@ func ValidPreparationBlockedReason(checkID, reason string) bool {
 }
 
 func (a WorkspacePreparationAttempt) Validate() error {
+	if len(a.Observations) != 0 && a.State != WorkspacePreparationBlocked {
+		return common.ErrConflict
+	}
+	if ValidatePreparationObservations(a.Observations, a.StartedAt, a.CompletedAt) != nil || a.Finalization != nil && (a.State != WorkspacePreparationBlocked || a.Assessment == nil || a.Assessment.Outcome != "checks_passed" || a.Finalization.Validate() != nil) {
+		return common.ErrConflict
+	}
 	if a.OwnerRevalidationVersion != "" && (a.OwnerRevalidationVersion != PreparationOwnerRevalidationVersion || a.EvaluationVersion != PreparationCheckEvaluationVersion) {
 		return common.ErrConflict
 	}

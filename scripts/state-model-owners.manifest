@@ -49,6 +49,9 @@ internal/modules/kernel/workspace/pkg/models/activation_preparation.go|Workspace
 internal/modules/kernel/workspace/pkg/models/activation_preparation.go|WorkspacePreparationAttempt.SkillContextState|derived_projection|internal/modules/kernel/workspace|-
 internal/modules/kernel/workspace/pkg/models/activation_preparation.go|WorkspacePreparationAttempt.SkillReferenceState|derived_projection|internal/modules/kernel/workspace|-
 internal/modules/kernel/workspace/pkg/models/activation_preparation.go|WorkspacePreparationAttempt.SkillStatusState|derived_projection|internal/modules/kernel/workspace|-
+internal/modules/kernel/workspace/pkg/models/preparation_observation_diagnostic.go|PreparationObservationDiagnostic.Phase|immutable_trace|internal/modules/kernel/workspace|-
+internal/modules/kernel/workspace/pkg/models/preparation_observation_diagnostic.go|PreparationObservationDiagnostic.Stage|immutable_trace|internal/modules/kernel/workspace|-
+internal/modules/kernel/workspace/pkg/models/preparation_observation_diagnostic.go|PreparationFinalization.Stage|derived_projection|internal/modules/kernel/workspace|-
 internal/modules/kernel/workspace/pkg/models/preparation_assessment.go|PreparationAssessment.Outcome|derived_projection|internal/modules/kernel/workspace|-
 internal/modules/kernel/workspace/pkg/models/preparation_assessment.go|PreparationOutstandingCheck.State|derived_projection|internal/modules/kernel/workspace|-
 internal/modules/kernel/workspace/pkg/models/preparation_skill_status.go|PreparationSkillStatusCompilation.State|derived_projection|internal/modules/kernel/workspace|-

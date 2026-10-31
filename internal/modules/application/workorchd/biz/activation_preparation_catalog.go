@@ -35,12 +35,18 @@ func (b *Biz) observePreparationProviderCatalogFor(ctx context.Context, workspac
 	ev := magicevent.NewEventWithContext(llmevents.TopicObserveProviderCatalogCache, ModuleID, llmevents.CommandDestination, magicevent.NewHeader(), bounded, command)
 	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicObserveProviderCatalogCache, eventcontract.LaneScope{WorkspaceID: string(workspaceID)}))
 	result := b.SendEvent(ev)
-	if result == nil || result.Error() != nil {
+	if result == nil {
 		return llmevents.ObserveProviderCatalogCacheResult{}, common.ErrConflict
+	}
+	if err := result.Error(); err != nil {
+		return llmevents.ObserveProviderCatalogCacheResult{}, preparationStageContextError(bounded, "catalog", err)
 	}
 	value, resultErr := result.Get()
 	response, ok := value.(llmevents.ObserveProviderCatalogCacheResult)
-	if resultErr != nil || !ok || response.ValidateFor(command) != nil {
+	if resultErr != nil {
+		return llmevents.ObserveProviderCatalogCacheResult{}, preparationStageContextError(bounded, "catalog_result", resultErr)
+	}
+	if !ok || response.ValidateFor(command) != nil {
 		return llmevents.ObserveProviderCatalogCacheResult{}, common.ErrConflict
 	}
 	return response.Clone(), nil

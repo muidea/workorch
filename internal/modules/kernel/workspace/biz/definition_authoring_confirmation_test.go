@@ -59,6 +59,7 @@ func seedReviewedAuthoringConfirmationWithTemplate(t *testing.T, owners *fileDef
 	if decorate != nil {
 		decorate(&template)
 	}
+	input.TemplateID = template.ID
 	if err := owners.repositories.WorkspaceTemplates.Create(ctx, &template); err != nil {
 		t.Fatal(err)
 	}

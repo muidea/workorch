@@ -153,6 +153,9 @@ func (m *Biz) handlePreparationBlockedSettlement(ev magicevent.Event, result mag
 		result.Set(nil, cd.WrapError(cd.IllegalParam, err, "invalid preparation scope"))
 		return
 	}
+	// Invocation-local compiled source reuse; every query still rereads all raw
+	// rows and fences their revision. Never retained on Biz or across requests.
+	ctx = withPreparationExactReads(ctx)
 	souls, soulReason := m.bindOriginalPreparationSouls(ctx, c)
 	registry, registryReason := m.bindOriginalPreparationSkillRegistry(ctx, c)
 	provider := m.bindOriginalPreparationProviderCache(ctx, c)
@@ -178,7 +181,7 @@ func (m *Biz) handlePreparationBlockedSettlement(ev magicevent.Event, result mag
 		seal.ContentHash = seal.Hash()
 	}
 	m.reobservePreparationFiles(ctx, evidence, resources, configs)
-	value, err := m.finishBlockedPreparation(ctx, workspacePreparationBlocked{ProcessPolicyFacts: c.ProcessPolicyFacts, Command: c.Original, Reason: "check_pipeline_incomplete", SealEvidence: seal, MCPRegistryEvidence: mcpRegistry, MCPRegistryReason: mcpReason, ProviderCacheReason: c.ProviderCacheReason, ProviderCacheEvidence: provider, MemoryInventoryEvidence: memoryInventory, MemoryInventoryReason: memoryReason, RunHistoryReason: c.RunHistoryReason, RunHistoryEvidence: runHistory, DirectoryEvidence: evidence, DirectoryReason: directoryReason, ResourceEvidence: resources, ManagedConfigEvidence: configs, ManagedConfigReason: configReason, SoulEvidence: souls, SoulReason: soulReason, SkillRegistryEvidence: registry, SkillRegistryReason: registryReason, SkillHubEffectRef: c.SkillHubEffectRef, SkillHubGlobal: c.SkillHubGlobal, SkillHubProject: c.SkillHubProject, At: time.Now().UTC()})
+	value, err := m.finishBlockedPreparation(ctx, workspacePreparationBlocked{Observations: c.Observations, ProcessPolicyFacts: c.ProcessPolicyFacts, Command: c.Original, Reason: "check_pipeline_incomplete", SealEvidence: seal, MCPRegistryEvidence: mcpRegistry, MCPRegistryReason: mcpReason, ProviderCacheReason: c.ProviderCacheReason, ProviderCacheEvidence: provider, MemoryInventoryEvidence: memoryInventory, MemoryInventoryReason: memoryReason, RunHistoryReason: c.RunHistoryReason, RunHistoryEvidence: runHistory, DirectoryEvidence: evidence, DirectoryReason: directoryReason, ResourceEvidence: resources, ManagedConfigEvidence: configs, ManagedConfigReason: configReason, SoulEvidence: souls, SoulReason: soulReason, SkillRegistryEvidence: registry, SkillRegistryReason: registryReason, SkillHubEffectRef: c.SkillHubEffectRef, SkillHubGlobal: c.SkillHubGlobal, SkillHubProject: c.SkillHubProject, At: time.Now().UTC()})
 	if err != nil {
 		result.Set(nil, cd.WrapError(cd.Unexpected, err, "preparation settlement unavailable; reconcile original identity"))
 		return
@@ -223,6 +226,7 @@ type workspacePreparationAccepted struct {
 }
 
 type workspacePreparationBlocked struct {
+	Observations                    []workspace.PreparationObservationDiagnostic
 	MCPConnection                   *mcpevents.ObservePreparationResult
 	ProcessPolicyFacts              *workspace.PreparationProcessPolicyFacts
 	SealEvidence                    *workspace.WorkspacePreparationSealEvidence
@@ -377,6 +381,7 @@ func (m *Biz) finishBlockedPreparation(ctx context.Context, fact workspacePrepar
 		if err != nil {
 			return workspaceevents.CheckWorkspacePreparationResult{}, err
 		}
+		fact.At = time.Now().UTC()
 		finishReduce := preparationtrace.Start(ctx, command.WorkspaceID, command.RequestID, "settlement_reduce", current.Revision)
 		transition, err := reduceWorkspacePreparationBlocked(current, fact)
 		finishReduce()
@@ -385,6 +390,9 @@ func (m *Biz) finishBlockedPreparation(ctx context.Context, fact workspacePrepar
 		}
 		if transition.Noop {
 			return m.preparationCommandReadback(ctx, current, command)
+		}
+		if err := ctx.Err(); err != nil {
+			return workspaceevents.CheckWorkspacePreparationResult{}, err
 		}
 		if !observedMCP && fact.Reason == "check_pipeline_incomplete" {
 			observedMCP = true
@@ -396,6 +404,9 @@ func (m *Biz) finishBlockedPreparation(ctx context.Context, fact workspacePrepar
 			if err != nil {
 				return workspaceevents.CheckWorkspacePreparationResult{}, err
 			}
+		}
+		if err := ctx.Err(); err != nil {
+			return workspaceevents.CheckWorkspacePreparationResult{}, err
 		}
 		finishCAS := preparationtrace.Start(ctx, command.WorkspaceID, command.RequestID, "settlement_cas", current.Revision)
 		casErr := m.workspaces.CompareAndSwap(ctx, transition.Next, current.Revision)
@@ -745,6 +756,7 @@ func reduceWorkspacePreparationBlocked(current *workspace.Workspace, fact worksp
 		next.StartupPreparation = &record
 	}
 	if reason == "check_pipeline_incomplete" {
+		a.Observations = workspace.ClonePreparationObservations(fact.Observations)
 		a.Checks = workspace.EvaluatePreparationChecks(a, fact.DirectoryEvidence, fact.ResourceEvidence, fact.ManagedConfigEvidence, fact.SoulEvidence)
 		a.Checks = workspace.EvaluatePreparationMemoryCheck(a, fact.MemoryInventoryEvidence)
 		a.Checks = workspace.EvaluatePreparationSealChecks(&next, a)
@@ -793,10 +805,13 @@ func reduceWorkspacePreparationBlocked(current *workspace.Workspace, fact worksp
 		next.StartupPreparation = &record
 	}
 	if reason == "check_pipeline_incomplete" && a.Assessment != nil && a.Assessment.Outcome == "checks_passed" {
-		if completion, err := preparationcompiler.CompileCompletion(&next, a); err == nil {
+		completion, err := preparationcompiler.CompileCompletion(&next, a)
+		a.Finalization = preparationcompiler.CompletionDiagnostic(err)
+		if err == nil {
 			record.Completions = append(record.Completions, completion)
-			next.StartupPreparation = &record
 		}
+		record.Attempts[i] = a
+		next.StartupPreparation = &record
 	}
 	if workspace.ValidatePreparationEvidencePersistence(&next) != nil {
 		return workspaceExecutionTransition{}, common.ErrConflict

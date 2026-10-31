@@ -27,9 +27,13 @@ type PreparationSoulObservation struct {
 
 func (b *Biz) ObservePreparationSouls(ctx context.Context, command workspaceevents.QueryExactConfirmedStartupSnapshotCommand) (PreparationSoulObservation, error) {
 	value := PreparationSoulObservation{PreparationSoulFacts: workspace.PreparationSoulFacts{Version: "workorch-preparation-souls/v1", WorkspaceID: command.WorkspaceID, WorkspaceRevision: command.ExpectedWorkspaceRevision, StartedAt: time.Now().UTC()}}
+	observedCtx := ctx
 	fail := func(code string, err error) (PreparationSoulObservation, error) {
 		value.FailureCode = code
 		value.CompletedAt = time.Now().UTC()
+		if observedCtx != nil {
+			err = preparationStageContextError(observedCtx, code, err)
+		}
 		return value, err
 	}
 	if b == nil || b.EventHub() == nil || ctx == nil || command.Validate() != nil {
@@ -44,6 +48,7 @@ func (b *Biz) ObservePreparationSouls(ctx context.Context, command workspaceeven
 	}
 	bounded, cancel := context.WithTimeout(bound, 3*time.Second)
 	defer cancel()
+	observedCtx = bounded
 	// A missing loader is not an observed empty system default. Never fall back
 	// to process-global configuration or call the full activation builder.
 	if configcore.LoaderFromContext(bounded) == nil {

@@ -31,12 +31,18 @@ func (b *Biz) ObservePreparationRunHistory(ctx context.Context, workspaceID comm
 	ev := magicevent.NewEventWithContext(runevents.TopicObserveWorkspacePreparationHistory, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), bounded, c)
 	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(runevents.Contracts(), ev.ID(), eventcontract.LaneScope{WorkspaceID: string(workspaceID)}))
 	result := b.SendEvent(ev)
-	if result == nil || result.Error() != nil {
+	if result == nil {
 		return runevents.ObserveWorkspacePreparationHistoryResult{}, common.ErrConflict
+	}
+	if err := result.Error(); err != nil {
+		return runevents.ObserveWorkspacePreparationHistoryResult{}, preparationStageContextError(bounded, "history", err)
 	}
 	value, resultErr := result.Get()
 	r, ok := value.(runevents.ObserveWorkspacePreparationHistoryResult)
-	if resultErr != nil || !ok || r.ValidateFor(c) != nil {
+	if resultErr != nil {
+		return runevents.ObserveWorkspacePreparationHistoryResult{}, preparationStageContextError(bounded, "history_result", resultErr)
+	}
+	if !ok || r.ValidateFor(c) != nil {
 		return runevents.ObserveWorkspacePreparationHistoryResult{}, common.ErrConflict
 	}
 	return r.Clone(), nil

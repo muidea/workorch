@@ -17,6 +17,7 @@ func Start(ctx context.Context, workspaceID common.WorkspaceID, requestID, phase
 		ctx = context.Background()
 	}
 	started := time.Now()
+	deadline, hasDeadline := ctx.Deadline()
 	return func() {
 		state := "active"
 		switch {
@@ -27,6 +28,6 @@ func Start(ctx context.Context, workspaceID common.WorkspaceID, requestID, phase
 		}
 		slog.InfoContext(ctx, "preparation phase completed", "workspace_id", workspaceID, "request_id", requestID,
 			"phase", phase, "workspace_revision", revision, "started_at", started.UTC(),
-			"finished_at", time.Now().UTC(), "duration", time.Since(started), "context_state", state)
+			"finished_at", time.Now().UTC(), "duration", time.Since(started), "context_state", state, "has_deadline", hasDeadline, "deadline", deadline.UTC(), "remaining_at_start", deadline.Sub(started))
 	}
 }
