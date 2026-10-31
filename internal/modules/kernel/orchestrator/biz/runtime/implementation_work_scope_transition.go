@@ -214,6 +214,12 @@ func (c *authorityComponent) reserveImplementationWorkScope(ctx context.Context,
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
+	// Storage rollover must be valid before admitting work/physical effects.
+	// Complete history is retained; segment count is not an execution budget.
+	if err := a.SemanticPlanning.ValidateHistoryStorage(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+
 	// 已持久 exact replay 只读返回，不能因当前 phase/resource 变化重开轮次。
 	for _, round := range a.ImplementationWork.Rounds {
 		if round.ScopeRequest.RequestID == request.RequestID {

@@ -342,7 +342,7 @@ func runtimeSemanticPlanningContainsManifest(ledger runtimecontract.RuntimeSeman
 	if ledger.Manifest != nil && strings.TrimSpace(ledger.Manifest.Hash) == manifestHash {
 		return true
 	}
-	for _, generation := range ledger.History {
+	for _, generation := range ledger.AllHistory() {
 		if generation.Snapshot.Manifest != nil && strings.TrimSpace(generation.Snapshot.Manifest.Hash) == manifestHash {
 			return true
 		}

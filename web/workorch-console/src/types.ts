@@ -1873,6 +1873,8 @@ export type TaskProgress = {
 };
 
 export type RuntimeProgress = {
+	implementationWork?: { reservedRounds: number; completedRounds: number; committedReceipts: number; unknownExecutions: number; semanticGenerations: number; archivedSegments: number };
+	terminalAcknowledgedOwners?: string[];
   // Whole-Run totals; absent on older producers. Flat counts below are focus-scoped.
   runEvidence?: { accepted: number; acceptedValidation: number; rejected: number; rejectedValidation: number };
   originalDiagnostic?: RuntimeOriginalDiagnostic;

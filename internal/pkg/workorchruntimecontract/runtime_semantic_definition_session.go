@@ -48,7 +48,7 @@ func validateRuntimeSemanticLedgerDefinitionSourcesInSession(ledger RuntimeSeman
 			return fmt.Errorf("runtime aggregate semantic active manifest: %w", err)
 		}
 	}
-	for i, generation := range ledger.History {
+	for i, generation := range ledger.AllHistory() {
 		if generation.Snapshot.Manifest == nil {
 			continue
 		}

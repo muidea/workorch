@@ -1932,6 +1932,12 @@ func cloneRuntimeSemanticPlanningLedgerRaw(in RuntimeSemanticPlanningLedger) Run
 	out.History = cloneRuntimeStateRawSlice(in.History, func(item RuntimeSemanticPlanningGeneration) RuntimeSemanticPlanningGeneration {
 		return cloneRuntimeSemanticPlanningGenerationRaw(item)
 	})
+	out.HistoryArchive = cloneRuntimeStateRawPointer(in.HistoryArchive, func(archive RuntimeSemanticHistoryArchive) RuntimeSemanticHistoryArchive {
+		archive.Segments = cloneRuntimeStateRawSlice(archive.Segments, func(segment []RuntimeSemanticPlanningGeneration) []RuntimeSemanticPlanningGeneration {
+			return cloneRuntimeStateRawSlice(segment, cloneRuntimeSemanticPlanningGenerationRaw)
+		})
+		return archive
+	})
 	return out
 }
 

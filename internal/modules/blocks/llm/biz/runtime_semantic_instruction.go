@@ -111,6 +111,11 @@ func runtimeSemanticBatchSequence(context runtimecontract.RuntimeSemanticPlanReq
 
 func runtimeSemanticBaseOutputInstruction(context runtimecontract.RuntimeSemanticPlanRequestContext, manifest runtimecontract.RuntimeSemanticPlanManifest) string {
 	base := runtimeSemanticBaseOutputInstructionWithoutWorkContent(context, manifest)
+	for _, obligation := range manifest.ProofObligations {
+		if work := obligation.ImplementationWork; work != nil && work.PurposeChoiceOnly && work.Scope.Request.Policy.ProgressProtocolRef == runtimecontract.RuntimeImplementationWorkProgressV1 {
+			base += " The sealed progress protocol requires implementationIntent.requirementReviews in original coverageItem.sourceObligationChecks order (use each exact checkRef; if absent use the original declarationRef). Review every original requirement exactly once against current content, with only requirementRef and workRequired; the shared remainingWork/reason explains the selected gaps without repeating source text. For implementation_effect, selectedRequirementRefs must be a nonempty unique subset of workRequired originals and remainingWork describes only the minimal change addressing those gaps. For terminal_proof, every workRequired must be false and selectedRequirementRefs must be empty. These are semantic proposals, never validation outcomes or completion credit. Do not equate an edit receipt with a satisfied original requirement."
+		}
+	}
 	if context.WorkContext == nil {
 		return base
 	}

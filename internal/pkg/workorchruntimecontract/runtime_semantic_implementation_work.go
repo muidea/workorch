@@ -40,6 +40,9 @@ func (w RuntimeSemanticImplementationWork) Validate() error {
 }
 
 func (w RuntimeSemanticImplementationWork) validateInSemanticSession(session *runtimeSemanticValidationSession) error {
+	if w.Scope.Request.Policy.ProgressProtocolRef == RuntimeImplementationWorkProgressV1 && w.Scope.Content == nil {
+		return fmt.Errorf("implementation progress requires complete current content before a semantic request")
+	}
 	if w.Scope.Request.InputRevision != nil && w.PurposeChoiceOnly && !w.EffectAvailable {
 		return fmt.Errorf("input revision cannot bypass exhausted original effect rounds")
 	}

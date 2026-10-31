@@ -183,7 +183,7 @@ func (c *planningTransactionComponent) invalidateSemanticCatalogGeneration(ctx c
 		// same manifest hash under a new logical request, so hash-only matching
 		// would let a delayed old event acknowledge or retire the wrong
 		// generation.
-		for _, history := range aggregate.SemanticPlanning.History {
+		for _, history := range aggregate.SemanticPlanning.AllHistory() {
 			if history.Snapshot.Manifest != nil && history.Snapshot.Manifest.Hash == manifestHash && history.Snapshot.LogicalRequestID == logicalRequestID {
 				return aggregate, nil
 			}

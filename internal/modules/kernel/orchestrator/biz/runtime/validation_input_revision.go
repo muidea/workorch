@@ -22,7 +22,7 @@ func retireRuntimeInputReviewForRevision(a RuntimeAggregate) (RuntimeAggregate, 
 	if policy == nil || policy.InputRevisionProtocolRef != runtimecontract.RuntimeValidationInputRevisionProtocolV1 || policy.OwnerModuleID != v.OwnerModuleID {
 		return a, false, nil
 	}
-	if a.ActiveDispatch != nil || a.Facts.Failure != nil || a.Facts.RepairDirective != nil || a.ImplementationWork.ScopePreview != nil || a.Termination != nil || len(a.SemanticPlanning.History) >= runtimecontract.RuntimeSemanticPlanningHistoryLimit-2 || len(a.Facts.Focus.CoverageWorkItemIDs) != 1 || a.Facts.Focus.CoverageWorkItemIDs[0] != v.Binding.CoverageWorkItemID || !slices.Contains(runtimecontract.RuntimeCWIsEligibleForPlanning(a.Facts), v.Binding.CoverageWorkItemID) {
+	if a.ActiveDispatch != nil || a.Facts.Failure != nil || a.Facts.RepairDirective != nil || a.ImplementationWork.ScopePreview != nil || a.Termination != nil || len(a.Facts.Focus.CoverageWorkItemIDs) != 1 || a.Facts.Focus.CoverageWorkItemIDs[0] != v.Binding.CoverageWorkItemID || !slices.Contains(runtimecontract.RuntimeCWIsEligibleForPlanning(a.Facts), v.Binding.CoverageWorkItemID) {
 		return a, false, nil
 	}
 	rounds := 0
@@ -46,8 +46,7 @@ func retireRuntimeInputReviewForRevision(a RuntimeAggregate) (RuntimeAggregate, 
 		}
 	}
 	ledger := a.SemanticPlanning
-	snapshot := ledger.Clone()
-	snapshot.History = nil
+	snapshot := ledger.WithoutHistory().Clone()
 	g := runtimecontract.RuntimeSemanticPlanningGeneration{Reason: runtimecontract.RuntimeSemanticPlanningRetirementInputRevision, RetiredAtStateRevision: a.StateRevision + 1, Snapshot: snapshot}
 	if err := g.Validate(); err != nil {
 		return a, false, err
@@ -55,7 +54,12 @@ func retireRuntimeInputReviewForRevision(a RuntimeAggregate) (RuntimeAggregate, 
 	if err := retireSemanticPlanningRequestSessions(&a, ledger, runtimecontract.RuntimeValidationInputRevisionRetirementOutcome); err != nil {
 		return a, false, err
 	}
-	a.SemanticPlanning = runtimecontract.RuntimeSemanticPlanningLedger{SchemaVersion: ledger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningRequired, DefinitionSeed: ledger.DefinitionSeed.Clone(), CatalogRefreshAttempts: ledger.CatalogRefreshAttempts, FeasibilityGaps: ledger.FeasibilityGaps, History: append(ledger.History, g)}
+	a.SemanticPlanning = runtimecontract.RuntimeSemanticPlanningLedger{SchemaVersion: ledger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningRequired, DefinitionSeed: ledger.DefinitionSeed.Clone(), CatalogRefreshAttempts: ledger.CatalogRefreshAttempts, FeasibilityGaps: ledger.FeasibilityGaps, History: ledger.History, HistoryArchive: ledger.HistoryArchive}
+	if appended, err := a.SemanticPlanning.AppendHistory(g); err != nil {
+		return a, false, err
+	} else {
+		a.SemanticPlanning = appended
+	}
 	facts, decision, err := reduceRuntimeAggregateWithDirective(a, a.Facts, &a.Decision.AuthoritySnapshot)
 	if err != nil {
 		return a, false, fmt.Errorf("reduce input revision: %w", err)

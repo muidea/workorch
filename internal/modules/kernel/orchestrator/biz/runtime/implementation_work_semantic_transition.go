@@ -32,8 +32,8 @@ func projectImplementationPurpose(a *RuntimeAggregate) (bool, error) {
 	if err := ledger.CoverageOrderDocument.ValidateAgainstManifest(*ledger.Manifest); err != nil {
 		return false, err
 	}
-	if len(ledger.History) >= runtimecontract.RuntimeSemanticPlanningHistoryLimit {
-		return false, fmt.Errorf("%w: implementation purpose semantic history exhausted", common.ErrConflict)
+	if err := ledger.ValidateHistoryStorage(); err != nil {
+		return false, err
 	}
 	preview := a.ImplementationWork.ScopePreview.Clone()
 	choice := runtimecontract.RuntimeImplementationWorkPurposeChoice{CoverageWorkItemID: preview.Request.CoverageWorkItemID, ScopeRequestID: preview.Request.RequestID, SemanticManifestHash: ledger.Manifest.Hash, LogicalRequestID: ledger.LogicalRequestID, DocumentHash: ledger.DocumentHash, Purpose: ledger.CoverageOrderDocument.ImplementationPurpose}
@@ -59,8 +59,7 @@ func projectImplementationPurpose(a *RuntimeAggregate) (bool, error) {
 	}
 	a.ImplementationWork.PurposeChoices = append(a.ImplementationWork.PurposeChoices, choice)
 	a.ImplementationWork.ScopePreview = nil
-	snapshot := ledger.Clone()
-	snapshot.History = nil
+	snapshot := ledger.WithoutHistory().Clone()
 	history := runtimecontract.RuntimeSemanticPlanningGeneration{RetiredAtStateRevision: a.StateRevision + 1, Reason: runtimecontract.RuntimeSemanticPlanningRetirementImplementationPurpose, Snapshot: snapshot}
 	if err := history.Validate(); err != nil {
 		return false, err
@@ -68,7 +67,12 @@ func projectImplementationPurpose(a *RuntimeAggregate) (bool, error) {
 	if err := retireSemanticPlanningRequestSessions(a, ledger, "implementation_purpose_selected"); err != nil {
 		return false, err
 	}
-	a.SemanticPlanning = runtimecontract.RuntimeSemanticPlanningLedger{SchemaVersion: ledger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningRequired, DefinitionSeed: ledger.DefinitionSeed.Clone(), CatalogRefreshAttempts: ledger.CatalogRefreshAttempts, FeasibilityGaps: ledger.FeasibilityGaps, History: append(ledger.History, history)}
+	a.SemanticPlanning = runtimecontract.RuntimeSemanticPlanningLedger{SchemaVersion: ledger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningRequired, DefinitionSeed: ledger.DefinitionSeed.Clone(), CatalogRefreshAttempts: ledger.CatalogRefreshAttempts, FeasibilityGaps: ledger.FeasibilityGaps, History: ledger.History, HistoryArchive: ledger.HistoryArchive}
+	if appended, err := a.SemanticPlanning.AppendHistory(history); err != nil {
+		return false, err
+	} else {
+		a.SemanticPlanning = appended
+	}
 	return true, nil
 }
 

@@ -1,11 +1,48 @@
 package runtime
 
 import (
+	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestInputReviewPrecedingLedgerAcrossStorageVersions(t *testing.T) {
+	_, _, aggregate, _, _, _ := sealedSemanticPlanningAggregate(t)
+	ledger := aggregate.SemanticPlanning.WithoutHistory()
+	for i := 0; i < 19; i++ {
+		snapshot := aggregate.SemanticPlanning.WithoutHistory().Clone()
+		snapshot.SchemaVersion = ledger.SchemaVersion
+		snapshot.LogicalRequestID = fmt.Sprintf("input-review-prefix-%d", i)
+		generation := runtimecontract.RuntimeSemanticPlanningGeneration{
+			RetiredAtStateRevision: uint64(i + 2), Reason: runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated,
+			InvalidationSignatures: []string{fmt.Sprintf("change-%d", i)}, PrerequisiteIDs: []string{snapshot.Manifest.OwnerCatalogs[0].PrerequisiteID}, Snapshot: snapshot,
+		}
+		var err error
+		ledger, err = ledger.AppendHistory(generation)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := ledger.Clone()
+	for index, generation := range ledger.AllHistory() {
+		preceding, err := runtimeInputReviewPrecedingLedger(ledger, generation)
+		if err != nil || preceding.HistoryCount() != index {
+			t.Fatalf("prefix %d: count=%d error=%v", index, preceding.HistoryCount(), err)
+		}
+		if err := preceding.ValidateHistoryStorage(); err != nil {
+			t.Fatalf("prefix %d packing: %v", index, err)
+		}
+		if !reflect.DeepEqual(preceding.WithoutHistory().Manifest, generation.Snapshot.Manifest) {
+			t.Fatal("prefix reconstruction rewrote semantic input")
+		}
+	}
+	if !reflect.DeepEqual(ledger, before) {
+		t.Fatal("prefix reconstruction rewrote original history")
+	}
+}
 
 func TestInputReviewInformationBudgetAppliesOnlyToUnresolvedExactSubjects(t *testing.T) {
 	document := runtimecontract.RuntimeSemanticPlanDocument{Proposals: []runtimecontract.RuntimeSemanticProofProposal{
@@ -14,11 +51,8 @@ func TestInputReviewInformationBudgetAppliesOnlyToUnresolvedExactSubjects(t *tes
 	}}
 	for _, tc := range []struct {
 		name, subject, want string
-		count               int
 	}{
 		{name: "first question"},
-		{name: "last available retirement", count: runtimecontract.RuntimeSemanticPlanningHistoryLimit - 1},
-		{name: "history exhausted", count: runtimecontract.RuntimeSemanticPlanningHistoryLimit, want: "validation_input_review_history_exhausted"},
 		{name: "exact unresolved subject already answered", subject: "unresolved-input", want: "validation_input_review_information_exhausted"},
 		{name: "different content has a new subject", subject: "older-input"},
 		{name: "another now-consistent input does not block a new question", subject: "consistent-input"},
@@ -28,7 +62,7 @@ func TestInputReviewInformationBudgetAppliesOnlyToUnresolvedExactSubjects(t *tes
 			if tc.subject != "" {
 				info = []runtimecontract.RuntimeValidationInputReviewInformation{{SubjectHash: tc.subject}}
 			}
-			if got := runtimeInputReviewInformationFailure(tc.count, info, document); got != tc.want {
+			if got := runtimeInputReviewInformationFailure(info, document); got != tc.want {
 				t.Fatalf("failure=%q want %q", got, tc.want)
 			}
 		})

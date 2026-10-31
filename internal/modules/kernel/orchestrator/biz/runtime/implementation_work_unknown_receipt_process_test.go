@@ -90,7 +90,7 @@ func TestImplementationWorkUnknownLateReceiptProcess(t *testing.T) {
 	}
 }
 
-func implementationWorkUnknownLateReceiptAcrossProcesses(t *testing.T, aggregate RuntimeAggregate, event RuntimeInternalEvent) {
+func implementationWorkUnknownLateReceiptAcrossProcesses(t *testing.T, aggregate RuntimeAggregate, event RuntimeInternalEvent, alreadyCommitted ...bool) {
 	t.Helper()
 	directory := t.TempDir()
 	aggregateData, err := json.Marshal(aggregate)
@@ -113,6 +113,10 @@ func implementationWorkUnknownLateReceiptAcrossProcesses(t *testing.T, aggregate
 		}
 	}
 	repository := &implementationWorkProcessRepository{path: filepath.Join(directory, "aggregate.json")}
+	delta := 1
+	if len(alreadyCommitted) > 0 && alreadyCommitted[0] {
+		delta = 0
+	}
 	for invocation := 0; invocation < 2; invocation++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestImplementationWorkUnknownLateReceiptProcess$", "-test.count=1", "-test.timeout=15s")
@@ -126,7 +130,7 @@ func implementationWorkUnknownLateReceiptAcrossProcesses(t *testing.T, aggregate
 		if err != nil {
 			t.Fatal(err)
 		}
-		if persisted.StateRevision != aggregate.StateRevision+1 || len(persisted.OperationReceipts) != len(aggregate.OperationReceipts)+1 {
+		if persisted.StateRevision != aggregate.StateRevision+uint64(delta) || len(persisted.OperationReceipts) != len(aggregate.OperationReceipts)+delta {
 			t.Fatalf("独立进程 callback %d 丢失或重复 CAS", invocation)
 		}
 		if !reflect.DeepEqual(persisted.ExecutionBudget, aggregate.ExecutionBudget) || !reflect.DeepEqual(persisted.ImplementationWork, aggregate.ImplementationWork) {

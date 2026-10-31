@@ -45,7 +45,7 @@ func ValidateRuntimeImplementationWorkingBindingSemanticSource(round RuntimeImpl
 	if validateImplementationWorkingBindingSemanticSource(round, semantic) == nil {
 		matches++
 	}
-	for _, generation := range semantic.History {
+	for _, generation := range semantic.AllHistory() {
 		if validateImplementationWorkingBindingSemanticSource(round, generation.Snapshot) == nil {
 			matches++
 		}
@@ -181,7 +181,7 @@ func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinition
 		}
 		seenChoices[choice.SemanticManifestHash] = true
 		matches := 0
-		for _, history := range semantic.History {
+		for _, history := range semantic.AllHistory() {
 			snapshot := history.Snapshot
 			if history.Reason != RuntimeSemanticPlanningRetirementImplementationPurpose || snapshot.Manifest == nil || snapshot.CoverageOrderDocument == nil || snapshot.Manifest.Hash != choice.SemanticManifestHash || snapshot.LogicalRequestID != choice.LogicalRequestID || snapshot.DocumentHash != choice.DocumentHash || StableRuntimeSemanticPlanDocumentHash(*snapshot.CoverageOrderDocument) != choice.DocumentHash || snapshot.CoverageOrderDocument.ImplementationPurpose != choice.Purpose {
 				continue

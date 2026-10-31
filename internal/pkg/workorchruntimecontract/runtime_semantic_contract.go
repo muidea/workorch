@@ -1935,6 +1935,9 @@ func validateRuntimeSemanticPlanDocumentAgainstValidatedManifestUncached(d Runti
 	if err := validateRuntimeImplementationIntent(d.ImplementationIntent, purposeWork, declaration); err != nil {
 		return err
 	}
+	if err := validateRuntimeImplementationProgress(d, manifest, purposeWork, declaration); err != nil {
+		return err
+	}
 	if purposeWork != nil {
 		if purposeWork.Scope.Request.InputRevision != nil && d.ImplementationPurpose != RuntimeImplementationWorkPurposeEffect {
 			return fmt.Errorf("rejected input requires a real bounded revision before fresh review")
@@ -2447,9 +2450,9 @@ const (
 	RuntimeSemanticPlanningRetirementRequestContractRepair  RuntimeSemanticPlanningRetirementReason = "request_contract_repaired"
 )
 
-// RuntimeSemanticPlanningHistoryLimit bounds immutable semantic lineage kept
-// inside the Runtime aggregate.  Exceeding the bound is a contract failure;
-// history is never silently discarded to make a new generation fit.
+// RuntimeSemanticPlanningHistoryLimit is the segment/tail size, NOT a Run
+// generation budget. Complete older segments remain in the same CAS record.
+// No history is discarded and storage rollover never refunds execution budget.
 const RuntimeSemanticPlanningHistoryLimit = 16
 
 // RuntimeSemanticFeasibilityGap preserves one retired semantic proposal and
@@ -2581,12 +2584,11 @@ func (g RuntimeSemanticPlanningGeneration) Normalized() RuntimeSemanticPlanningG
 	// nested History tree.  Validation below rejects any non-nil nested history;
 	// normalization must remain bounded so a corrupt persisted record cannot
 	// turn startup validation into an unbounded recursive clone.
-	nestedHistory := append([]RuntimeSemanticPlanningGeneration(nil), g.Snapshot.History...)
-	g.Snapshot.History = nil
+	nestedHistory := g.Snapshot.History
+	nestedArchive := g.Snapshot.HistoryArchive
+	g.Snapshot = g.Snapshot.WithoutHistory()
 	g.Snapshot = g.Snapshot.Clone()
-	if nestedHistory != nil {
-		g.Snapshot.History = nestedHistory
-	}
+	g.Snapshot.History, g.Snapshot.HistoryArchive = nestedHistory, nestedArchive
 	return g
 }
 
@@ -2673,7 +2675,7 @@ func validateRuntimeSemanticPlanningGenerationComplete(raw, g RuntimeSemanticPla
 	if g.Reason != RuntimeSemanticPlanningRetirementInputReviewInformation && g.InputReviewResolutionID != "" {
 		return fmt.Errorf("runtime non-review retirement cannot carry an information resolution")
 	}
-	if g.Snapshot.History != nil {
+	if g.Snapshot.History != nil || g.Snapshot.HistoryArchive != nil {
 		return fmt.Errorf("runtime semantic planning generation snapshot must not contain nested history")
 	}
 	if g.Snapshot.Phase == RuntimeSemanticPlanningRequired || g.Snapshot.Phase == RuntimeSemanticPlanningFailed {
@@ -2759,11 +2761,12 @@ type RuntimeSemanticPlanningLedger struct {
 	FeasibilityGaps         []RuntimeSemanticFeasibilityGap
 	CatalogRefreshAttempts  int
 	Failure                 *RuntimeOriginalDiagnostic
-	// History is immutable semantic-generation audit lineage. It is owned by
-	// Orchestrator SM-2 and never participates in the current provider request.
-	// A fresh generation starts with Phase=Required while retaining all prior
-	// snapshots here.
-	History []RuntimeSemanticPlanningGeneration
+	// History is the recent immutable semantic-generation tail. Complete older
+	// bodies remain in HistoryArchive. All consumers use AllHistory in original
+	// order; neither tier participates in the current provider request or grants
+	// authority. Orchestrator SM-2 owns retirement, with a fresh Required ledger.
+	History        []RuntimeSemanticPlanningGeneration
+	HistoryArchive *RuntimeSemanticHistoryArchive `json:",omitempty"`
 }
 
 func NewRuntimeSemanticPlanningLedger(seed RuntimeDefinitionSeed) (RuntimeSemanticPlanningLedger, error) {
@@ -2829,6 +2832,22 @@ func (l RuntimeSemanticPlanningLedger) Normalized() RuntimeSemanticPlanningLedge
 		l.FeasibilityGaps[idx] = l.FeasibilityGaps[idx].Normalized()
 	}
 	l.Failure = l.Failure.Normalized()
+	if l.HistoryArchive != nil {
+		archive := &RuntimeSemanticHistoryArchive{ProtocolRef: l.HistoryArchive.ProtocolRef, GenerationCount: l.HistoryArchive.GenerationCount}
+		if l.HistoryArchive.Segments != nil {
+			archive.Segments = make([][]RuntimeSemanticPlanningGeneration, len(l.HistoryArchive.Segments))
+			for i, segment := range l.HistoryArchive.Segments {
+				if segment != nil {
+					archive.Segments[i] = make([]RuntimeSemanticPlanningGeneration, len(segment))
+					for j, generation := range segment {
+						archive.Segments[i][j] = generation.Clone()
+					}
+				}
+			}
+		}
+		l.HistoryArchive = archive
+	}
+
 	if len(l.History) > 0 {
 		values := make([]RuntimeSemanticPlanningGeneration, 0, len(l.History))
 		for _, value := range l.History {
@@ -2930,8 +2949,11 @@ func validateRuntimeSemanticPlanningLedgerInSession(l RuntimeSemanticPlanningLed
 }
 
 func validateRuntimeSemanticPlanningLedgerNormalized(raw, l RuntimeSemanticPlanningLedger, session *runtimeSemanticValidationSession) error {
-	rawHistory := append([]RuntimeSemanticPlanningGeneration(nil), raw.History...)
-	if l.SchemaVersion != RuntimeSemanticPlanningLedgerSchemaCurrent {
+	rawHistory := make([]RuntimeSemanticPlanningGeneration, 0, raw.HistoryCount())
+	for _, generation := range raw.AllHistory() {
+		rawHistory = append(rawHistory, generation)
+	}
+	if l.SchemaVersion != RuntimeSemanticPlanningLedgerSchemaCurrent && l.SchemaVersion != RuntimeSemanticPlanningLedgerSchemaSegmented {
 		return fmt.Errorf("runtime semantic planning ledger requires current schema")
 	}
 	// Ledger collections are identity-bearing history, not presentation lists.
@@ -2943,23 +2965,25 @@ func validateRuntimeSemanticPlanningLedgerNormalized(raw, l RuntimeSemanticPlann
 		len(raw.History) != len(l.History) {
 		return fmt.Errorf("runtime semantic planning ledger contains duplicate or empty identity history")
 	}
-	if len(l.History) > RuntimeSemanticPlanningHistoryLimit {
-		return fmt.Errorf("runtime semantic planning history exceeds bounded limit %d", RuntimeSemanticPlanningHistoryLimit)
+	if err := raw.ValidateHistoryStorage(); err != nil {
+		return err
+	}
+	if raw.HistoryCount() != l.HistoryCount() {
+		return fmt.Errorf("runtime semantic history count changed")
 	}
 	type generationIdentity struct {
 		manifestHash     string
 		logicalRequestID string
 	}
-	seenHistory := make(map[generationIdentity]struct{}, len(l.History))
+	seenHistory := make(map[generationIdentity]struct{}, l.HistoryCount())
 	seenInvalidationSignatures := make(map[string]struct{})
 	lastRetiredRevision := uint64(0)
-	for idx := range l.History {
-		if idx >= len(rawHistory) || len(rawHistory[idx].InvalidationSignatures) != len(l.History[idx].InvalidationSignatures) || len(rawHistory[idx].PrerequisiteIDs) != len(l.History[idx].PrerequisiteIDs) ||
-			len(rawHistory[idx].ReopenedCoverageIDs) != len(l.History[idx].ReopenedCoverageIDs) || len(rawHistory[idx].ReopenTriggerRefs) != len(l.History[idx].ReopenTriggerRefs) ||
-			len(rawHistory[idx].ChangedCoverageIDs) != len(l.History[idx].ChangedCoverageIDs) || len(rawHistory[idx].ClosureChangeTriggerRefs) != len(l.History[idx].ClosureChangeTriggerRefs) {
+	for idx, history := range l.AllHistory() {
+		if idx >= len(rawHistory) || len(rawHistory[idx].InvalidationSignatures) != len(history.InvalidationSignatures) || len(rawHistory[idx].PrerequisiteIDs) != len(history.PrerequisiteIDs) ||
+			len(rawHistory[idx].ReopenedCoverageIDs) != len(history.ReopenedCoverageIDs) || len(rawHistory[idx].ReopenTriggerRefs) != len(history.ReopenTriggerRefs) ||
+			len(rawHistory[idx].ChangedCoverageIDs) != len(history.ChangedCoverageIDs) || len(rawHistory[idx].ClosureChangeTriggerRefs) != len(history.ClosureChangeTriggerRefs) {
 			return fmt.Errorf("runtime semantic planning history %d contains duplicate or empty lineage values", idx)
 		}
-		history := l.History[idx]
 		if err := validateRuntimeSemanticPlanningGenerationNormalized(rawHistory[idx], history, session); err != nil {
 			return fmt.Errorf("runtime semantic planning history %d: %w", idx, err)
 		}

@@ -159,10 +159,14 @@ func implementationWorkPurposeController(t *testing.T, targetOptions ...[]string
 	return implementationWorkPurposeControllerWithLineage(t, targets, nil)
 }
 
-func implementationWorkPurposeControllerWithLineage(t *testing.T, targets []string, rules []runtimecontract.RuntimeLineageAssertionRule) (*RuntimeController, *implementationWorkDetachedRepository, RuntimeAggregate) {
+func implementationWorkPurposeControllerWithLineage(t *testing.T, targets []string, rules []runtimecontract.RuntimeLineageAssertionRule, roundLimits ...int) (*RuntimeController, *implementationWorkDetachedRepository, RuntimeAggregate) {
 	t.Helper()
 	facts := controllerFacts()
-	policy := runtimecontract.RuntimeImplementationWorkPolicy{ProtocolRef: runtimecontract.RuntimeImplementationWorkProtocolV1, OwnerModuleID: runtimecontract.RuntimeModuleFile, AllowedOperations: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileWrite}}, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope}, TargetSelectorRef: "work-scope", TargetSelectorOwnerRef: "profile/work-test", TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: targets, MaxRoundsPerCWI: 2, MaxTargetsPerRound: len(targets), RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true}
+	maxRounds := 2
+	if len(roundLimits) > 0 && roundLimits[0] > 0 {
+		maxRounds = roundLimits[0]
+	}
+	policy := runtimecontract.RuntimeImplementationWorkPolicy{ProtocolRef: runtimecontract.RuntimeImplementationWorkProtocolV1, OwnerModuleID: runtimecontract.RuntimeModuleFile, AllowedOperations: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileWrite}}, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope}, TargetSelectorRef: "work-scope", TargetSelectorOwnerRef: "profile/work-test", TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: targets, MaxRoundsPerCWI: maxRounds, MaxTargetsPerRound: len(targets), RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true}
 	facts.Activation.ExecutionContract.ProfileContracts = []runtimecontract.RuntimeProfileContract{{ID: "work-test", EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{ID: "*", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ImplementationWorkPolicy: &policy}}}}
 	facts.DefinitionFocuses[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	facts.DefinitionFocuses[0].AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
@@ -226,6 +230,8 @@ func TestImplementationWorkPurposeFirstPrivateCASAndTerminalEntry(t *testing.T) 
 }
 
 type implementationWorkRealFileFixture struct {
+	progress     bool
+	maxRounds    int
 	hub          magicevent.Hub
 	directory    string
 	controller   *RuntimeController
@@ -259,6 +265,9 @@ func (f *implementationWorkRealFileFixture) current(t *testing.T, initial Runtim
 		return f.controller, f.repository, fresh
 	}
 	policy := initial.Facts.DefinitionFocuses[0].ImplementationWorkPolicy
+	if f.progress {
+		policy.ProgressProtocolRef = runtimecontract.RuntimeImplementationWorkProgressV1
+	}
 	policy.TargetSelectorRef = "file/workspace_deliverable"
 	policy.AllowedOperations = []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileEdit}}
 	initial.Definition.CapabilityContract = append(initial.Definition.CapabilityContract, runtimecontract.StepKindFileEdit)
@@ -295,7 +304,19 @@ func (f *implementationWorkRealFileFixture) scope(t *testing.T, request runtimec
 	t.Helper()
 	p := request.Policy
 	response := f.send(t, fileevents.TopicAcquireRuntimeTargetSelection, fileevents.AcquireRuntimeTargetSelectionCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.AuthoritySnapshotID, PrerequisiteID: request.RequestID, WorkspaceDeliverableDirectory: f.directory, TargetRole: "implementation_work", TargetSelectorRef: p.TargetSelectorRef, TargetSelectorOwnerRef: p.TargetSelectorOwnerRef, TargetSelectorSubjectRef: p.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: p.TargetSelectorCandidateRefs, ProspectiveTargetAllOfConstraintRefs: p.ProspectiveTargetAllOfConstraintRefs, MaxItems: runtimecontract.RuntimeOwnerInventoryItemsMaxCount}).(fileevents.AcquireRuntimeTargetSelectionResult)
-	return runtimecontract.RuntimeImplementationWorkScopeObservation{Request: request, Selection: response.Selection, Observation: response.Observation}
+	scope := runtimecontract.RuntimeImplementationWorkScopeObservation{Request: request, Selection: response.Selection, Observation: response.Observation}
+	if f.progress {
+		scope.Content = &runtimecontract.RuntimeImplementationWorkContent{ProtocolRef: runtimecontract.RuntimeImplementationWorkContentV1, ManifestRevision: scope.Selection.ObservedRevision}
+		for _, target := range scope.Selection.TargetRefs {
+			body, err := os.ReadFile(filepath.Join(f.directory, target))
+			if err != nil {
+				t.Fatal(err)
+			}
+			h := sha256.Sum256(body)
+			scope.Content.Snapshots = append(scope.Content.Snapshots, runtimecontract.TargetSnapshot{TargetRef: target, Content: string(body), ContentHash: hex.EncodeToString(h[:]), ContentState: runtimecontract.SnapshotContentStateComplete, Size: int64(len(body))})
+		}
+	}
+	return scope
 }
 
 func (f *implementationWorkRealFileFixture) semanticFeasibility(t *testing.T, a RuntimeAggregate, manifest runtimecontract.RuntimeSemanticPlanManifest, proposal runtimecontract.RuntimeSemanticProofProposal) runtimecontract.RuntimeSemanticProofFeasibility {
@@ -438,7 +459,7 @@ func TestRuntimeLineageCompletedRoundsUsesRealFileReceiptsAndOriginalCutoff(t *t
 	})
 }
 
-func testImplementationWorkRealFileTwoRounds(t *testing.T, rules []runtimecontract.RuntimeLineageAssertionRule, verify func(RuntimeAggregate, string)) {
+func testImplementationWorkRealFileTwoRounds(t *testing.T, rules []runtimecontract.RuntimeLineageAssertionRule, verify func(RuntimeAggregate, string), progress ...bool) {
 	t.Helper()
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
@@ -455,7 +476,7 @@ func testImplementationWorkRealFileTwoRounds(t *testing.T, rules []runtimecontra
 	if err := os.WriteFile(filepath.Join(directory, "target.txt"), []byte("initial implementation"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	owner := &implementationWorkRealFileFixture{hub: hub, directory: directory, lineageRules: rules}
+	owner := &implementationWorkRealFileFixture{hub: hub, directory: directory, lineageRules: rules, progress: len(progress) > 0 && progress[0]}
 	first := implementationWorkPrivatePipeline(t, runtimecontract.RuntimeImplementationWorkPurposeEffect, []string{"target.txt"}, owner)
 	for len(first.Facts.Prerequisites.Pending) > 0 {
 		pending := first.Facts.Prerequisites.Pending[0]
@@ -526,11 +547,15 @@ func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.Run
 	if owner != nil {
 		rules = owner.lineageRules
 	}
-	controller, repository, aggregate := implementationWorkPurposeControllerWithLineage(t, targets, rules)
+	maxRounds := 2
+	if owner != nil && owner.maxRounds > 0 {
+		maxRounds = owner.maxRounds
+	}
+	controller, repository, aggregate := implementationWorkPurposeControllerWithLineage(t, targets, rules, maxRounds)
 	if owner != nil {
 		controller, repository, aggregate = owner.current(t, aggregate)
 	}
-	priorRounds, priorChoices, priorHistory, priorEvidence := len(aggregate.ImplementationWork.Rounds), len(aggregate.ImplementationWork.PurposeChoices), len(aggregate.SemanticPlanning.History), len(aggregate.Facts.Evidence.Accepted)
+	priorRounds, priorChoices, priorHistory, priorEvidence := len(aggregate.ImplementationWork.Rounds), len(aggregate.ImplementationWork.PurposeChoices), aggregate.SemanticPlanning.HistoryCount(), len(aggregate.Facts.Evidence.Accepted)
 	purposeRequestID := fmt.Sprintf("purpose-request-%d", priorChoices)
 	workRequestID := fmt.Sprintf("work-request-%d", priorRounds)
 	workProofRequestID := fmt.Sprintf("work-proof-request-%d", priorRounds)
@@ -585,9 +610,21 @@ func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.Run
 	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, Transaction: &RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: "purpose-prefix", LogicalRequestID: purposeRequestID}})
 	document := runtimecontract.RuntimeSemanticPlanDocument{SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: runtimecontract.RuntimeSemanticPlanStepCoverageOrder, CoverageOrder: []common.CoverageWorkItemID{"cwi-v2"}, ImplementationPurpose: purpose}
+	if owner != nil && owner.progress {
+		obligation := manifest.ProofObligations[0]
+		work := obligation.ImplementationWork
+		intent := &runtimecontract.RuntimeImplementationIntent{DeclarationRef: obligation.DeclarationRef, ContentHash: work.Scope.Content.Hash(), RemainingWork: "scripted minimal original requirement work or independent verification", Reason: "compare exact current content with original obligation"}
+		for _, ref := range runtimecontract.RuntimeImplementationRequirementRefs(manifest, *work, obligation.DeclarationRef) {
+			intent.RequirementReviews = append(intent.RequirementReviews, runtimecontract.RuntimeImplementationRequirementReview{RequirementRef: ref, WorkRequired: purpose == runtimecontract.RuntimeImplementationWorkPurposeEffect})
+			if purpose == runtimecontract.RuntimeImplementationWorkPurposeEffect {
+				intent.SelectedRequirementRefs = append(intent.SelectedRequirementRefs, ref)
+			}
+		}
+		document.ImplementationIntent = intent
+	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &document, LogicalRequestID: purposeRequestID}})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventEligibleFocusProjected, Authority: &RuntimeInternalAuthorityPayload{SemanticOrderManifestHash: manifest.Hash, SemanticCoverageOrder: document.CoverageOrder}})
-	if aggregate.ImplementationWork.ScopePreview != nil || len(aggregate.ImplementationWork.PurposeChoices) != priorChoices+1 || len(aggregate.SemanticPlanning.History) != priorHistory+1 || aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired {
+	if aggregate.ImplementationWork.ScopePreview != nil || len(aggregate.ImplementationWork.PurposeChoices) != priorChoices+1 || aggregate.SemanticPlanning.HistoryCount() != priorHistory+1 || aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired {
 		t.Fatal("purpose did not settle exact source and retire generation atomically")
 	}
 	wantRounds := priorRounds
@@ -1013,4 +1050,21 @@ func TestImplementationWorkScopeEnvelopeRejectsAuthoritySmuggling(t *testing.T) 
 			t.Fatalf("scope payload smuggling accepted: %v", err)
 		}
 	}
+}
+
+func TestImplementationWorkProgressRealFileTwoRoundsAndReload(t *testing.T) {
+	testImplementationWorkRealFileTwoRounds(t, nil, func(a RuntimeAggregate, _ string) {
+		reviewed := 0
+		for _, generation := range a.SemanticPlanning.AllHistory() {
+			if d := generation.Snapshot.CoverageOrderDocument; d != nil && d.ImplementationPurpose != "" {
+				if d.ImplementationIntent == nil || len(d.ImplementationIntent.RequirementReviews) == 0 {
+					t.Fatal("lost exact original requirement review across CAS/reload")
+				}
+				reviewed++
+			}
+		}
+		if reviewed < 2 {
+			t.Fatalf("expected two exact implementation purposes, got %d", reviewed)
+		}
+	}, true)
 }

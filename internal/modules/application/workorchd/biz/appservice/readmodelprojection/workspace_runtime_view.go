@@ -117,6 +117,12 @@ func runtimeProgressSummary(runtime *projectioncontract.RuntimeProgress) string 
 	parts = append(parts, fmt.Sprintf("dispatch %d", runtime.CompletedDispatchCount))
 	parts = append(parts, fmt.Sprintf("attempts %d", runtime.CandidateAttemptCount))
 	parts = append(parts, fmt.Sprintf("whole Run: durable effects %d | satisfied CWI %d", runtime.DurableEffectCount, runtime.SatisfiedCWICount))
+	if work := runtime.ImplementationWork; work != nil {
+		parts = append(parts, fmt.Sprintf("implementation: rounds completed %d/%d | Runtime receipts %d | unknown executions %d | semantic generations %d (archived segments %d); work is not validation credit", work.CompletedRounds, work.ReservedRounds, work.CommittedReceipts, work.UnknownExecutions, work.SemanticGenerations, work.ArchivedSegments))
+	}
+	if len(runtime.TerminalAcknowledgedOwners) > 0 {
+		parts = append(parts, "terminal ACK: "+strings.Join(runtime.TerminalAcknowledgedOwners, ","))
+	}
 	if counts := runtime.RunEvidence; counts != nil {
 		parts = append(parts, fmt.Sprintf("whole Run: evidence accepted %d rejected %d | validation accepted %d rejected %d", counts.Accepted, counts.Rejected, counts.AcceptedValidation, counts.RejectedValidation))
 	}

@@ -100,7 +100,7 @@ func semanticAuditLineageForCurrentBinding(aggregate RuntimeAggregate, coverageI
 		active.Manifest.Hash == manifestHash && strings.TrimSpace(active.LogicalRequestID) != "" {
 		return manifestHash, strings.TrimSpace(active.LogicalRequestID), true
 	}
-	for _, generation := range active.History {
+	for _, generation := range active.AllHistory() {
 		snapshot := generation.Snapshot
 		if snapshot.Phase != runtimecontract.RuntimeSemanticPlanningSealed || snapshot.Manifest == nil ||
 			snapshot.Manifest.Hash != manifestHash || strings.TrimSpace(snapshot.LogicalRequestID) == "" {

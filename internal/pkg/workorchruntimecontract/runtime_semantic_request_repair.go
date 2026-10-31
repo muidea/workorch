@@ -165,7 +165,7 @@ func ValidateRuntimeSemanticRequestRepairSources(ledger RuntimeSemanticPlanningL
 		}
 	}
 	seen := map[string]bool{}
-	for _, g := range ledger.History {
+	for _, g := range ledger.AllHistory() {
 		if g.RequestContractRepair == nil {
 			continue
 		}

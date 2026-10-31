@@ -166,7 +166,7 @@ func validateRuntimeHistoricalSemanticStartupSource(sources RuntimeLineageAssert
 	if err := validate(sources.Semantic); err != nil {
 		return err
 	}
-	for _, generation := range sources.Semantic.History {
+	for _, generation := range sources.Semantic.AllHistory() {
 		if err := validate(generation.Snapshot); err != nil {
 			return err
 		}

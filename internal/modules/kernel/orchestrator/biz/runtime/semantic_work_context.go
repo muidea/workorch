@@ -32,7 +32,7 @@ func SemanticWorkContext(a RuntimeAggregate, m contract.RuntimeSemanticPlanManif
 			return nil, fmt.Errorf("semantic work prior round is incomplete")
 		}
 		round := contract.RuntimeSemanticWorkRound{Ordinal: r.Ordinal, DispatchID: r.DispatchID, ReceiptSetHash: r.CompletedReceiptSetHash}
-		for _, generation := range a.SemanticPlanning.History {
+		for _, generation := range a.SemanticPlanning.AllHistory() {
 			snapshot := generation.Snapshot
 			if snapshot.Manifest == nil || snapshot.CoverageOrderDocument == nil {
 				continue
@@ -58,7 +58,7 @@ func SemanticWorkContext(a RuntimeAggregate, m contract.RuntimeSemanticPlanManif
 		}
 		ret.PriorRounds = append(ret.PriorRounds, round)
 	}
-	for _, g := range a.SemanticPlanning.History {
+	for _, g := range a.SemanticPlanning.AllHistory() {
 		if g.Snapshot.Manifest == nil || g.Snapshot.CoverageOrderDocument == nil {
 			continue
 		}

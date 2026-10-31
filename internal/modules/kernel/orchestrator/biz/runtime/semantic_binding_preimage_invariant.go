@@ -58,7 +58,7 @@ func validateRuntimeSemanticBindingPreimagesInGate(a RuntimeAggregate, gate *run
 	}
 	if len(inventory.byBindingID) == 0 && runtimeFactsCarrySemanticBindingProjection(a.Facts) {
 		historyBatches, historyDocuments, historyResults := 0, 0, 0
-		for _, generation := range a.SemanticPlanning.History {
+		for _, generation := range a.SemanticPlanning.AllHistory() {
 			historyBatches += len(generation.Snapshot.Batches)
 			historyDocuments += len(generation.Snapshot.BatchDocuments)
 			historyResults += len(generation.Snapshot.BatchFeasibilityResults)
@@ -148,12 +148,12 @@ func buildRuntimeSemanticBindingPreimageInventoryInGate(ledger runtimecontract.R
 	// below, multiplying validation cost without strengthening the preimage
 	// proof.
 	active := ledger
-	active.History = nil
+	active = active.WithoutHistory()
 	active = active.Clone()
 	if err := addRuntimeSemanticLedgerBindingPreimagesInGate(&inventory, "active", active, gate); err != nil {
 		return runtimeSemanticBindingPreimageInventory{}, err
 	}
-	for index, generation := range ledger.History {
+	for index, generation := range ledger.AllHistory() {
 		if err := addRuntimeSemanticLedgerBindingPreimagesInGate(&inventory, fmt.Sprintf("history %d", index), generation.Snapshot, gate); err != nil {
 			return runtimeSemanticBindingPreimageInventory{}, err
 		}

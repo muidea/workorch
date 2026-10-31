@@ -15,6 +15,7 @@ import (
 )
 
 const (
+	RuntimeImplementationWorkProgressV1 = "implementation-work-progress/v1"
 	RuntimeImplementationWorkProtocolV1 = "runtime-implementation-work/v1"
 	MaxRuntimeImplementationWorkRounds  = 8
 	MaxRuntimeImplementationWorkTargets = 8
@@ -115,6 +116,7 @@ func implementationWorkProtocolSupported(policy RuntimeImplementationWorkPolicy)
 // fresh observation and validation. Only the optional versioned input-revision
 // route can open an exact reviewed input; ordinary work keeps it protected.
 type RuntimeImplementationWorkPolicy struct {
+	ProgressProtocolRef                  string                         `json:"progressProtocolRef,omitempty"`
 	InputRevisionProtocolRef             string                         `json:"inputRevisionProtocolRef,omitempty"`
 	ProtocolRef                          string                         `json:"protocolRef"`
 	OwnerModuleID                        string                         `json:"ownerModuleId"`
@@ -152,6 +154,7 @@ func cloneRuntimeImplementationWorkPolicy(p *RuntimeImplementationWorkPolicy) *R
 
 func (p RuntimeImplementationWorkPolicy) Normalized() RuntimeImplementationWorkPolicy {
 	p = p.Clone()
+	p.ProgressProtocolRef = strings.TrimSpace(p.ProgressProtocolRef)
 	p.ProtocolRef = strings.TrimSpace(p.ProtocolRef)
 	p.InputRevisionProtocolRef = strings.TrimSpace(p.InputRevisionProtocolRef)
 	p.OwnerModuleID = strings.TrimSpace(p.OwnerModuleID)
@@ -188,6 +191,9 @@ func (p RuntimeImplementationWorkPolicy) Normalized() RuntimeImplementationWorkP
 
 func (p RuntimeImplementationWorkPolicy) Validate() error {
 	p = p.Normalized()
+	if p.ProgressProtocolRef != "" && p.ProgressProtocolRef != RuntimeImplementationWorkProgressV1 {
+		return fmt.Errorf("unsupported implementation progress protocol")
+	}
 	if p.InputRevisionProtocolRef != "" && p.InputRevisionProtocolRef != RuntimeValidationInputRevisionProtocolV1 {
 		return fmt.Errorf("unsupported input revision protocol")
 	}

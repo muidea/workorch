@@ -899,7 +899,7 @@ func runtimeSemanticValidationFailureRepairForBinding(aggregate RuntimeAggregate
 			return runtimecontract.RuntimeSemanticValidationFailureRepair{}, false, err
 		}
 	}
-	for _, generation := range ledger.History {
+	for _, generation := range ledger.AllHistory() {
 		if generation.Snapshot.Manifest == nil || generation.Snapshot.Manifest.Hash != ref.SemanticManifestHash {
 			continue
 		}

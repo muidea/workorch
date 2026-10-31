@@ -68,7 +68,7 @@ func runtimeInputReviewDependency(a RuntimeAggregate, ledger runtimecontract.Run
 	}
 }
 
-func runtimeInputReviewInformationFailure(historyCount int, information []runtimecontract.RuntimeValidationInputReviewInformation, document runtimecontract.RuntimeSemanticPlanDocument) string {
+func runtimeInputReviewInformationFailure(information []runtimecontract.RuntimeValidationInputReviewInformation, document runtimecontract.RuntimeSemanticPlanDocument) string {
 	for _, proposal := range document.Proposals {
 		if proposal.ValidationInputReview == nil || runtimecontract.RuntimeValidationInputReviewConclusion(*proposal.ValidationInputReview) != runtimecontract.RuntimeValidationInputInconclusive {
 			continue
@@ -79,11 +79,7 @@ func runtimeInputReviewInformationFailure(historyCount int, information []runtim
 			}
 		}
 	}
-	// Do not open a ticket whose answer cannot be consumed within the
-	// existing generation budget; the capacity guard precedes the write.
-	if historyCount >= runtimecontract.RuntimeSemanticPlanningHistoryLimit {
-		return "validation_input_review_history_exhausted"
-	}
+
 	return ""
 }
 
@@ -217,7 +213,7 @@ func runtimeInputReviewOnlyCoverageOmissions(document runtimecontract.RuntimeSem
 // information retirements are the complete budget preimage. V1 keeps its
 // original exact-subject contract for already-started Runs.
 func runtimeInputReviewInformationFailureForLedger(ledger runtimecontract.RuntimeSemanticPlanningLedger, document runtimecontract.RuntimeSemanticPlanDocument) string {
-	if code := runtimeInputReviewInformationFailure(len(ledger.History), ledger.Manifest.InputReviewInformation, document); code != "" {
+	if code := runtimeInputReviewInformationFailure(ledger.Manifest.InputReviewInformation, document); code != "" {
 		return code
 	}
 	for _, current := range document.Proposals {
@@ -225,7 +221,7 @@ func runtimeInputReviewInformationFailureForLedger(ledger runtimecontract.Runtim
 		if !found || binding.InputReview.ProtocolRef == runtimecontract.RuntimeValidationInputReviewProtocol || current.ValidationInputReview == nil {
 			continue
 		}
-		for _, history := range ledger.History {
+		for _, history := range ledger.AllHistory() {
 			if history.Reason != runtimecontract.RuntimeSemanticPlanningRetirementInputReviewInformation {
 				continue
 			}
@@ -275,7 +271,7 @@ func runtimeInputReviewResolutionMatches(a RuntimeAggregate, ledger runtimecontr
 func retireRuntimeInputReviewForInformation(a *RuntimeAggregate, resolution runtimecontract.RuntimeGovernanceResolution) error {
 	ledger := a.SemanticPlanning.Clone()
 	if !runtimeInputReviewResolutionMatches(*a, ledger, resolution) || resolution.Outcome != runtimecontract.RuntimeGovernanceResolutionOutcomeContinue ||
-		ledger.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted || a.ActiveDispatch != nil || len(ledger.History) >= runtimecontract.RuntimeSemanticPlanningHistoryLimit {
+		ledger.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted || a.ActiveDispatch != nil {
 		return fmt.Errorf("%w: input review information cannot reopen this semantic transaction", common.ErrConflict)
 	}
 	document, _ := runtimeInputReviewDocument(ledger)
@@ -289,8 +285,7 @@ func retireRuntimeInputReviewForInformation(a *RuntimeAggregate, resolution runt
 			return err
 		}
 	}
-	snapshot := ledger.Clone()
-	snapshot.History = nil
+	snapshot := ledger.WithoutHistory().Clone()
 	history := runtimecontract.RuntimeSemanticPlanningGeneration{RetiredAtStateRevision: a.StateRevision + 1,
 		Reason: runtimecontract.RuntimeSemanticPlanningRetirementInputReviewInformation, InputReviewResolutionID: resolution.ResolutionID, Snapshot: snapshot}
 	if err := history.Validate(); err != nil {
@@ -302,7 +297,12 @@ func retireRuntimeInputReviewForInformation(a *RuntimeAggregate, resolution runt
 	a.SemanticPlanning = runtimecontract.RuntimeSemanticPlanningLedger{
 		SchemaVersion: ledger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningRequired, DefinitionSeed: ledger.DefinitionSeed.Clone(),
 		CatalogRefreshAttempts: ledger.CatalogRefreshAttempts, FeasibilityGaps: ledger.FeasibilityGaps,
-		History: append(ledger.History, history),
+		History: ledger.History, HistoryArchive: ledger.HistoryArchive,
+	}
+	if appended, err := a.SemanticPlanning.AppendHistory(history); err != nil {
+		return err
+	} else {
+		a.SemanticPlanning = appended
 	}
 	return nil
 }
@@ -311,7 +311,7 @@ func retireRuntimeInputReviewForInformation(a *RuntimeAggregate, resolution runt
 // lineage. It does not treat a summary or a ticket status as review approval.
 func RuntimeInputReviewInformation(a RuntimeAggregate) ([]runtimecontract.RuntimeValidationInputReviewInformation, error) {
 	var ret []runtimecontract.RuntimeValidationInputReviewInformation
-	for _, history := range a.SemanticPlanning.History {
+	for _, history := range a.SemanticPlanning.AllHistory() {
 		if history.Reason != runtimecontract.RuntimeSemanticPlanningRetirementInputReviewInformation {
 			continue
 		}
@@ -364,7 +364,7 @@ func validateRuntimeInputReviewAggregate(a RuntimeAggregate) error {
 		}
 		return nil
 	}
-	for _, history := range a.SemanticPlanning.History {
+	for _, history := range a.SemanticPlanning.AllHistory() {
 		if err := validateManifest(history.Snapshot.Manifest); err != nil {
 			return err
 		}
@@ -372,12 +372,9 @@ func validateRuntimeInputReviewAggregate(a RuntimeAggregate) error {
 			if history.Snapshot.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted {
 				return fmt.Errorf("input review information retired a non-review transaction")
 			}
-			precedingLedger := history.Snapshot.Clone()
-			for _, prior := range a.SemanticPlanning.History {
-				if prior.RetiredAtStateRevision >= history.RetiredAtStateRevision {
-					break
-				}
-				precedingLedger.History = append(precedingLedger.History, prior)
+			precedingLedger, err := runtimeInputReviewPrecedingLedger(a.SemanticPlanning, history)
+			if err != nil {
+				return err
 			}
 			document, _ := runtimeInputReviewDocument(precedingLedger)
 			if code := runtimeInputReviewInformationFailureForLedger(precedingLedger, document); code != "" {
@@ -439,4 +436,25 @@ func validateRuntimeInputReviewAggregate(a RuntimeAggregate) error {
 		}
 	}
 	return nil
+}
+
+// Reconstruct only the preceding storage prefix for the information-budget
+// check. A v2 snapshot has no history of its own, so its storage version cannot
+// be used while incrementally packing the first legacy-sized prefix. This
+// detached view is never persisted and does not rewrite any generation body.
+func runtimeInputReviewPrecedingLedger(ledger runtimecontract.RuntimeSemanticPlanningLedger, history runtimecontract.RuntimeSemanticPlanningGeneration) (runtimecontract.RuntimeSemanticPlanningLedger, error) {
+	storage := runtimecontract.RuntimeSemanticPlanningLedger{SchemaVersion: runtimecontract.RuntimeSemanticPlanningLedgerSchemaCurrent}
+	for _, prior := range ledger.AllHistory() {
+		if prior.RetiredAtStateRevision >= history.RetiredAtStateRevision {
+			break
+		}
+		var err error
+		storage, err = storage.AppendHistory(prior)
+		if err != nil {
+			return runtimecontract.RuntimeSemanticPlanningLedger{}, err
+		}
+	}
+	preceding := history.Snapshot.Clone()
+	preceding.SchemaVersion, preceding.History, preceding.HistoryArchive = storage.SchemaVersion, storage.History, storage.HistoryArchive
+	return preceding, nil
 }

@@ -7,6 +7,7 @@ import (
 )
 
 type runtimeSemanticTailProjection struct {
+	WorkContextRef      string                                                `json:"workContextRef,omitempty"`
 	WorkContext         *runtimecontract.RuntimeSemanticWorkContext           `json:"workContext,omitempty"`
 	CoverageProgress    runtimecontract.RuntimeSemanticCoverageProgress       `json:"coverageProgress"`
 	ExecutionHistory    runtimecontract.RuntimeSemanticExecutionHistory       `json:"executionHistory"`

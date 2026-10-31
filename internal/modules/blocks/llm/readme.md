@@ -327,3 +327,27 @@ Source observations never authorize writing another target, skipping review or c
   不复制原始 provider 值或诊断 Cause。只能重新生成重复 name 的值以表达完整语义，其余参数/操作 scope 冻结。
   同合同 attempt0/1 保持 C0–C3、schema、wire、rendered stable prefix；LLM 不选择是否重试，不证明修订语义正确，
   不授予 effect、readiness 或验收 credit。真实效果仍需 File owner，普通 validation/repair/终态沿原合同。
+
+
+### Semantic shared work rendering v5
+
+`semantic-render/shared-work/v5` is sealed by the Orchestrator for new semantic requests; the adapter never upgrades an
+existing request, recovery or correction. C0-C2, their roles, and their actual stable prefix remain unchanged for the same
+sealed Profile. Complete current work content and prior rounds move to volatile user C3 `workContext`, before planStep,
+schema and generation identity. C4 uses the closed local `workContextRef="C3.workContext"` and retains complete budgets,
+coverage progress, execution history, feedback and correction context. This location is not a stable authority tier.
+Current content appears once; source arrays and raw bodies remain complete. Content precedes its volatile manifest revision.
+
+Prior-round targets use an inline complete `value`, or `receiptSequence` referencing the same dispatch in C4 execution history,
+only after exact field equality (operation, ordered targets, receipt identity/hash, before/after hashes and changed) is proved.
+Targets absent from the bounded general suffix remain inline, so complete per-CWI round history is never cut to that suffix.
+A missing/ambiguous/wrong-dispatch/mixed local reference fails integrity. Before provider I/O, references are expanded and all
+original content, rounds, intents, history, coverage, budget and feedback are compared with the detached typed owner inputs.
+Hashes, local references, compressed byte count and cache reuse never grant owner readiness, effect, validation or CWI credit.
+No cross-request cache or mutable global dictionary is introduced; Workspace/Profile differences remain in their own inputs.
+The original renderers retain their bytes, schema and source contracts. Native transport schema/local decoder stay complete.
+
+Tests: `runtime_semantic_shared_work_test.go` covers exact expansion, inline old receipts, tampering, cross-stage prefix,
+legacy-compatible C1/C2, and concurrent unrelated projects. `runtime_implementation_progress_test.go` tests original-set
+coverage and purpose consistency; owner tests exercise real File rounds with per-event CAS/reload. These deterministic
+checks do not establish upstream cached-token gains or model semantic sufficiency; both still need deployment observation.

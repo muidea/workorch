@@ -14,6 +14,7 @@ const RuntimeOperationsRenderContractV3 = "operations-render/parameter-cardinali
 const RuntimeOperationsRenderContractV4 = "operations-render/cache-layout/v4"
 
 const RuntimeSemanticRenderContractV3 = "semantic-render/owner-work-content/v3"
+const RuntimeSemanticRenderContractV5 = "semantic-render/shared-work/v5"
 const RuntimeSemanticRenderContractV4 = "semantic-render/cache-layout/v4"
 
 const RuntimeSemanticRenderContractV2 = "semantic-render/owner-work-vocabulary/v2"
@@ -93,7 +94,7 @@ func (c RuntimeExpectedDocumentContract) Validate() error {
 			return common.ErrInvalidArgument
 		}
 	case RuntimeProviderDocumentSemanticPlan:
-		if c.OperationsRenderContractRef != "" || (c.SemanticRenderContractRef != "" && c.SemanticRenderContractRef != RuntimeSemanticRenderContractV2 && c.SemanticRenderContractRef != RuntimeSemanticRenderContractV3 && c.SemanticRenderContractRef != RuntimeSemanticRenderContractV4) || c.WireContractHash != "" || c.DefinitionSeedHash == "" {
+		if c.OperationsRenderContractRef != "" || (c.SemanticRenderContractRef != "" && c.SemanticRenderContractRef != RuntimeSemanticRenderContractV2 && c.SemanticRenderContractRef != RuntimeSemanticRenderContractV3 && c.SemanticRenderContractRef != RuntimeSemanticRenderContractV4 && c.SemanticRenderContractRef != RuntimeSemanticRenderContractV5) || c.WireContractHash != "" || c.DefinitionSeedHash == "" {
 			return common.ErrInvalidArgument
 		}
 		switch c.PlanStep {

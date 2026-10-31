@@ -26,7 +26,7 @@ func TestRuntimeExecutionLimitsValidationIdentityAndClone(t *testing.T) {
 		{"negative proof batches", func(v *RuntimeExecutionLimits) { v.MaxProofBatchesPerCWI = -1 }},
 		{"negative durable dispatches", func(v *RuntimeExecutionLimits) { v.MaxDurableDispatchesPerCWI = -1 }},
 		{"raise durable dispatches", func(v *RuntimeExecutionLimits) { v.MaxDurableDispatchesPerCWI = 8193 }},
-		{"raise proof batches", func(v *RuntimeExecutionLimits) { v.MaxProofBatchesPerCWI = RuntimeSemanticPlanningHistoryLimit + 2 }},
+		{"raise proof batches", func(v *RuntimeExecutionLimits) { v.MaxProofBatchesPerCWI = RuntimeExecutionProofBatchesPerCWIMaxV1 + 1 }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			changed := contract.Normalized()

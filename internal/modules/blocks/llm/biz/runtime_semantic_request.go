@@ -20,7 +20,7 @@ type runtimeSemanticPreparedRequest struct {
 func prepareRuntimeSemanticPlanRequest(request llmmodels.RuntimeCandidateRequest) (runtimeSemanticPreparedRequest, error) {
 	if request.ExpectedDocument != nil {
 		ref := request.ExpectedDocument.SemanticRenderContractRef
-		if ref != "" && ref != runtimecontract.RuntimeSemanticRenderContractV2 && ref != runtimecontract.RuntimeSemanticRenderContractV3 && ref != runtimecontract.RuntimeSemanticRenderContractV4 {
+		if ref != "" && ref != runtimecontract.RuntimeSemanticRenderContractV2 && ref != runtimecontract.RuntimeSemanticRenderContractV3 && ref != runtimecontract.RuntimeSemanticRenderContractV4 && ref != runtimecontract.RuntimeSemanticRenderContractV5 {
 			return runtimeSemanticPreparedRequest{}, fmt.Errorf("unsupported runtime semantic renderer")
 		}
 	}
@@ -33,14 +33,14 @@ func prepareRuntimeSemanticPlanRequest(request llmmodels.RuntimeCandidateRequest
 	}
 	if request.ExpectedDocument != nil && request.SemanticContext.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
 		for _, obligation := range request.SemanticManifest.ProofObligations {
-			if obligation.ImplementationWork != nil && request.ExpectedDocument.SemanticRenderContractRef != runtimecontract.RuntimeSemanticRenderContractV2 && request.ExpectedDocument.SemanticRenderContractRef != runtimecontract.RuntimeSemanticRenderContractV3 && request.ExpectedDocument.SemanticRenderContractRef != runtimecontract.RuntimeSemanticRenderContractV4 {
+			if obligation.ImplementationWork != nil && request.ExpectedDocument.SemanticRenderContractRef != runtimecontract.RuntimeSemanticRenderContractV2 && request.ExpectedDocument.SemanticRenderContractRef != runtimecontract.RuntimeSemanticRenderContractV3 && request.ExpectedDocument.SemanticRenderContractRef != runtimecontract.RuntimeSemanticRenderContractV4 && request.ExpectedDocument.SemanticRenderContractRef != runtimecontract.RuntimeSemanticRenderContractV5 {
 				return runtimeSemanticPreparedRequest{}, &runtimecontract.RuntimeSemanticRequestContractError{Reason: "sealed work renderer is obsolete; exact owner retirement is required before a new physical call"}
 			}
 		}
 	}
 	if request.ExpectedDocument != nil {
 		for _, o := range request.SemanticManifest.ProofObligations {
-			if o.ImplementationWork != nil && o.ImplementationWork.Scope.Content != nil && request.ExpectedDocument.SemanticRenderContractRef != runtimecontract.RuntimeSemanticRenderContractV3 && request.ExpectedDocument.SemanticRenderContractRef != runtimecontract.RuntimeSemanticRenderContractV4 {
+			if o.ImplementationWork != nil && o.ImplementationWork.Scope.Content != nil && request.ExpectedDocument.SemanticRenderContractRef != runtimecontract.RuntimeSemanticRenderContractV3 && request.ExpectedDocument.SemanticRenderContractRef != runtimecontract.RuntimeSemanticRenderContractV4 && request.ExpectedDocument.SemanticRenderContractRef != runtimecontract.RuntimeSemanticRenderContractV5 {
 				return runtimeSemanticPreparedRequest{}, &runtimecontract.RuntimeSemanticRequestContractError{Reason: "content-bound work renderer requires a sealed content-capable request"}
 			}
 		}

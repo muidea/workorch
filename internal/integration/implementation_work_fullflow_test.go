@@ -672,6 +672,15 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 						Content struct {
 							Value string `json:"const"`
 						} `json:"contentHash"`
+						Reviews *struct {
+							Items struct {
+								Properties struct {
+									Ref struct {
+										Values []string `json:"enum"`
+									} `json:"requirementRef"`
+								} `json:"properties"`
+							} `json:"items"`
+						} `json:"requirementReviews"`
 					} `json:"properties"`
 				} `json:"implementationIntent"`
 			} `json:"properties"`
@@ -747,7 +756,16 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 			document["implementationPurpose"] = purpose
 			if request.Schema.Properties.Intent != nil {
 				decl := request.Schema.Properties.Intent.Properties
-				document["implementationIntent"] = runtimecontract.RuntimeImplementationIntent{DeclarationRef: decl.Declaration.Value, ContentHash: decl.Content.Value, RemainingWork: "scripted original requirement implementation or independent validation", Reason: "bounded deterministic fixture purpose bound to exact supplied content"}
+				intent := runtimecontract.RuntimeImplementationIntent{DeclarationRef: decl.Declaration.Value, ContentHash: decl.Content.Value, RemainingWork: "scripted original requirement implementation or independent validation", Reason: "bounded deterministic fixture purpose bound to exact supplied content"}
+				if decl.Reviews != nil {
+					for _, ref := range decl.Reviews.Items.Properties.Ref.Values {
+						intent.RequirementReviews = append(intent.RequirementReviews, runtimecontract.RuntimeImplementationRequirementReview{RequirementRef: ref, WorkRequired: purpose == runtimecontract.RuntimeImplementationWorkPurposeEffect})
+						if purpose == runtimecontract.RuntimeImplementationWorkPurposeEffect {
+							intent.SelectedRequirementRefs = append(intent.SelectedRequirementRefs, ref)
+						}
+					}
+				}
+				document["implementationIntent"] = intent
 			}
 			kind += "/" + string(purpose)
 		}
@@ -921,6 +939,7 @@ func (p *implementationWorkFullflowProvider) candidate(raw map[string]json.RawMe
 			} `json:"operationContracts"`
 		} `json:"outputContract"`
 		Context struct {
+			Focus        runtimecontract.CoverageFocus           `json:"focus"`
 			Evidence     []string                                `json:"allowedAcceptedEvidenceRefs"`
 			Preparations []implementationWorkFullflowPreparation `json:"validationProofPreparations"`
 			Repair       json.RawMessage                         `json:"repairDirective"`
@@ -933,8 +952,28 @@ func (p *implementationWorkFullflowProvider) candidate(raw map[string]json.RawMe
 	if err := json.Unmarshal(wire, &request); err != nil {
 		return nil, "runtime/candidate", err
 	}
+	// The v4 renderer publishes a single current focus at context.focus and
+	// references it from decision. A scripted provider must consume that exact
+	// published reference, rather than treating an omitted duplicate as empty.
+	var decisionReference struct{ FocusRef string }
+	if err := json.Unmarshal(raw["decision"], &decisionReference); err != nil {
+		return nil, "runtime/candidate", err
+	}
+	switch decisionReference.FocusRef {
+	case "": // Earlier renderer with an inline focus.
+	case "context.focus":
+		if !reflect.DeepEqual(request.Decision.Focus, runtimecontract.CoverageFocus{}) {
+			return nil, "runtime/candidate", fmt.Errorf("duplicate inline focus alongside context.focus reference")
+		}
+		request.Decision.Focus = request.Context.Focus
+	default:
+		return nil, "runtime/candidate", fmt.Errorf("unsupported focus reference %q", decisionReference.FocusRef)
+	}
 	kind := "runtime/" + string(request.Contract.State)
 	if request.Contract.State == runtimecontract.ConvergenceStateNeedAssessment {
+		if request.Decision.Focus.ID == "" || len(request.Decision.Focus.CoverageWorkItemIDs) == 0 {
+			return nil, kind, fmt.Errorf("assessment requires the exact published current focus")
+		}
 		if len(request.Context.Evidence) == 0 {
 			return nil, kind, fmt.Errorf("assessment 不得无真实 owner evidence 提议 satisfied")
 		}
@@ -1557,7 +1596,7 @@ func implementationWorkFullflowAssertDocuments(t *testing.T, state *runtimecontr
 		}
 	}
 	checkSemantic(state.SemanticPlanning)
-	for _, history := range state.SemanticPlanning.History {
+	for _, history := range state.SemanticPlanning.AllHistory() {
 		checkSemantic(history.Snapshot)
 	}
 	for _, dispatch := range state.CompletedDispatches {

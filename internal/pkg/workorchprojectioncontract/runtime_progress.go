@@ -5,6 +5,8 @@ import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimec
 // RuntimeProgress is a read-only product projection of persisted Runtime
 // progress. Consumers must not reverse-drive Runtime authority from it.
 type RuntimeProgress struct {
+	ImplementationWork         *RuntimeImplementationProgress `json:"implementationWork,omitempty"`
+	TerminalAcknowledgedOwners []string                       `json:"terminalAcknowledgedOwners,omitempty"`
 	// RunEvidence is whole-Run accounting. The legacy flat evidence counters
 	// below remain current-focus diagnostic-lineage counters for compatibility.
 	// nil means an older producer did not supply totals, not zero progress.
@@ -39,6 +41,17 @@ type RuntimeProgress struct {
 	PrerequisiteInvalidations       []RuntimePrerequisiteRefreshInvalidation    `json:"prerequisiteInvalidations,omitempty"`
 	ExecutionBudget                 *runtimecontract.RuntimeExecutionBudgetView `json:"executionBudget,omitempty"`
 	RecoverableWait                 *runtimecontract.RuntimeRecoverableWaitView `json:"recoverableWait,omitempty"`
+}
+
+// Counts persisted Runtime facts only. In particular, an owner-local physical
+// effect or saved receipt not admitted to Runtime cannot be inferred here.
+type RuntimeImplementationProgress struct {
+	ReservedRounds      int `json:"reservedRounds"`
+	CompletedRounds     int `json:"completedRounds"`
+	CommittedReceipts   int `json:"committedReceipts"`
+	UnknownExecutions   int `json:"unknownExecutions"`
+	SemanticGenerations int `json:"semanticGenerations"`
+	ArchivedSegments    int `json:"archivedSegments"`
 }
 
 type RuntimeEvidenceCounts struct {
@@ -78,6 +91,11 @@ func CloneRuntimeProgress(item *RuntimeProgress) *RuntimeProgress {
 		return nil
 	}
 	ret := *item
+	if item.ImplementationWork != nil {
+		value := *item.ImplementationWork
+		ret.ImplementationWork = &value
+	}
+	ret.TerminalAcknowledgedOwners = append([]string(nil), item.TerminalAcknowledgedOwners...)
 	if item.RunEvidence != nil {
 		counts := *item.RunEvidence
 		ret.RunEvidence = &counts

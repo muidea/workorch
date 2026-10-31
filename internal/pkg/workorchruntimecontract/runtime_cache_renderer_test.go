@@ -13,7 +13,7 @@ func TestCacheRendererVersionIsSealedAndClosed(t *testing.T) {
 		}
 		versions := []string{"", RuntimeOperationsRenderContractV2, RuntimeOperationsRenderContractV3, RuntimeOperationsRenderContractV4}
 		if kind == RuntimeProviderDocumentSemanticPlan {
-			versions = []string{"", RuntimeSemanticRenderContractV2, RuntimeSemanticRenderContractV3, RuntimeSemanticRenderContractV4}
+			versions = []string{"", RuntimeSemanticRenderContractV2, RuntimeSemanticRenderContractV3, RuntimeSemanticRenderContractV4, RuntimeSemanticRenderContractV5}
 		}
 		seen := map[string]bool{}
 		for _, version := range versions {

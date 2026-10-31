@@ -8,6 +8,9 @@ import (
 
 const RuntimeExecutionLimitsV1 = "runtime-execution-limits/v1"
 
+// V1 policy maximum is independent of semantic-history storage layout.
+const RuntimeExecutionProofBatchesPerCWIMaxV1 = 17
+
 // RuntimeExecutionLimits narrows physical budgets and optionally bounds proof
 // batches and durable dispatch seals per original CWI. It authorizes no work
 // and creates no second ledger.
@@ -31,8 +34,8 @@ func (l RuntimeExecutionLimits) Validate() error {
 	if l.MaxDurableDispatchesPerCWI < 0 || int64(l.MaxDurableDispatchesPerCWI) > operations.Limit {
 		return fmt.Errorf("runtime durable dispatch limit must be in 1..%d when specified", operations.Limit)
 	}
-	if l.MaxProofBatchesPerCWI < 0 || l.MaxProofBatchesPerCWI > RuntimeSemanticPlanningHistoryLimit+1 {
-		return fmt.Errorf("runtime proof batch limit must be in 1..%d when specified", RuntimeSemanticPlanningHistoryLimit+1)
+	if l.MaxProofBatchesPerCWI < 0 || l.MaxProofBatchesPerCWI > RuntimeExecutionProofBatchesPerCWIMaxV1 {
+		return fmt.Errorf("runtime proof batch limit must be in 1..%d when specified", RuntimeExecutionProofBatchesPerCWIMaxV1)
 	}
 	for _, bound := range l.dimensions() {
 		policy, found := RuntimeBudgetDimensionPolicyFor(baseline, bound.dimension)

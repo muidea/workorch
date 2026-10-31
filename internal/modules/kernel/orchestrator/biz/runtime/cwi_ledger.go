@@ -1082,7 +1082,7 @@ func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, wo
 	}
 	for _, choice := range aggregate.ImplementationWork.PurposeChoices {
 		if choice.SemanticManifestHash == manifestHash {
-			for _, retired := range aggregate.SemanticPlanning.History {
+			for _, retired := range aggregate.SemanticPlanning.AllHistory() {
 				if retired.Reason == runtimecontract.RuntimeSemanticPlanningRetirementImplementationPurpose && retired.Snapshot.Manifest != nil && retired.Snapshot.Manifest.Hash == manifestHash && retired.Snapshot.CoverageOrderDocument != nil && sameCoverageIDs(retired.Snapshot.CoverageOrderDocument.CoverageOrder, acceptedOrder) {
 					return aggregate, nil
 				}

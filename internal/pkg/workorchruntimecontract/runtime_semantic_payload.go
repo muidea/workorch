@@ -1,6 +1,7 @@
 package workorchruntimecontract
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -240,6 +241,32 @@ func validateRuntimeSemanticPayloadFields(payload []byte) error {
 	}
 	if err := validateRuntimeSemanticObjectFields("$", envelope, allowed, required); err != nil {
 		return err
+	}
+	if raw, exists := envelope["implementationIntent"]; exists {
+		var intent map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &intent); err != nil {
+			return &RuntimeCandidatePayloadDiagnostic{Path: "$.implementationIntent", Actual: "non_object", Cause: err}
+		}
+		if rawReviews, exists := intent["requirementReviews"]; exists {
+			var reviews []json.RawMessage
+			if err := json.Unmarshal(rawReviews, &reviews); err != nil {
+				return &RuntimeCandidatePayloadDiagnostic{Path: "$.implementationIntent.requirementReviews", Actual: "non_array", Cause: err}
+			}
+			for n, rawReview := range reviews {
+				path := fmt.Sprintf("$.implementationIntent.requirementReviews[%d]", n)
+				var fields map[string]json.RawMessage
+				if err := json.Unmarshal(rawReview, &fields); err != nil {
+					return &RuntimeCandidatePayloadDiagnostic{Path: path, Actual: "non_object", Cause: err}
+				}
+				if err := validateRuntimeSemanticObjectFields(path, fields, []string{"requirementRef", "workRequired"}, []string{"requirementRef", "workRequired"}); err != nil {
+					return err
+				}
+				value := bytes.TrimSpace(fields["workRequired"])
+				if !bytes.Equal(value, []byte("true")) && !bytes.Equal(value, []byte("false")) {
+					return &RuntimeCandidatePayloadDiagnostic{Path: path + ".workRequired", Actual: "non_boolean", Cause: fmt.Errorf("original requirement review must explicitly propose a boolean")}
+				}
+			}
+		}
 	}
 	var proposals []json.RawMessage
 	if err := json.Unmarshal(envelope["proposals"], &proposals); err != nil {
@@ -625,6 +652,11 @@ func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifes
 				normalRequired = append(normalRequired, "implementationPurpose")
 				if work.Scope.Content != nil {
 					properties["implementationIntent"] = map[string]any{"type": "object", "additionalProperties": false, "required": []string{"declarationRef", "contentHash", "remainingWork", "reason"}, "properties": map[string]any{"declarationRef": map[string]any{"const": obligation.DeclarationRef}, "contentHash": map[string]any{"const": work.Scope.Content.Hash()}, "remainingWork": map[string]any{"type": "string", "minLength": 1, "maxLength": 2048}, "reason": map[string]any{"type": "string", "minLength": 1, "maxLength": 2048}}}
+					if work.Scope.Request.Policy.ProgressProtocolRef == RuntimeImplementationWorkProgressV1 {
+						intent := properties["implementationIntent"].(map[string]any)
+						refs := RuntimeImplementationRequirementRefs(manifest, *work, obligation.DeclarationRef)
+						addRuntimeImplementationProgressSchema(schema, intent, refs)
+					}
 					normalRequired = append(normalRequired, "implementationIntent")
 				}
 			}

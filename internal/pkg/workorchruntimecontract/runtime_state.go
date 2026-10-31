@@ -437,6 +437,9 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 	if err := ValidateRuntimeSemanticProofBatchLimits(r.SemanticPlanning, r.Facts.Activation.ExecutionContract.ExecutionLimits); err != nil {
 		return err
 	}
+	if err := ValidateRuntimeSemanticHistoryScope(r.SemanticPlanning, r.Facts.WorkspaceID, r.Facts.RunID); err != nil {
+		return err
+	}
 	if r.SemanticPlanning.DefinitionSeed.Hash != r.Facts.DefinitionSeed.Hash {
 		return fmt.Errorf("runtime semantic planning seed does not match facts")
 	}

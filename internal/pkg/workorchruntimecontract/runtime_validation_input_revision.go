@@ -193,7 +193,7 @@ func ValidateRuntimeInputRevisionSource(v *RuntimeValidationInputRevision, l Run
 		return nil
 	}
 	matches := 0
-	for _, g := range l.History {
+	for _, g := range l.AllHistory() {
 		if g.Reason != RuntimeSemanticPlanningRetirementInputRevision {
 			continue
 		}
@@ -236,7 +236,7 @@ func validateRuntimeInputRevisionTargets(v *RuntimeValidationInputRevision, p Ru
 // any original-CWI work/provider/history budget.
 func PendingRuntimeValidationInputRevision(s RuntimeSemanticPlanningLedger, w RuntimeImplementationWorkLedger, cwi common.CoverageWorkItemID) (*RuntimeValidationInputRevision, error) {
 	var pending *RuntimeValidationInputRevision
-	for _, g := range s.History {
+	for _, g := range s.AllHistory() {
 		if g.Reason != RuntimeSemanticPlanningRetirementInputRevision {
 			continue
 		}
@@ -286,7 +286,7 @@ func RuntimeImplementationWorkTerminalPurposeSelected(w RuntimeImplementationWor
 
 func validateRuntimeInputRevisionState(def RuntimeDefinitionContext, facts RuntimeFacts, w RuntimeImplementationWorkLedger, s RuntimeSemanticPlanningLedger) error {
 	// A history product may only be consumed by a later semantic transaction.
-	for _, consumer := range s.History {
+	for _, consumer := range s.AllHistory() {
 		if consumer.Snapshot.Manifest == nil {
 			continue
 		}
@@ -298,7 +298,7 @@ func validateRuntimeInputRevisionState(def RuntimeDefinitionContext, facts Runti
 			if err := ValidateRuntimeInputRevisionSource(v, s); err != nil {
 				return err
 			}
-			for _, source := range s.History {
+			for _, source := range s.AllHistory() {
 				if source.Reason == RuntimeSemanticPlanningRetirementInputRevision && source.Snapshot.Manifest != nil && source.Snapshot.Manifest.Hash == v.SourceManifestHash && source.RetiredAtStateRevision >= consumer.RetiredAtStateRevision {
 					return fmt.Errorf("input revision borrowed a future conflict report")
 				}
@@ -324,7 +324,7 @@ func validateRuntimeInputRevisionState(def RuntimeDefinitionContext, facts Runti
 			return err
 		}
 	}
-	for _, g := range s.History {
+	for _, g := range s.AllHistory() {
 		if g.Reason != RuntimeSemanticPlanningRetirementInputRevision {
 			continue
 		}
@@ -358,7 +358,7 @@ func validateRuntimeInputRevisionState(def RuntimeDefinitionContext, facts Runti
 // the independently persisted SM-3 request. A report alone is not a completed
 // provider transaction; retirement must retain the exact immutable expectation.
 func ValidateRuntimeInputRevisionRequestSources(semantic RuntimeSemanticPlanningLedger, sessions []RuntimeCandidateRequestSession) error {
-	for _, g := range semantic.History {
+	for _, g := range semantic.AllHistory() {
 		if g.Reason != RuntimeSemanticPlanningRetirementInputRevision {
 			continue
 		}

@@ -13,7 +13,7 @@ import (
 // effects, reset budgets or infer a request from projection/diagnostic text.
 func CompileRuntimeSemanticRequestRepairProof(a RuntimeAggregate) (runtimecontract.RuntimeSemanticRequestRepairProof, error) {
 	s, l := a.DefinitionClarification, a.SemanticPlanning
-	if s == nil || s.Dispatch == nil || s.Request == nil || l.Manifest == nil || l.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen || a.ActiveDispatch != nil || a.Termination != nil || a.Facts.Failure != nil || a.Facts.RepairDirective != nil || a.Decision.State != runtimecontract.ConvergenceStateNeedGovernance || l.Attempt != 0 || len(a.GovernanceResolutions) != 0 || len(l.History) >= runtimecontract.RuntimeSemanticPlanningHistoryLimit {
+	if s == nil || s.Dispatch == nil || s.Request == nil || l.Manifest == nil || l.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen || a.ActiveDispatch != nil || a.Termination != nil || a.Facts.Failure != nil || a.Facts.RepairDirective != nil || a.Decision.State != runtimecontract.ConvergenceStateNeedGovernance || l.Attempt != 0 || len(a.GovernanceResolutions) != 0 {
 		return runtimecontract.RuntimeSemanticRequestRepairProof{}, common.ErrConflict
 	}
 	if s.Observation.WorkspaceID != a.Facts.WorkspaceID || s.Observation.RunID != a.Facts.RunID || s.Observation.DefinitionRevision != a.Definition.Revision || s.Observation.StartupInputHash != a.Definition.StartupInputHash || s.Dispatch.AuthoritySnapshotID != a.Decision.AuthoritySnapshot.ID {
@@ -67,7 +67,7 @@ func CompileRuntimeSemanticRequestRepairProof(a RuntimeAggregate) (runtimecontra
 	if limits := a.Facts.Activation.ExecutionContract.ExecutionLimits; limits != nil && limits.MaxProofBatchesPerCWI > 0 && runtimecontract.RuntimeSemanticProofBatchUsage(l)[round.CoverageWorkItemID] >= limits.MaxProofBatchesPerCWI {
 		return p, common.ErrConflict
 	}
-	for _, g := range l.History {
+	for _, g := range l.AllHistory() {
 		if g.RequestContractRepair != nil && g.RequestContractRepair.Proof.Expected.LogicalRequestID == p.Expected.LogicalRequestID {
 			return p, common.ErrConflict
 		}
@@ -90,7 +90,7 @@ func (c *authorityComponent) observeRuntimeSemanticRequestRepair(ctx context.Con
 		if err := validateSemanticRequestRepairLease(proof, *resolution, leaseTemplate); err != nil {
 			return a, err
 		}
-		for _, g := range a.SemanticPlanning.History {
+		for _, g := range a.SemanticPlanning.AllHistory() {
 			if g.RequestContractRepair != nil && g.RequestContractRepair.Proof.Hash == proof.Hash {
 				if g.RequestContractRepair.Resolution == *resolution {
 					return a, nil
@@ -121,8 +121,7 @@ func (c *authorityComponent) observeRuntimeSemanticRequestRepair(ctx context.Con
 			return a, common.ErrConflict
 		}
 		ledger := a.SemanticPlanning.Clone()
-		snapshot := ledger.Clone()
-		snapshot.History = nil
+		snapshot := ledger.WithoutHistory().Clone()
 		record := runtimecontract.RuntimeSemanticRequestRepairRecord{Proof: proof.Clone(), Resolution: *resolution}
 		generation := runtimecontract.RuntimeSemanticPlanningGeneration{RetiredAtStateRevision: revision + 1, Reason: runtimecontract.RuntimeSemanticPlanningRetirementRequestContractRepair, RequestContractRepair: &record, Snapshot: snapshot}
 		if err := generation.Validate(); err != nil {
@@ -131,7 +130,12 @@ func (c *authorityComponent) observeRuntimeSemanticRequestRepair(ctx context.Con
 		if err := retireSemanticPlanningRequestSessions(&a, ledger, "semantic_request_contract_repaired"); err != nil {
 			return a, err
 		}
-		a.SemanticPlanning = runtimecontract.RuntimeSemanticPlanningLedger{SchemaVersion: ledger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningRequired, DefinitionSeed: ledger.DefinitionSeed.Clone(), CatalogRefreshAttempts: ledger.CatalogRefreshAttempts, FeasibilityGaps: ledger.FeasibilityGaps, History: append(ledger.History, generation)}
+		a.SemanticPlanning = runtimecontract.RuntimeSemanticPlanningLedger{SchemaVersion: ledger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningRequired, DefinitionSeed: ledger.DefinitionSeed.Clone(), CatalogRefreshAttempts: ledger.CatalogRefreshAttempts, FeasibilityGaps: ledger.FeasibilityGaps, History: ledger.History, HistoryArchive: ledger.HistoryArchive}
+		if appended, err := a.SemanticPlanning.AppendHistory(generation); err != nil {
+			return a, err
+		} else {
+			a.SemanticPlanning = appended
+		}
 		a.DefinitionClarification = nil
 		facts, decision, e := reduceRuntimeAggregateWithDirective(a, a.Facts, nil)
 		if e != nil {

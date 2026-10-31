@@ -58,6 +58,7 @@ func mapRuntimeProgress(state runtimecontract.RuntimeStateRecord) projectioncont
 	}
 	acceptedAt, effectAt, effectCount := runtimeOwnerEvidenceProgress(state)
 	ret := projectioncontract.RuntimeProgress{
+		ImplementationWork:              runtimeImplementationProgress(state),
 		RunEvidence:                     runEvidence,
 		LatestAcceptedEvidenceAt:        acceptedAt,
 		LatestDurableEffectAt:           effectAt,
@@ -73,6 +74,11 @@ func mapRuntimeProgress(state runtimecontract.RuntimeStateRecord) projectioncont
 		CurrentFocusID:                  strings.TrimSpace(facts.Focus.ID),
 		ConvergenceState:                string(state.Decision.State),
 		ActiveDispatchID:                activeDispatchID,
+	}
+	if err := runtimecontract.ValidateRuntimeStateTerminalDeliveryLedger(state.Decision, state.Termination, state.DeliveryAcknowledgements, state.Facts.Recovery); err == nil {
+		for _, acknowledgement := range state.DeliveryAcknowledgements {
+			ret.TerminalAcknowledgedOwners = append(ret.TerminalAcknowledgedOwners, string(acknowledgement.Owner))
+		}
 	}
 	for _, item := range facts.Coverage {
 		if item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
@@ -113,6 +119,44 @@ func mapRuntimeProgress(state runtimecontract.RuntimeStateRecord) projectioncont
 	ret.PrerequisiteRefreshLimit = facts.RecoveryPolicy.Limit(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh)
 	ret.PrerequisiteInvalidations = mapPrerequisiteRefreshInvalidations(state.PrerequisiteInvalidations)
 	ret.PrerequisiteRefreshState = runtimePrerequisiteRefreshState(facts, ret.PrerequisiteInvalidations)
+	return ret
+}
+
+func runtimeImplementationProgress(state runtimecontract.RuntimeStateRecord) *projectioncontract.RuntimeImplementationProgress {
+	if len(state.ImplementationWork.Rounds) == 0 && len(state.ImplementationWork.PurposeChoices) == 0 {
+		return nil
+	}
+	ret := &projectioncontract.RuntimeImplementationProgress{ReservedRounds: len(state.ImplementationWork.Rounds), SemanticGenerations: state.SemanticPlanning.HistoryCount()}
+	if archive := state.SemanticPlanning.HistoryArchive; archive != nil {
+		ret.ArchivedSegments = len(archive.Segments)
+	}
+	dispatches := append([]runtimecontract.RuntimeDispatchRecord(nil), state.CompletedDispatches...)
+	if state.ActiveDispatch != nil {
+		dispatches = append(dispatches, *state.ActiveDispatch)
+	}
+	for _, round := range state.ImplementationWork.Rounds {
+		if round.CompletedReceiptSetHash != "" {
+			ret.CompletedRounds++
+		}
+		// A late receipt cannot erase the original unknown round disposition.
+		if round.OutcomeUnknownExecutionKey != "" {
+			ret.UnknownExecutions++
+		}
+		for _, dispatch := range dispatches {
+			if dispatch.ID != round.DispatchID {
+				continue
+			}
+			for _, execution := range dispatch.OperationExecutions {
+				if execution.State != runtimecontract.OperationExecutionOwnerCommitted && execution.State != runtimecontract.OperationExecutionEvidenceCommitted {
+					continue
+				}
+				receipt, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(state.OperationReceipts, execution.ExecutionKey, execution.Fence)
+				if found && receipt.OperationID == execution.OperationID && execution.OwnerReceiptHash == runtimecontract.StableRuntimeOperationReceiptHash(receipt) {
+					ret.CommittedReceipts++
+				}
+			}
+		}
+	}
 	return ret
 }
 

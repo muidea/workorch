@@ -71,3 +71,86 @@ func TestTerminalReadinessCauseProjectsWithoutFailureFactOrAuthorityMutation(t *
 		t.Fatal("terminal audit clone aliased cause")
 	}
 }
+
+func TestRuntimeImplementationProgressSeparatesReceiptsRoundsAndValidation(t *testing.T) {
+	receipt := runtimecontract.RuntimeOperationReceipt{OperationID: "operation", ExecutionKey: "execution", Fence: 1, Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, Changed: true}
+	state := runtimecontract.RuntimeStateRecord{
+		ImplementationWork:  runtimecontract.RuntimeImplementationWorkLedger{Rounds: []runtimecontract.RuntimeImplementationWorkRound{{DispatchID: "work-dispatch", CompletedReceiptSetHash: "complete"}, {DispatchID: "pending-dispatch", OutcomeUnknownExecutionKey: "unknown-execution", OutcomeUnknownFence: 1}}},
+		CompletedDispatches: []runtimecontract.RuntimeDispatchRecord{{ID: "work-dispatch", OperationExecutions: []runtimecontract.RuntimeOperationExecutionRecord{{OperationID: receipt.OperationID, ExecutionKey: receipt.ExecutionKey, Fence: 1, State: runtimecontract.OperationExecutionEvidenceCommitted, OwnerReceiptHash: runtimecontract.StableRuntimeOperationReceiptHash(receipt)}}}},
+		ActiveDispatch:      &runtimecontract.RuntimeDispatchRecord{ID: "pending-dispatch", OperationExecutions: []runtimecontract.RuntimeOperationExecutionRecord{{OperationID: "unknown-operation", State: runtimecontract.OperationExecutionOutcomeUnknown}}},
+		OperationReceipts:   []runtimecontract.RuntimeOperationReceipt{receipt},
+	}
+	before, _ := json.Marshal(state)
+	progress := mapRuntimeProgress(state)
+	want := &projectioncontract.RuntimeImplementationProgress{ReservedRounds: 2, CompletedRounds: 1, CommittedReceipts: 1, UnknownExecutions: 1}
+	if !reflect.DeepEqual(progress.ImplementationWork, want) || progress.RunEvidence.AcceptedValidation != 0 || progress.SatisfiedCWICount != 0 {
+		t.Fatalf("implementation became acceptance progress: %+v", progress)
+	}
+	for _, fragment := range []string{"rounds completed 1/2", "Runtime receipts 1", "unknown executions 1", "work is not validation credit"} {
+		if !strings.Contains(runtimeProgressSummary(&progress), fragment) {
+			t.Fatalf("summary missing %q", fragment)
+		}
+	}
+	state.StateRevision++
+	if !reflect.DeepEqual(mapRuntimeProgress(state).ImplementationWork, want) {
+		t.Fatal("scheduling revision fabricated progress")
+	}
+	state.StateRevision--
+	after, _ := json.Marshal(state)
+	if string(before) != string(after) {
+		t.Fatal("projection mutated state")
+	}
+	clone := projectioncontract.CloneRuntimeProgress(&progress)
+	clone.ImplementationWork.CompletedRounds = 99
+	if progress.ImplementationWork.CompletedRounds != 1 {
+		t.Fatal("workspace progress clones alias")
+	}
+	state.ActiveDispatch.OperationExecutions[0].State = runtimecontract.OperationExecutionOwnerCommitted
+	if runtimeImplementationProgress(state).UnknownExecutions != 1 {
+		t.Fatal("late known receipt erased the original unknown round")
+	}
+	state.OperationReceipts[0].AfterHash = "receipt-drift"
+	if runtimeImplementationProgress(state).CommittedReceipts != 0 {
+		t.Fatal("receipt count trusted a mismatching body")
+	}
+}
+
+func TestRuntimeProgressTerminalAcknowledgementsRequireExactIdentity(t *testing.T) {
+	state := runtimecontract.RuntimeStateRecord{Decision: runtimecontract.RuntimeDecision{
+		State:             runtimecontract.ConvergenceStateFailed,
+		AuthoritySnapshot: runtimecontract.AuthoritySnapshot{ID: "authority", WorkspaceID: "workspace", RunID: "run"},
+		Terminal:          &runtimecontract.RuntimeTerminalDecision{Code: "original-failure", Summary: "original failure"},
+	}}
+	outcome, found, err := runtimecontract.DeriveRuntimeTerminalOutcome(state.Decision, nil)
+	if err != nil || !found {
+		t.Fatal(err)
+	}
+	deliveryID := runtimecontract.StableTerminalDeliveryID("workspace", "run", "authority", outcome)
+	for i, owner := range []runtimecontract.RuntimeDeliveryOwner{runtimecontract.RuntimeDeliveryOwnerResult, runtimecontract.RuntimeDeliveryOwnerWorkspace, runtimecontract.RuntimeDeliveryOwnerRun} {
+		ack := runtimecontract.RuntimeDeliveryAcknowledgement{WorkspaceID: "workspace", RunID: "run", TerminalDeliveryID: deliveryID, Owner: owner,
+			AuthoritySnapshotID: "authority", CausationID: "terminal-delivery/" + deliveryID, Outcome: outcome}
+		switch owner {
+		case runtimecontract.RuntimeDeliveryOwnerResult:
+			ack.ResultID = runtimecontract.RuntimeTerminalResultID("workspace", "run")
+			ack.AcknowledgedState = runtimecontract.RuntimeDeliveryAcknowledgedResultRecorded
+		case runtimecontract.RuntimeDeliveryOwnerWorkspace:
+			ack.AcknowledgedState = runtimecontract.RuntimeDeliveryAcknowledgedWorkspaceReleased
+		case runtimecontract.RuntimeDeliveryOwnerRun:
+			ack.AcknowledgedState = runtimecontract.RuntimeDeliveryAcknowledgedRunTerminal
+		}
+		state.DeliveryAcknowledgements = append(state.DeliveryAcknowledgements, ack)
+		progress := mapRuntimeProgress(state)
+		if len(progress.TerminalAcknowledgedOwners) != i+1 {
+			t.Fatal("exact persisted ACK omitted")
+		}
+		clone := projectioncontract.CloneRuntimeProgress(&progress)
+		clone.TerminalAcknowledgedOwners[0] = "other-owner"
+		if progress.TerminalAcknowledgedOwners[0] == "other-owner" {
+			t.Fatal("ACK projection clone aliases")
+		}
+	}
+	state.DeliveryAcknowledgements[2].RunID = "another-run"
+	if len(mapRuntimeProgress(state).TerminalAcknowledgedOwners) != 0 {
+		t.Fatal("cross-run ACK became completion")
+	}
+}

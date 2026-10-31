@@ -13,7 +13,7 @@ func TestDecodePreservesNestedProfileContractValues(t *testing.T) {
 		"repairDeclarationTargetSelectorCandidateRefs": []any{"candidate"}, "repairOperationTargetSelectorRef": "operation",
 	}
 	implementation := map[string]any{
-		"protocolRef": "protocol", "ownerModuleId": "owner", "inputRevisionProtocolRef": "validation/input-revision/v1",
+		"protocolRef": "protocol", "ownerModuleId": "owner", "progressProtocolRef": "implementation-work-progress/v1", "inputRevisionProtocolRef": "validation/input-revision/v1",
 		"allowedOperations":     []any{map[string]any{"kind": "operation", "variantId": "variant"}},
 		"allowedTargetPolicies": []any{"existing"}, "targetSelectorRef": "selector", "targetSelectorOwnerRef": "selector-owner",
 		"targetSelectorSubjectRef": "selector-subject", "targetSelectorCandidateRefs": []any{"candidate"},
@@ -60,6 +60,7 @@ func TestDecodePreservesNestedProfileContractValues(t *testing.T) {
 		decodedEvidence.ValidationFailureRepairConvergence.Routes[0].RepairDeclarationTargetSelectorCandidateRefs[0] != "candidate" ||
 		decodedEvidence.ImplementationWorkPolicy.AllowedOperations[0].VariantID != "variant" ||
 		decodedEvidence.ImplementationWorkPolicy.InputRevisionProtocolRef != "validation/input-revision/v1" ||
+		decodedEvidence.ImplementationWorkPolicy.ProgressProtocolRef != "implementation-work-progress/v1" ||
 		got[0].BootstrapRecipes[0].Artifacts[0].DependsOnArtifactIDs[0] != "prior" ||
 		decodedEvidence.OwnerFactConvergences[0].MaxAcquisitionAttempts != 2 {
 		t.Fatalf("nested Profile policies lost: %+v", got)

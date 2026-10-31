@@ -174,7 +174,10 @@ func validateRuntimeAggregateSM2AfterSemanticInGate(a RuntimeAggregate, gate *ru
 	if err := gate.ValidateDefinitionSources(a.SemanticPlanning, a.Facts.DefinitionSeed, a.Facts.DefinitionFocuses); err != nil {
 		return err
 	}
-	for idx, history := range a.SemanticPlanning.History {
+	if a.SemanticPlanning.SchemaVersion == runtimecontract.RuntimeSemanticPlanningLedgerSchemaSegmented && a.SemanticPlanning.HistoryArchive == nil {
+		return fmt.Errorf("segmented runtime semantic root ledger is missing its archive")
+	}
+	for idx, history := range a.SemanticPlanning.AllHistory() {
 		if history.Snapshot.Manifest == nil {
 			// The typed ledger validator already rejects this shape; retain an
 			// aggregate-level guard so a future history representation cannot
@@ -241,7 +244,7 @@ func validateRuntimeAggregateValidationProofApplicability(a RuntimeAggregate) er
 	if a.SemanticPlanning.Manifest != nil {
 		sealedCatalogs = append(sealedCatalogs, a.SemanticPlanning.Manifest.OwnerCatalogs...)
 	}
-	for _, generation := range a.SemanticPlanning.History {
+	for _, generation := range a.SemanticPlanning.AllHistory() {
 		if generation.Snapshot.Manifest != nil {
 			sealedCatalogs = append(sealedCatalogs, generation.Snapshot.Manifest.OwnerCatalogs...)
 		}
@@ -354,7 +357,7 @@ func validateRuntimeSemanticBindingPurposeInvariantInGate(a RuntimeAggregate, ga
 			return err
 		}
 	}
-	for _, generation := range a.SemanticPlanning.History {
+	for _, generation := range a.SemanticPlanning.AllHistory() {
 		// A generation can return to order-accepted while preparing its next
 		// batch, then be retired after an eligibility or catalog change.  Its
 		// exact manifest still explains an already-sealed binding; only that
@@ -390,7 +393,7 @@ func validateRuntimeSemanticBindingPurposeInvariantInGate(a RuntimeAggregate, ga
 			if a.SemanticPlanning.Manifest != nil {
 				activeManifestHash = a.SemanticPlanning.Manifest.Hash
 			}
-			return fmt.Errorf("runtime aggregate CWI %q current binding manifest %q has no exact semantic purpose lineage (active=%q history=%d)", item.ID, ref.SemanticManifestHash, activeManifestHash, len(a.SemanticPlanning.History))
+			return fmt.Errorf("runtime aggregate CWI %q current binding manifest %q has no exact semantic purpose lineage (active=%q history=%d)", item.ID, ref.SemanticManifestHash, activeManifestHash, a.SemanticPlanning.HistoryCount())
 		}
 		focus, found := focuses[ref.FocusID]
 		if !found {

@@ -9,10 +9,10 @@ import (
 
 func TestSemanticCacheRendererSurvivesReloadAndSameContractCorrection(t *testing.T) {
 	_, _, base, fresh := semanticRequestIntentFixture(t)
-	if fresh.SemanticRenderContractRef != rc.RuntimeSemanticRenderContractV4 {
+	if fresh.SemanticRenderContractRef != rc.RuntimeSemanticRenderContractV5 {
 		t.Fatal("new semantic intent did not choose cache layout")
 	}
-	for _, version := range []string{"", rc.RuntimeSemanticRenderContractV2, rc.RuntimeSemanticRenderContractV3, rc.RuntimeSemanticRenderContractV4} {
+	for _, version := range []string{"", rc.RuntimeSemanticRenderContractV2, rc.RuntimeSemanticRenderContractV3, rc.RuntimeSemanticRenderContractV4, rc.RuntimeSemanticRenderContractV5} {
 		t.Run(version, func(t *testing.T) {
 			a := base
 			expected := fresh.Clone()
@@ -81,7 +81,7 @@ func TestSemanticCacheRendererKeepsNilLegacySessionAndRejectsForeignScope(t *tes
 	// intent, even when the transaction/manifest are otherwise equal.
 	a.CandidateRequestSessions[0].LogicalRequestID = "retired-generation"
 	fresh, err := SemanticExpectedDocument(a)
-	if err != nil || fresh.SemanticRenderContractRef != rc.RuntimeSemanticRenderContractV4 {
+	if err != nil || fresh.SemanticRenderContractRef != rc.RuntimeSemanticRenderContractV5 {
 		t.Fatal("retired request prevented fresh renderer selection", err)
 	}
 }
@@ -95,7 +95,7 @@ func TestSemanticCacheRendererProofBatchCorrectionKeepsSourceVersion(t *testing.
 		t.Fatal(err)
 	}
 	base.SemanticPlanning.LogicalRequestID = rc.StableRuntimeCandidateRequestSessionID(rc.RuntimeProviderDocumentSemanticPlan, base.Facts.WorkspaceID, base.Facts.RunID, base.Decision.AuthorityTransaction(), base.SemanticPlanning.StablePrefixHash, base.SemanticPlanning.Manifest.Hash, key)
-	for _, version := range []string{"", rc.RuntimeSemanticRenderContractV2, rc.RuntimeSemanticRenderContractV3, rc.RuntimeSemanticRenderContractV4} {
+	for _, version := range []string{"", rc.RuntimeSemanticRenderContractV2, rc.RuntimeSemanticRenderContractV3, rc.RuntimeSemanticRenderContractV4, rc.RuntimeSemanticRenderContractV5} {
 		a := base
 		expected, err := SemanticExpectedDocument(a)
 		if err != nil || expected.PlanStep != rc.RuntimeSemanticPlanStepProofBatch || expected.BatchSequence != 2 {

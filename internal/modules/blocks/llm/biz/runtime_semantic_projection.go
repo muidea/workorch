@@ -14,6 +14,8 @@ type runtimeSemanticCapabilityProjection struct {
 }
 
 type runtimeSemanticAuthorityProjection struct {
+	WorkContext       *runtimeSemanticWorkProjectionV5        `json:"workContext,omitempty"`
+	ContextEncoding   string                                  `json:"contextEncoding,omitempty"`
 	WorkspaceID       string                                  `json:"workspaceId"`
 	RunID             string                                  `json:"runId"`
 	Soul              *runtimecontract.RuntimeSoulContext     `json:"soul,omitempty"`

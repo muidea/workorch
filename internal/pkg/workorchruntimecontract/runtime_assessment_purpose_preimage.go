@@ -58,14 +58,14 @@ func runtimeAssessmentPurposePreimagesFromSemanticLedgerInSession(ledger Runtime
 	// History needlessly clones every immutable snapshot that is traversed
 	// separately below.
 	active := ledger
-	active.History = nil
+	active = active.WithoutHistory()
 	active = active.Clone()
 	activeEntries, err := runtimeAssessmentPurposePreimagesFromSemanticGenerationInSession(active, session)
 	if err != nil {
 		return nil, err
 	}
 	ret = append(ret, activeEntries...)
-	for index, generation := range ledger.History {
+	for index, generation := range ledger.AllHistory() {
 		if !semanticLedgerAlreadyValidated {
 			if err := validateRuntimeSemanticPlanningGenerationNormalized(generation, generation.Normalized(), session); err != nil {
 				return nil, fmt.Errorf("runtime assessment purpose semantic history %d: %w", index, err)

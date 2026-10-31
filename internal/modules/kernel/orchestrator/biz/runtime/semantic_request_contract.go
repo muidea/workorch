@@ -53,7 +53,7 @@ func SemanticExpectedDocument(aggregate RuntimeAggregate) (runtimecontract.Runti
 			return runtimecontract.RuntimeExpectedDocumentContract{}, fmt.Errorf("%w: semantic expected document has no persisted active batch", common.ErrConflict)
 		}
 	}
-	expected.SemanticRenderContractRef = runtimecontract.RuntimeSemanticRenderContractV4
+	expected.SemanticRenderContractRef = runtimecontract.RuntimeSemanticRenderContractV5
 
 	// Recovery and same-contract correction inherit the exact source request's
 	// renderer. A generation retirement has a different request key, so it may

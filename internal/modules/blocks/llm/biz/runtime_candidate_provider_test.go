@@ -429,7 +429,7 @@ func TestProviderAuditRequestBytesPreferAdapterWireMeasurement(t *testing.T) {
 }
 
 func TestRuntimeSemanticPlanProviderUsesSingleCachePipelineAndSafeCorrection(t *testing.T) {
-	for _, renderer := range []string{"", runtimecontract.RuntimeSemanticRenderContractV4} {
+	for _, renderer := range []string{"", runtimecontract.RuntimeSemanticRenderContractV4, runtimecontract.RuntimeSemanticRenderContractV5} {
 		t.Run(renderer, func(t *testing.T) {
 			base := runtimeSemanticProviderTestRequest(t)
 			base.SemanticContext.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder

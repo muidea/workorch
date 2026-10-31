@@ -322,6 +322,12 @@ func (c *candidateDispatchComponent) claimOperationExecution(ctx context.Context
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
+	// Storage rollover must be valid before admitting work/physical effects.
+	// Complete history is retained; segment count is not an execution budget.
+	if err := aggregate.SemanticPlanning.ValidateHistoryStorage(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+
 	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}

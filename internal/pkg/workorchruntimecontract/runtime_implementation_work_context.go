@@ -53,10 +53,12 @@ func (c RuntimeImplementationWorkContent) Validate(scope RuntimeImplementationWo
 // A minimal semantic explanation binds a purpose proposal to its exact original
 // obligation and read-only input. Code validates identity, never its sufficiency.
 type RuntimeImplementationIntent struct {
-	DeclarationRef string `json:"declarationRef"`
-	ContentHash    string `json:"contentHash"`
-	RemainingWork  string `json:"remainingWork"`
-	Reason         string `json:"reason"`
+	DeclarationRef          string                                   `json:"declarationRef"`
+	ContentHash             string                                   `json:"contentHash"`
+	RemainingWork           string                                   `json:"remainingWork"`
+	Reason                  string                                   `json:"reason"`
+	RequirementReviews      []RuntimeImplementationRequirementReview `json:"requirementReviews,omitempty"`
+	SelectedRequirementRefs []string                                 `json:"selectedRequirementRefs,omitempty"`
 }
 
 func (i *RuntimeImplementationIntent) Clone() *RuntimeImplementationIntent {
@@ -64,6 +66,8 @@ func (i *RuntimeImplementationIntent) Clone() *RuntimeImplementationIntent {
 		return nil
 	}
 	v := *i
+	v.RequirementReviews = slices.Clone(i.RequirementReviews)
+	v.SelectedRequirementRefs = slices.Clone(i.SelectedRequirementRefs)
 	return &v
 }
 func validateRuntimeImplementationIntent(i *RuntimeImplementationIntent, w *RuntimeSemanticImplementationWork, declaration string) error {

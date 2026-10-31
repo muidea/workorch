@@ -1018,6 +1018,7 @@
                 ],
                 "maxRoundsPerCWI": 8,
                 "inputRevisionProtocolRef": "validation/input-revision/v1",
+                "progressProtocolRef": "implementation-work-progress/v1",
                 "maxTargetsPerRound": 4,
                 "requireFreshObservation": true,
                 "requireFreshValidation": true,

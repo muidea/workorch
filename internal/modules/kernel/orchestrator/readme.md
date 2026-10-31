@@ -1150,7 +1150,7 @@ SM-2 验证 exact ticket/request/report lineage，在同一个 resolution CAS �
 generation，重入 `required`；SM-4 只交付 continuation。新 manifest 仅携带准确 subject 的 preceding resolution facts，
 使用新 logical request 重新评审；不改写 Definition/startup、旧报告或历史证据，也不授予 CWI credit。
 每个 Run 的同一 exact subject 最多接受一次信息补充；仍无法判断以 `validation_input_review_information_exhausted`
-明确失败，不循环开票；既有 history 容量不足以消费答案时，在开票前以 `validation_input_review_history_exhausted` 终止。
+明确失败，不循环开票；历史存储先校验完整结构，按下述分段协议保留全部答案来源，不以固定 generation 条数阻止消费答案。
 拒绝 ticket 则沿既有治理 fail 路径终止。既有 history、request/correction、provider budget 不另开账户。
 v2 进一步以同一 Run 的原 CWI/check 为信息预算身份；内容、路径、native/recipe/catalog revision 变化和进程重启均不能
 刷新额度。预算从 preceding `input_review_information` 原记录反证，不新增跨 owner counter；fresh-load 同样拒绝超额
@@ -1599,7 +1599,7 @@ SM-2 的 exact complete input-review conflict 私有事件保留旧 generation�
 待修订报告只允许真实 effect purpose，不允许 unchanged re-review 或借用 post-execution repair。未 opt-in 继续原 conflict 失败。
 
 File opt-in edit feasibility 预览同一 edit，核对原输入 before hash、变化后像；候选/最终 seal/dispatch reload 重核。
-仍使用原 MaxRoundsPerCWI、history/provider/capability budget，真实 accepted receipt 零 CWI/validation credit；
+仍使用原 MaxRoundsPerCWI、proof/provider/capability budget，真实 accepted receipt 零 CWI/validation credit；
 资源失效后取得真实当前输入，再独立审查、执行全部原 validation 和终态交付。未知、stale、预算不足或混合/歧义来源不放行。
 Core 不解释语言/框架/项目语义；具体改法来自原 Profile/project 和完整审查反馈。SM-1/4 不获新决策权。
 验证：`TestInputRevision*`、`TestDriveRuntimeInputReviewRevision*`，后者用真实 File/Shell/Run/Result/Workspace owner，
@@ -1625,3 +1625,58 @@ exact contentHash、remainingWork、reason。schema、strict decoder、document 
 代码只检查身份、来源和有限形状；模型的理由不构成语义充分性、readiness、validation 或 CWI credit。
 原 Goal/DoD、Profile、protected inputs、8 轮/4 目标与普通独立验证均保持；业务差异继续在 Profile 和项目上下文。
 必要修复仍走既有 revision/repair/fresh validation，不强制切换终验、不把重复抽样直至 PASS 当成稳定性。
+
+### Semantic history segments v1 and work receipt settlement
+
+`runtime-semantic-history-segments/v1` 将完整旧 generation 分为每段 16 条的不可变正文，
+与最多 16 条的近期 `History` 同存于原 opaque Runtime record。16 是存储段大小，不再是单 Run 的规划次数预算。
+空扩展保留旧 JSON 表示；仅新退休跨段时写入 `HistoryArchive` 并升级 ledger schema 为 v2，旧二进制必须拒绝而不能忽略 archive 后仅消费 tail。不迁移、重算或复活已失败的 Run。
+每个 retirement snapshot 同时清除 tail/archive，禁止嵌套历史。原文、顺序、definition、scope、generation、
+invalidation signature、provider/owner/binding/repair 来源仍逐项完整反证，不凭 segment hash 或展示投影授信。
+归档 `GenerationCount` 必须与完整段正文数相等；丢失整段、缺少 archive 或降级 schema 均拒绝。
+
+SM-2/SM-3/SM-4 仍在一次 Run aggregate CAS 中协调 execution、完整 owner receipt、真实 budget consumption、
+工作 effect/collective round 与 generation retirement；段滚动无独立 I/O、提交顺序或可丢失的跨文件窗口。
+Scope reservation 与 physical claim 前检查 storage representation。合法结构可以追加后续段，不再在 effect 后因
+固定历史条数拒绝 receipt；非法结构在 effect 前拒绝。结构、来源、fence、scope 或证据错误仍拒绝，不能捕获任意
+settlement error 后把 receipt 强行记成合法；真正缺原结果仍走原 unknown 合同。File 保存原 receipt、query-first、
+有界交付及确定性拒绝即停止的合同不变，不通过重放 effect 或无限重发修复内部错误。
+
+所有 source-ledger、working intent、输入修订/信息补充、request repair、assessment、binding preimage、
+budget 和 fresh-load 消费者按 `AllHistory()` 的全序访问完整正文。段滚动不退款、不去重或改变原封存预算；
+`runtime-execution-limits/v1` 的显式 proof batch 策略上界独立保持 17，不再从段大小派生。
+每 CWI 原工作轮次/目标限制及 provider/capability/recovery 预算保持，SM-1 生命周期不变。
+这是一份记录内的分段存储，尚未减少总记录字节或启用延迟加载；仍须核对完整校验、clone 和 CAS 成本。
+
+`runtime_semantic_history_test.go` 覆盖段边界、完整正文/顺序/反例、clone/raw-clone、重载、scope 与不退额。
+`semantic_history_workflow_test.go` 在原 8 轮预算内通过真实 File owner、私有 event/CAS 和第 17 次退休，
+随后以独立进程重读分段记录、重投 exact duplicate，证明零额外 CAS/effect/credit/预算。
+它不是公开 fullflow 或真实 provider 验收。进度只读投影将 Runtime 已提交回执、工作轮次、unknown、validation、
+CWI 和精确终态 ACK 分轴展示；owner 私存而未被 Runtime 接纳的物理 effect/receipt 不能从该投影推断。
+
+
+### Original-requirement implementation progress v1
+
+A Profile may seal `ImplementationWorkPolicy.ProgressProtocolRef=implementation-work-progress/v1`.
+The built-in software-dev Profile opts in for newly sealed startup inputs; existing Run/Profile snapshots are not upgraded.
+Before any semantic request this protocol requires the complete current owner content. The purpose document's
+`implementationIntent.requirementReviews` covers the current CWI's complete original `SourceObligationChecks.CheckRef`
+set in its original order; without finer checks the exact original declaration is one indivisible requirement.
+Each entry contains only the exact ref and `workRequired`, avoiding repeated source text/explanations. The existing
+`remainingWork`/`reason` explains the minimal selected changes. `selectedRequirementRefs` for an effect must be a nonempty,
+unique subset of the proposed gaps. A terminal-proof purpose requires no proposed gaps and no selected implementation refs.
+Missing/foreign/duplicate/reordered originals and contradictory purposes follow the existing bounded semantic rejection path.
+This is consistency of a semantic proposal, not code-proven readiness, validation, or completion. Receipt/effect alone never
+sets a review to false, satisfies a CWI, or advances terminal delivery. Core does not interpret project text or filenames.
+
+SM-2 consumes the admitted purpose through the existing private event/CAS; SM-3 hashes/clones/persists the complete document,
+including reviews and selected refs; SM-4 renders only the exact persisted version/context and re-drives existing transactions.
+SM-1, original all-of Goal/DoD/StartupInput, fresh owner facts, protected inputs, original work/provider/capability budgets,
+independent validation/repair, and three-owner ACK remain unchanged. No global every-N-round terminal switch is introduced.
+Old Profiles keep their original purpose wire and reject injection of undeclared progress fields.
+
+New semantic ExpectedDocument contracts select `semantic-render/shared-work/v5`. Recovery and same-contract correction
+inherit the original renderer, including legacy nil/v2/v3/v4 sessions. A singleton order still uses its original provider
+transaction: its current ledger contract explicitly identifies the order as provider-authored. Local compilation must not
+fabricate that provenance, usage, session or accepted document. Removing this call requires a separate explicit compiler
+origin and complete lineage contract; this change does not silently bypass that transaction.

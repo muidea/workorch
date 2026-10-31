@@ -84,7 +84,7 @@ func Fields(kind string) InputFields {
 		return InputFields{Text: "kind variantId"}
 	case "implementationWork":
 		return InputFields{
-			Text:       "protocolRef inputRevisionProtocolRef ownerModuleId targetSelectorRef targetSelectorOwnerRef targetSelectorSubjectRef",
+			Text:       "protocolRef inputRevisionProtocolRef progressProtocolRef ownerModuleId targetSelectorRef targetSelectorOwnerRef targetSelectorSubjectRef",
 			Boolean:    "requireFreshObservation requireFreshValidation protectValidationInputs",
 			Integer:    "maxRoundsPerCWI maxTargetsPerRound",
 			StringList: "allowedTargetPolicies targetSelectorCandidateRefs prospectiveTargetAllOfConstraintRefs",

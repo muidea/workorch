@@ -2,11 +2,61 @@ package integration_test
 
 import (
 	"encoding/json"
+	"reflect"
 	"slices"
 	"testing"
 
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestImplementationWorkFullflowAssessmentConsumesPublishedFocusReference(t *testing.T) {
+	focus := runtimecontract.CoverageFocus{ID: "original-focus", CoverageWorkItemIDs: []common.CoverageWorkItemID{"original-cwi"}}
+	for _, tc := range []struct {
+		name, ref string
+		inline    bool
+		wantError bool
+	}{
+		{name: "v4 reference", ref: "context.focus"},
+		{name: "inline renderer", inline: true},
+		{name: "missing focus", wantError: true},
+		{name: "unknown reference", ref: "other.focus", wantError: true},
+		{name: "duplicate focus", ref: "context.focus", inline: true, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			decision := map[string]any{}
+			if tc.ref != "" {
+				decision["FocusRef"] = tc.ref
+			}
+			if tc.inline {
+				decision["Focus"] = focus
+			}
+			values := map[string]any{"decision": decision, "outputContract": map[string]any{"state": runtimecontract.ConvergenceStateNeedAssessment}, "context": map[string]any{"focus": focus, "allowedAcceptedEvidenceRefs": []string{"exact-owner-evidence"}}}
+			raw := map[string]json.RawMessage{}
+			for key, value := range values {
+				data, err := json.Marshal(value)
+				if err != nil {
+					t.Fatal(err)
+				}
+				raw[key] = data
+			}
+			payload, _, err := (&implementationWorkFullflowProvider{}).candidate(raw)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("provider fixture error=%v", err)
+			}
+			if tc.wantError {
+				return
+			}
+			candidate, err := runtimecontract.DecodeRuntimeCandidatePayload(runtimecontract.ConvergenceStateNeedAssessment, payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if candidate.Assessment == nil || candidate.Assessment.FocusID != focus.ID || !reflect.DeepEqual(candidate.Assessment.CoverageWorkItemIDs, focus.CoverageWorkItemIDs) {
+				t.Fatal("published focus identity lost")
+			}
+		})
+	}
+}
 
 func TestImplementationWorkFullflowReviewUsesExactIndependentSourceCriteria(t *testing.T) {
 	var validation implementationWorkFullflowValidation

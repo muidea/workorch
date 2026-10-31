@@ -111,7 +111,7 @@ func semanticCatalogInvalidationLineage(aggregate RuntimeAggregate, manifest run
 	// this retirement.  Without this fence, every later generation would repeat
 	// all historical signatures and make the lineage look causally ambiguous.
 	retiredSignatures := make(map[string]struct{})
-	for _, history := range aggregate.SemanticPlanning.History {
+	for _, history := range aggregate.SemanticPlanning.AllHistory() {
 		for _, signature := range history.InvalidationSignatures {
 			signature = strings.TrimSpace(signature)
 			if signature != "" {
@@ -172,13 +172,10 @@ func retireSemanticPlanningGeneration(aggregate *RuntimeAggregate, reason runtim
 	if len(ids) == 0 || len(signatures) == 0 {
 		return fmt.Errorf("%w: semantic planning invalidation has no catalog lineage", common.ErrConflict)
 	}
-	if len(ledger.History) >= runtimecontract.RuntimeSemanticPlanningHistoryLimit {
-		return fmt.Errorf("%w: semantic planning generation history exhausted", common.ErrConflict)
+	if err := ledger.ValidateHistoryStorage(); err != nil {
+		return err
 	}
-	snapshot := ledger.Clone()
-	// A history entry is a complete snapshot, but nested history would duplicate
-	// old generations and turn the persisted record into an unbounded tree.
-	snapshot.History = nil
+	snapshot := ledger.WithoutHistory().Clone()
 	history := runtimecontract.RuntimeSemanticPlanningGeneration{
 		RetiredAtStateRevision: aggregate.StateRevision + 1,
 		Reason:                 reason,
@@ -195,7 +192,12 @@ func retireSemanticPlanningGeneration(aggregate *RuntimeAggregate, reason runtim
 		DefinitionSeed:         ledger.DefinitionSeed.Clone(),
 		FeasibilityGaps:        append([]runtimecontract.RuntimeSemanticFeasibilityGap(nil), ledger.FeasibilityGaps...),
 		CatalogRefreshAttempts: ledger.CatalogRefreshAttempts,
-		History:                append(append([]runtimecontract.RuntimeSemanticPlanningGeneration(nil), ledger.History...), history),
+		History:                ledger.History, HistoryArchive: ledger.HistoryArchive,
+	}
+	if appended, err := newLedger.AppendHistory(history); err != nil {
+		return err
+	} else {
+		newLedger = appended
 	}
 	if err := newLedger.Validate(); err != nil {
 		return err
@@ -286,8 +288,8 @@ func retireSemanticPlanningGenerationForCWIReopen(aggregate *RuntimeAggregate, r
 	if aggregate.ActiveDispatch != nil {
 		return fmt.Errorf("%w: semantic planning generation cannot retire an active dispatch", common.ErrConflict)
 	}
-	if len(ledger.History) >= runtimecontract.RuntimeSemanticPlanningHistoryLimit {
-		return fmt.Errorf("%w: semantic planning generation history exhausted", common.ErrConflict)
+	if err := ledger.ValidateHistoryStorage(); err != nil {
+		return err
 	}
 	byCoverage := runtimeCoverageByID(aggregate.Facts.Coverage)
 	seen := make(map[common.CoverageWorkItemID]struct{}, len(reopened))
@@ -313,8 +315,7 @@ func retireSemanticPlanningGenerationForCWIReopen(aggregate *RuntimeAggregate, r
 	}
 	sort.SliceStable(ids, func(i, j int) bool { return string(ids[i]) < string(ids[j]) })
 	sort.Strings(triggerRefs)
-	snapshot := ledger.Clone()
-	snapshot.History = nil
+	snapshot := ledger.WithoutHistory().Clone()
 	history := runtimecontract.RuntimeSemanticPlanningGeneration{
 		RetiredAtStateRevision: aggregate.StateRevision + 1,
 		Reason:                 runtimecontract.RuntimeSemanticPlanningRetirementCWIReopened,
@@ -330,7 +331,12 @@ func retireSemanticPlanningGenerationForCWIReopen(aggregate *RuntimeAggregate, r
 		Phase:                  runtimecontract.RuntimeSemanticPlanningRequired,
 		DefinitionSeed:         ledger.DefinitionSeed.Clone(),
 		CatalogRefreshAttempts: ledger.CatalogRefreshAttempts,
-		History:                append(append([]runtimecontract.RuntimeSemanticPlanningGeneration(nil), ledger.History...), history),
+		History:                ledger.History, HistoryArchive: ledger.HistoryArchive,
+	}
+	if appended, err := newLedger.AppendHistory(history); err != nil {
+		return err
+	} else {
+		newLedger = appended
 	}
 	if err := newLedger.Validate(); err != nil {
 		return err
@@ -356,16 +362,15 @@ func retireSemanticPlanningGenerationForBindingContradiction(aggregate *RuntimeA
 	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningFailed || ledger.Manifest == nil || aggregate.ActiveDispatch != nil {
 		return fmt.Errorf("%w: semantic binding contradiction cannot retire the current generation", common.ErrConflict)
 	}
-	if len(ledger.History) >= runtimecontract.RuntimeSemanticPlanningHistoryLimit {
-		return fmt.Errorf("%w: semantic planning generation history exhausted", common.ErrConflict)
+	if err := ledger.ValidateHistoryStorage(); err != nil {
+		return err
 	}
 	item, found := runtimeCoverageByID(aggregate.Facts.Coverage)[coverageID]
 	if !found || item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStatePlanning || item.CurrentBindingRef != nil || len(item.BindingRetirementLineage) == 0 ||
 		item.BindingRetirementLineage[len(item.BindingRetirementLineage)-1].CausationRef != strings.TrimSpace(causationRef) {
 		return fmt.Errorf("%w: semantic binding contradiction has no canonical retirement lineage", common.ErrConflict)
 	}
-	snapshot := ledger.Clone()
-	snapshot.History = nil
+	snapshot := ledger.WithoutHistory().Clone()
 	history := runtimecontract.RuntimeSemanticPlanningGeneration{
 		RetiredAtStateRevision: aggregate.StateRevision + 1,
 		Reason:                 runtimecontract.RuntimeSemanticPlanningRetirementBindingContradiction,
@@ -381,7 +386,12 @@ func retireSemanticPlanningGenerationForBindingContradiction(aggregate *RuntimeA
 		Phase:                  runtimecontract.RuntimeSemanticPlanningRequired,
 		DefinitionSeed:         ledger.DefinitionSeed.Clone(),
 		CatalogRefreshAttempts: ledger.CatalogRefreshAttempts,
-		History:                append(append([]runtimecontract.RuntimeSemanticPlanningGeneration(nil), ledger.History...), history),
+		History:                ledger.History, HistoryArchive: ledger.HistoryArchive,
+	}
+	if appended, err := newLedger.AppendHistory(history); err != nil {
+		return err
+	} else {
+		newLedger = appended
 	}
 	if err := newLedger.Validate(); err != nil {
 		return err
@@ -408,8 +418,8 @@ func retireSemanticPlanningGenerationForEligibilityChange(aggregate *RuntimeAggr
 	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningFailed || ledger.Manifest == nil || aggregate.ActiveDispatch != nil {
 		return fmt.Errorf("%w: semantic planning eligibility change cannot retire the current generation", common.ErrConflict)
 	}
-	if len(ledger.History) >= runtimecontract.RuntimeSemanticPlanningHistoryLimit {
-		return fmt.Errorf("%w: semantic planning generation history exhausted", common.ErrConflict)
+	if err := ledger.ValidateHistoryStorage(); err != nil {
+		return err
 	}
 	coverage := runtimeCoverageByID(aggregate.Facts.Coverage)
 	eligible := make(map[common.CoverageWorkItemID]struct{})
@@ -455,8 +465,7 @@ func retireSemanticPlanningGenerationForEligibilityChange(aggregate *RuntimeAggr
 		}
 	}
 	triggerRefs = uniqueTriggerRefs
-	snapshot := ledger.Clone()
-	snapshot.History = nil
+	snapshot := ledger.WithoutHistory().Clone()
 	history := runtimecontract.RuntimeSemanticPlanningGeneration{
 		RetiredAtStateRevision:   aggregate.StateRevision + 1,
 		Reason:                   runtimecontract.RuntimeSemanticPlanningRetirementEligibleClosureChanged,
@@ -471,7 +480,12 @@ func retireSemanticPlanningGenerationForEligibilityChange(aggregate *RuntimeAggr
 		SchemaVersion: ledger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningRequired,
 		DefinitionSeed: ledger.DefinitionSeed.Clone(), FeasibilityGaps: append([]runtimecontract.RuntimeSemanticFeasibilityGap(nil), ledger.FeasibilityGaps...),
 		CatalogRefreshAttempts: ledger.CatalogRefreshAttempts,
-		History:                append(append([]runtimecontract.RuntimeSemanticPlanningGeneration(nil), ledger.History...), history),
+		History:                ledger.History, HistoryArchive: ledger.HistoryArchive,
+	}
+	if appended, err := newLedger.AppendHistory(history); err != nil {
+		return err
+	} else {
+		newLedger = appended
 	}
 	if err := newLedger.Validate(); err != nil {
 		return err

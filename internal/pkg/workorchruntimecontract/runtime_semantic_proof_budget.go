@@ -20,7 +20,7 @@ func RuntimeSemanticProofBatchUsage(ledger RuntimeSemanticPlanningLedger) map[co
 			}
 		}
 	}
-	for _, history := range ledger.History {
+	for _, history := range ledger.AllHistory() {
 		add(history.Snapshot.Batches)
 	}
 	add(ledger.Batches)
