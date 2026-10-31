@@ -14,7 +14,7 @@ func candidateWithProfileEvidencePurposeMapping() workspace.DefinitionAdmissionC
 	p := &c.RuntimeProfileContracts[0]
 	p.DeliverableExpectations = []runtimecontract.RuntimeDeliverableExpectation{{ID: "initial-delivery", Required: true, Description: "Profile 原交付义务全文\n与原 DoD 全部合取。"}}
 	p.EvidenceRequirements = append(p.EvidenceRequirements, runtimecontract.RuntimeProfileEvidenceRequirement{ID: "initial-delivery", Scope: "deliverable", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite}})
-	c.Specification.EvidencePurposeMappings = []workspace.GoalEvidencePurposeMapping{{ContractRef: runtimecontract.RuntimeProfileDeliverableEvidencePurposeV2,
+	c.Specification.EvidencePurposeMappings = []workspace.GoalEvidencePurposeMapping{{ContractRef: runtimecontract.RuntimeProfileDeliverableEvidencePurpose,
 		HistoricalItemRef: runtimecontract.RuntimeProfileDeliverablePurposeRef(p.ID, "initial-delivery"), AcceptanceItemRef: c.DoDInputs[1].CandidateItemRef,
 		HistoricalProfileID: p.ID, HistoricalDeliverableID: "initial-delivery", HistoricalText: p.DeliverableExpectations[0].Description,
 		HistoricalProfileHash: runtimecontract.StableRuntimeProfileContractsHash([]runtimecontract.RuntimeProfileContract{*p})}}
@@ -82,7 +82,7 @@ func TestProfileEvidencePurposeAdmissionConfirmsSnapshotWithoutInventingDoD(t *t
 func TestRequiredProfilePurposeCannotConfirmMissingEvenWithSixPASS(t *testing.T) {
 	c := candidateWithProfileEvidencePurposeMapping()
 	p := &c.RuntimeProfileContracts[0]
-	p.DeliverableExpectations[0].RequiredEvidencePurposeContractRef = runtimecontract.RuntimeProfileDeliverableEvidencePurposeV2
+	p.DeliverableExpectations[0].RequiredEvidencePurposeContractRef = runtimecontract.RuntimeProfileDeliverableEvidencePurpose
 	c.Specification.EvidencePurposeMappings[0].HistoricalProfileHash = runtimecontract.StableRuntimeProfileContractsHash(c.RuntimeProfileContracts)
 	c.RuntimeProfileContractsHash = runtimecontract.StableRuntimeProfileContractsHash(c.RuntimeProfileContracts)
 	for n := range c.Specification.Reviews {

@@ -33,7 +33,7 @@ func TestAuthoringSpecificationPersistsProposalAndSixIndependentReviews(t *testi
 		t.Fatal(err)
 	}
 	acceptance := &workspace.DefinitionDerivedAcceptance{AuthoringInputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"补充验收"}}
-	record, err = record.CompleteDerivation(derivation.PermitID, acceptance, "")
+	record, err = completeTestDerivation(record, derivation.PermitID, acceptance, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,10 @@ func TestAuthoringSpecificationPersistsProposalAndSixIndependentReviews(t *testi
 				}
 				result.Set(response, nil)
 			case workspaceevents.CompleteAuthoringSpecificationCommand:
-				next, err := record.CompleteSpecification(command.PermitID, command.Proposal, command.Review, command.FailureCode, command.Diagnostic)
+				next, err := completeTestSpecification(record, command.PermitID, command.Proposal, command.Review, command.FailureCode, command.Diagnostic)
+				if command.Review != nil && command.SuccessAudit != nil {
+					next, err = record.CompleteReviewDocument(command.PermitID, *command.Review, *command.SuccessAudit)
+				}
 				if command.Mapping != nil {
 					next, err = record.CompleteSpecificationMapping(command.PermitID, *command.Mapping, *command.SuccessAudit)
 				}

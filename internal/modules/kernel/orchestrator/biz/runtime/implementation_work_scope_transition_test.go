@@ -265,9 +265,7 @@ func (f *implementationWorkRealFileFixture) current(t *testing.T, initial Runtim
 		return f.controller, f.repository, fresh
 	}
 	policy := initial.Facts.DefinitionFocuses[0].ImplementationWorkPolicy
-	if f.progress {
-		policy.ProgressProtocolRef = runtimecontract.RuntimeImplementationWorkProgressV1
-	}
+
 	policy.TargetSelectorRef = "file/workspace_deliverable"
 	policy.AllowedOperations = []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileEdit}}
 	initial.Definition.CapabilityContract = append(initial.Definition.CapabilityContract, runtimecontract.StepKindFileEdit)
@@ -305,7 +303,7 @@ func (f *implementationWorkRealFileFixture) scope(t *testing.T, request runtimec
 	p := request.Policy
 	response := f.send(t, fileevents.TopicAcquireRuntimeTargetSelection, fileevents.AcquireRuntimeTargetSelectionCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.AuthoritySnapshotID, PrerequisiteID: request.RequestID, WorkspaceDeliverableDirectory: f.directory, TargetRole: "implementation_work", TargetSelectorRef: p.TargetSelectorRef, TargetSelectorOwnerRef: p.TargetSelectorOwnerRef, TargetSelectorSubjectRef: p.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: p.TargetSelectorCandidateRefs, ProspectiveTargetAllOfConstraintRefs: p.ProspectiveTargetAllOfConstraintRefs, MaxItems: runtimecontract.RuntimeOwnerInventoryItemsMaxCount}).(fileevents.AcquireRuntimeTargetSelectionResult)
 	scope := runtimecontract.RuntimeImplementationWorkScopeObservation{Request: request, Selection: response.Selection, Observation: response.Observation}
-	if f.progress {
+	{
 		scope.Content = &runtimecontract.RuntimeImplementationWorkContent{ProtocolRef: runtimecontract.RuntimeImplementationWorkContentV1, ManifestRevision: scope.Selection.ObservedRevision}
 		for _, target := range scope.Selection.TargetRefs {
 			body, err := os.ReadFile(filepath.Join(f.directory, target))
@@ -599,7 +597,14 @@ func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.Run
 	observation := request.ManifestBinding.Observation
 	observation.PrerequisiteID, observation.Kind, observation.ContentHash = request.RequestID, runtimecontract.PrerequisiteKindTargetSelection, selection.SnapshotID
 	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
-	scope := runtimecontract.RuntimeImplementationWorkScopeObservation{Request: *request, Selection: selection, Observation: observation}
+	scope := runtimecontract.RuntimeImplementationWorkScopeObservation{Request: *request, Selection: selection, Observation: observation,
+		Content: &runtimecontract.RuntimeImplementationWorkContent{ProtocolRef: runtimecontract.RuntimeImplementationWorkContentV1, ManifestRevision: selection.ObservedRevision}}
+	// Detached deterministic owner snapshot for the private transition fixture.
+	for _, target := range targets {
+		content := "original content for " + target
+		hash := sha256.Sum256([]byte(content))
+		scope.Content.Snapshots = append(scope.Content.Snapshots, runtimecontract.TargetSnapshot{TargetRef: target, Content: content, ContentHash: hex.EncodeToString(hash[:]), ContentState: runtimecontract.SnapshotContentStateComplete, Size: int64(len(content))})
+	}
 	if owner != nil {
 		scope = owner.scope(t, *request)
 	}
@@ -610,7 +615,7 @@ func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.Run
 	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, Transaction: &RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: "purpose-prefix", LogicalRequestID: purposeRequestID}})
 	document := runtimecontract.RuntimeSemanticPlanDocument{SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: runtimecontract.RuntimeSemanticPlanStepCoverageOrder, CoverageOrder: []common.CoverageWorkItemID{"cwi-v2"}, ImplementationPurpose: purpose}
-	if owner != nil && owner.progress {
+	{
 		obligation := manifest.ProofObligations[0]
 		work := obligation.ImplementationWork
 		intent := &runtimecontract.RuntimeImplementationIntent{DeclarationRef: obligation.DeclarationRef, ContentHash: work.Scope.Content.Hash(), RemainingWork: "scripted minimal original requirement work or independent verification", Reason: "compare exact current content with original obligation"}

@@ -20,7 +20,7 @@ func TestSemanticSharedWorkReferencesExpandExactOriginalAndRejectTampering(t *te
 		t.Fatal("lost exact reference or old inline receipt")
 	}
 	raw, _ := json.Marshal(v)
-	var loaded runtimeSemanticWorkProjectionV5
+	var loaded runtimeSemanticWorkProjection
 	json.Unmarshal(raw, &loaded)
 	expanded, err := expandSemanticWorkContext(&loaded, h)
 	if err != nil || !reflect.DeepEqual(c, expanded) {
@@ -72,7 +72,7 @@ func TestSemanticSharedWorkV5IntegrityAndStagePrefix(t *testing.T) {
 	request.SemanticContext.ExecutionHistory.Hash = rc.StableRuntimeSemanticExecutionHistoryHash(request.SemanticContext.ExecutionHistory)
 	request.SemanticContext.ExecutionBudget.ManifestHash = request.SemanticManifest.Hash
 	request.SemanticContext.ExecutionBudget.Hash = rc.StableRuntimeSemanticExecutionBudgetHash(request.SemanticContext.ExecutionBudget)
-	request.ExpectedDocument = &rc.RuntimeExpectedDocumentContract{SemanticRenderContractRef: rc.RuntimeSemanticRenderContractV4}
+	request.ExpectedDocument = &rc.RuntimeExpectedDocumentContract{SemanticContextEncoding: rc.RuntimeSemanticContextEncoding}
 	legacy, err := prepareRuntimeSemanticPlanRequest(request)
 	if err != nil {
 		t.Fatal(err)
@@ -81,7 +81,7 @@ func TestSemanticSharedWorkV5IntegrityAndStagePrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request.ExpectedDocument.SemanticRenderContractRef = rc.RuntimeSemanticRenderContractV5
+	request.ExpectedDocument.SemanticContextEncoding = rc.RuntimeSemanticContextEncoding
 	prepared, err := prepareRuntimeSemanticPlanRequest(request)
 	if err != nil {
 		t.Fatal(err)
@@ -127,7 +127,7 @@ func TestSemanticSharedWorkV5IntegrityAndStagePrefix(t *testing.T) {
 			for n := range p.PromptContext.Sections {
 				s := &p.PromptContext.Sections[n]
 				if strings.HasPrefix(s.ID, "C4.") && kind == "wrong-ref" {
-					s.Content = strings.ReplaceAll(s.Content, semanticWorkContextRefV5, "another-context")
+					s.Content = strings.ReplaceAll(s.Content, semanticWorkContextRef, "another-context")
 				}
 				if strings.HasPrefix(s.ID, "C3.") && (kind == "dropped-content" || kind == "altered-content") {
 					var a runtimeSemanticAuthorityProjection
@@ -142,7 +142,7 @@ func TestSemanticSharedWorkV5IntegrityAndStagePrefix(t *testing.T) {
 				}
 			}
 			if kind == "unsealed-version" {
-				p.ContextBudget.RenderContractRef = rc.RuntimeSemanticRenderContractV4
+				p.ContextBudget.RenderContractRef = "unknown"
 			}
 			if validateRuntimeSemanticContextIntegrity(prepared.context, prepared.manifest, 0, nil, nil, p.ContextBudget, p.PromptContext) == nil {
 				t.Fatal("tampered context passed integrity")

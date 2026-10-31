@@ -9,7 +9,7 @@ import (
 	rc "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestOperationsRendererSelectionSurvivesReloadAndCorrection(t *testing.T) {
+func TestCurrentOperationsEncodingSurvivesReloadAndCorrection(t *testing.T) {
 	ctx := context.Background()
 	state := &inMemoryRuntimeStateRepository{}
 	controller, err := runtime.NewRuntimeController(state)
@@ -29,13 +29,14 @@ func TestOperationsRendererSelectionSurvivesReloadAndCorrection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fresh.OperationsRenderContractRef != rc.RuntimeOperationsRenderContractV4 {
-		t.Fatal("fresh intent did not select v4")
+	if fresh.OperationsContextEncoding != rc.RuntimeOperationsContextEncoding {
+		t.Fatal("fresh intent did not use current operations encoding")
 	}
-	for _, renderer := range []string{"", rc.RuntimeOperationsRenderContractV2, rc.RuntimeOperationsRenderContractV3, rc.RuntimeOperationsRenderContractV4} {
+	{
+		renderer := rc.RuntimeOperationsContextEncoding
 		saved := aggregate
 		expected := fresh
-		expected.OperationsRenderContractRef = renderer
+		expected.OperationsContextEncoding = renderer
 		saved.CandidateRequestSessions = append(saved.CandidateRequestSessions, rc.RuntimeCandidateRequestSession{DocumentKind: rc.RuntimeProviderDocumentOperations, Transaction: aggregate.Decision.AuthorityTransaction(), ManifestHash: manifest.Hash, ExpectedDocument: &expected})
 		bytes, _ := json.Marshal(saved)
 		var reloaded runtime.RuntimeAggregate
@@ -47,22 +48,27 @@ func TestOperationsRendererSelectionSurvivesReloadAndCorrection(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.OperationsRenderContractRef != renderer || got.CorrectionAttempt != attempt || got.WireContractHash != fresh.WireContractHash {
+			if got.OperationsContextEncoding != renderer || got.CorrectionAttempt != attempt || got.WireContractHash != fresh.WireContractHash {
 				t.Fatal("reload/correction changed sealed rendering or wire")
 			}
 		}
-		foreign := saved.CandidateRequestSessions[0].Clone()
-		foreign.Transaction.AuthoritySnapshotID = "other-authority"
-		foreign.ExpectedDocument.OperationsRenderContractRef = "foreign"
-		saved.CandidateRequestSessions = append(saved.CandidateRequestSessions, foreign)
-		if _, err := runtimeOperationsExpectedDocument(saved, manifest, 0); err != nil {
-			t.Fatalf("foreign authority contaminated renderer: %v", err)
+		// The current encoding is compiled from code, never selected from an
+		// archived request session. Invalid identities still fail the closed
+		// ExpectedDocument contract before any provider submission.
+		valid := fresh
+		valid.LogicalRequestID, valid.StablePrefixHash = "current-request", "stable-prefix"
+		valid.MaxOutputTokens = 1024
+		valid.Hash = rc.StableRuntimeExpectedDocumentHash(valid)
+		if err := valid.Validate(); err != nil {
+			t.Fatalf("current expected document: %v", err)
 		}
-		conflict := saved.CandidateRequestSessions[0].Clone()
-		conflict.ExpectedDocument.OperationsRenderContractRef = "conflicting"
-		saved.CandidateRequestSessions = append(saved.CandidateRequestSessions, conflict)
-		if _, err := runtimeOperationsExpectedDocument(saved, manifest, 1); err == nil {
-			t.Fatal("inconsistent renderer lineage accepted")
+		for _, unsupported := range []string{"", "unsupported-encoding"} {
+			invalid := valid
+			invalid.OperationsContextEncoding = unsupported
+			invalid.Hash = rc.StableRuntimeExpectedDocumentHash(invalid)
+			if err := invalid.Validate(); err == nil {
+				t.Fatal("noncurrent encoding accepted")
+			}
 		}
 	}
 }

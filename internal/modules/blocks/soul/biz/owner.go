@@ -82,11 +82,6 @@ func (m *Biz) Start() error {
 	if err := m.subscribeOwner(soulevents.TopicSoulCommandEnsureDefaults, m.handleSystemDefaultsCommand); err != nil {
 		return err
 	}
-	for _, topic := range []string{soulevents.TopicSoulCommandQueryBuiltinDefaults, soulevents.TopicSoulCommandUpgradeBuiltinDefault} {
-		if err := m.subscribeOwner(topic, m.handleBuiltinDefaultsCommand); err != nil {
-			return err
-		}
-	}
 	m.started = true
 	return nil
 }

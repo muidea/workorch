@@ -18,7 +18,7 @@ func TestPreparationDefinitionCompilationCannotBeImportedWithoutOriginalSource(t
 			if backend == "file" {
 				repo = file.NewWorkspaceRepository(filepath.Join(t.TempDir(), "workspaces.json"))
 			}
-			w := &workspace.Workspace{ID: "unbound-compilation", Revision: 1, StartupPreparation: &workspace.WorkspacePreparationRecord{Version: workspace.WorkspacePreparationRecordVersion, WorkspaceID: "unbound-compilation", Attempts: []workspace.WorkspacePreparationAttempt{{DefinitionCompilation: &workspace.PreparationDefinitionCompilation{CompilerVersion: workspace.PreparationDefinitionCompilerVersion, SourceInventoryHash: "caller-hash"}}}}}
+			w := &workspace.Workspace{ID: "unbound-compilation", Revision: 1, StartupPreparation: &workspace.WorkspacePreparationRecord{Version: workspace.WorkspacePreparationWorkflowVersion, WorkspaceID: "unbound-compilation", Attempts: []workspace.WorkspacePreparationAttempt{{DefinitionCompilation: &workspace.PreparationDefinitionCompilation{CompilerVersion: workspace.PreparationDefinitionCompilerVersion, SourceInventoryHash: "caller-hash"}}}}}
 			if repo.Create(context.Background(), w) == nil {
 				t.Fatal("imported compilation without original seal")
 			}

@@ -24,6 +24,10 @@ func workCompilerSessionFixture(t *testing.T) workCompilerSessionInput {
 	catalogs[0].OperationKinds = []string{StepKindFileWrite, RuntimeBlockKindPatchApply}
 	catalogs[0] = catalogs[0].Normalized()
 	catalogs[0].SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(catalogs[0])
+	round.ScopeObservation.Content = &RuntimeImplementationWorkContent{ProtocolRef: RuntimeImplementationWorkContentV1, ManifestRevision: round.ScopeObservation.Selection.ObservedRevision}
+	for _, target := range round.ScopeObservation.Selection.TargetRefs {
+		round.ScopeObservation.Content.Snapshots = append(round.ScopeObservation.Content.Snapshots, workContentSnapshot(target, "original work bytes"))
+	}
 	round.WorkingBinding = nil
 	round.Hash = StableRuntimeImplementationWorkRoundHash(round)
 	return workCompilerSessionInput{

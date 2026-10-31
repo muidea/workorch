@@ -15,7 +15,7 @@ func TestAssessmentApplicabilityProjectionReverseProvesOriginalReceipt(t *testin
 	current.Entries[0].Revision = "actual-postcondition"
 	current.Entries[0].DependencyHash = "current-selector"
 	current = current.WithHash()
-	applicability := &runtimecontract.RuntimeEvidenceApplicabilityDependencies{ProtocolRef: runtimecontract.RuntimeEvidenceApplicabilityDependenciesV1, OwnerRevisionSet: current}
+	applicability := &runtimecontract.RuntimeEvidenceApplicabilityDependencies{ProtocolRef: runtimecontract.RuntimeEvidenceApplicabilityDependenciesProtocol, OwnerRevisionSet: current}
 	controller, repository, _ := prepareOwnerFactAssessmentWithDependencyPair(t, true, nil, &reads, applicability)
 	before := repository.aggregate.CloneRaw()
 	result, err := controller.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{Kind: RuntimeInternalEventAssessmentObserved, Scope: RuntimeInternalEventScope{WorkspaceID: "ws-v2", RunID: "run-v2"}, Authority: &RuntimeInternalAuthorityPayload{}})

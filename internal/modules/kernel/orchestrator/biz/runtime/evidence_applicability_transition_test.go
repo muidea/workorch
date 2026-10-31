@@ -87,7 +87,7 @@ func applicabilityTransitionFixture(t *testing.T) (RuntimeAggregate, runtimecont
 	current.Entries[0].ResourceKind = "workspace_target_content"
 	current.Entries[0].Revision, current.Entries[0].DependencyHash = "postcondition", "postcondition-selector"
 	current = current.WithHash()
-	proof := &runtimecontract.RuntimeEvidenceApplicabilityDependencies{ProtocolRef: runtimecontract.RuntimeEvidenceApplicabilityDependenciesV1, OwnerRevisionSet: current}
+	proof := &runtimecontract.RuntimeEvidenceApplicabilityDependencies{ProtocolRef: runtimecontract.RuntimeEvidenceApplicabilityDependenciesProtocol, OwnerRevisionSet: current}
 	_, prepared, _ := prepareOwnerFactAssessmentDependencyBoundary(t, true, nil, &reads, proof, false)
 	aggregate := prepared.aggregate.CloneRaw()
 	if aggregate.ActiveDispatch != nil {

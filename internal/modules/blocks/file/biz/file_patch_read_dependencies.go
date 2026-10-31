@@ -106,7 +106,7 @@ func filePatchApplicabilityDependencies(scope runtimecontract.RuntimeOperationEx
 		return nil, err
 	}
 	if scope.HistoricalEffectProofContractRef == "" {
-		return &runtimecontract.RuntimeEvidenceApplicabilityDependencies{ProtocolRef: runtimecontract.RuntimeEvidenceApplicabilityDependenciesV1, OwnerRevisionSet: set}, nil
+		return &runtimecontract.RuntimeEvidenceApplicabilityDependencies{ProtocolRef: runtimecontract.RuntimeEvidenceApplicabilityDependenciesProtocol, OwnerRevisionSet: set}, nil
 	}
 	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
 	if !found || descriptor.OwnerModuleID != ModuleID || descriptor.HistoricalEffectProofContractRef != runtimecontract.RuntimeFileHistoricalEffectProofV1 {
@@ -116,7 +116,7 @@ func filePatchApplicabilityDependencies(scope runtimecontract.RuntimeOperationEx
 		return nil, fmt.Errorf("File effect purpose differs from owner contract")
 	}
 	return &runtimecontract.RuntimeEvidenceApplicabilityDependencies{
-		ProtocolRef: runtimecontract.RuntimeEvidenceApplicabilityDependenciesV2, OwnerRevisionSet: set,
+		ProtocolRef: runtimecontract.RuntimeEvidenceApplicabilityDependenciesProtocol, OwnerRevisionSet: set,
 		PurposeRef: runtimecontract.RuntimeHistoricalEffectProofV1, OwnerModuleID: ModuleID, OperationKind: operation.Kind,
 		OwnerContractRef: descriptor.HistoricalEffectProofContractRef,
 	}, nil

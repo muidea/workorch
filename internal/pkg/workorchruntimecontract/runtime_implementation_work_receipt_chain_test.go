@@ -3,7 +3,6 @@ package workorchruntimecontract
 import (
 	"encoding/json"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -62,33 +61,22 @@ func TestImplementationWorkResourceChainRequiresExactOrderedEdges(t *testing.T) 
 	}
 }
 
-func TestImplementationWorkReceiptProtocolIsSealedAndLegacyHashUnchanged(t *testing.T) {
+func TestImplementationWorkReceiptChainBindingSurvivesReload(t *testing.T) {
 	ledger, _ := implementationWorkLedgerFixture(t)
 	round := ledger.Rounds[0].Clone()
-	before, _ := json.Marshal(round.WorkingBinding)
-	if strings.Contains(string(before), "ReceiptProtocolRef") {
-		t.Fatal("empty extension changed legacy bytes")
-	}
-	original := round.Hash
-	round.WorkingBinding.ReceiptProtocolRef = RuntimeImplementationWorkReceiptChainV1
-	rehashImplementationWorkRound(&round)
-	if original == round.Hash || round.WorkingBinding.Hash == ledger.Rounds[0].WorkingBinding.Hash {
-		t.Fatal("new protocol was not part of sealed identity")
-	}
-	if err := round.Validate(); err != nil {
+	raw, err := json.Marshal(round)
+	if err != nil {
 		t.Fatal(err)
 	}
-	var reloaded RuntimeImplementationWorkRound
-	raw, _ := json.Marshal(round)
-	if err := json.Unmarshal(raw, &reloaded); err != nil {
+	var loaded RuntimeImplementationWorkRound
+	if err := json.Unmarshal(raw, &loaded); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(round, reloaded) || reloaded.Validate() != nil {
-		t.Fatal("restart lost sealed protocol")
+	if !reflect.DeepEqual(round, loaded) || loaded.Validate() != nil {
+		t.Fatal("restart changed original working binding")
 	}
-	round.WorkingBinding.ReceiptProtocolRef = "unknown"
-	rehashImplementationWorkRound(&round)
-	if round.Validate() == nil {
-		t.Fatal("unknown protocol accepted")
+	loaded.WorkingBinding = nil
+	if _, err := RuntimeImplementationWorkDispositionForDispatchReceipt(loaded, RuntimeDispatchRecord{}, nil, RuntimeFacts{}, nil, RuntimeOperationReceipt{}); err == nil {
+		t.Fatal("receipt accepted without working binding")
 	}
 }

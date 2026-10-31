@@ -19,7 +19,7 @@ func TestDiagnosticReceiptCannotDowngradeOriginalBindingAtIngressOrReload(t *tes
 		binding.CheckAttestations[i].ExecutionStagesHash = stagesHash
 	}
 	binding.InputReview = &runtimecontract.RuntimeValidationInputReviewSubject{
-		ProtocolRef:                 runtimecontract.RuntimeValidationInputReviewProtocolV3,
+		ProtocolRef:                 runtimecontract.RuntimeValidationInputReviewProtocol,
 		Files:                       []runtimecontract.RuntimeValidationInputReviewFile{{TargetRef: "check.go", Content: "original", ContentHash: runtimecontract.RuntimeValidationInputContentHash("original")}},
 		DiagnosticSourceContractRef: runtimecontract.RuntimeValidationDiagnosticSourceReviewV1,
 		DiagnosticSources:           []runtimecontract.RuntimeValidationDiagnosticSource{{SourceRef: "source-a", NativeCaseRef: "owner/native-a", InputTargetRef: "check.go"}},
@@ -28,7 +28,7 @@ func TestDiagnosticReceiptCannotDowngradeOriginalBindingAtIngressOrReload(t *tes
 	dispatch.CoverageBindings[0].Proofs[0].ValidationCheckAttestations = runtimecontract.CloneRuntimeValidationCheckAttestationBindings(binding.CheckAttestations)
 	dispatch.CoverageBindings[0].Hash = runtimecontract.StableCoverageEvidenceBindingHash(dispatch.CoverageBindings[0])
 	catalog.TargetRefs = []string{"implementation.go", "validation_target.go"}
-	catalog.ValidationRecipes[0].InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV3
+	catalog.ValidationRecipes[0].InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 	catalog.ValidationRecipes[0].AdapterRef = "owner/opaque-review"
 	catalog.ValidationSurfaces[0].ProofRequirementBindings[0] = binding
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)

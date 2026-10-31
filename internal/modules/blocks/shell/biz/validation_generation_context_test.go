@@ -16,8 +16,8 @@ func TestValidationGenerationContextObservesActualSourceWithoutTruncationOrInput
 	raw := "package delivery\r\nfunc Value() string { return \"实际实现\" }\r\n"
 	writeNativeStructureSource(t, root, "delivery/value.go", raw)
 	writeNativeStructureSource(t, root, "delivery/value_test.go", "test-local substitute must not become implementation")
-	writeNativeStructureSource(t, root, "workorch_validation/v5/input.go", "old validation is not implementation")
-	manifest := runtimecontract.WorkspaceManifest{Revision: "tree", TargetRefs: []string{"workorch_validation/v5/input.go", "go.mod", "delivery/value_test.go", "delivery/value.go"}}
+	writeNativeStructureSource(t, root, "workorch_validation/conjunctive/input.go", "old validation is not implementation")
+	manifest := runtimecontract.WorkspaceManifest{Revision: "tree", TargetRefs: []string{"workorch_validation/conjunctive/input.go", "go.mod", "delivery/value_test.go", "delivery/value.go"}}
 	c := shellValidationGenerationContext(root, manifest, "catalog")
 	if c.Validate("catalog") != nil || c.Outcome != "complete" || len(c.Files) != 2 || c.Files[0].Content != raw {
 		t.Fatalf("actual source missing: %+v", c)

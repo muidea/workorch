@@ -305,9 +305,9 @@ func (b *Biz) completeAuthoringSpecification(ctx context.Context, id common.Work
 			completion.Diagnostic = &diagnostic
 		} else {
 			completion.Review = &parsed
-			if request.WireContractRef != "" {
-				completion.SuccessAudit = &workspace.DefinitionAuthoringSuccessByteAudit{Document: authoringProviderObservation(response.ObservedDocument), Wire: authoringProviderObservation(response.Wire)}
-			}
+
+			completion.SuccessAudit = &workspace.DefinitionAuthoringSuccessByteAudit{Document: authoringProviderObservation(response.ObservedDocument), Wire: authoringProviderObservation(response.Wire)}
+
 		}
 	}
 	completed, settlementErr := b.settleAuthoringSpecification(ctx, completion)

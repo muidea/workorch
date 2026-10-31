@@ -9,7 +9,7 @@ import (
 func TestPreparationMemoryJudgmentRequiresOriginalReferenceAndVersion(t *testing.T) {
 	fixture := func(reason, state string) StartupPreparationView {
 		v := preparationViewFixture()
-		v.Record.Version, v.OperationState = "workorch-preparation-record/v2", "blocked"
+		v.Record.Version, v.OperationState = "workorch-preparation-record", "blocked"
 		a := &v.Record.Attempts[0]
 		a.State, a.CreationEpoch = "blocked", strings.Repeat("a", 32)
 		a.EvaluationVersion = "workorch-preparation-check-evaluation/v1"
@@ -53,7 +53,7 @@ func TestPreparationMemoryJudgmentRequiresOriginalReferenceAndVersion(t *testing
 func TestPreparationMemoryInventoryReferenceNeverGrantsReadiness(t *testing.T) {
 	fixture := func() StartupPreparationView {
 		v := preparationViewFixture()
-		v.Record.Version, v.OperationState, v.CurrentValidity = "workorch-preparation-record/v2", "blocked", "not_evaluated"
+		v.Record.Version, v.OperationState, v.CurrentValidity = "workorch-preparation-record", "blocked", "not_evaluated"
 		a := &v.Record.Attempts[0]
 		a.State, a.CreationEpoch, a.MemoryInventoryEvidenceRef = "blocked", strings.Repeat("a", 32), "memory-inventory-observation:"+strings.Repeat("b", 32)
 		at := a.StartedAt.Add(time.Second)
@@ -69,7 +69,7 @@ func TestPreparationMemoryInventoryReferenceNeverGrantsReadiness(t *testing.T) {
 		}
 	}
 	for _, change := range []func(*StartupPreparationView){
-		func(v *StartupPreparationView) { v.Record.Version = "workorch-preparation-record/v1" },
+		func(v *StartupPreparationView) { v.Record.Version = "unsupported-record-contract" },
 		func(v *StartupPreparationView) {
 			v.Record.Attempts[0].MemoryInventoryEvidenceRef = "memory-inventory-observation:ready"
 		},

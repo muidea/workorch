@@ -207,18 +207,15 @@ func runtimeInputReviewOnlyCoverageOmissions(document runtimecontract.RuntimeSem
 	return missing
 }
 
-// V2 charges information against Run + immutable CWI + original check, not
-// mutable input bytes, native names, paths, recipe or catalog revision. No
-// extra counter is reconstructed or reset on re-drive; the preceding sealed
-// information retirements are the complete budget preimage. V1 keeps its
-// original exact-subject contract for already-started Runs.
+// Information is charged against Run + immutable CWI + original check.
+// Input, path and source changes cannot reset the sealed information budget.
 func runtimeInputReviewInformationFailureForLedger(ledger runtimecontract.RuntimeSemanticPlanningLedger, document runtimecontract.RuntimeSemanticPlanDocument) string {
 	if code := runtimeInputReviewInformationFailure(ledger.Manifest.InputReviewInformation, document); code != "" {
 		return code
 	}
 	for _, current := range document.Proposals {
-		binding, found := runtimecontract.RuntimeSemanticValidationInputReviewBinding(current, ledger.Manifest.OwnerCatalogs)
-		if !found || binding.InputReview.ProtocolRef == runtimecontract.RuntimeValidationInputReviewProtocol || current.ValidationInputReview == nil {
+		_, found := runtimecontract.RuntimeSemanticValidationInputReviewBinding(current, ledger.Manifest.OwnerCatalogs)
+		if !found || current.ValidationInputReview == nil {
 			continue
 		}
 		for _, history := range ledger.AllHistory() {
@@ -439,8 +436,8 @@ func validateRuntimeInputReviewAggregate(a RuntimeAggregate) error {
 }
 
 // Reconstruct only the preceding storage prefix for the information-budget
-// check. A v2 snapshot has no history of its own, so its storage version cannot
-// be used while incrementally packing the first legacy-sized prefix. This
+// check. Rebuild the bounded ledger from its original generations; the
+// detached prefix has the same current storage contract. This
 // detached view is never persisted and does not rewrite any generation body.
 func runtimeInputReviewPrecedingLedger(ledger runtimecontract.RuntimeSemanticPlanningLedger, history runtimecontract.RuntimeSemanticPlanningGeneration) (runtimecontract.RuntimeSemanticPlanningLedger, error) {
 	storage := runtimecontract.RuntimeSemanticPlanningLedger{SchemaVersion: runtimecontract.RuntimeSemanticPlanningLedgerSchemaCurrent}

@@ -64,7 +64,7 @@ func TestDefinitionChangeCandidateReserveRejectsDriftButSettlesOriginalPermit(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	reserve := workspaceevents.ReserveDefinitionDerivationCommand{WorkspaceID: w.ID, InputHash: prepared.DefinitionChangeCandidate.Record.InputHash, RequestID: "candidate-derive", ProviderBindingHash: "provider-binding", ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil)}
+	reserve := workspaceevents.ReserveDefinitionDerivationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "derive"), WorkspaceID: w.ID, InputHash: prepared.DefinitionChangeCandidate.Record.InputHash, RequestID: "candidate-derive", ProviderBindingHash: "provider-binding", ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil)}
 	event := definitionSpecificationInternalEvent{WorkspaceID: w.ID, DeriveReserve: &reserve}
 	reserved, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, event)
 	if err != nil || reserved.Derivation == nil || reserved.Derivation.FreshPermitID == "" {
@@ -94,7 +94,7 @@ func TestDefinitionChangeCandidateReserveRejectsDriftButSettlesOriginalPermit(t 
 		t.Fatalf("拒绝改写 unknown=%v", err)
 	}
 	proposalResult := &workspace.DefinitionDerivedAcceptance{AuthoringInputHash: reserve.InputHash, TemplateSnapshotHash: prepared.DefinitionChangeCandidate.Record.TemplateSnapshotHash, AdditionalItems: []string{}}
-	completion := workspaceevents.CompleteDefinitionDerivationCommand{WorkspaceID: w.ID, PermitID: reserved.Derivation.Request.PermitID, Proposal: proposalResult}
+	completion := workspaceevents.CompleteDefinitionDerivationCommand{SuccessAudit: derivationTestAudit(t, proposalResult), WorkspaceID: w.ID, PermitID: reserved.Derivation.Request.PermitID, Proposal: proposalResult}
 	completed, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: w.ID, DeriveComplete: &completion})
 	if err != nil || completed.Derivation.ValidateCompletion(completion) != nil {
 		t.Fatalf("漂移后已知结果未结算=%v", err)
@@ -114,7 +114,7 @@ func TestDefinitionChangeCandidateReserveRejectsDriftButSettlesOriginalPermit(t 
 		t.Fatalf("fresh owner completion 重放=%v", err)
 	}
 	conflicting := completion
-	conflicting.Proposal, conflicting.FailureCode = nil, "invalid_proposal"
+	conflicting.Proposal, conflicting.FailureCode, conflicting.SuccessAudit = nil, "invalid_proposal", nil
 	if _, err := fresh.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: w.ID, DeriveComplete: &conflicting}); err == nil || err.Error() != "derivation completion conflict" {
 		t.Fatalf("同 permit 异结果=%v", err)
 	}

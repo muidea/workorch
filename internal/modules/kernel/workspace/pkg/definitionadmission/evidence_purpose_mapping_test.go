@@ -16,7 +16,7 @@ func candidateWithEvidencePurposeMapping() workspace.DefinitionAdmissionCandidat
 	p.EvidenceRequirements[0].LineageAssertions = nil
 	p.EvidenceRequirements[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
 	p.EvidenceRequirements[0].AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite}
-	c.Specification.EvidencePurposeMappings = []workspace.GoalEvidencePurposeMapping{{ContractRef: runtimecontract.RuntimeCrossCWIEvidencePurposeV1, HistoricalItemRef: c.DoDInputs[0].CandidateItemRef, AcceptanceItemRef: c.DoDInputs[1].CandidateItemRef}}
+	c.Specification.EvidencePurposeMappings = []workspace.GoalEvidencePurposeMapping{{ContractRef: runtimecontract.RuntimeCrossCWIEvidencePurpose, HistoricalItemRef: c.DoDInputs[0].CandidateItemRef, AcceptanceItemRef: c.DoDInputs[1].CandidateItemRef}}
 	for n := range c.Specification.Reviews {
 		c.Specification.Reviews[n].SpecificationHash = c.Specification.ContentHash()
 	}

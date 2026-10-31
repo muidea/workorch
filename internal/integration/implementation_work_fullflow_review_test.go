@@ -75,7 +75,7 @@ func TestImplementationWorkFullflowReviewUsesExactIndependentSourceCriteria(t *t
 		{"profile", "共同 CWI", runtimecontract.RuntimeValidationInputConsistent},
 	} {
 		t.Run(test.check, func(t *testing.T) {
-			item, err := implementationWorkFullflowReviewCheck(&validation, test.check, "共同 CWI", runtimecontract.RuntimeValidationInputReviewProtocolV2, files, "isolated package", refs)
+			item, err := implementationWorkFullflowReviewCheck(&validation, test.check, "共同 CWI", runtimecontract.RuntimeValidationInputReviewProtocol, files, "isolated package", refs)
 			if err != nil || item.Conclusion != test.conclusion || len(item.Obligations) != 1 || item.Obligations[0].CriterionText != test.criterion {
 				t.Fatalf("independent source review drifted: %+v err=%v", item, err)
 			}
@@ -83,16 +83,16 @@ func TestImplementationWorkFullflowReviewUsesExactIndependentSourceCriteria(t *t
 	}
 	// Even a behavioral criterion cannot prove a declaration requiring owner facts.
 	validation.SourceChecks[0].Declaration = "查询真实 Git owner receipt"
-	item, err := implementationWorkFullflowReviewCheck(&validation, validation.Checks[0], "共同 CWI", runtimecontract.RuntimeValidationInputReviewProtocolV2, files, "isolated package", refs)
+	item, err := implementationWorkFullflowReviewCheck(&validation, validation.Checks[0], "共同 CWI", runtimecontract.RuntimeValidationInputReviewProtocol, files, "isolated package", refs)
 	if err != nil || item.Conclusion != runtimecontract.RuntimeValidationInputInconclusive {
 		t.Fatal("source declaration authority was ignored")
 	}
 	validation.SourceChecks = validation.SourceChecks[:1]
-	if _, err := implementationWorkFullflowReviewCheck(&validation, validation.Checks[1], "共同 CWI", runtimecontract.RuntimeValidationInputReviewProtocolV2, files, "isolated package", refs); err == nil {
+	if _, err := implementationWorkFullflowReviewCheck(&validation, validation.Checks[1], "共同 CWI", runtimecontract.RuntimeValidationInputReviewProtocol, files, "isolated package", refs); err == nil {
 		t.Fatal("missing source criterion fell back to shared CWI")
 	}
 	validation.SourceChecks = append(validation.SourceChecks, validation.SourceChecks[0])
-	if _, err := implementationWorkFullflowReviewCheck(&validation, validation.Checks[0], "共同 CWI", runtimecontract.RuntimeValidationInputReviewProtocolV2, files, "isolated package", refs); err == nil {
+	if _, err := implementationWorkFullflowReviewCheck(&validation, validation.Checks[0], "共同 CWI", runtimecontract.RuntimeValidationInputReviewProtocol, files, "isolated package", refs); err == nil {
 		t.Fatal("duplicate source identity accepted")
 	}
 }
@@ -114,7 +114,7 @@ func TestImplementationWorkFullflowReviewCompositionPreservesOrdinaryAndTypedCon
 	scope := "Shell 的根 module build/test/race 另外实际执行"
 	review := func(input []runtimecontract.RuntimeValidationInputReviewFile, consumers []runtimecontract.RuntimeLineageAssertion) runtimecontract.RuntimeValidationInputCheckReview {
 		t.Helper()
-		item, err := implementationWorkFullflowReviewCheck(&validation, "check", criterion, runtimecontract.RuntimeValidationInputReviewProtocolV3, input, scope, refs, consumers)
+		item, err := implementationWorkFullflowReviewCheck(&validation, "check", criterion, runtimecontract.RuntimeValidationInputReviewProtocol, input, scope, refs, consumers)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -145,7 +145,7 @@ func TestImplementationWorkFullflowReviewCompositionPreservesOrdinaryAndTypedCon
 	if review(files, drifted).Conclusion != runtimecontract.RuntimeValidationInputConflict {
 		t.Fatal("rehashed single-round rule weakened two-round criterion")
 	}
-	if _, err := implementationWorkFullflowReviewCheck(&validation, "check", criterion, runtimecontract.RuntimeValidationInputReviewProtocolV2, files, scope, refs, assertions); err == nil {
-		t.Fatal("legacy review silently carried composite declarations")
+	if _, err := implementationWorkFullflowReviewCheck(&validation, "check", criterion, "unsupported-review-contract", files, scope, refs, assertions); err == nil {
+		t.Fatal("unknown review contract silently carried composite declarations")
 	}
 }

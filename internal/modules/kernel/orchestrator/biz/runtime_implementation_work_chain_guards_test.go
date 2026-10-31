@@ -38,8 +38,8 @@ func assertImplementationWorkChainGuards(t *testing.T, source contract.RuntimeSt
 		{name: "cross workspace", mutate: func(s *contract.RuntimeStateRecord, i, j int) { s.CompletedDispatches[0].WorkspaceID = "foreign" }, fail: true},
 		{name: "cross run", mutate: func(s *contract.RuntimeStateRecord, i, j int) { s.CompletedDispatches[0].RunID = "foreign" }, fail: true},
 		{name: "cross dispatch", mutate: func(s *contract.RuntimeStateRecord, i, j int) { s.CompletedDispatches[0].ID = "foreign" }, fail: true},
-		{name: "unknown protocol", mutate: func(s *contract.RuntimeStateRecord, i, j int) {
-			s.ImplementationWork.Rounds[0].WorkingBinding.ReceiptProtocolRef = "unsupported"
+		{name: "missing original working binding", mutate: func(s *contract.RuntimeStateRecord, i, j int) {
+			s.ImplementationWork.Rounds[0].WorkingBinding = nil
 		}, fail: true},
 		{name: "missing current change", mutate: func(s *contract.RuntimeStateRecord, i, j int) {
 			s.OperationReceipts[j].ResourceChanges = nil

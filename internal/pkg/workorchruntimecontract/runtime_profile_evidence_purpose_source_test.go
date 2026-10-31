@@ -10,7 +10,7 @@ func profilePurposeFixture() (RuntimeSourceObligationInventory, []RuntimeProfile
 	i, p, items := evidencePurposeMappingFixture()
 	p[0].DeliverableExpectations = []RuntimeDeliverableExpectation{{ID: "created-source", Required: true, Description: "  原 Profile 交付全文\n不能把历史创建当当前验收。  "}}
 	p[0].EvidenceRequirements = append(p[0].EvidenceRequirements, RuntimeProfileEvidenceRequirement{ID: "created-source", Scope: "deliverable", RequiredEvidenceKinds: []string{EvidenceKindStateChange}, AcceptedStepKinds: []string{StepKindFileWrite}})
-	i.EvidencePurposeMappings = []RuntimeEvidencePurposeMapping{{ContractRef: RuntimeProfileDeliverableEvidencePurposeV2,
+	i.EvidencePurposeMappings = []RuntimeEvidencePurposeMapping{{ContractRef: RuntimeProfileDeliverableEvidencePurpose,
 		HistoricalItemRef: RuntimeProfileDeliverablePurposeRef(p[0].ID, "created-source"), AcceptanceItemRef: "acceptance",
 		HistoricalProfileID: p[0].ID, HistoricalDeliverableID: "created-source", HistoricalText: p[0].DeliverableExpectations[0].Description,
 		HistoricalProfileHash: StableRuntimeProfileContractsHash(p)}}
@@ -29,7 +29,7 @@ func TestProfileEvidencePurposePreservesFullSnapshotChecksAndLegacyIdentity(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if compiled[0].HistoricalAcceptance.ContractRef != RuntimeProfileDeliverableEvidencePurposeV2 || compiled[1].PrerequisiteCoverageWorkItemIDs[0] != items[0].ID {
+	if compiled[0].HistoricalAcceptance.ContractRef != RuntimeProfileDeliverableEvidencePurpose || compiled[1].PrerequisiteCoverageWorkItemIDs[0] != items[0].ID {
 		t.Fatal("Profile source was not bound to exact consumer")
 	}
 	for _, item := range compiled {
@@ -69,7 +69,7 @@ func TestProfileEvidencePurposePreservesFullSnapshotChecksAndLegacyIdentity(t *t
 	}
 	legacy, _, _ := evidencePurposeMappingFixture()
 	raw, _ := json.Marshal(legacy.EvidencePurposeMappings[0])
-	if string(raw) != `{"ContractRef":"runtime/cross-cwi-evidence-purpose/v1","HistoricalItemRef":"dod","AcceptanceItemRef":"acceptance"}` {
+	if string(raw) != `{"ContractRef":"runtime/cross-cwi-evidence-purpose","HistoricalItemRef":"dod","AcceptanceItemRef":"acceptance"}` {
 		t.Fatal("empty extension changed v1 wire")
 	}
 }
@@ -99,7 +99,7 @@ func TestProfileEvidencePurposeRejectsRehashedDriftMissingAndAmbiguousSources(t 
 			i.EvidencePurposeMappings = append(i.EvidencePurposeMappings, i.EvidencePurposeMappings[0])
 		},
 		"legacy cannot borrow Profile": func(i *RuntimeSourceObligationInventory, _ *[]RuntimeProfileContract) {
-			i.EvidencePurposeMappings[0].ContractRef = RuntimeCrossCWIEvidencePurposeV1
+			i.EvidencePurposeMappings[0].ContractRef = RuntimeCrossCWIEvidencePurpose
 		},
 		"no ordinary proof": func(_ *RuntimeSourceObligationInventory, p *[]RuntimeProfileContract) {
 			(*p)[0].EvidenceRequirements[1].RequiredEvidenceKinds = []string{EvidenceKindStateChange}

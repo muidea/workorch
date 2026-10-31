@@ -8,10 +8,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
 )
 
-func ParseAuthoringMapping(payload []byte) (workspace.DefinitionAuthoringMapping, error) {
-	return workspace.DecodeDefinitionAuthoringMapping(payload)
-}
-
 func ParseAuthoringProposal(payload []byte, derivation workspace.DefinitionDerivationRequest) (workspace.GoalSpecification, error) {
 	mapping, err := workspace.DecodeAuthoringMappingFor(derivation, payload)
 	if err != nil {
@@ -41,11 +37,9 @@ func ParseAuthoringReview(payload []byte, kind string, proposal workspace.GoalSp
 	}
 	var review workspace.GoalSpecificationCompletenessReview
 	var err error
-	if derivation.WireContractRef == "" {
-		review, err = ParseReview(payload, kind, proposal)
-	} else {
-		review, err = workspace.DecodeOwnerBoundReview(workspace.DefinitionAuthoringSpecificationRequest{WireContractRef: derivation.WireContractRef, WireContractHash: workspace.AuthoringWireHash(derivation.WireContractRef, kind), ReviewKind: kind, ProposalHash: proposal.ContentHash()}, payload)
-	}
+
+	review, err = workspace.DecodeOwnerBoundReview(workspace.DefinitionAuthoringSpecificationRequest{WireContractRef: derivation.WireContractRef, WireContractHash: workspace.AuthoringWireHash(derivation.WireContractRef, kind), ReviewKind: kind, ProposalHash: proposal.ContentHash()}, payload)
+
 	if err != nil {
 		return workspace.GoalSpecificationCompletenessReview{}, err
 	}

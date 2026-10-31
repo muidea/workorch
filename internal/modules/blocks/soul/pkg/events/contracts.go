@@ -8,14 +8,12 @@ func Contracts() []eventcontract.Contract {
 		TopicSoulCommandGet,
 		TopicSoulCommandList,
 		TopicSoulCommandValidateCapability,
-		TopicSoulCommandQueryBuiltinDefaults,
 	)...)
 	ret = append(ret, eventcontract.Build("soul", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicSoulCommandCreate,
 		TopicSoulCommandUpdate,
 		TopicSoulCommandDelete,
 		TopicSoulCommandEnsureDefaults,
-		TopicSoulCommandUpgradeBuiltinDefault,
 	)...)
 	return ret
 }

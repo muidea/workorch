@@ -14,7 +14,7 @@ func inputRevisionProviderFixture(t *testing.T) *runtimecontract.RuntimeValidati
 	binding := request.SemanticManifest.OwnerCatalogs[0].ValidationSurfaces[0].ProofRequirementBindings[0]
 	report := runtimecontract.RuntimeValidationInputReview{SubjectHash: binding.InputReview.Hash}
 	for _, check := range binding.RequiredCheckRefs {
-		report.Checks = append(report.Checks, runtimecontract.RuntimeValidationInputCheckReview{RequiredCheckRef: check, Conclusion: runtimecontract.RuntimeValidationInputConflict, Reason: "The input omits the original required assertion.", InputTargetRefs: []string{binding.InputReview.Files[0].TargetRef}})
+		report.Checks = append(report.Checks, runtimecontract.RuntimeValidationInputCheckReview{RequiredCheckRef: check, Conclusion: runtimecontract.RuntimeValidationInputConflict, Reason: "The input omits the original required assertion.", InputTargetRefs: []string{binding.InputReview.Files[0].TargetRef}, Obligations: []runtimecontract.RuntimeValidationInputObligationReview{{CriterionText: request.SemanticManifest.CoverageItems[0].TargetText, Finding: runtimecontract.RuntimeValidationInputMissing, Reason: "The input omits the original required assertion.", InputTargetRefs: []string{binding.InputReview.Files[0].TargetRef}}}})
 	}
 	v := &runtimecontract.RuntimeValidationInputRevision{WorkspaceID: request.SemanticContext.WorkspaceID, RunID: request.SemanticContext.RunID, DefinitionSeedHash: request.SemanticContext.DefinitionSeed.Hash, SourceManifestHash: "original-manifest", SourceLogicalRequestID: "original-request", SourceDocumentHash: "original-rejected-report", OwnerModuleID: runtimecontract.RuntimeModuleFile, Binding: binding, Report: report, InputTargetRefs: []string{binding.InputReview.Files[0].TargetRef}}
 	if err := v.Validate(); err != nil {
@@ -43,9 +43,21 @@ func TestRuntimeInputRevisionCompleteC3StablePrefixAndClosedPurpose(t *testing.T
 			if projected == nil || projected.InputRevision == nil || projected.TerminalEvidenceCredit || !reflect.DeepEqual(projected.InputRevision, request.SemanticManifest.ProofObligations[0].ImplementationWork.Scope.Request.InputRevision) {
 				t.Fatal("C3 lost exact original input/review or claimed credit")
 			}
-			if purpose && strings.Contains(string(provider.Schema), `"terminal_proof"`) {
-				t.Fatal("unchanged re-review can bypass required real effect")
+			if purpose {
+				var schema struct {
+					Properties map[string]json.RawMessage `json:"properties"`
+				}
+				if err := json.Unmarshal([]byte(provider.Schema), &schema); err != nil {
+					t.Fatal(err)
+				}
+				var choice struct {
+					Enum []string `json:"enum"`
+				}
+				if err := json.Unmarshal(schema.Properties["implementationPurpose"], &choice); err != nil || !reflect.DeepEqual(choice.Enum, []string{string(runtimecontract.RuntimeImplementationWorkPurposeEffect)}) {
+					t.Fatal("input revision permits unchanged terminal branch", err)
+				}
 			}
+
 			v.Report.Checks[0].Reason = "The exact original input still lacks its behavioral assertion."
 			changed := runtimeSemanticWorkProviderRequestForTest(t, purpose, v)
 			after, err := runtimeSemanticPlanProviderRequest(changed)

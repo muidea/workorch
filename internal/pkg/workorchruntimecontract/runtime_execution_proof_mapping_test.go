@@ -8,7 +8,7 @@ import (
 
 func executionProofSourceFixture(t *testing.T) (RuntimeLineageAssertionSources, RuntimeLineageAssertion, CoverageEvidenceBinding) {
 	t.Helper()
-	rule := RuntimeLineageAssertionRule{Ref: "original-work", Kind: RuntimeLineageCompletedWorkRounds, ConsumptionPoint: RuntimeProofPhaseExecution, MinCompletedRounds: 2, ExecutionSourceContractRef: RuntimeCrossSourceExecutionProofV1}
+	rule := RuntimeLineageAssertionRule{Ref: "original-work", Kind: RuntimeLineageCompletedWorkRounds, ConsumptionPoint: RuntimeProofPhaseExecution, MinCompletedRounds: 2, ExecutionSourceContractRef: RuntimeDoDSourceExecutionProof}
 	sources, consumer := lineageSourceFixture(t, rule)
 	ledger, bindings := assessmentPurposeGenerationForTest(t, "cwi-source", "source-request", false, "dodItem")
 	original := ledger.DefinitionSeed.CoverageItems[0]
@@ -22,7 +22,7 @@ func executionProofSourceFixture(t *testing.T) (RuntimeLineageAssertionSources, 
 	item := sources.Facts.DefinitionSeed.CoverageItems[0]
 	inventory.Sources = append(inventory.Sources, RuntimeDefinitionSource{CandidateItemRef: "consumer", ItemRef: "consumer-formal", SourceScope: item.SourceScope, SourceID: item.SourceID, Text: item.TargetText})
 	inventory.Obligations[0].DoDItemRefs = append(inventory.Obligations[0].DoDItemRefs, "consumer")
-	inventory.ExecutionProofMappings = []RuntimeExecutionProofMapping{{ContractRef: RuntimeCrossSourceExecutionProofV1, ConsumerItemRef: "consumer", RuleRef: rule.Ref, SourceItemRef: "dod"}}
+	inventory.ExecutionProofMappings = []RuntimeExecutionProofMapping{{ContractRef: RuntimeDoDSourceExecutionProof, ConsumerItemRef: "consumer", RuleRef: rule.Ref, SourceItemRef: "dod"}}
 	inventory = inventory.WithHash()
 	if err := inventory.Validate(); err != nil {
 		t.Fatal(err)
@@ -145,7 +145,7 @@ func TestExecutionProofMappingCoverageExactDependencyAndCycles(t *testing.T) {
 			t.Fatal("missing endpoint guessed from another source")
 		}
 	}
-	inventory.ExecutionProofMappings = append(inventory.ExecutionProofMappings, RuntimeExecutionProofMapping{ContractRef: RuntimeCrossSourceExecutionProofV1, ConsumerItemRef: "dod", RuleRef: "reverse", SourceItemRef: "consumer"})
+	inventory.ExecutionProofMappings = append(inventory.ExecutionProofMappings, RuntimeExecutionProofMapping{ContractRef: RuntimeDoDSourceExecutionProof, ConsumerItemRef: "dod", RuleRef: "reverse", SourceItemRef: "consumer"})
 	inventory = inventory.WithHash()
 	if _, err := CompileRuntimeExecutionProofMappingCoverage(inventory, items); err == nil {
 		t.Fatal("cross-rule proof dependency cycle accepted")

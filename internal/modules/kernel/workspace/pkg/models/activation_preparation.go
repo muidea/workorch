@@ -9,12 +9,11 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-const WorkspacePreparationRecordVersion = "workorch-preparation-record/v1"
-const WorkspacePreparationWorkflowVersion = "workorch-preparation-record/v2"
+const WorkspacePreparationWorkflowVersion = "workorch-preparation-record"
 const WorkspacePreparationAttemptLimit = 64
 
 // These are operation states, not Workspace lifecycle or activation permission.
-// v1 is a read-only trace. v2 supports explicit accepted -> blocked operations,
+// Current preparation supports explicit accepted -> blocked operations,
 // optionally with versioned point-in-time File/Soul judgments, but deliberately
 // cannot represent aggregate positive readiness, M3 or execution rights.
 type WorkspacePreparationAttemptState string
@@ -58,7 +57,7 @@ type WorkspacePreparationAttempt struct {
 	CreationEpoch              string
 	PreparationEpoch           uint64
 	Checks                     []WorkspacePreparationCheckResult
-	// Versioned point-in-time per-check judgments, never aggregate readiness.
+	// Current point-in-time per-check judgments, never aggregate readiness.
 	EvaluationVersion               string
 	NoRunEvaluationVersion          string `json:",omitempty"`
 	EmptySelectionEvaluationVersion string `json:",omitempty"`
@@ -130,7 +129,7 @@ func (r WorkspacePreparationRecord) Clone() WorkspacePreparationRecord {
 }
 
 func (r WorkspacePreparationRecord) Validate(workspaceID common.WorkspaceID) error {
-	if (r.Version != WorkspacePreparationRecordVersion && r.Version != WorkspacePreparationWorkflowVersion) || r.WorkspaceID != workspaceID || workspaceID == "" || len(r.Attempts) == 0 || len(r.Attempts) > WorkspacePreparationAttemptLimit {
+	if r.Version != WorkspacePreparationWorkflowVersion || r.WorkspaceID != workspaceID || workspaceID == "" || len(r.Attempts) == 0 || len(r.Attempts) > WorkspacePreparationAttemptLimit {
 		return common.ErrConflict
 	}
 	if validatePreparationCompletions(r) != nil {
@@ -139,63 +138,59 @@ func (r WorkspacePreparationRecord) Validate(workspaceID common.WorkspaceID) err
 	seen := make(map[string]struct{}, len(r.Attempts))
 	lastRevision := uint64(0)
 	for _, attempt := range r.Attempts {
-		if r.Version == WorkspacePreparationRecordVersion && (attempt.ExecutionInputVersion != "" || attempt.DefinitionCompilation != nil || attempt.Assessment != nil || attempt.EmptySelectionEvaluationVersion != "" || attempt.OwnerRevalidationVersion != "") {
-			return common.ErrConflict
-		}
+
 		if _, present := seen[attempt.RequestID]; present || attempt.Validate() != nil || attempt.CommittedWorkspaceRevision <= lastRevision {
 			return common.ErrConflict
 		}
-		if r.Version == WorkspacePreparationWorkflowVersion {
-			if attempt.EvaluationVersion != "" && attempt.EvaluationVersion != PreparationCheckEvaluationVersion {
-				return common.ErrConflict
-			}
-			if attempt.EvaluationVersion == "" && attempt.ObservationSnapshotHash != "" || attempt.EvaluationVersion != "" && !boundedPreparationIdentity(attempt.ObservationSnapshotHash) {
-				return common.ErrConflict
-			}
-			if !preparationFenceHex(attempt.CreationEpoch, 16) || len(attempt.Checks) == 0 || len(attempt.Checks) > 128 {
-				return common.ErrConflict
-			}
-			lastID := ""
-			for _, check := range attempt.Checks {
-				if check.ID == "provider_cache" && IsPreparationProviderSelectionReason(check.Reason) && (attempt.ProviderCacheEvidenceRef == "" || check.Owner != "llm" || !check.Required || attempt.EvaluationVersion != PreparationCheckEvaluationVersion || attempt.State != WorkspacePreparationBlocked || check.State != "blocked") {
-					return common.ErrConflict
-				}
-				if check.ID == "mcp_selection" && PreparationMCPReasonRequiresEvidence(check.Reason) && (attempt.MCPRegistryEvidenceRef == "" || check.Owner != "mcpregistry" || !check.Required) {
-					return common.ErrConflict
-				}
-				if check.ID == "mcp_selection" && IsPreparationMCPSelectionReason(check.Reason) && (attempt.EvaluationVersion != PreparationCheckEvaluationVersion || attempt.State != WorkspacePreparationBlocked || check.State != "blocked") {
-					return common.ErrConflict
-				}
-				if !validPreparationCheckSubject(attempt.EvaluationVersion, check) {
-					return common.ErrConflict
-				}
-				if check.ID == "memory_selection" && PreparationMemoryReasonRequiresEvidence(check.Reason) && attempt.MemoryInventoryEvidenceRef == "" {
-					return common.ErrConflict
-				}
-				if check.ID == "skill_selection" && strings.HasPrefix(check.Reason, "skill_selection_") && (attempt.SkillSelectionState == "" || check.Reason != "skill_selection_"+attempt.SkillSelectionState) {
-					return common.ErrConflict
-				}
-				if check.ID == "skill_selection" && check.Reason == "skill_registry_observed_selection_pending" && attempt.SkillRegistryEvidenceRef == "" {
-					return common.ErrConflict
-				}
-				if check.ID == "soul_selection" && check.Reason == "souls_observed_remaining_checks" && attempt.SoulEvidenceRef == "" {
-					return common.ErrConflict
-				}
-				if !boundedPreparationIdentity(check.ID) || !boundedPreparationIdentity(check.Owner) || check.ID <= lastID {
-					return common.ErrConflict
-				}
-				lastID = check.ID
-				if attempt.State == WorkspacePreparationAccepted || attempt.State == WorkspacePreparationUnknown {
-					if check.State != "pending" || check.Reason != "not_observed" {
-						return common.ErrConflict
-					}
-				} else if !ValidPreparationEvaluatedCheck(attempt, check) {
-					return common.ErrConflict
-				}
-			}
-		} else if attempt.NoRunEvaluationVersion != "" || attempt.RunHistoryEvidenceRef != "" || attempt.SealEvidenceRef != "" || attempt.MCPRegistryEvidenceRef != "" || attempt.ObservationSnapshotHash != "" || attempt.EvaluationVersion != "" || attempt.CreationEpoch != "" || attempt.PreparationEpoch != 0 || len(attempt.Checks) != 0 || attempt.DirectoryEvidenceHash != "" || attempt.ResourceEvidenceHash != "" || attempt.ManagedConfigEvidenceRef != "" || attempt.SoulEvidenceRef != "" || attempt.SkillRegistryEvidenceRef != "" || attempt.ProviderCacheEvidenceRef != "" || attempt.MemoryInventoryEvidenceRef != "" || attempt.SkillHubEffectRef != "" {
+
+		if attempt.EvaluationVersion != "" && attempt.EvaluationVersion != PreparationCheckEvaluationVersion {
 			return common.ErrConflict
 		}
+		if attempt.EvaluationVersion == "" && attempt.ObservationSnapshotHash != "" || attempt.EvaluationVersion != "" && !boundedPreparationIdentity(attempt.ObservationSnapshotHash) {
+			return common.ErrConflict
+		}
+		if !preparationFenceHex(attempt.CreationEpoch, 16) || len(attempt.Checks) == 0 || len(attempt.Checks) > 128 {
+			return common.ErrConflict
+		}
+		lastID := ""
+		for _, check := range attempt.Checks {
+			if check.ID == "provider_cache" && IsPreparationProviderSelectionReason(check.Reason) && (attempt.ProviderCacheEvidenceRef == "" || check.Owner != "llm" || !check.Required || attempt.EvaluationVersion != PreparationCheckEvaluationVersion || attempt.State != WorkspacePreparationBlocked || check.State != "blocked") {
+				return common.ErrConflict
+			}
+			if check.ID == "mcp_selection" && PreparationMCPReasonRequiresEvidence(check.Reason) && (attempt.MCPRegistryEvidenceRef == "" || check.Owner != "mcpregistry" || !check.Required) {
+				return common.ErrConflict
+			}
+			if check.ID == "mcp_selection" && IsPreparationMCPSelectionReason(check.Reason) && (attempt.EvaluationVersion != PreparationCheckEvaluationVersion || attempt.State != WorkspacePreparationBlocked || check.State != "blocked") {
+				return common.ErrConflict
+			}
+			if !validPreparationCheckSubject(attempt.EvaluationVersion, check) {
+				return common.ErrConflict
+			}
+			if check.ID == "memory_selection" && PreparationMemoryReasonRequiresEvidence(check.Reason) && attempt.MemoryInventoryEvidenceRef == "" {
+				return common.ErrConflict
+			}
+			if check.ID == "skill_selection" && strings.HasPrefix(check.Reason, "skill_selection_") && (attempt.SkillSelectionState == "" || check.Reason != "skill_selection_"+attempt.SkillSelectionState) {
+				return common.ErrConflict
+			}
+			if check.ID == "skill_selection" && check.Reason == "skill_registry_observed_selection_pending" && attempt.SkillRegistryEvidenceRef == "" {
+				return common.ErrConflict
+			}
+			if check.ID == "soul_selection" && check.Reason == "souls_observed_remaining_checks" && attempt.SoulEvidenceRef == "" {
+				return common.ErrConflict
+			}
+			if !boundedPreparationIdentity(check.ID) || !boundedPreparationIdentity(check.Owner) || check.ID <= lastID {
+				return common.ErrConflict
+			}
+			lastID = check.ID
+			if attempt.State == WorkspacePreparationAccepted || attempt.State == WorkspacePreparationUnknown {
+				if check.State != "pending" || check.Reason != "not_observed" {
+					return common.ErrConflict
+				}
+			} else if !ValidPreparationEvaluatedCheck(attempt, check) {
+				return common.ErrConflict
+			}
+		}
+
 		seen[attempt.RequestID] = struct{}{}
 		lastRevision = attempt.CommittedWorkspaceRevision
 	}

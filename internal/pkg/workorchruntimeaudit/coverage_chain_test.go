@@ -32,7 +32,7 @@ func TestAuditValidationFeedbackPreservesIncompleteProofAndExactDiagnostics(t *t
 	}
 	baseline.PassedChecks, baseline.FailedChecks = nil, []string{"check-A"}
 	baseline.CheckFailures = []runtimecontract.RuntimeValidationCheckFailure{{CheckRef: "check-A", TargetRef: "checks/a.test", Line: 47, DiagnosticHash: strings.Repeat("a", 64)}}
-	baseline.FailureDetailProtocolRef = runtimecontract.RuntimeValidationFailureDetailProtocolV2
+	baseline.FailureDetailProtocolRef = runtimecontract.RuntimeValidationFailureDetailProtocol
 	baseline.CheckFailures[0].ComparisonHash = strings.Repeat("c", 64)
 	baseline.CheckFailures[0].ReportedAssertion = runtimecontract.RuntimeValidationReportedAssertion{Code: "shape_mismatch", ExpectedShape: "object", ObservedShape: "array"}
 	evidence := projectioncontract.RuntimeAuditEvidence{ValidationRecipeID: baseline.ValidationRecipeID, ObservationProtocolRef: baseline.ObservationProtocolRef,

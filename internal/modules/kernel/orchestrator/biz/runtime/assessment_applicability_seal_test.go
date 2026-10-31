@@ -9,7 +9,7 @@ import (
 
 func TestAssessmentApplicabilitySealUsesIndependentObservationPrefix(t *testing.T) {
 	reads := (runtimecontract.RuntimeOwnerRevisionSet{DefinitionRevision: "definition-v2", Entries: []runtimecontract.RuntimeOwnerRevisionRef{{OwnerKind: "capability", OwnerInstanceID: "typed-owner/ws-v2", ResourceKind: "workspace_target", ResourceID: "target", Revision: "historical", DependencyHash: "selector"}}}).WithHash()
-	pair := &runtimecontract.RuntimeEvidenceApplicabilityDependencies{ProtocolRef: runtimecontract.RuntimeEvidenceApplicabilityDependenciesV1, OwnerRevisionSet: reads}
+	pair := &runtimecontract.RuntimeEvidenceApplicabilityDependencies{ProtocolRef: runtimecontract.RuntimeEvidenceApplicabilityDependenciesProtocol, OwnerRevisionSet: reads}
 	_, repository, _ := prepareOwnerFactAssessmentWithDependencyPair(t, true, nil, &reads, pair)
 	sealed := repository.aggregate.CloneRaw()
 	if sealed.ActiveDispatch == nil || sealed.ActiveDispatch.AssessmentAuthorityInput == nil {

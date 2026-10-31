@@ -33,7 +33,7 @@ func TestDerivationReserveRejectsUnsealedResourceBeforeProviderPermit(t *testing
 	if err := owners.repositories.Workspaces.Create(ctx, &workspace.Workspace{ID: input.WorkspaceID, TemplateID: template.ID, DeliverableDirectory: directory, DefinitionAuthoring: &record}); err != nil {
 		t.Fatal(err)
 	}
-	reserve := workspaceevents.ReserveDefinitionDerivationCommand{WorkspaceID: input.WorkspaceID, InputHash: record.InputHash, RequestID: "derive/" + record.InputHash, ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil), ProviderBindingHash: "provider"}
+	reserve := workspaceevents.ReserveDefinitionDerivationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "derive"), WorkspaceID: input.WorkspaceID, InputHash: record.InputHash, RequestID: "derive/" + record.InputHash, ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil), ProviderBindingHash: "provider"}
 	if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: input.WorkspaceID, DeriveReserve: &reserve}); err == nil {
 		t.Fatal("unsealed resource obtained a derivation provider permit")
 	}
@@ -160,7 +160,7 @@ func TestDerivationHistoricalCompletionAfterTemplateRemoval(t *testing.T) {
 		owners.close()
 		t.Fatal(err)
 	}
-	reserve := workspaceevents.ReserveDefinitionDerivationCommand{WorkspaceID: input.WorkspaceID, InputHash: record.InputHash, RequestID: "derive/" + record.InputHash, ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil), ProviderBindingHash: "provider"}
+	reserve := workspaceevents.ReserveDefinitionDerivationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "derive"), WorkspaceID: input.WorkspaceID, InputHash: record.InputHash, RequestID: "derive/" + record.InputHash, ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil), ProviderBindingHash: "provider"}
 	first, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: input.WorkspaceID, DeriveReserve: &reserve})
 	if err != nil || first.Derivation == nil || first.Derivation.FreshPermitID == "" {
 		owners.close()
@@ -178,7 +178,7 @@ func TestDerivationHistoricalCompletionAfterTemplateRemoval(t *testing.T) {
 		t.Fatalf("historical query: %+v %v", view, err)
 	}
 	proposal := &workspace.DefinitionDerivedAcceptance{AuthoringInputHash: input.InputHash(), TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"验收条件"}}
-	complete := workspaceevents.CompleteDefinitionDerivationCommand{WorkspaceID: input.WorkspaceID, PermitID: first.Derivation.FreshPermitID, Proposal: proposal}
+	complete := workspaceevents.CompleteDefinitionDerivationCommand{SuccessAudit: derivationTestAudit(t, proposal), WorkspaceID: input.WorkspaceID, PermitID: first.Derivation.FreshPermitID, Proposal: proposal}
 	done, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: input.WorkspaceID, DeriveComplete: &complete})
 	if err != nil || done.Derivation == nil || done.Derivation.Request.Proposal == nil {
 		t.Fatalf("complete historical permit: %+v %v", done, err)
@@ -207,7 +207,7 @@ func TestDerivationPermitSurvivesFileReopen(t *testing.T) {
 		owners.close()
 		t.Fatal(err)
 	}
-	command := workspaceevents.ReserveDefinitionDerivationCommand{WorkspaceID: input.WorkspaceID, InputHash: input.InputHash(), RequestID: "derive-1", ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil), ProviderBindingHash: "provider"}
+	command := workspaceevents.ReserveDefinitionDerivationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "derive"), WorkspaceID: input.WorkspaceID, InputHash: input.InputHash(), RequestID: "derive-1", ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil), ProviderBindingHash: "provider"}
 	first, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: input.WorkspaceID, DeriveReserve: &command})
 	owners.close()
 	if err != nil {
@@ -223,7 +223,7 @@ func TestDerivationPermitSurvivesFileReopen(t *testing.T) {
 		t.Fatalf("restart reissued permit: %+v %v", replay, err)
 	}
 	proposal := &workspace.DefinitionDerivedAcceptance{AuthoringInputHash: input.InputHash(), TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"验收条件"}}
-	complete := workspaceevents.CompleteDefinitionDerivationCommand{WorkspaceID: input.WorkspaceID, PermitID: first.Derivation.FreshPermitID, Proposal: proposal}
+	complete := workspaceevents.CompleteDefinitionDerivationCommand{SuccessAudit: derivationTestAudit(t, proposal), WorkspaceID: input.WorkspaceID, PermitID: first.Derivation.FreshPermitID, Proposal: proposal}
 	done, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: input.WorkspaceID, DeriveComplete: &complete})
 	if err != nil || done.Derivation.Request.Proposal == nil || done.Derivation.FreshPermitID != "" {
 		t.Fatalf("complete: %+v %v", done, err)

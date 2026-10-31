@@ -11,7 +11,7 @@ import (
 // process execution, receipt/raw storage, Run CAS and recovery are real owners.
 // An unrelated failure with no observed implementation remains fail-closed.
 func TestDriveRuntimeProjectMultiFailureOwnerMainline(t *testing.T) {
-	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV3}
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol}
 	for _, mode := range []string{"consistent", "project_history_failure"} {
 		t.Run(mode, func(t *testing.T) {
 			baseline := runValidationInputReviewMainline(t, mode, "", options)
@@ -27,7 +27,7 @@ func TestDriveRuntimeProjectMultiFailureOwnerMainline(t *testing.T) {
 }
 
 func TestDriveRuntimeProjectMultiFailureConfirmedRepair(t *testing.T) {
-	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV3}
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol}
 	baseline := runValidationInputReviewMainline(t, "project_behavior_failure", "", options)
 	for _, cut := range []string{"after_review_binding", "after_project_receipt", "after_repair_receipt"} {
 		t.Run(cut, func(t *testing.T) {

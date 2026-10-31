@@ -17,8 +17,8 @@ func goalExecutionFixture() (RuntimeSourceObligationInventory, []RuntimeProfileC
 			inventory.Sources[n].Text = goalText
 		}
 	}
-	rule := RuntimeLineageAssertionRule{Ref: "goal-original-work", Kind: RuntimeLineageCompletedWorkRounds, ConsumptionPoint: RuntimeProofPhaseExecution, MinCompletedRounds: 2, ExecutionSourceContractRef: RuntimeGoalSourceExecutionProofV2}
-	inventory.ExecutionProofMappings = []RuntimeExecutionProofMapping{{ContractRef: RuntimeGoalSourceExecutionProofV2, ConsumerItemRef: "goal", RuleRef: rule.Ref, SourceItemRef: "dod", ConsumerGoalText: goalText}}
+	rule := RuntimeLineageAssertionRule{Ref: "goal-original-work", Kind: RuntimeLineageCompletedWorkRounds, ConsumptionPoint: RuntimeProofPhaseExecution, MinCompletedRounds: 2, ExecutionSourceContractRef: RuntimeGoalSourceExecutionProof}
+	inventory.ExecutionProofMappings = []RuntimeExecutionProofMapping{{ContractRef: RuntimeGoalSourceExecutionProof, ConsumerItemRef: "goal", RuleRef: rule.Ref, SourceItemRef: "dod", ConsumerGoalText: goalText}}
 	inventory = inventory.WithHash()
 	profiles := []RuntimeProfileContract{{ID: "profile", EvidenceRequirements: []RuntimeProfileEvidenceRequirement{
 		{ID: "goal", Scope: "goal", RequiredEvidenceKinds: []string{EvidenceKindValidation}, AcceptedStepKinds: []string{RuntimeBlockKindManagedValidationSession}, LineageAssertions: []RuntimeLineageAssertionRule{rule}},
@@ -96,7 +96,7 @@ func TestGoalExecutionProofSealsCompleteGoalANDOrdinaryOriginalChecks(t *testing
 func TestGoalExecutionProofFailsClosedForWrongSourceVersionAndGoalBytes(t *testing.T) {
 	for name, change := range map[string]func(*RuntimeSourceObligationInventory, *[]RuntimeProfileContract){
 		"legacy": func(i *RuntimeSourceObligationInventory, _ *[]RuntimeProfileContract) {
-			i.ExecutionProofMappings[0].ContractRef = RuntimeCrossSourceExecutionProofV1
+			i.ExecutionProofMappings[0].ContractRef = RuntimeDoDSourceExecutionProof
 		},
 		"unknown": func(i *RuntimeSourceObligationInventory, _ *[]RuntimeProfileContract) {
 			i.ExecutionProofMappings[0].SourceItemRef = "missing"

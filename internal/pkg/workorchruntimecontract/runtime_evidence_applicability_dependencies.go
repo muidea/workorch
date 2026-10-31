@@ -2,8 +2,8 @@ package workorchruntimecontract
 
 import "fmt"
 
-const RuntimeEvidenceApplicabilityDependenciesV1 = "evidence-applicability-dependencies/v1"
-const RuntimeEvidenceApplicabilityDependenciesV2 = "evidence-applicability-dependencies/v2"
+const RuntimeEvidenceApplicabilityDependenciesProtocol = "evidence-applicability-dependencies"
+
 const RuntimeHistoricalEffectProofV1 = "historical-effect-proof/v1"
 const RuntimeFileHistoricalEffectProofV1 = "file/mutation-historical-effect/v1"
 
@@ -14,8 +14,7 @@ const RuntimeFileHistoricalEffectProofV1 = "file/mutation-historical-effect/v1"
 type RuntimeEvidenceApplicabilityDependencies struct {
 	ProtocolRef      string
 	OwnerRevisionSet RuntimeOwnerRevisionSet
-	// Explicit receiving-owner declaration. Empty fields preserve the v1 wire;
-	// old receipts are never upgraded by normalization or by their operation kind.
+	// Explicit receiving-owner proof purpose; never inferred from operation kind.
 	PurposeRef       string `json:",omitempty"`
 	OwnerModuleID    string `json:",omitempty"`
 	OperationKind    string `json:",omitempty"`
@@ -46,12 +45,15 @@ func ValidateRuntimeEvidenceDependencyPair(reads *RuntimeOwnerRevisionSet, appli
 	if reads == nil {
 		return fmt.Errorf("applicability dependencies require exact protocol and original observed reads")
 	}
-	switch applicability.ProtocolRef {
-	case RuntimeEvidenceApplicabilityDependenciesV1:
+	if applicability.ProtocolRef != RuntimeEvidenceApplicabilityDependenciesProtocol {
+		return fmt.Errorf("unsupported applicability schema")
+	}
+	switch applicability.PurposeRef {
+	case "":
 		if applicability.PurposeRef != "" || applicability.OwnerModuleID != "" || applicability.OperationKind != "" || applicability.OwnerContractRef != "" {
-			return fmt.Errorf("legacy applicability cannot declare a proof purpose")
+			return fmt.Errorf("current-resource applicability cannot claim historical operation fields")
 		}
-	case RuntimeEvidenceApplicabilityDependenciesV2:
+	case RuntimeHistoricalEffectProofV1:
 		descriptor, found := RuntimeOperationDescriptorForKind(applicability.OperationKind)
 		if !found || descriptor.Kind != applicability.OperationKind || descriptor.OwnerModuleID != applicability.OwnerModuleID ||
 			applicability.PurposeRef != RuntimeHistoricalEffectProofV1 || applicability.OwnerContractRef == "" ||
@@ -75,12 +77,11 @@ func ValidateRuntimeEvidenceDependencyPair(reads *RuntimeOwnerRevisionSet, appli
 // must still reverse-prove the original receipt, binding and execution lineage.
 func RuntimeEvidenceIsHistoricalEffect(fact EvidenceFact) bool {
 	value := fact.ApplicabilityDependencies
-	return fact.Kind == EvidenceKindStateChange && value != nil && value.ProtocolRef == RuntimeEvidenceApplicabilityDependenciesV2 &&
-		value.PurposeRef == RuntimeHistoricalEffectProofV1 && ValidateRuntimeEvidenceDependencyPair(fact.OwnerRevisionSet, value, "") == nil
+	return fact.Kind == EvidenceKindStateChange && value != nil && value.PurposeRef == RuntimeHistoricalEffectProofV1 && ValidateRuntimeEvidenceDependencyPair(fact.OwnerRevisionSet, value, "") == nil
 }
 
 func ValidateRuntimeEvidencePurposeForOperation(value *RuntimeEvidenceApplicabilityDependencies, kind, evidenceKind string) error {
-	if value != nil && value.ProtocolRef == RuntimeEvidenceApplicabilityDependenciesV2 &&
+	if value != nil && value.PurposeRef == RuntimeHistoricalEffectProofV1 &&
 		(value.OperationKind != kind || evidenceKind != EvidenceKindStateChange) {
 		return fmt.Errorf("historical effect declaration differs from sealed operation/evidence purpose")
 	}
@@ -134,8 +135,8 @@ func RuntimeHistoricalEffectProofContractForDispatch(dispatch RuntimeDispatchRec
 	return RuntimeHistoricalEffectProofContractForBindings(dispatch.CoverageBindings, operation)
 }
 
-// A mapped historical source cannot silently downgrade to current-resource
-// v1 (or omit its observed dependency pair). The original mapping remains in
+// A mapped historical effect cannot be relabeled as current-resource proof
+// or omit its observed dependency pair. The original mapping remains in
 // the sealed binding/manifest; this gate checks purpose only, never credit.
 func ValidateRuntimeHistoricalEffectReceiptPurpose(dispatch RuntimeDispatchRecord, operation RuntimeOperation, value *RuntimeEvidenceApplicabilityDependencies) error {
 	expected := RuntimeHistoricalEffectProofContractForDispatch(dispatch, operation)
@@ -145,10 +146,10 @@ func ValidateRuntimeHistoricalEffectReceiptPurpose(dispatch RuntimeDispatchRecor
 			mapped = true
 		}
 	}
-	if mapped && (expected == "" || value == nil || value.ProtocolRef != RuntimeEvidenceApplicabilityDependenciesV2 || value.PurposeRef != RuntimeHistoricalEffectProofV1) {
+	if mapped && (expected == "" || value == nil || value.PurposeRef != RuntimeHistoricalEffectProofV1) {
 		return fmt.Errorf("mapped historical source requires original owner-declared historical receipt purpose")
 	}
-	if value != nil && value.ProtocolRef == RuntimeEvidenceApplicabilityDependenciesV2 && value.OwnerContractRef != expected {
+	if value != nil && value.PurposeRef == RuntimeHistoricalEffectProofV1 && value.OwnerContractRef != expected {
 		return fmt.Errorf("historical effect has no original sealed ordinary acceptance source")
 	}
 	return nil
@@ -178,7 +179,7 @@ func RuntimeHistoricalEffectsHaveCurrentAcceptanceProof(selected []EvidenceFact)
 		historical = historical || RuntimeEvidenceIsHistoricalEffect(fact)
 		value := fact.ApplicabilityDependencies
 		current = current || (fact.Kind == EvidenceKindValidation && fact.Validation != nil && value != nil &&
-			value.ProtocolRef == RuntimeEvidenceApplicabilityDependenciesV1 && len(value.OwnerRevisionSet.Entries) > 0 &&
+			value.PurposeRef == "" && len(value.OwnerRevisionSet.Entries) > 0 &&
 			ValidateRuntimeEvidenceDependencyPair(fact.OwnerRevisionSet, value, "") == nil)
 	}
 	return !historical || current

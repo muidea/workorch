@@ -22,12 +22,11 @@ transition。
 | --- | --- | --- | --- |
 | `application/workorchd` | Application → Soul | create/get/list/update/delete、`ValidateCapabilitySelectionCommand/Result` | mutation/list/validation 只接受 exact `application/workorchd/context-registry`；get 另接受 exact `application/workorchd/appservice` |
 | `kernel/system` | System → Soul | `EnsureDefaultsCommand/Result` | 仅接受 exact source `kernel/system` |
-| `application/workorchd` | Application → Soul | `QueryBuiltinSoulDefaultsCommand/Result`、`UpgradeBuiltinSoulDefaultCommand/Result` | 仅接受 exact `application/workorchd/context-registry`；query 返回当前/内嵌内容指纹，upgrade 只提交一个资源意图 |
 | repository backend | Soul → repository | `SoulRepository` CRUD/list | owner-private 技术依赖 |
 
 每个 topic 在 [`pkg/events`](pkg/events) 中有独立 concrete command/result。list 使用稳定 ID cursor，默认 100、最大 200。
-默认资源 ensure 创建缺失 ID，并通过同一 owner-private guarded upgrade 自动更新 exact reviewed、未定制且带完整
-`builtin_seed` 内容身份的旧版本。定制/未知对象保留，不凭内置 ID 推测升级许可。
+默认资源 ensure 创建缺失 ID，并将 `builtin_seed` 资源同步到当前程序内置内容。
+定制资源保留，不维护历史内容指纹表或显式升级 API；同步不改写已封存的 Run 快照。
 
 ## 不变量与非职责
 
@@ -37,15 +36,9 @@ transition。
   catalog replacement command，最后成功提交的 command 为当前值，exact content replay 为 no-op。
 - `ExpectedRevision` 对普通 CRUD 合同不适用：Soul 没有多阶段 lifecycle 状态机；revision 是 owner 输出的
   变更序号而非 caller transition precondition。invalid/missing/duplicate/failure 分别返回错误且不产生部分写入。
-- builtin upgrade 由 `soulBuiltinUpgradeEvent → submitBuiltinDefaultUpgrade` 独占比较/替换事务，与普通 CRUD 共用
-  owner-local mutation lock。要求 exact `ExpectedContentHash`、当前内嵌 `TargetContentHash`、reviewed historical fingerprint
-  和 `builtin_seed` provenance；provenance 单独不能证明未定制。未知/定制/stale/changed-target 零写入，不提供 force。
-- 升级写入后响应丢失，fresh owner 可凭 exact 内容识别已达目标，重复请求为 no-op、不再次增加 revision；本事务不修改
-  Workspace admission 或 Run 封存 Soul snapshot，不触发 Resume/Restart。历史指纹表是纯数据，不是跨 owner 状态管理器。
-- 新 Start/Restart 的 activation 读取当时的 Soul owner 内容，不复用跨请求旧快照；Resume/recovery 继续使用 Run seal。
-  Soul owner 不遍历 Workspace/Run 做热替换、迁移或历史记录修补。
-  guidance 更新须连同此前发布内容的完整 frozen fixture 与精确指纹验证；
-  `TestEntrypointSoulsUpgradeReopensReviewedPreviousDefaults` 覆盖规划/执行/验收 Soul 的 memory/file 自动更新、幂等及定制保护。
+- 内置同步与 CRUD 共用 owner-local mutation lock；当前内容相同为 no-op。定制 provenance 不被覆盖。
+- Start/Restart 读取当时 Soul 内容；Resume/recovery 使用 Run 已封存内容，不能热替换或修补历史。
+  `TestStartupSynchronizesProgramOwnedSoulAfterReopen` 覆盖 memory/file 重载、同步幂等与定制保护。
 - result 必须 detached clone；repository/service 不对其它组件开放。
 - `EnsureDefaults` 的 caller identity 是合同的一部分，错误 source 即 fail-closed、零写入。
 - Soul 不查询 Skill/MCP owner、不判断 selected capability 是否存在，也不把 guidance 转成 Runtime authority。
@@ -55,7 +48,7 @@ transition。
 ### 生命周期合同
 
 - `Start` 逐成功订阅记账；部分失败保留 topic、service 与 repository，未清理前拒绝再次注册。
-- `BeginShutdown` 非等待式关闭 create/update/delete、ensure/upgrade；Get/List、ValidateCapability 和 QueryBuiltinDefaults 保留原 typed/source 校验，作为只读 drain 通路，不扩大许可。
+- `BeginShutdown` 非等待式关闭 create/update/delete、ensure；Get/List 与 ValidateCapability 保留原 typed/source 校验，作为只读 drain 通路，不扩大许可。
 - 生命周期票覆盖真实 handler 返回。`Quiesce(ctx)` 等真实退出；取消或超时不授权释放资源，可用新预算重试。
 - `Stop` 排空后封闭最终准入并复核，逆序 checked 退订成功才移除账本，全部成功才清引用；未知 panic 不吞掉，也不遗留清理锁。
 - 本地排空不能替代共享任务/Hub 屏障。调用方串行 Configure/Start/Stop，禁止覆盖未释放 owner；plugin guard 保留失败 cause，SM-1～SM-4 业务权威不变。
@@ -70,7 +63,7 @@ transition。
 | cursor / pagination bounds | `TestServiceListSoulsUsesBoundedStableCursor`、`TestServiceListSoulsAppliesDefaultAndMaximumLimits` | 覆盖 stable cursor、noncanonical cursor、default 100 与 max 200 clamp |
 | defaults normal / idempotent | [`biz/defaults_test.go`](biz/defaults_test.go) | memory/file 均覆盖 |
 | defaults invalid seed 零写入 | `TestEnsureSoulDefaultsRejectsInvalidSeedBeforePersistence` | memory/file 均覆盖 validation-before-persistence |
-| explicit upgrade / customized / stale / reload / concurrent edit | [`biz/builtin_defaults_test.go`](biz/builtin_defaults_test.go) | exact 历史内容、错误 source/Post、未知版本、普通编辑保留 provenance、写后响应丢失、file fresh-handle replay 与并发编辑保护 |
+| 当前内置内容与定制保护 | [`biz/defaults_test.go`](biz/defaults_test.go) | 当前程序同步、定制内容保留、memory/file reopen |
 | System exact source 与 Post 零写入 | `TestStrongSoulCommandsIgnoreFireAndForgetPost` | 覆盖 |
 | detached result | [`pkg/events/messages_test.go`](pkg/events/messages_test.go) | 覆盖 |
 | memory/file persistence | `TestSoulRepositoryContract_Memory`、`TestSoulRepositoryContract_File` in [`internal/pkg/repository/repository_contract_test.go`](../../../pkg/repository/repository_contract_test.go) | 覆盖 |

@@ -429,7 +429,7 @@ func TestProviderAuditRequestBytesPreferAdapterWireMeasurement(t *testing.T) {
 }
 
 func TestRuntimeSemanticPlanProviderUsesSingleCachePipelineAndSafeCorrection(t *testing.T) {
-	for _, renderer := range []string{"", runtimecontract.RuntimeSemanticRenderContractV4, runtimecontract.RuntimeSemanticRenderContractV5} {
+	for _, renderer := range []string{runtimecontract.RuntimeSemanticContextEncoding} {
 		t.Run(renderer, func(t *testing.T) {
 			base := runtimeSemanticProviderTestRequest(t)
 			base.SemanticContext.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
@@ -447,7 +447,7 @@ func TestRuntimeSemanticPlanProviderUsesSingleCachePipelineAndSafeCorrection(t *
 			base.SemanticManifest.DefinitionSeedHash = base.SemanticContext.DefinitionSeed.Hash
 			base.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(base.SemanticManifest)
 			refreshSemanticProgressForTest(t, &base)
-			base.ExpectedDocument = &runtimecontract.RuntimeExpectedDocumentContract{SemanticRenderContractRef: renderer, MaxOutputTokens: base.SemanticContext.ProviderCeiling.EffectiveMaxOutputTokens}
+			base.ExpectedDocument = &runtimecontract.RuntimeExpectedDocumentContract{SemanticContextEncoding: renderer, MaxOutputTokens: base.SemanticContext.ProviderCeiling.EffectiveMaxOutputTokens}
 			initial, err := runtimeProviderRequest(base)
 			if err != nil {
 				t.Fatal(err)
@@ -1766,7 +1766,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 	}
 	t.Run("sealed compact renderer preserves exact dynamic authority", func(t *testing.T) {
 		wire := runtimeCandidateWireForTest(t, manifest)
-		expected := &runtimecontract.RuntimeExpectedDocumentContract{WireContractHash: wire.Hash, OperationsRenderContractRef: runtimecontract.RuntimeOperationsRenderContractV2}
+		expected := &runtimecontract.RuntimeExpectedDocumentContract{WireContractHash: wire.Hash, OperationsContextEncoding: runtimecontract.RuntimeOperationsContextEncoding}
 		input := llmmodels.RuntimeCandidateRequest{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix, CandidateManifest: manifest, DefinitionContext: definition, CandidateContext: candidateContext, ExpectedDocument: expected}
 		compact, err := runtimeProviderRequest(input)
 		if err != nil {
@@ -1795,7 +1795,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 		for _, strict := range []bool{false, true} {
 			compact.Config.Capabilities.JSONSchemaResponse = strict
 			compact.RawTextOutput = !strict
-			if scope := responsesCacheSchemaScope(compact); scope != "runtime/operations-schema/v2" {
+			if scope := responsesCacheSchemaScope(compact); scope != "runtime/operations-schema" {
 				t.Fatalf("v2 exact contract scope = %s", scope)
 			}
 			first := responsesWireInputForRequest(&compact)
@@ -1803,39 +1803,34 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 			if !bytes.Equal(first, second) {
 				t.Fatal("identical snapshot rendering drifted")
 			}
-			if compact.ContextBudget.PromptRenderer != "workorch.runtime_candidate_prompt/v2" {
+			if compact.ContextBudget.PromptRenderer != "workorch.runtime_candidate_prompt" {
 				t.Fatal("audit lost selected renderer")
 			}
 		}
-		expected.OperationsRenderContractRef = "unknown"
+		expected.OperationsContextEncoding = "unknown"
 		if _, err := runtimeProviderRequest(input); err == nil {
 			t.Fatal("unknown renderer accepted")
 		}
-		expected.OperationsRenderContractRef = ""
-		old, err := runtimeProviderRequest(input)
-		if err != nil {
-			t.Fatal(err)
+		expected.OperationsContextEncoding = ""
+		if _, err := runtimeProviderRequest(input); err == nil {
+			t.Fatal("missing current encoding accepted")
 		}
-		for i := range old.PromptContext.Sections {
-			if old.PromptContext.Sections[i].Content != request.PromptContext.Sections[i].Content {
-				t.Fatalf("legacy renderer C%d was upgraded", i)
-			}
-		}
+
 	})
 	t.Run("cache layout v4 preserves current authority and strict transport", func(t *testing.T) {
 		wire := runtimeCandidateWireForTest(t, manifest)
-		input := llmmodels.RuntimeCandidateRequest{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix, CandidateManifest: manifest, DefinitionContext: definition, CandidateContext: candidateContext, ExpectedDocument: &runtimecontract.RuntimeExpectedDocumentContract{WireContractHash: wire.Hash, OperationsRenderContractRef: runtimecontract.RuntimeOperationsRenderContractV3}}
+		input := llmmodels.RuntimeCandidateRequest{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix, CandidateManifest: manifest, DefinitionContext: definition, CandidateContext: candidateContext, ExpectedDocument: &runtimecontract.RuntimeExpectedDocumentContract{WireContractHash: wire.Hash, OperationsContextEncoding: runtimecontract.RuntimeOperationsContextEncoding}}
 		assertRuntimeCacheLayoutOperations(t, input)
 	})
-	for _, renderer := range []string{runtimecontract.RuntimeOperationsRenderContractV3, runtimecontract.RuntimeOperationsRenderContractV4} {
+	for _, renderer := range []string{runtimecontract.RuntimeOperationsContextEncoding} {
 		t.Run("cardinality renderer native and text transport share exact contract/"+renderer, func(t *testing.T) {
 			wire := runtimeCandidateWireForTest(t, manifest)
-			input := llmmodels.RuntimeCandidateRequest{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix, CandidateManifest: manifest, DefinitionContext: definition, CandidateContext: candidateContext, ExpectedDocument: &runtimecontract.RuntimeExpectedDocumentContract{WireContractHash: wire.Hash, OperationsRenderContractRef: renderer}}
+			input := llmmodels.RuntimeCandidateRequest{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix, CandidateManifest: manifest, DefinitionContext: definition, CandidateContext: candidateContext, ExpectedDocument: &runtimecontract.RuntimeExpectedDocumentContract{WireContractHash: wire.Hash, OperationsContextEncoding: renderer}}
 			modern, err := runtimeProviderRequest(input)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if modern.Schema != runtimeCandidateCardinalitySchema(manifest, wire) || modern.ContextBudget.PromptRenderer != "workorch.runtime_candidate_prompt/v3" {
+			if modern.Schema != runtimeCandidateCardinalitySchema(manifest, wire) || modern.ContextBudget.PromptRenderer != "workorch.runtime_candidate_prompt" {
 				t.Fatal("v3 schema/audit diverged")
 			}
 			var current map[string]json.RawMessage
@@ -1895,7 +1890,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 				if !strict && transport != nil {
 					t.Fatal("raw text unexpectedly dispatched native schema")
 				}
-				if responsesCacheSchemaScope(modern) != "runtime/operations-schema/v3" {
+				if responsesCacheSchemaScope(modern) != "runtime/operations-schema" {
 					t.Fatal("v3 cache identity missing")
 				}
 				assertRuntimeSectionCacheWire(t, modern)
@@ -1963,7 +1958,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 		}
 		// New diagnostic facts are volatile and explicit. An old location/hash
 		// record above must retain its exact rendering rather than be backfilled.
-		failed.Validation.FailureDetailProtocolRef = runtimecontract.RuntimeValidationFailureDetailProtocolV2
+		failed.Validation.FailureDetailProtocolRef = runtimecontract.RuntimeValidationFailureDetailProtocol
 		failed.Validation.CheckFailures[0].ComparisonHash = strings.Repeat("c", 64)
 		for _, complete := range []bool{false, true} {
 			if complete {
@@ -1983,7 +1978,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 				}
 			}
 			newTail := rendered.PromptContext.Sections[4].Content
-			if !strings.Contains(newTail, `"failureDetailProtocolRef":"validation/check-failure/v2"`) ||
+			if !strings.Contains(newTail, `"failureDetailProtocolRef":"validation/check-failure"`) ||
 				!strings.Contains(newTail, fmt.Sprintf(`"failureDetailsIncomplete":%t`, !complete)) {
 				t.Fatalf("diagnostic completeness lost: %s", newTail)
 			}

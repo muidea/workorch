@@ -11,7 +11,7 @@ import (
 
 func TestSealedMappingDecoderShapeMatchesProviderSchemaAtEveryField(t *testing.T) {
 	var schema map[string]any
-	if err := json.Unmarshal([]byte(DefinitionAuthoringMappingSchema), &schema); err != nil {
+	if err := json.Unmarshal([]byte(mustCurrentMappingSchema(t)), &schema); err != nil {
 		t.Fatal(err)
 	}
 	var check func(mappingShape, map[string]any, string)
@@ -59,13 +59,14 @@ func TestSealedMappingDecoderShapeMatchesProviderSchemaAtEveryField(t *testing.T
 			t.Fatalf("%s：未覆盖 shape", path)
 		}
 	}
-	check(authoringMappingShape, schema, "$")
+	check(authoringSemanticMappingShape(), schema, "$")
 }
 
 func TestSealedMappingDecoderRejectsEachMissingNullCaseAndWrongTypeField(t *testing.T) {
 	_, mapping, _ := fullSizeMappingFixture(t)
-	mapping.ExecutionProofMappings = []GoalExecutionProofMapping{{ContractRef: "runtime/cross-source-execution-proof/v1", ConsumerItemRef: "consumer", RuleRef: "rule", SourceItemRef: "source"}}
-	mapping.EvidencePurposeMappings = []GoalEvidencePurposeMapping{{ContractRef: "runtime/cross-cwi-evidence-purpose/v1", HistoricalItemRef: "history", AcceptanceItemRef: "current"}}
+	mapping.ExecutionProofMappings = []GoalExecutionProofMapping{{ContractRef: "runtime/dod-source-execution-proof", ConsumerItemRef: "consumer", RuleRef: "rule", SourceItemRef: "source"}}
+	mapping.EvidencePurposeMappings = []GoalEvidencePurposeMapping{{ContractRef: "runtime/cross-cwi-evidence-purpose", HistoricalItemRef: "history", AcceptanceItemRef: "current"}}
+	mapping.ProfileAcceptanceSelections = []DefinitionProfileAcceptanceSelection{{SourceRef: "profile", AcceptanceItemRef: "item"}}
 	mapping.GoalRequirement.ResourceIDs = []string{"resource"}
 	mapping.Dimensions[0].ResourceIDs = []string{"resource"}
 	for index := range mapping.Requirements {
@@ -76,7 +77,7 @@ func TestSealedMappingDecoderRejectsEachMissingNullCaseAndWrongTypeField(t *test
 	if err := json.Unmarshal(audit.Document.Content, &root); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := DecodeDefinitionAuthoringMapping(audit.Document.Content); err != nil {
+	if _, err := decodeCurrentMappingFixture(audit.Document.Content); err != nil {
 		t.Fatal(err)
 	}
 	reject := func(name string) {
@@ -85,7 +86,7 @@ func TestSealedMappingDecoderRejectsEachMissingNullCaseAndWrongTypeField(t *test
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := DecodeDefinitionAuthoringMapping(raw); err == nil {
+		if _, err := decodeCurrentMappingFixture(raw); err == nil {
 			t.Fatalf("非法字段被接受：%s", name)
 		}
 	}
@@ -140,12 +141,21 @@ func TestSealedMappingDecoderRejectsEachMissingNullCaseAndWrongTypeField(t *test
 			walk(*shape.item, values[0], fmt.Sprintf("%s[0]", path))
 		}
 	}
-	walk(authoringMappingShape, root, "$")
+	walk(authoringSemanticMappingShape(), root, "$")
 	raw, err := json.Marshal(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := DecodeDefinitionAuthoringMapping(raw); err != nil {
+	if _, err := decodeCurrentMappingFixture(raw); err != nil {
 		t.Fatalf("反例恢复后合法前像被改变：%v", err)
 	}
+}
+
+func mustCurrentMappingSchema(t testing.TB) string {
+	t.Helper()
+	s, err := AuthoringWireSchema(DefinitionAuthoringOwnerBound, "proposal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }

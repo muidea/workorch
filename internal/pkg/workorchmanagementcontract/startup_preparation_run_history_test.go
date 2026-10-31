@@ -9,7 +9,7 @@ import (
 func TestPreparationRunHistoryReferenceCannotConferNoRunReadiness(t *testing.T) {
 	fixture := func() StartupPreparationView {
 		v := preparationViewFixture()
-		v.Record.Version, v.OperationState = "workorch-preparation-record/v2", "blocked"
+		v.Record.Version, v.OperationState = "workorch-preparation-record", "blocked"
 		a := &v.Record.Attempts[0]
 		a.State, a.CreationEpoch, a.RunHistoryEvidenceRef = "blocked", strings.Repeat("a", 32), "run-history-observation:"+strings.Repeat("b", 32)
 		end := a.StartedAt.Add(time.Second)
@@ -25,7 +25,7 @@ func TestPreparationRunHistoryReferenceCannotConferNoRunReadiness(t *testing.T) 
 		}
 	}
 	for _, change := range []func(*StartupPreparationView){
-		func(v *StartupPreparationView) { v.Record.Version = "workorch-preparation-record/v1" },
+		func(v *StartupPreparationView) { v.Record.Version = "unsupported-record-contract" },
 		func(v *StartupPreparationView) {
 			v.Record.Attempts[0].RunHistoryEvidenceRef = "run-history-observation:ready"
 		},

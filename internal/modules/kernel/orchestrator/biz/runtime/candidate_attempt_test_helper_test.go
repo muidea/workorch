@@ -118,7 +118,7 @@ func runtimeTestOperationsExpectedDocument(aggregate RuntimeAggregate, manifestH
 			wireContractHash = wire.Hash
 		}
 	}
-	return runtimecontract.RuntimeExpectedDocumentContract{
+	return runtimecontract.RuntimeExpectedDocumentContract{OperationsContextEncoding: runtimecontract.RuntimeOperationsContextEncoding,
 		SchemaVersion:       runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:        runtimecontract.RuntimeProviderDocumentOperations,
 		ManifestHash:        manifestHash,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,18 +23,23 @@ func TestWorkspacePreparationPersistenceAndCloneIsolation(t *testing.T) {
 			if backend == "file" {
 				repo = file.NewWorkspaceRepository(path)
 			}
-			record := &workspace.WorkspacePreparationRecord{Version: workspace.WorkspacePreparationRecordVersion, WorkspaceID: "ws", Attempts: []workspace.WorkspacePreparationAttempt{{
-				RequestID: "request", PayloadHash: "payload", ExpectedWorkspaceRevision: 1, CommittedWorkspaceRevision: 2, State: workspace.WorkspacePreparationUnknown, StartedAt: time.Now().UTC(),
+			record := &workspace.WorkspacePreparationRecord{Version: workspace.WorkspacePreparationWorkflowVersion, WorkspaceID: "ws", Attempts: []workspace.WorkspacePreparationAttempt{{
+				RequestID: "request", PayloadHash: "payload", ExpectedWorkspaceRevision: 1, CommittedWorkspaceRevision: 2, State: workspace.WorkspacePreparationUnknown, StartedAt: time.Now().UTC(), CreationEpoch: strings.Repeat("a", 32), Checks: []workspace.WorkspacePreparationCheckResult{{ID: "exact_seal", Owner: "workspace", Required: true, State: "pending", Reason: "not_observed"}},
 				Binding: workspace.WorkspacePreparationBinding{AuthoringRef: workspace.DefinitionAuthoringAdmissionRef{InputHash: "input", DerivationPermitID: "permit", ProposalHash: "proposal", SpecificationHash: "spec"}, CandidateID: "candidate", CandidateRevision: 1, CandidateHash: "candidate-hash", DefinitionRevision: "definition", StartupInputHash: "startup", AuthoringConfigurationHash: "config", SnapshotHash: "snapshot", ManifestHash: "manifest", CheckPolicyVersion: "policy", CompilerVersion: "compiler"},
 			}}}
 			if record.Validate("ws") != nil {
 				t.Fatal("invalid fixture")
 			}
-			w := &workspace.Workspace{ID: "ws", Revision: 2, StartupPreparation: record}
-			expected := record.Clone()
+			w := &workspace.Workspace{ID: "ws", PreparationFence: &workspace.WorkspacePreparationFence{Version: workspace.WorkspacePreparationFenceVersion, WorkspaceID: "ws", CreationEpoch: record.Attempts[0].CreationEpoch}}
 			if err := repo.Create(ctx, w); err != nil {
 				t.Fatal(err)
 			}
+			record.Attempts[0].State = workspace.WorkspacePreparationAccepted
+			w.StartupPreparation = record
+			if err := repo.CompareAndSwap(ctx, w, w.Revision); err != nil {
+				t.Fatal(err)
+			}
+			expected := record.Clone()
 			record.Attempts[0].RequestID = "caller-mutated-create"
 			read, err := repo.Get(ctx, "ws")
 			if err != nil || !reflect.DeepEqual(*read.StartupPreparation, expected) {

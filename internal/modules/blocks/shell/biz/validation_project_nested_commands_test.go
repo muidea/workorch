@@ -16,7 +16,7 @@ func TestProjectMultiFailureReviewedInputNestedCommands(t *testing.T) {
 	root, internal := t.TempDir(), t.TempDir()
 	recipe := isolatedInputRecipe()
 	recipe.AdapterRef = shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic
-	recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV3
+	recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 	requirement := shellValidationProofRequirementForTest(t, recipe.ID, "nested-cwi")
 	checks, ok := shellValidationCheckAttestations(recipe, requirement)
 	if !ok {
@@ -48,7 +48,7 @@ func %s(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding.InputReview, _ = shellVersionedInputReview(root, refs, binding)
+	binding.InputReview, _ = shellInputReview(root, refs, binding)
 	if binding.InputReview == nil {
 		t.Fatal("missing independently observable input")
 	}

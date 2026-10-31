@@ -24,6 +24,7 @@ func inputRevisionFixture(t *testing.T) (*RuntimeValidationInputRevision, Runtim
 	m.Hash = StableRuntimeSemanticPlanManifestHash(m)
 	d.ManifestHash = m.Hash
 	d.Proposals[1].ValidationInputReview.Checks[0].Conclusion = RuntimeValidationInputConflict
+	d.Proposals[1].ValidationInputReview.Checks[0].Obligations[0].Finding = RuntimeValidationInputConflicting
 	l := RuntimeSemanticPlanningLedger{Phase: RuntimeSemanticPlanningProofBatchDocumentAccepted, Manifest: &m, LogicalRequestID: runtimeSemanticBindingTestRequestID, ActiveBatchID: d.BatchID, BatchDocuments: []RuntimeSemanticPlanDocument{d}}
 	v, err := CompileRuntimeValidationInputRevision(l)
 	if err != nil {

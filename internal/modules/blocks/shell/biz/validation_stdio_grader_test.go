@@ -102,7 +102,7 @@ func TestStdioEnvelopeReferenceGraderCalibration(t *testing.T) {
 					t.Fatal("passing test's self-reported marker became failed-check evidence")
 				}
 			} else {
-				if observation.ValidateFailureDetails() != nil || observation.FailureDetailProtocolRef != runtimecontract.RuntimeValidationFailureDetailProtocolV2 || len(observation.CheckFailures) != 1 {
+				if observation.ValidateFailureDetails() != nil || observation.FailureDetailProtocolRef != runtimecontract.RuntimeValidationFailureDetailProtocol || len(observation.CheckFailures) != 1 {
 					t.Fatalf("failed grader lost typed diagnostic: %+v", observation)
 				}
 				detail := observation.CheckFailures[0]

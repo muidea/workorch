@@ -510,29 +510,12 @@ func runtimeOperationsExpectedDocument(aggregate runtime.RuntimeAggregate, manif
 	if maxRecoveryAttempts <= 0 {
 		maxRecoveryAttempts = 1
 	}
-	// Renderer selection is sealed on the first request of this authority.
-	// A reload, transport recovery or same-contract correction inherits it;
-	// deployment never silently upgrades an unfinished legacy request.
-	renderer := runtimecontract.RuntimeOperationsRenderContractV4
-	foundRenderer := false
-	for _, session := range aggregate.CandidateRequestSessions {
-		if session.DocumentKind != runtimecontract.RuntimeProviderDocumentOperations || session.Transaction != aggregate.Decision.AuthorityTransaction() || session.ManifestHash != manifest.Hash {
-			continue
-		}
-		ref := ""
-		if session.ExpectedDocument != nil {
-			ref = session.ExpectedDocument.OperationsRenderContractRef
-		}
-		if foundRenderer && renderer != ref {
-			return runtimecontract.RuntimeExpectedDocumentContract{}, fmt.Errorf("%w: inconsistent operations renderer lineage", common.ErrConflict)
-		}
-		renderer, foundRenderer = ref, true
-	}
+
 	return runtimecontract.RuntimeExpectedDocumentContract{
-		OperationsRenderContractRef: renderer,
-		SchemaVersion:               runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
-		DocumentKind:                runtimecontract.RuntimeProviderDocumentOperations,
-		ManifestHash:                manifest.Hash, WireContractHash: wire.Hash, CorrectionAttempt: correctionAttempt,
+		OperationsContextEncoding: runtimecontract.RuntimeOperationsContextEncoding,
+		SchemaVersion:             runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
+		DocumentKind:              runtimecontract.RuntimeProviderDocumentOperations,
+		ManifestHash:              manifest.Hash, WireContractHash: wire.Hash, CorrectionAttempt: correctionAttempt,
 		MaxOutputTokens: maxOutputTokens, MaxRecoveryAttempts: maxRecoveryAttempts,
 	}, nil
 }

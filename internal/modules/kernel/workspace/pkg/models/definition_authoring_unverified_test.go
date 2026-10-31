@@ -7,7 +7,7 @@ func TestAuthoringUnverifiedDraftWithSixPASSCannotConfirm(t *testing.T) {
 	permit := record.DerivationRequests[0].PermitID
 	var request DefinitionAuthoringSpecificationRequest
 	var err error
-	record, request, _, err = record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: "proposal", DerivationPermitID: permit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
+	record, request, _, err = record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal", DerivationPermitID: permit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -16,12 +16,12 @@ func TestAuthoringUnverifiedDraftWithSixPASSCannotConfirm(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, kind := range goalReviewKinds {
-		record, request, _, err = record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: "review-" + kind, DerivationPermitID: permit, Phase: DefinitionSpecificationCritic, ReviewKind: kind, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"})
+		record, request, _, err = record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, kind), RequestID: "review-" + kind, DerivationPermitID: permit, Phase: DefinitionSpecificationCritic, ReviewKind: kind, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		review := GoalSpecificationCompletenessReview{Kind: kind, Status: GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立审查", EvidenceRefs: []string{DefinitionAuthoringGoalItemRef}, RequirementIDs: currentRequiredRequirementIDsFixture(proposal)}
-		record, err = record.CompleteSpecification(request.PermitID, nil, &review, "")
+		record, err = completeTestSpecification(record, request.PermitID, nil, &review, "")
 		if err != nil {
 			t.Fatal(err)
 		}

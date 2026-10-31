@@ -10,7 +10,7 @@ import (
 
 func candidateWithGoalExecutionMapping() workspace.DefinitionAdmissionCandidate {
 	c := candidateWithSpecification()
-	rule := runtimecontract.RuntimeLineageAssertionRule{Ref: "goal-original-work", Kind: runtimecontract.RuntimeLineageCompletedWorkRounds, ConsumptionPoint: runtimecontract.RuntimeProofPhaseExecution, MinCompletedRounds: 2, ExecutionSourceContractRef: runtimecontract.RuntimeGoalSourceExecutionProofV2}
+	rule := runtimecontract.RuntimeLineageAssertionRule{Ref: "goal-original-work", Kind: runtimecontract.RuntimeLineageCompletedWorkRounds, ConsumptionPoint: runtimecontract.RuntimeProofPhaseExecution, MinCompletedRounds: 2, ExecutionSourceContractRef: runtimecontract.RuntimeGoalSourceExecutionProof}
 	declaration := c.RuntimeProfileContracts[0].EvidenceRequirements[0]
 	declaration.ID, declaration.Scope, declaration.LineageAssertions = c.GoalInput.CandidateItemRef, "goal", []runtimecontract.RuntimeLineageAssertionRule{rule}
 	c.RuntimeProfileContracts[0].EvidenceRequirements = append(c.RuntimeProfileContracts[0].EvidenceRequirements, declaration)

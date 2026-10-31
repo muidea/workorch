@@ -367,7 +367,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 				}
 				observed := llmevents.ObserveProviderCatalogCacheResult{WorkspaceID: c.WorkspaceID, OwnerEpoch: "llm-preparation-epoch:ABCDEFGHIJKLMNOPQRSTUVWXYZ", ObservedAt: time.Now().UTC(), Catalog: llmmodel.ProviderModelCatalog{ProviderID: "ai-proxy", Source: "ai_proxy", State: llmmodel.ProviderCatalogStateUnavailable, ErrorCode: "cache_miss"}}
 				if emptySelection {
-					observed.Configuration = &llmevents.PreparationProviderConfiguration{Version: llmevents.PreparationProviderConfigurationVersion, DefaultChat: runtimecontract.ProviderModelTarget{ProviderID: runtimecontract.BuiltinAIProxyProviderID, ModelID: "chat"}}
+					observed.Configuration = &llmevents.PreparationProviderConfiguration{Version: llmevents.PreparationProviderConfigurationSnapshotVersion, DefaultChat: runtimecontract.ProviderModelTarget{ProviderID: runtimecontract.BuiltinAIProxyProviderID, ModelID: "chat"}}
 				}
 				result.Set(observed, nil)
 			}); err != nil {
@@ -847,7 +847,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 				input.Revision = 1
 				input.GoalText = fmt.Sprintf("历史目标-%d", n)
 			}
-			request := workspace.DefinitionDerivationRequest{RequestID: fmt.Sprintf("historical-%d", n), Input: input, Template: record.TemplateSnapshot.Clone(), Resources: resources, ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(resources), ProviderBindingHash: definitionProviderBindingHash(configuration), FailureCode: "provider_failed"}
+			request := workspace.DefinitionDerivationRequest{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "derive"), RequestID: fmt.Sprintf("historical-%d", n), Input: input, Template: record.TemplateSnapshot.Clone(), Resources: resources, ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(resources), ProviderBindingHash: definitionProviderBindingHash(configuration), FailureCode: "provider_failed"}
 			request.PermitID = request.ExpectedPermitID()
 			record.DerivationRequests = append(record.DerivationRequests, request)
 		}
@@ -1442,6 +1442,67 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		if finalSkillChanged && first.Preparation.CurrentValidity != "stale" {
 			t.Fatal("real final owner drift/unavailability did not stale current validity")
 		}
+		if emptySelection {
+			// The sole current contract consumes configured LLM defaults. A cold
+			// diagnostic catalog is no longer an independent authorization gate.
+			if first.ValidateFor(created.WorkspaceID, intent) != nil || first.Preparation.OperationState != "completed" || first.Preparation.Record == nil || len(first.Preparation.Record.Completions) != 1 || len(first.Preparation.Record.Attempts) != 1 || len(first.Preparation.Record.Attempts[0].Checks) < 10 {
+				t.Fatalf("current all-of preparation did not complete: %+v", first)
+			}
+			attempt := first.Preparation.Record.Attempts[0]
+			if attempt.Assessment == nil || attempt.Assessment.Outcome != "checks_passed" || attempt.Assessment.PassedRequiredCount != attempt.Assessment.RequiredCount || len(attempt.Assessment.Outstanding) != 0 || first.Compilation == nil || first.Compilation.FailureCode != "" || first.Compilation.BootstrapHash == "" {
+				t.Fatalf("completion lacks all required checks and original compilation: %+v", first)
+			}
+			for _, check := range attempt.Checks {
+				if check.Required && check.State != "passed" {
+					t.Fatal("required check omitted", check)
+				}
+			}
+			original, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, action := range []string{"", "/check", "/recover"} {
+				method := http.MethodPost
+				if action == "" {
+					method = http.MethodGet
+				}
+				again := preparationHTTPWorkflowRequest(t, baseURL, method, preparationPath+action, intent)
+				if again.Preparation.OperationState != "completed" || !reflect.DeepEqual(first.Preparation.Record, again.Preparation.Record) {
+					t.Fatal("read/replay changed original completion")
+				}
+			}
+			reopened := workorchrepo.NewWorkspaceScopedFileRepositorySet(storage)
+			restored, err := reopened.Workspaces.Get(ctx, original.ID)
+			if err != nil || !reflect.DeepEqual(original.StartupPreparation, restored.StartupPreparation) || physicalCalls.Load() != baselineCalls || preparationCacheReads.Load() != 1 {
+				t.Fatal("completion replay/reopen changed original facts or performed another provider call", err)
+			}
+			for _, field := range []string{"hash", "count", "snapshot", "profile", "contract", "erase_seal"} {
+				bad, err := reopened.Workspaces.Get(ctx, original.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				c := bad.StartupPreparation.Attempts[0].DefinitionCompilation
+				switch field {
+				case "hash":
+					c.SourceInventoryHash = "caller"
+				case "count":
+					c.ObligationCount++
+				case "snapshot":
+					c.SnapshotHash = "other"
+				case "profile":
+					c.ProfileContractsHash = "other"
+				case "contract":
+					c.CompilerVersion = "unsupported-contract"
+				case "erase_seal":
+					bad.PreparationSealEvidence = nil
+				}
+				if startuppreparation.ValidatePreparedDefinitionPersistence(bad) == nil || reopened.Workspaces.CompareAndSwap(ctx, bad, bad.Revision) == nil {
+					t.Fatal("forged current compilation accepted", field)
+				}
+			}
+			assertNoRuns()
+			return
+		}
 		if first.ValidateFor(created.WorkspaceID, intent) != nil || first.Preparation.OperationState != "blocked" || len(first.Preparation.Record.Attempts[0].Checks) < 10 {
 			t.Fatalf("public preparation did not persist full blocked checklist: %+v", first)
 		}
@@ -1453,83 +1514,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		if assessment == nil || assessment.Outcome != "blocked" || assessment.ValidateFor(first.Preparation.Record.Attempts[0].Binding.ManifestHash, first.Preparation.Record.Attempts[0].Checks) != nil {
 			t.Fatal("HTTP lost complete original all-of assessment", assessment)
 		}
-		if emptySelection && (len(assessment.Outstanding) != 1 || assessment.Outstanding[0].ID != "provider_cache" || assessment.PassedRequiredCount != assessment.RequiredCount-1) {
-			t.Fatalf("bounded non-provider main path did not converge: %+v", assessment)
-		}
-		if emptySelection {
-			if first.Compilation == nil || first.Compilation.FailureCode != "" || first.Compilation.BootstrapHash == "" {
-				t.Fatalf("original full structure did not compile from cold-cache declaration: %+v", first.Compilation)
-			}
-			t.Logf("STEP04 bounded checklist: required=%d passed=%d outstanding=%s; M3 not issued", assessment.RequiredCount, assessment.PassedRequiredCount, assessment.Outstanding[0].ID)
-			for _, change := range []string{"hash", "count", "snapshot", "profile", "version", "erase_seal"} {
-				bad, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
-				if err != nil {
-					t.Fatal(err)
-				}
-				c := bad.StartupPreparation.Attempts[0].DefinitionCompilation
-				switch change {
-				case "hash":
-					c.SourceInventoryHash = "caller"
-				case "count":
-					c.ObligationCount++
-				case "snapshot":
-					c.SnapshotHash = "other"
-				case "profile":
-					c.ProfileContractsHash = "other"
-				case "version":
-					c.CompilerVersion = "other"
-				case "erase_seal":
-					bad.PreparationSealEvidence = nil
-				}
-				if startuppreparation.ValidatePreparedDefinitionPersistence(bad) == nil || repositories.Workspaces.CompareAndSwap(ctx, bad, bad.Revision) == nil {
-					t.Fatal("forged pure compilation accepted", change)
-				}
-			}
-			original, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
-			if err != nil {
-				t.Fatal(err)
-			}
-			clone := original.StartupPreparation.Clone()
-			clone.Attempts[0].DefinitionCompilation.ObligationCount++
-			if clone.Attempts[0].DefinitionCompilation.ObligationCount == original.StartupPreparation.Attempts[0].DefinitionCompilation.ObligationCount {
-				t.Fatal("compilation clone aliases original")
-			}
-		}
-		if emptySelection {
-			for _, mutate := range []func(*workspace.Workspace){
-				func(w *workspace.Workspace) { w.PreparationSkillRegistryEvidence = nil },
-				func(w *workspace.Workspace) { w.PreparationMCPRegistryEvidence = nil },
-				func(w *workspace.Workspace) { w.StartupPreparation.Attempts[0].EmptySelectionEvaluationVersion = "" },
-				func(w *workspace.Workspace) { w.StartupPreparation.Attempts[0].Assessment.PassedRequiredCount++ },
-				func(w *workspace.Workspace) {
-					a := &w.StartupPreparation.Attempts[0]
-					for i, c := range a.Checks {
-						if c.ID == "provider_cache" {
-							a.Checks = append(a.Checks[:i], a.Checks[i+1:]...)
-							break
-						}
-					}
-					requirements := make([]workspace.PreparationCheckRequirement, len(a.Checks))
-					for i, c := range a.Checks {
-						requirements[i] = workspace.PreparationCheckRequirement{ID: c.ID, Owner: c.Owner, Required: c.Required}
-					}
-					s, err := workspace.AssessPreparationChecks(a.Binding.ManifestHash, requirements, a.Checks)
-					if err != nil {
-						t.Fatal(err)
-					}
-					a.Assessment = &s
-				},
-			} {
-				bad, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
-				if err != nil {
-					t.Fatal(err)
-				}
-				mutate(bad)
-				if workspace.ValidatePreparationEvidencePersistence(bad) == nil {
-					t.Fatal("forged aggregate or incomplete owner material accepted")
-				}
-			}
-		}
+
 		if first.Preparation.Record.Attempts[0].DirectoryEvidenceHash == "" {
 			t.Fatal("HTTP explicit check lost actual File material reference")
 		}
@@ -1581,9 +1566,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 				t.Fatal("HTTP lost full registry observation or granted connection proof", check)
 			}
 			skillReason := "skill_selection_compiled_checks_pending"
-			if emptySelection {
-				skillReason = workspace.PreparationEmptySkillReason
-			}
+
 			if check.ID == "skill_selection" && check.Reason != skillReason {
 				t.Fatal("HTTP lost registry classification")
 			}
@@ -1591,9 +1574,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 				t.Fatal("HTTP lost complete Soul classification")
 			}
 			wantState := "blocked"
-			if emptySelection && (check.ID == "skill_selection" || check.ID == "mcp_selection") {
-				wantState = "passed"
-			}
+
 			if check.ID == "exact_seal" || check.ID == "persistence_integrity" || check.ID == "first_activation_no_run" || check.ID == "directory_boundary" || check.ID == "managed_configuration" || check.ID == "soul_selection" || check.ID == "memory_selection" || strings.HasPrefix(check.ID, "resource/") {
 				wantState = "passed"
 			}
@@ -1717,9 +1698,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		}
 		mcpSelection := stored.PreparationMCPRegistryEvidence[0].Selection
 		mcpArchiveReason := mcpReason
-		if emptySelection {
-			mcpArchiveReason = "mcp_selection_empty_policy_pending"
-		}
+
 		if mcpSelection == nil || mcpSelection.FailureCode != mcpFailure || stored.PreparationMCPRegistryEvidence[0].SelectionEvaluationVersion != workspace.PreparationMCPSelectionEvaluationVersion || stored.PreparationMCPRegistryEvidence[0].BlockedReason() != mcpArchiveReason || mcpSelection.Version != workspace.PreparationMCPSelectionVersion || mcpSelection.SkillRegistryRef != stored.PreparationSkillRegistryEvidence[0].Ref || mcpSelection.SkillRegistryContentHash != stored.PreparationSkillRegistryEvidence[0].ContentHash || !reflect.DeepEqual(mcpSelection.Definition, workspace.PreparationMCPDefinition(stored)) {
 			t.Fatal("HTTP/reopen lost owner-derived exact MCP selection")
 		}
@@ -1804,9 +1783,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			t.Fatal("reopen lost reference compilation")
 		}
 		selectedCount := 2
-		if emptySelection {
-			selectedCount = 0
-		}
+
 		if selection.Status == nil || selection.Status.State != skillStatusState || len(selection.Status.Entries) != selectedCount {
 			t.Fatal("reopen lost original selected status diagnosis")
 		}
@@ -1819,9 +1796,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			t.Fatal("reopen lost independently compiled context budget")
 		}
 		changes := []string{"score", "content", "allowlist", "source_ref", "context_projection", "context_budget", "context_diagnostic", "context_summary_missing", "context_erase", "references_path", "references_erase", "references_state", "status_raw", "status_reason", "status_state", "status_erase", "erase"}
-		if emptySelection {
-			changes = []string{"allowlist", "source_ref", "context_diagnostic", "context_summary_missing", "references_erase", "references_state", "status_state", "status_erase", "erase"}
-		}
+
 		for _, change := range changes {
 			bad, _ := repositories.Workspaces.Get(ctx, stored.ID)
 			e := &bad.PreparationSkillRegistryEvidence[0]
@@ -1985,7 +1960,7 @@ func authoringHTTPRequest(t *testing.T, baseURL, method, path string, body any, 
 	if response.StatusCode != status {
 		var detail json.RawMessage
 		_ = json.NewDecoder(response.Body).Decode(&detail)
-		t.Fatalf("%s %s: status=%d want=%d body=%s", method, path, response.StatusCode, status, detail)
+		t.Fatalf("%s %s: status=%d want=%d body=%s request=%s", method, path, response.StatusCode, status, detail, payload)
 	}
 	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusAccepted {
 		return management.DefinitionAuthoringView{}

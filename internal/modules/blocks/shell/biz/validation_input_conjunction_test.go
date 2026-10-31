@@ -16,7 +16,7 @@ import (
 
 func conjunctiveSourceRequirement(t *testing.T) (runtimecontract.RuntimeValidationRecipe, runtimecontract.RuntimeValidationProofRequirement, []runtimecontract.RuntimeValidationCheckAttestationBinding) {
 	t.Helper()
-	recipe := runtimecontract.RuntimeValidationRecipe{ID: "source-package", Command: "go", Args: []string{"test", "-v", "./..."}, AdapterRef: modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint, InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV2}
+	recipe := runtimecontract.RuntimeValidationRecipe{ID: "source-package", Command: "go", Args: []string{"test", "-v", "./..."}, AdapterRef: modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint, InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol}
 	requirement := shellValidationProofRequirementForTest(t, recipe.ID, "shared-source")
 	for _, id := range []string{"A", "B"} {
 		check := runtimecontract.RuntimeSourceObligationCheck{InventoryHash: "inventory", ObligationID: id, RequirementID: "requirement", VerificationID: "verify-" + id, Criterion: "独立判据 " + id, Declaration: "验证 " + id}
@@ -64,7 +64,7 @@ func TestConjunctiveInputPreparationReviewAndIdentity(t *testing.T) {
 		t.Fatal("preparation lost the complete conjunctive identity")
 	}
 	for _, check := range checks {
-		if shellVersionedNativeCheckTarget(check.NativeCheckRef) != target {
+		if shellReviewedNativeCheckTarget(check.NativeCheckRef) != target {
 			t.Fatal("member escaped its requirement input package")
 		}
 	}
@@ -78,7 +78,7 @@ func TestConjunctiveInputPreparationReviewAndIdentity(t *testing.T) {
 		t.Fatalf("complete source input unavailable: %+v", surfaces)
 	}
 	binding := surfaces[0].ProofRequirementBindings[0]
-	if binding.InputReview == nil || len(binding.InputReview.Files) != 2 || binding.InputReview.ProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocolV2 || binding.InputReview.ScopeContractRef != shellConjunctiveReviewScopeContractRef || binding.InputReview.ValidateAgainstBinding(binding) != nil {
+	if binding.InputReview == nil || len(binding.InputReview.Files) != 2 || binding.InputReview.ProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocol || binding.InputReview.ScopeContractRef != shellConjunctiveReviewScopeContractRef || binding.InputReview.ValidateAgainstBinding(binding) != nil {
 		t.Fatal("complete source input review lost member/scope identity")
 	}
 	found := false
@@ -113,7 +113,7 @@ func TestConjunctiveInputPreparationReviewAndIdentity(t *testing.T) {
 
 func TestConjunctiveInputRejectsReviewDowngradeAndCapacityOverflow(t *testing.T) {
 	recipe, requirement, checks := conjunctiveSourceRequirement(t)
-	for _, protocol := range []string{"", runtimecontract.RuntimeValidationInputReviewProtocol} {
+	for _, protocol := range []string{"", "unsupported-review-contract"} {
 		downgraded := recipe
 		downgraded.InputReviewProtocolRef = protocol
 		if _, supported := shellValidationCheckAttestations(downgraded, requirement); supported {
@@ -144,7 +144,7 @@ func TestConjunctiveInputRejectsReviewDowngradeAndCapacityOverflow(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if subject, code := shellVersionedInputReview(root, refs, binding); subject != nil || code != "validation_input_review_capacity_exceeded" {
+			if subject, code := shellInputReview(root, refs, binding); subject != nil || code != "validation_input_review_capacity_exceeded" {
 				t.Fatalf("oversized subject was truncated or admitted: %+v %s", subject, code)
 			}
 		})
@@ -179,8 +179,8 @@ func TestConjunctiveInputExecutesEverySourceAndRejectsUnreviewedMembers(t *testi
 			}
 			files := map[string]string{
 				"go.mod": "module fixture\ngo 1.26\n", target: input,
-				"delivery/value.go":                             "package delivery\nfunc Compute(v int) int{return v+7}\n",
-				"workorch_validation/v4/neighbor/input_test.go": "package old\nfunc broken(\n",
+				"delivery/value.go": "package delivery\nfunc Compute(v int) int{return v+7}\n",
+				"workorch_validation/isolated/neighbor/input_test.go": "package old\nfunc broken(\n",
 			}
 			if scenario == "supplement" {
 				files[shellSupplementTargetRef(checks[0].NativeCheckRef)] = fmt.Sprintf("package checks\nimport \"testing\"\nfunc %s(t *testing.T){if 2+2!=4 {t.Fatal(\"supplement\")}}\n", shellSupplementCheckRef(checks[0].NativeCheckRef))

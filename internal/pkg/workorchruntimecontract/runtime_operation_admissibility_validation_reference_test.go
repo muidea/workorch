@@ -40,7 +40,7 @@ func referenceRuntimeOperationAdmissibilityValidate(a RuntimeOperationAdmissibil
 			if recipe.InputReviewProtocolRef != "" && (binding.InputReview == nil || binding.InputReview.ProtocolRef != recipe.InputReviewProtocolRef) {
 				return fmt.Errorf("runtime owner catalog downgraded the sealed input review protocol")
 			}
-			if binding.InputReview != nil && binding.InputReview.ProtocolRef == RuntimeValidationInputReviewProtocolV2 && recipe.InputReviewProtocolRef != RuntimeValidationInputReviewProtocolV2 {
+			if binding.InputReview != nil && binding.InputReview.ProtocolRef == RuntimeValidationInputReviewProtocol && recipe.InputReviewProtocolRef != RuntimeValidationInputReviewProtocol {
 				return fmt.Errorf("runtime owner catalog introduced an undeclared v2 input review protocol")
 			}
 			if binding.InputReview == nil {

@@ -11,10 +11,10 @@ import (
 )
 
 func TestRuntimeSemanticWorkContentStaysInVolatileTailAndCannotBeDropped(t *testing.T) {
-	for _, renderer := range []string{contract.RuntimeSemanticRenderContractV3, contract.RuntimeSemanticRenderContractV4} {
+	for _, renderer := range []string{contract.RuntimeSemanticContextEncoding} {
 		t.Run(renderer, func(t *testing.T) {
 			request := runtimeSemanticWorkProviderRequestForTest(t, true)
-			request.ExpectedDocument = &contract.RuntimeExpectedDocumentContract{SemanticRenderContractRef: renderer}
+			request.ExpectedDocument = &contract.RuntimeExpectedDocumentContract{SemanticContextEncoding: renderer}
 			baseline, err := prepareRuntimeSemanticPlanRequest(request)
 			if err != nil {
 				t.Fatal(err)
@@ -46,7 +46,7 @@ func TestRuntimeSemanticWorkContentStaysInVolatileTailAndCannotBeDropped(t *test
 			if prompt.definition != old.definition || prompt.capability != old.capability || prepared.stablePrefix != baseline.stablePrefix {
 				t.Fatal("volatile content changed stable C1/C2/prefix")
 			}
-			if !strings.Contains(prompt.tail, `exact current content\n`) || strings.Contains(prompt.authority, body) {
+			if !strings.Contains(prompt.authority, `exact current content\n`) || strings.Contains(prompt.tail, `exact current content\n`) {
 				t.Fatal("exact file body not solely in C4")
 			}
 			if !strings.Contains(runtimeSemanticOutputInstruction(prepared.context, prepared.manifest), "implementationIntent") {
@@ -60,14 +60,14 @@ func TestRuntimeSemanticWorkContentStaysInVolatileTailAndCannotBeDropped(t *test
 				t.Fatal(err)
 			}
 			for i := range provider.PromptContext.Sections {
-				if strings.HasPrefix(provider.PromptContext.Sections[i].ID, "C4.") {
-					var tail runtimeSemanticTailProjection
-					json.Unmarshal([]byte(provider.PromptContext.Sections[i].Content), &tail)
-					if !reflect.DeepEqual(tail.WorkContext, prepared.context.WorkContext) {
+				if strings.HasPrefix(provider.PromptContext.Sections[i].ID, "C3.") {
+					var authority runtimeSemanticAuthorityProjection
+					json.Unmarshal([]byte(provider.PromptContext.Sections[i].Content), &authority)
+					if !reflect.DeepEqual(authority.WorkContext.Content, prepared.context.WorkContext.Content) {
 						t.Fatal("projection changed original content")
 					}
-					tail.WorkContext = nil
-					raw, _ := json.Marshal(tail)
+					authority.WorkContext.Content = nil
+					raw, _ := json.Marshal(authority)
 					provider.PromptContext.Sections[i].Content = string(raw)
 				}
 			}

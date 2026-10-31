@@ -195,18 +195,6 @@ func TestPreparationNegotiatesBothSupportedVersionsAndRequiresCleanClose(t *test
 					t.Fatal("close failure lost")
 				}
 				assertNegotiationRequests(t, log, "initialize", "notifications/initialized", "tools/list", "resources/list", "prompts/list", "stdin_closed")
-				// Old immutable attempts keep their original evaluation across reload.
-				old := r.Clone()
-				old.Command.Version = mcpevents.PreparationObservationVersionV1
-				want := version == "2025-11-25" && !badClose
-				if old.Satisfied() != want {
-					t.Fatal("v1 historical judgment changed")
-				}
-				data, _ := json.Marshal(old)
-				var reloaded mcpevents.ObservePreparationResult
-				if json.Unmarshal(data, &reloaded) != nil || reloaded.Satisfied() != want {
-					t.Fatal("historical reload changed judgment")
-				}
 				// The consumer rechecks the requested version, not just returned text.
 				tampered := r.Clone()
 				tampered.Observations[0].Frames[0].Request = []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"unknown"}}`)

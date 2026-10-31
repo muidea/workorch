@@ -15,7 +15,7 @@ func RequiredRuntimeEvidencePurposes(profiles []RuntimeProfileContract) ([]Runti
 			if d.RequiredEvidencePurposeContractRef == "" {
 				continue
 			}
-			if !d.Required || d.RequiredEvidencePurposeContractRef != RuntimeProfileDeliverableEvidencePurposeV2 {
+			if !d.Required || d.RequiredEvidencePurposeContractRef != RuntimeProfileDeliverableEvidencePurpose {
 				return nil, fmt.Errorf("required_evidence_purpose_invalid: unsupported required deliverable purpose")
 			}
 			m := RuntimeEvidencePurposeMapping{ContractRef: d.RequiredEvidencePurposeContractRef,

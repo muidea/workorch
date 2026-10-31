@@ -29,9 +29,9 @@ func RuntimeImplementationRequirementRefs(m RuntimeSemanticPlanManifest, w Runti
 
 func validateRuntimeImplementationProgress(d RuntimeSemanticPlanDocument, m RuntimeSemanticPlanManifest, w *RuntimeSemanticImplementationWork, declaration string) error {
 	i := d.ImplementationIntent
-	if w == nil || w.Scope.Request.Policy.ProgressProtocolRef == "" {
+	if w == nil {
 		if i != nil && (len(i.RequirementReviews) != 0 || len(i.SelectedRequirementRefs) != 0) {
-			return fmt.Errorf("implementation progress requires the sealed Profile protocol")
+			return fmt.Errorf("implementation progress requires an implementation work scope")
 		}
 		return nil
 	}

@@ -2,14 +2,13 @@ package workorchruntimecontract
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func TestRuntimeExpectedDocumentContractValidatesOperationsAndSemanticBatch(t *testing.T) {
-	operations := RuntimeExpectedDocumentContract{
+	operations := RuntimeExpectedDocumentContract{OperationsContextEncoding: RuntimeOperationsContextEncoding,
 		SchemaVersion: RuntimeExpectedDocumentSchemaCurrent, DocumentKind: RuntimeProviderDocumentOperations,
 		ManifestHash: "manifest-1", WireContractHash: "wire-1", LogicalRequestID: "request-1", StablePrefixHash: "prefix-1",
 		MaxOutputTokens: 8192, MaxRecoveryAttempts: 3,
@@ -33,7 +32,7 @@ func TestRuntimeExpectedDocumentContractValidatesOperationsAndSemanticBatch(t *t
 	if err := missingWire.Validate(); err == nil {
 		t.Fatal("operations contract accepted a missing wire-contract identity")
 	}
-	batch := RuntimeExpectedDocumentContract{
+	batch := RuntimeExpectedDocumentContract{SemanticContextEncoding: RuntimeSemanticContextEncoding,
 		SchemaVersion: RuntimeExpectedDocumentSchemaCurrent, DocumentKind: RuntimeProviderDocumentSemanticPlan, PlanStep: RuntimeSemanticPlanStepProofBatch,
 		ManifestHash: "manifest-2", DefinitionSeedHash: "seed-1", LogicalRequestID: "request-2", StablePrefixHash: "prefix-1",
 		BatchID: "batch-2", BatchSequence: 2, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2", "cwi-3"}, CoverageOrderHash: "order-1",
@@ -70,7 +69,7 @@ func TestRuntimeExpectedDocumentContractValidatesOperationsAndSemanticBatch(t *t
 }
 
 func TestRuntimeExpectedDocumentHashIsOrderSensitiveAndCloneDetached(t *testing.T) {
-	contract := RuntimeExpectedDocumentContract{
+	contract := RuntimeExpectedDocumentContract{SemanticContextEncoding: RuntimeSemanticContextEncoding,
 		SchemaVersion: RuntimeExpectedDocumentSchemaCurrent, DocumentKind: RuntimeProviderDocumentSemanticPlan, PlanStep: RuntimeSemanticPlanStepProofBatch,
 		ManifestHash: "manifest-1", DefinitionSeedHash: "seed-1", LogicalRequestID: "request-1", StablePrefixHash: "prefix-1",
 		BatchID: "batch-1", BatchSequence: 1, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1", "cwi-2"}, CoverageOrderHash: "order-1",
@@ -127,43 +126,32 @@ func TestRuntimeProviderDocumentFramingIsOwnerNeutral(t *testing.T) {
 	}
 }
 
-func TestExpectedOperationsRendererIsSealedAndLegacySerializationUnchanged(t *testing.T) {
-	legacy := RuntimeExpectedDocumentContract{SchemaVersion: RuntimeExpectedDocumentSchemaCurrent, DocumentKind: RuntimeProviderDocumentOperations, ManifestHash: "manifest", WireContractHash: "wire", LogicalRequestID: "logical", StablePrefixHash: "prefix", MaxOutputTokens: 4096, MaxRecoveryAttempts: 2}
-	legacy.Hash = StableRuntimeExpectedDocumentHash(legacy)
-	raw, _ := json.Marshal(legacy)
-	if strings.Contains(string(raw), "OperationsRenderContractRef") {
-		t.Fatal("legacy bytes gained an empty renderer field")
-	}
-	modern := legacy.Clone()
-	modern.OperationsRenderContractRef = RuntimeOperationsRenderContractV2
-	if err := modern.Validate(); err == nil {
-		t.Fatal("renderer changed without resealing identity")
-	}
-	modern.Hash = StableRuntimeExpectedDocumentHash(modern)
-	if err := modern.Validate(); err != nil {
+func TestExpectedOperationsEncodingIsSealedAndSurvivesReload(t *testing.T) {
+	current := RuntimeExpectedDocumentContract{OperationsContextEncoding: RuntimeOperationsContextEncoding, SchemaVersion: RuntimeExpectedDocumentSchemaCurrent, DocumentKind: RuntimeProviderDocumentOperations, ManifestHash: "manifest", WireContractHash: "wire", LogicalRequestID: "logical", StablePrefixHash: "prefix", MaxOutputTokens: 4096, MaxRecoveryAttempts: 2}
+	current.Hash = StableRuntimeExpectedDocumentHash(current)
+	if err := current.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	var reloaded RuntimeExpectedDocumentContract
-	raw, _ = json.Marshal(modern)
-	if err := json.Unmarshal(raw, &reloaded); err != nil {
+	raw, _ := json.Marshal(current)
+	var restored RuntimeExpectedDocumentContract
+	if err := json.Unmarshal(raw, &restored); err != nil {
 		t.Fatal(err)
 	}
-	if err := reloaded.Validate(); err != nil {
-		t.Fatal(err)
+	if restored.Validate() != nil || restored.Hash != current.Hash || restored.OperationsContextEncoding != RuntimeOperationsContextEncoding {
+		t.Fatal("reload lost exact current encoding")
 	}
-	if reloaded.OperationsRenderContractRef != RuntimeOperationsRenderContractV2 || reloaded.Hash == legacy.Hash {
-		t.Fatal("restart lost renderer identity")
+	for _, encoding := range []string{"", "operations-render/v1", "unknown"} {
+		bad := current.Clone()
+		bad.OperationsContextEncoding = encoding
+		bad.Hash = StableRuntimeExpectedDocumentHash(bad)
+		if bad.Validate() == nil {
+			t.Fatal("unsupported encoding accepted", encoding)
+		}
 	}
-	unknown := modern
-	unknown.OperationsRenderContractRef = "operations-render/unknown"
-	unknown.Hash = StableRuntimeExpectedDocumentHash(unknown)
-	if err := unknown.Validate(); err == nil {
-		t.Fatal("unknown renderer accepted")
-	}
-	semantic := modern
+	semantic := current.Clone()
 	semantic.DocumentKind = RuntimeProviderDocumentSemanticPlan
 	semantic.Hash = StableRuntimeExpectedDocumentHash(semantic)
-	if err := semantic.Validate(); err == nil {
-		t.Fatal("operations renderer accepted on semantic request")
+	if semantic.Validate() == nil {
+		t.Fatal("operations encoding accepted on semantic request")
 	}
 }

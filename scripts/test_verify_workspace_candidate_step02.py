@@ -64,7 +64,7 @@ class Step02VerifierTest(unittest.TestCase):
 
     def test_exact_prompt_payload_excludes_contract_examples(self):
         payload = {"candidateAcceptance": [{"CandidateItemRef": "source", "Text": "原文"}], "goal": {"Text": "原目标"}}
-        self.assertEqual(step02.prompt_payload('contract {"shape":true}\n' + json.dumps(payload)), payload)
+        self.assertEqual(step02.prompt_payload('### C0.specification-contract\ncontract {"shape":true}\n### C3.specification-request\n' + json.dumps(payload)), payload)
 
     def test_ambiguous_or_truncated_prompt_fails_closed(self):
         for text in ('{}', '{"outputShape":', '{"outputShape":{}}\n{"candidateAcceptance":[]}'):

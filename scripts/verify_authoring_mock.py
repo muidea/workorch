@@ -209,17 +209,13 @@ def authoring_response(prompt):
         if section is None:
             return None
         if section == 'C3.derivation-input':
-            shape = request['outputShape']
-            if request.get('wireContractRef') == 'workorch.authoring.owner-bound/v2':
-                return {'AdditionalItems': []}
-            return {'AuthoringInputHash': _text(shape['AuthoringInputHash']),
-                    'TemplateSnapshotHash': _text(shape['TemplateSnapshotHash']),
-                    'AdditionalItems': []}
+            if request['outputShape'] != {'AdditionalItems': []}:
+                raise AuthoringMockError('派生请求必须使用当前语义输出合同')
+            return {'AdditionalItems': []}
         if 'kind' in request:
             review = _review(request)
-            if request.get('wireContractRef') == 'workorch.authoring.owner-bound/v2':
-                review['review'].pop('Kind')
-                review['review'].pop('SpecificationHash')
+            review['review'].pop('Kind')
+            review['review'].pop('SpecificationHash')
             return review
         items = _candidates(request)
         _text(request['goal']['CandidateItemRef'])
@@ -247,9 +243,8 @@ def authoring_response(prompt):
                 verification.update(ProfileID=binding[0], EvidenceRequirementID=binding[1], Scope=binding[2])
             mapping['Obligations'].append({'CandidateItemRef': ref, 'RequirementRef': requirement,
                                           'Verification': verification})
-        if request.get('wireContractRef') == 'workorch.authoring.owner-bound/v2':
-            for field in ('Protocol', 'InputHash', 'TemplateSnapshotHash', 'ResourceSnapshotHash'):
-                del mapping[field]
+        for field in ('Protocol', 'InputHash', 'TemplateSnapshotHash', 'ResourceSnapshotHash'):
+            del mapping[field]
         return {'mapping': mapping}
     except (KeyError, TypeError, json.JSONDecodeError) as error:
         raise AuthoringMockError('创作 mock 输入合同无效') from error

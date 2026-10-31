@@ -1140,7 +1140,7 @@ func validateAndNormalizeRuntimeOperationAdmissibility(a RuntimeOperationAdmissi
 			if recipe.InputReviewProtocolRef != "" && (binding.InputReview == nil || binding.InputReview.ProtocolRef != recipe.InputReviewProtocolRef) {
 				return RuntimeOperationAdmissibility{}, fmt.Errorf("runtime owner catalog downgraded the sealed input review protocol")
 			}
-			if binding.InputReview != nil && binding.InputReview.ProtocolRef != RuntimeValidationInputReviewProtocol && recipe.InputReviewProtocolRef != binding.InputReview.ProtocolRef {
+			if binding.InputReview != nil && recipe.InputReviewProtocolRef != binding.InputReview.ProtocolRef {
 				return RuntimeOperationAdmissibility{}, fmt.Errorf("runtime owner catalog introduced an undeclared versioned input review protocol")
 			}
 			if binding.InputReview == nil {

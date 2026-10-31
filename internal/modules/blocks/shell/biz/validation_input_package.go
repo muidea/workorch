@@ -14,17 +14,17 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-const shellGoIsolatedEntrypointObservationProtocolRef = "shell/go-test-json/workspace-behavior/v5"
+const shellGoIsolatedEntrypointObservationProtocolRef = "shell/go-test-json/isolated-package-behavior"
 
 const shellIsolatedInputContentContractRef = "shell/go-test-input/isolated-entrypoint/v1"
 const shellIsolatedReviewScopeContractRef = "shell/go-test-input/isolated-package-review/v1"
 const shellIsolatedReviewScopeRequirements = "The supplied files are the complete current CWI input package, including its helpers/fixtures and present root module/workspace definitions. Shell executes only this package's exact original and supplemental native tests, not the project-wide test suite or neighboring validation packages. Root GOWORK is disabled. Go-built children inherit owner instrumentation; only actual execution of non-test, non-harness workspace implementation yields behavior grounding, never test success alone. An original full-suite/build criterion requires its own explicit execution and assertions; this package-level run cannot satisfy it by implication or omit existing failures. Inputs that depend on unreviewed external harness code or fixtures cannot be judged consistent from this subject; identify the missing context. Package scope is not an OS filesystem/process sandbox. Every original Goal/DoD criterion remains mandatory; the scope grants neither criterion replacement nor acceptance credit."
 const shellIsolatedInputContentRequirements = "Create exactly targetRef as a Go test in its own package directory, with the exact nativeCheckRef func(t *testing.T). Named same-package helpers, types, constants and data-only variables are allowed; no init, TestMain, methods, other Test functions, global initializer calls or closures, nested modules, cgo or imports of other validation packages. Keep all check helpers and fixtures inside this package directory; its complete contents and root module definitions must fit the owner review envelope (16 files, 64 KiB). Tests run from this directory, three levels below the workspace root. Exercise the actual workspace delivery in-process or via a freshly Go-built executable inheriting owner GOFLAGS and GOCOVERDIR; do not use prebuilt binaries, dependency-only or test-local substitutes, source markers, instrumentation overrides or input mutation. Assert the original criterion and every required case through the real testing.T; missing dependencies, skips and unobserved delivery are unverified, never passed. All original Goal/DoD criteria remain mandatory; do not weaken or edit historical inputs. The owner selects only this check package, not a full-project test suite: any original full-suite/build requirement still needs its own actual execution and assertions. Inputs depending on unreviewed external harness code or fixtures cannot be declared consistent. Creation, structural readiness and consistency review grant no execution or acceptance credit."
 
-var shellIsolatedNativeIdentity = regexp.MustCompile(`^TestWorkOrchCWI_[A-Z0-9_]+_InputV4$`)
+var shellIsolatedNativeIdentity = regexp.MustCompile(`^TestWorkOrchCWI_[A-Z0-9_]+_IsolatedInput$`)
 
 func shellValidationInputReviewRequired(adapter string) bool {
-	return adapter == modulecommon.ValidationRecipeAdapterVersionedEntrypoint || adapter == modulecommon.ValidationRecipeAdapterIsolatedEntrypoint || adapter == modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint || shellProjectAdapter(adapter)
+	return adapter == modulecommon.ValidationRecipeAdapterReviewedEntrypoint || adapter == modulecommon.ValidationRecipeAdapterIsolatedEntrypoint || adapter == modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint || shellProjectAdapter(adapter)
 }
 
 func shellEntrypointObservationProtocol(ref string) bool {
@@ -36,7 +36,7 @@ func shellIsolatedNativeCheck(check runtimecontract.RuntimeValidationCheckAttest
 }
 
 func shellIsolatedNativePackage(native string) string {
-	return "workorch_validation/v4/" + strings.ToLower(strings.TrimSuffix(native, "_Behavior"))
+	return "workorch_validation/isolated/" + strings.ToLower(strings.TrimSuffix(native, "_Behavior"))
 }
 
 // v5 owns one exact Go package per immutable CWI mapping. Older protocols keep

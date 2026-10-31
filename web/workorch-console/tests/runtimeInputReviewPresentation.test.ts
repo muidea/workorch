@@ -8,7 +8,7 @@ test('input review displays every original obligation and exact source without c
     schemaVersion: 'workorch.runtime_original_diagnostic', ownerModuleId: 'kernel/orchestrator', originalClass: 'contract',
     originalCode: 'validation_input_review_coverage_incomplete', originalMessage: 'input review blocked validation', signature: 'review-1',
     validationInputReviews: [{
-      reviewRef: 'review-1', protocolRef: 'validation/input-consistency/v2', coverageWorkItemId: 'cwi-1',
+      reviewRef: 'review-1', protocolRef: 'validation/input-consistency', coverageWorkItemId: 'cwi-1',
       requirementHash: 'original-requirement', reportHash: 'original-report', redacted: true,
       report: { subjectHash: 'exact-input-version', checks: [{
         requiredCheckRef: 'original-check', conclusion: 'conflict', reason: 'The documentation assertion is missing.',

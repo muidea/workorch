@@ -652,7 +652,7 @@ func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifes
 				normalRequired = append(normalRequired, "implementationPurpose")
 				if work.Scope.Content != nil {
 					properties["implementationIntent"] = map[string]any{"type": "object", "additionalProperties": false, "required": []string{"declarationRef", "contentHash", "remainingWork", "reason"}, "properties": map[string]any{"declarationRef": map[string]any{"const": obligation.DeclarationRef}, "contentHash": map[string]any{"const": work.Scope.Content.Hash()}, "remainingWork": map[string]any{"type": "string", "minLength": 1, "maxLength": 2048}, "reason": map[string]any{"type": "string", "minLength": 1, "maxLength": 2048}}}
-					if work.Scope.Request.Policy.ProgressProtocolRef == RuntimeImplementationWorkProgressV1 {
+					{
 						intent := properties["implementationIntent"].(map[string]any)
 						refs := RuntimeImplementationRequirementRefs(manifest, *work, obligation.DeclarationRef)
 						addRuntimeImplementationProgressSchema(schema, intent, refs)

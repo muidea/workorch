@@ -48,12 +48,10 @@ func TestRuntimeSemanticHistorySegmentsPreserveBodiesRestartAndBudget(t *testing
 			if (ledger.HistoryArchive != nil) != (count > 16) {
 				t.Fatal("unexpected archive")
 			}
-			if count > 16 && ledger.SchemaVersion != RuntimeSemanticPlanningLedgerSchemaSegmented {
+			if count > 16 && ledger.SchemaVersion != RuntimeSemanticPlanningLedgerSchemaCurrent {
 				t.Fatal("old readers could silently ignore archive")
 			}
-			if count > 16 && referenceSemanticLedgerBeforeSeedSession(ledger, ledger.Normalized(), newRuntimeSemanticValidationSession()) == nil {
-				t.Fatal("legacy validator accepted segmented schema")
-			}
+
 			data, err := json.Marshal(ledger)
 			if err != nil {
 				t.Fatal(err)
@@ -111,10 +109,10 @@ func TestRuntimeSemanticHistorySegmentsPreserveBodiesRestartAndBudget(t *testing
 func TestRuntimeSemanticHistorySegmentsRejectCorruptionAcrossBoundary(t *testing.T) {
 	base := semanticSegmentedHistoryFixture(t, 17)
 	for name, mutate := range map[string]func(*RuntimeSemanticPlanningLedger){
-		"generation count":           func(l *RuntimeSemanticPlanningLedger) { l.HistoryArchive.GenerationCount-- },
-		"missing archive":            func(l *RuntimeSemanticPlanningLedger) { l.HistoryArchive = nil },
-		"legacy schema with archive": func(l *RuntimeSemanticPlanningLedger) { l.SchemaVersion = RuntimeSemanticPlanningLedgerSchemaCurrent },
-		"protocol":                   func(l *RuntimeSemanticPlanningLedger) { l.HistoryArchive.ProtocolRef = "unknown" },
+		"generation count": func(l *RuntimeSemanticPlanningLedger) { l.HistoryArchive.GenerationCount-- },
+
+		"unknown shape": func(l *RuntimeSemanticPlanningLedger) { l.SchemaVersion = "unknown" },
+		"protocol":      func(l *RuntimeSemanticPlanningLedger) { l.HistoryArchive.ProtocolRef = "unknown" },
 		"short segment": func(l *RuntimeSemanticPlanningLedger) {
 			l.HistoryArchive.Segments[0] = l.HistoryArchive.Segments[0][:15]
 		},

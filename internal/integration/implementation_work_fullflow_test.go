@@ -326,9 +326,9 @@ func implementationWorkFullflowDeclareProject(t *testing.T, client *http.Client,
 	requirements = append(requirements,
 		declaration("dod-001", "dodItem", rounds("project-two-rounds", ""), repair("project-repair", ""),
 			map[string]any{"ref": "project-delivery", "kind": "delivery_acknowledgements", "consumptionPoint": "post_terminal_delivery"},
-			map[string]any{"ref": "project-snapshot", "kind": "terminal_owner_snapshot", "consumptionPoint": "post_terminal_delivery", "terminalContractRef": runtimecontract.RuntimeTerminalProofContractV2, "receiptSourceScope": "deliverable", "receiptSourceId": "version_control_snapshot", "validationSourceScope": "deliverable", "validationSourceId": "validation_report", "ownerModuleId": runtimecontract.RuntimeModuleGit, "operationKind": "git/write", "operationVariantId": "commit", "requiredEffectScope": "workspace_durable"}),
-		declaration("dod-002", "dodItem", repair("project-source-repair", runtimecontract.RuntimeCrossSourceExecutionProofV1)),
-		declaration("*", "goal", rounds("project-goal-rounds", runtimecontract.RuntimeGoalSourceExecutionProofV2), repair("project-goal-repair", runtimecontract.RuntimeGoalSourceExecutionProofV2)),
+			map[string]any{"ref": "project-snapshot", "kind": "terminal_owner_snapshot", "consumptionPoint": "post_terminal_delivery", "terminalContractRef": runtimecontract.RuntimeTerminalSnapshotProofContract, "receiptSourceScope": "deliverable", "receiptSourceId": "version_control_snapshot", "validationSourceScope": "deliverable", "validationSourceId": "validation_report", "ownerModuleId": runtimecontract.RuntimeModuleGit, "operationKind": "git/write", "operationVariantId": "commit", "requiredEffectScope": "workspace_durable"}),
+		declaration("dod-002", "dodItem", repair("project-source-repair", runtimecontract.RuntimeDoDSourceExecutionProof)),
+		declaration("*", "goal", rounds("project-goal-rounds", runtimecontract.RuntimeGoalSourceExecutionProof), repair("project-goal-repair", runtimecontract.RuntimeGoalSourceExecutionProof)),
 	)
 	profile["evidenceRequirements"] = requirements
 	if err := runtimeprofiledecode.ValidateInputShape(hints); err != nil {
@@ -418,9 +418,9 @@ func implementationWorkFullflowAuthoringMapping(record *workspace.DefinitionAuth
 	for _, profile := range b.ProfileContracts {
 		for _, requirement := range profile.EvidenceRequirements {
 			for _, rule := range requirement.LineageAssertions {
-				if rule.ExecutionSourceContractRef == runtimecontract.RuntimeGoalSourceExecutionProofV2 && requirement.Scope == "goal" {
+				if rule.ExecutionSourceContractRef == runtimecontract.RuntimeGoalSourceExecutionProof && requirement.Scope == "goal" {
 					m.ExecutionProofMappings = append(m.ExecutionProofMappings, workspace.GoalExecutionProofMapping{ContractRef: rule.ExecutionSourceContractRef, ConsumerItemRef: workspace.DefinitionAuthoringGoalItemRef, RuleRef: rule.Ref, SourceItemRef: consumer, ConsumerGoalText: d.Input.GoalText})
-				} else if rule.ExecutionSourceContractRef == runtimecontract.RuntimeCrossSourceExecutionProofV1 && requirement.Scope == "dodItem" && requirement.ID == "dod-002" {
+				} else if rule.ExecutionSourceContractRef == runtimecontract.RuntimeDoDSourceExecutionProof && requirement.Scope == "dodItem" && requirement.ID == "dod-002" {
 					m.ExecutionProofMappings = append(m.ExecutionProofMappings, workspace.GoalExecutionProofMapping{ContractRef: rule.ExecutionSourceContractRef, ConsumerItemRef: "derived-dod:user:000002", RuleRef: rule.Ref, SourceItemRef: consumer})
 				} else if rule.ExecutionSourceContractRef != "" {
 					return m, fmt.Errorf("public fixture has no declared exact source mapping for %s/%s/%s", requirement.Scope, requirement.ID, rule.Ref)
@@ -847,7 +847,7 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 						}
 					}
 					if input.DiagnosticSourceContractRef != "" {
-						if input.DiagnosticSourceContractRef != runtimecontract.RuntimeValidationDiagnosticSourceReviewV1 || input.Protocol != runtimecontract.RuntimeValidationInputReviewProtocolV3 || len(input.DiagnosticSources) == 0 {
+						if input.DiagnosticSourceContractRef != runtimecontract.RuntimeValidationDiagnosticSourceReviewV1 || input.Protocol != runtimecontract.RuntimeValidationInputReviewProtocol || len(input.DiagnosticSources) == 0 {
 							return nil, kind, fmt.Errorf("unsupported project diagnostic source review")
 						}
 						for _, source := range input.DiagnosticSources {
@@ -1236,8 +1236,8 @@ func implementationWorkFullflowReviewCheck(validation *implementationWorkFullflo
 	if len(assertionSets) == 1 {
 		assertions = assertionSets[0]
 	}
-	if protocol != runtimecontract.RuntimeValidationInputReviewProtocolV3 && len(assertions) != 0 {
-		return runtimecontract.RuntimeValidationInputCheckReview{}, fmt.Errorf("legacy review cannot carry composition consumers")
+	if protocol != runtimecontract.RuntimeValidationInputReviewProtocol {
+		return runtimecontract.RuntimeValidationInputCheckReview{}, fmt.Errorf("unknown review contract")
 	}
 	criterion, declaration := sharedCriterion, ""
 	seen := map[string]bool{}
@@ -1254,7 +1254,7 @@ func implementationWorkFullflowReviewCheck(validation *implementationWorkFullflo
 		return runtimecontract.RuntimeValidationInputCheckReview{}, fmt.Errorf("source check 缺原判据，不能回退共同 CWI: %s", check)
 	}
 	reviewInput := func(text string) (string, string, string) {
-		if protocol == runtimecontract.RuntimeValidationInputReviewProtocolV3 {
+		if protocol == runtimecontract.RuntimeValidationInputReviewProtocol {
 			return implementationWorkFullflowReviewComposition(text, files, scope, assertions)
 		}
 		return implementationWorkFullflowReviewInput(text, files, scope)
@@ -1267,9 +1267,7 @@ func implementationWorkFullflowReviewCheck(validation *implementationWorkFullflo
 		}
 	}
 	item := runtimecontract.RuntimeValidationInputCheckReview{RequiredCheckRef: check, Conclusion: conclusion, Reason: reason, InputTargetRefs: refs}
-	if protocol == runtimecontract.RuntimeValidationInputReviewProtocolV2 {
-		item.Obligations = []runtimecontract.RuntimeValidationInputObligationReview{{CriterionText: criterion, Finding: finding, Reason: reason, InputTargetRefs: refs}}
-	} else if protocol == runtimecontract.RuntimeValidationInputReviewProtocolV3 {
+	if protocol == runtimecontract.RuntimeValidationInputReviewProtocol {
 		consumers := []string{runtimecontract.RuntimeValidationInputConsumer}
 		for _, assertion := range assertions {
 			consumers = append(consumers, assertion.Rule.Ref)

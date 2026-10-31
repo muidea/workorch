@@ -119,9 +119,6 @@ assert_json "$TMP_DIR/healthz.json" "healthz status" 'data.get("status") == "ok"
 curl -fsS "$BASE_URL/readyz" >"$TMP_DIR/readyz.json"
 assert_json "$TMP_DIR/readyz.json" "readyz status" 'data.get("status") == "ready"'
 
-curl -fsS "$BASE_URL/api/v1/workorch/builtin-defaults" >"$TMP_DIR/builtin-defaults.json"
-assert_json "$TMP_DIR/builtin-defaults.json" "builtin default owner inventory" 'len(data.get("defaults", [])) == 42 and sum(item.get("kind") == "soul" for item in data["defaults"]) == 36 and sum(item.get("kind") == "workspace_template" for item in data["defaults"]) == 6'
-assert_json "$TMP_DIR/builtin-defaults.json" "builtin default current versus embedded content" 'all(item.get("id") and item.get("builtinContentHash") and item.get("present") == bool(item.get("currentContentHash")) and isinstance(item.get("upgradeAvailable"), bool) for item in data["defaults"])'
 
 download_console_assets
 assert_console_text '执行人格（Soul）'

@@ -305,7 +305,7 @@ func (c RuntimeDefinitionContext) Validate() error {
 			return fmt.Errorf("runtime Definition source obligations startup identity mismatch")
 		}
 		for _, mapping := range c.SourceObligations.ExecutionProofMappings {
-			if mapping.ContractRef == RuntimeGoalSourceExecutionProofV2 && strings.TrimSpace(mapping.ConsumerGoalText) != c.GoalDefinition {
+			if mapping.ContractRef == RuntimeGoalSourceExecutionProof && strings.TrimSpace(mapping.ConsumerGoalText) != c.GoalDefinition {
 				return fmt.Errorf("Goal execution source differs from immutable Definition Goal")
 			}
 		}

@@ -82,7 +82,7 @@ func TestProjectConjunctionRawBytesPreservedAndCapacityExplicit(t *testing.T) {
 }
 
 func TestProjectConjunctionFactBindsExactArgvScopeAndSourceSet(t *testing.T) {
-	specs := shellProjectFixedStages([]string{"test", "-json", "-count=1", "-run", "^TestExact$", "./workorch_validation/v4/exact"}, "workorch_validation/v4/exact")
+	specs := shellProjectFixedStages([]string{"test", "-json", "-count=1", "-run", "^TestExact$", "./workorch_validation/isolated/exact"}, "workorch_validation/isolated/exact")
 	raw := newShellProjectRawBuffer().fact()
 	var stages []shellProjectStageFact
 	for _, spec := range specs {
@@ -145,9 +145,9 @@ func TestProjectConjunctionRealGoRejectsProjectFailuresSkipsAndEmpty(t *testing.
 			spec := shellProjectFixedStages(nil, "")[1]
 			switch scenario {
 			case "old-input-failure":
-				writeNativeStructureSource(t, root, "workorch_validation/v3/old_test.go", "package old\nimport \"testing\"\nfunc TestOld(t *testing.T){t.Fatal(\"original failure\")}\n")
+				writeNativeStructureSource(t, root, "workorch_validation/entrypoint/old_test.go", "package old\nimport \"testing\"\nfunc TestOld(t *testing.T){t.Fatal(\"original failure\")}\n")
 			case "neighbor-compile":
-				writeNativeStructureSource(t, root, "workorch_validation/v4/neighbor/input_test.go", "package neighbor\nfunc broken(\n")
+				writeNativeStructureSource(t, root, "workorch_validation/isolated/neighbor/input_test.go", "package neighbor\nfunc broken(\n")
 			case "skip":
 				body = strings.Replace(body, "if Value()!=4 {t.Fatal(\"wrong\")}", "t.Skip(\"not executed\")", 1)
 			case "empty":
@@ -199,7 +199,7 @@ func TestProjectConjunctionSourceSetIncludesNeighborsAndFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, ref := range []string{"workorch_validation/v4/neighbor/input_test.go", "workorch_validation/v4/neighbor/fixture.txt", "go.work.sum"} {
+	for _, ref := range []string{"workorch_validation/isolated/neighbor/input_test.go", "workorch_validation/isolated/neighbor/fixture.txt", "go.work.sum"} {
 		writeNativeStructureSource(t, root, ref, "original bytes")
 		after, err := shellProjectSourceSetHash(root)
 		if err != nil || after == before {

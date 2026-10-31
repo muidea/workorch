@@ -13,7 +13,7 @@ func evidencePurposeMappingFixture() (RuntimeSourceObligationInventory, []Runtim
 	inventory.Sources = append(inventory.Sources, RuntimeDefinitionSource{CandidateItemRef: "acceptance", ItemRef: "acceptance-formal", SourceScope: "dodItem", SourceID: "dod-002", Text: "后继当前验收；不能代替原历史行为"})
 	inventory.Obligations = append(inventory.Obligations, RuntimeSourceObligation{ID: "C", RequirementID: "requirement", DoDItemRefs: []string{"acceptance"}, Text: inventory.Sources[2].Text})
 	inventory.Verifications = append(inventory.Verifications, RuntimeSourceVerification{ID: "verify-C", ObligationID: "C", Declaration: "普通验收", ProfileID: "profile", EvidenceRequirementID: "dod-002", Scope: "dodItem"})
-	inventory.EvidencePurposeMappings = []RuntimeEvidencePurposeMapping{{ContractRef: RuntimeCrossCWIEvidencePurposeV1, HistoricalItemRef: "dod", AcceptanceItemRef: "acceptance"}}
+	inventory.EvidencePurposeMappings = []RuntimeEvidencePurposeMapping{{ContractRef: RuntimeCrossCWIEvidencePurpose, HistoricalItemRef: "dod", AcceptanceItemRef: "acceptance"}}
 	inventory = inventory.WithHash()
 	texts := map[string]string{}
 	for _, source := range inventory.Sources {
@@ -121,7 +121,7 @@ func TestEvidencePurposeMappingRejectsCoordinatedRehashAndNonordinarySources(t *
 			i.EvidencePurposeMappings[0].ContractRef = "runtime/cross-cwi-evidence-purpose/v0"
 		},
 		"cycle": func(i *RuntimeSourceObligationInventory, _ *[]RuntimeProfileContract) {
-			i.EvidencePurposeMappings = append(i.EvidencePurposeMappings, RuntimeEvidencePurposeMapping{ContractRef: RuntimeCrossCWIEvidencePurposeV1, HistoricalItemRef: "acceptance", AcceptanceItemRef: "dod"})
+			i.EvidencePurposeMappings = append(i.EvidencePurposeMappings, RuntimeEvidencePurposeMapping{ContractRef: RuntimeCrossCWIEvidencePurpose, HistoricalItemRef: "acceptance", AcceptanceItemRef: "dod"})
 		},
 		"legacy owner has no purpose": func(_ *RuntimeSourceObligationInventory, p *[]RuntimeProfileContract) {
 			(*p)[0].EvidenceRequirements[0].AcceptedStepKinds = []string{StepKindGitWrite}

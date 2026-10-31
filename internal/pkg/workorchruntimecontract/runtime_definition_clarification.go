@@ -694,18 +694,14 @@ func (r RuntimeDefinitionClarificationRequestRecord) ValidateAgainst(dispatch Ru
 }
 
 type RuntimeDefinitionClarificationState struct {
-	Observation           RuntimeDefinitionGapObservation
-	RequestContractRepair *RuntimeSemanticRequestRepairProof `json:",omitempty"`
-	Dispatch              *RuntimeDefinitionClarificationDispatch
-	Request               *RuntimeDefinitionClarificationRequestRecord
+	Observation RuntimeDefinitionGapObservation
+	Dispatch    *RuntimeDefinitionClarificationDispatch
+	Request     *RuntimeDefinitionClarificationRequestRecord
 }
 
 func (s RuntimeDefinitionClarificationState) Clone() RuntimeDefinitionClarificationState {
 	ret := RuntimeDefinitionClarificationState{Observation: s.Observation.Clone()}
-	if s.RequestContractRepair != nil {
-		value := s.RequestContractRepair.Clone()
-		ret.RequestContractRepair = &value
-	}
+
 	if s.Dispatch != nil {
 		value := s.Dispatch.Clone()
 		ret.Dispatch = &value
@@ -723,7 +719,7 @@ func (s RuntimeDefinitionClarificationState) Validate() error {
 		return err
 	}
 	if s.Dispatch == nil {
-		if s.Request != nil || s.RequestContractRepair != nil {
+		if s.Request != nil {
 			return fmt.Errorf("runtime Definition clarification request cannot precede dispatch")
 		}
 		return nil
@@ -731,14 +727,7 @@ func (s RuntimeDefinitionClarificationState) Validate() error {
 	if err := s.Dispatch.ValidateAgainst(s.Observation); err != nil {
 		return err
 	}
-	if s.RequestContractRepair != nil {
-		if err := s.RequestContractRepair.Validate(); err != nil {
-			return err
-		}
-		if !s.RequestContractRepair.Matches(s) {
-			return fmt.Errorf("request contract repair differs from original clarification")
-		}
-	}
+
 	if s.Request != nil {
 		return s.Request.ValidateAgainst(*s.Dispatch)
 	}

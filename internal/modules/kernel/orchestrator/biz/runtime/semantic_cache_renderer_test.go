@@ -9,14 +9,14 @@ import (
 
 func TestSemanticCacheRendererSurvivesReloadAndSameContractCorrection(t *testing.T) {
 	_, _, base, fresh := semanticRequestIntentFixture(t)
-	if fresh.SemanticRenderContractRef != rc.RuntimeSemanticRenderContractV5 {
+	if fresh.SemanticContextEncoding != rc.RuntimeSemanticContextEncoding {
 		t.Fatal("new semantic intent did not choose cache layout")
 	}
-	for _, version := range []string{"", rc.RuntimeSemanticRenderContractV2, rc.RuntimeSemanticRenderContractV3, rc.RuntimeSemanticRenderContractV4, rc.RuntimeSemanticRenderContractV5} {
-		t.Run(version, func(t *testing.T) {
+	for _, encoding := range []string{rc.RuntimeSemanticContextEncoding} {
+		t.Run(encoding, func(t *testing.T) {
 			a := base
 			expected := fresh.Clone()
-			expected.SemanticRenderContractRef = version
+			expected.SemanticContextEncoding = encoding
 			expected.Hash = rc.StableRuntimeExpectedDocumentHash(expected)
 			a.CandidateRequestSessions = []rc.RuntimeCandidateRequestSession{{DocumentKind: rc.RuntimeProviderDocumentSemanticPlan, LogicalRequestID: expected.LogicalRequestID, Transaction: a.Decision.AuthorityTransaction(), ManifestHash: expected.ManifestHash, ExpectedDocument: &expected}}
 			raw, err := json.Marshal(a)
@@ -39,11 +39,11 @@ func TestSemanticCacheRendererSurvivesReloadAndSameContractCorrection(t *testing
 			}
 			reloaded.SemanticPlanning.LogicalRequestID = rc.StableRuntimeCandidateRequestSessionID(rc.RuntimeProviderDocumentSemanticPlan, reloaded.Facts.WorkspaceID, reloaded.Facts.RunID, reloaded.Decision.AuthorityTransaction(), fresh.StablePrefixHash, fresh.ManifestHash, key)
 			correction, err := SemanticExpectedDocument(reloaded)
-			if err != nil || correction.SemanticRenderContractRef != version || correction.CorrectionAttempt != 1 {
+			if err != nil || correction.SemanticContextEncoding != encoding || correction.CorrectionAttempt != 1 {
 				t.Fatal("correction changed original renderer", err)
 			}
 			conflict := correction.Clone()
-			conflict.SemanticRenderContractRef = "foreign-version"
+			conflict.SemanticContextEncoding = "foreign-version"
 			conflict.Hash = rc.StableRuntimeExpectedDocumentHash(conflict)
 			reloaded.CandidateRequestSessions = append(reloaded.CandidateRequestSessions, rc.RuntimeCandidateRequestSession{DocumentKind: rc.RuntimeProviderDocumentSemanticPlan, LogicalRequestID: correction.LogicalRequestID, Transaction: reloaded.Decision.AuthorityTransaction(), ManifestHash: correction.ManifestHash, ExpectedDocument: &conflict})
 			if _, err := SemanticExpectedDocument(reloaded); err == nil {
@@ -53,13 +53,13 @@ func TestSemanticCacheRendererSurvivesReloadAndSameContractCorrection(t *testing
 	}
 }
 
-func TestSemanticCacheRendererKeepsNilLegacySessionAndRejectsForeignScope(t *testing.T) {
+func TestSemanticCacheRendererRejectsIncompleteSessionAndForeignScope(t *testing.T) {
 	_, _, a, expected := semanticRequestIntentFixture(t)
 	a.CandidateRequestSessions = []rc.RuntimeCandidateRequestSession{{DocumentKind: rc.RuntimeProviderDocumentSemanticPlan, LogicalRequestID: expected.LogicalRequestID, Transaction: a.Decision.AuthorityTransaction(), ManifestHash: expected.ManifestHash}}
-	legacy, err := SemanticExpectedDocument(a)
-	if err != nil || legacy.SemanticRenderContractRef != "" {
-		t.Fatal("nil legacy session upgraded", err)
+	if _, err := SemanticExpectedDocument(a); err == nil {
+		t.Fatal("incomplete persisted request accepted")
 	}
+	a.CandidateRequestSessions[0].ExpectedDocument = &expected
 	for _, field := range []string{"kind", "transaction", "manifest"} {
 		t.Run(field, func(t *testing.T) {
 			foreign := a
@@ -81,12 +81,12 @@ func TestSemanticCacheRendererKeepsNilLegacySessionAndRejectsForeignScope(t *tes
 	// intent, even when the transaction/manifest are otherwise equal.
 	a.CandidateRequestSessions[0].LogicalRequestID = "retired-generation"
 	fresh, err := SemanticExpectedDocument(a)
-	if err != nil || fresh.SemanticRenderContractRef != rc.RuntimeSemanticRenderContractV5 {
+	if err != nil || fresh.SemanticContextEncoding != rc.RuntimeSemanticContextEncoding {
 		t.Fatal("retired request prevented fresh renderer selection", err)
 	}
 }
 
-func TestSemanticCacheRendererProofBatchCorrectionKeepsSourceVersion(t *testing.T) {
+func TestSemanticCacheRendererProofBatchCorrectionKeepsCurrentContract(t *testing.T) {
 	_, _, base, _ := semanticRequestIntentFixture(t)
 	base.SemanticPlanning.Batches = []rc.RuntimeSemanticPlanBatch{{BatchID: "proof-batch", Sequence: 2}}
 	base.SemanticPlanning.ActiveBatchID = "proof-batch"
@@ -95,13 +95,13 @@ func TestSemanticCacheRendererProofBatchCorrectionKeepsSourceVersion(t *testing.
 		t.Fatal(err)
 	}
 	base.SemanticPlanning.LogicalRequestID = rc.StableRuntimeCandidateRequestSessionID(rc.RuntimeProviderDocumentSemanticPlan, base.Facts.WorkspaceID, base.Facts.RunID, base.Decision.AuthorityTransaction(), base.SemanticPlanning.StablePrefixHash, base.SemanticPlanning.Manifest.Hash, key)
-	for _, version := range []string{"", rc.RuntimeSemanticRenderContractV2, rc.RuntimeSemanticRenderContractV3, rc.RuntimeSemanticRenderContractV4, rc.RuntimeSemanticRenderContractV5} {
+	for _, encoding := range []string{rc.RuntimeSemanticContextEncoding} {
 		a := base
 		expected, err := SemanticExpectedDocument(a)
 		if err != nil || expected.PlanStep != rc.RuntimeSemanticPlanStepProofBatch || expected.BatchSequence != 2 {
 			t.Fatal("proof-batch intent projection changed", err)
 		}
-		expected.SemanticRenderContractRef = version
+		expected.SemanticContextEncoding = encoding
 		expected.Hash = rc.StableRuntimeExpectedDocumentHash(expected)
 		a.CandidateRequestSessions = []rc.RuntimeCandidateRequestSession{{DocumentKind: rc.RuntimeProviderDocumentSemanticPlan, LogicalRequestID: expected.LogicalRequestID, Transaction: a.Decision.AuthorityTransaction(), ManifestHash: expected.ManifestHash, ExpectedDocument: &expected}}
 		a.SemanticPlanning.Attempt = 1
@@ -112,7 +112,7 @@ func TestSemanticCacheRendererProofBatchCorrectionKeepsSourceVersion(t *testing.
 		}
 		a.SemanticPlanning.LogicalRequestID = rc.StableRuntimeCandidateRequestSessionID(rc.RuntimeProviderDocumentSemanticPlan, a.Facts.WorkspaceID, a.Facts.RunID, a.Decision.AuthorityTransaction(), expected.StablePrefixHash, expected.ManifestHash, key)
 		got, err := SemanticExpectedDocument(a)
-		if err != nil || got.SemanticRenderContractRef != version || got.BatchSequence != 2 {
+		if err != nil || got.SemanticContextEncoding != encoding || got.BatchSequence != 2 {
 			t.Fatal("proof correction changed source renderer or batch", err)
 		}
 	}

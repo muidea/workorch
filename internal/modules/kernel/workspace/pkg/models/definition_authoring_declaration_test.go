@@ -32,7 +32,7 @@ func TestAuthoringDeclarationSchemaGuidesGenerationWithoutChangingHistoricalFail
 		original.Obligations[i].Verification.Declaration = ""
 	}
 	audit := mappingAuditFixture(t, original)
-	decoded, err := DecodeDefinitionAuthoringMapping(audit.Document.Content)
+	decoded, err := DecodeAuthoringMappingFor(record.DerivationRequests[0], audit.Document.Content)
 	if err != nil || !reflect.DeepEqual(decoded, original) {
 		t.Fatalf("historical mapping decode changed: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestAuthoringDeclarationSchemaGuidesGenerationWithoutChangingHistoricalFail
 	if semanticErr == nil || !strings.Contains(semanticErr.Error(), "has no traceable obligation and verification") {
 		t.Fatalf("historical first semantic failure changed: %v", semanticErr)
 	}
-	record, request, _, err := record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: "historical-empty", DerivationPermitID: record.DerivationRequests[0].PermitID, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "mock-provider"})
+	record, request, _, err := record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "historical-empty", DerivationPermitID: record.DerivationRequests[0].PermitID, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "mock-provider"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestAuthoringDeclarationSchemaGuidesGenerationWithoutChangingHistoricalFail
 		t.Fatalf("historical failure ledger rejected: %v", err)
 	}
 	failed := record.SpecificationRequests[0]
-	reparsed, _, err := ReparseMappingFailure(failed)
+	reparsed, _, err := ReparseMappingFailure(failed, record.DerivationRequests[0])
 	if err != nil || !reflect.DeepEqual(reparsed, original) || failed.CompletionIdentity == "" {
 		t.Fatalf("historical raw reparse/completion changed: %v", err)
 	}

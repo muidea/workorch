@@ -13,12 +13,12 @@ func TestRuntimeDiagnosticSourcesAreIndependentProtectedC3AndSchemaOnly(t *testi
 	request := runtimeInputReviewProviderFixture(t)
 	catalog := &request.SemanticManifest.OwnerCatalogs[0]
 	binding := &catalog.ValidationSurfaces[0].ProofRequirementBindings[0]
-	binding.InputReview.ProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV3
+	binding.InputReview.ProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 	binding.InputReview.DiagnosticSourceContractRef = runtimecontract.RuntimeValidationDiagnosticSourceReviewV1
 	binding.InputReview.DiagnosticSources = []runtimecontract.RuntimeValidationDiagnosticSource{{SourceRef: "owner-source-a", NativeCaseRef: "owner/package/TestA", InputTargetRef: binding.InputReview.Files[0].TargetRef}, {SourceRef: "owner-source-b", NativeCaseRef: "owner/package/TestB", InputTargetRef: binding.InputReview.Files[0].TargetRef}}
 	refresh := func() {
 		binding.InputReview.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, *binding)
-		catalog.ValidationRecipes = []runtimecontract.RuntimeValidationRecipe{{ID: binding.ValidationRecipeID, AdapterRef: "owner/source-review", Command: "check", InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV3}}
+		catalog.ValidationRecipes = []runtimecontract.RuntimeValidationRecipe{{ID: binding.ValidationRecipeID, AdapterRef: "owner/source-review", Command: "check", InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol}}
 		catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
 		request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
 		refreshSemanticProgressForTest(t, &request)

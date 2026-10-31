@@ -32,11 +32,15 @@ func seedPreparationRecord(t *testing.T, w *workspace.Workspace, state workspace
 			CheckPolicyVersion: startuppreparation.CheckPolicyVersion, CompilerVersion: startuppreparation.BootstrapCompilerVersion,
 		},
 		StartedAt: time.Now().Add(-time.Minute).UTC(), State: state,
+		CreationEpoch: w.PreparationFence.CreationEpoch,
+		Checks:        []workspace.WorkspacePreparationCheckResult{{ID: "readonly-state", Owner: "workspace", Required: true, State: "pending", Reason: "not_observed"}},
 	}
 	if state == workspace.WorkspacePreparationBlocked || state == workspace.WorkspacePreparationFailed {
 		attempt.CompletedAt = attempt.StartedAt.Add(time.Second)
+		attempt.Checks[0].State = "blocked"
+		attempt.Checks[0].Reason = "check_pipeline_incomplete"
 	}
-	w.StartupPreparation = &workspace.WorkspacePreparationRecord{Version: workspace.WorkspacePreparationRecordVersion, WorkspaceID: w.ID, Attempts: []workspace.WorkspacePreparationAttempt{attempt}}
+	w.StartupPreparation = &workspace.WorkspacePreparationRecord{Version: workspace.WorkspacePreparationWorkflowVersion, WorkspaceID: w.ID, Attempts: []workspace.WorkspacePreparationAttempt{attempt}}
 }
 
 func TestPreparationStateQueryIsReadOnlyAcrossFileReopen(t *testing.T) {
@@ -51,15 +55,15 @@ func TestPreparationStateQueryIsReadOnlyAcrossFileReopen(t *testing.T) {
 		t.Fatalf("unchecked projection: %+v %v", state, err)
 	}
 	w.ActiveRunID = "actual-run"
-	seedPreparationRecord(t, w, workspace.WorkspacePreparationUnknown)
+	seedPreparationRecord(t, w, workspace.WorkspacePreparationAccepted)
 	if err := owners.repositories.Workspaces.CompareAndSwap(ctx, w, w.Revision); err != nil {
 		t.Fatal(err)
 	}
 	stored, _ := owners.repositories.Workspaces.Get(ctx, w.ID)
 	before, _ := json.Marshal(stored)
 	state, err = owners.workspace.queryWorkspacePreparationState(ctx, command)
-	if err != nil || state.State != "unknown" || state.CurrentValidity != "not_evaluated" || state.ActiveRunID != "actual-run" {
-		t.Fatalf("unknown projection: %+v %v", state, err)
+	if err != nil || state.State != "accepted" || state.CurrentValidity != "not_evaluated" || state.ActiveRunID != "actual-run" {
+		t.Fatalf("accepted projection: %+v %v", state, err)
 	}
 	mutated := *state.Record
 	mutated.Attempts[0].RequestID = "caller-mutation"

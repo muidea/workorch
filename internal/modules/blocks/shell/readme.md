@@ -54,7 +54,7 @@ Workspace typed read 取得目录，不使用 caller directory。读取以原文
 对象和越界 selector；实际 missing 与读取错误分开，部分集合不能冒完整观察。返回 exact request/state revision/
 receipt hash 与完整 raw-canonical set，零进程、session、effect、receipt 或预算消费。
 Orchestrator 的 SM-4 adapter 只提交 owner 事实；SM-2 私有事务判断当前性、stale 与 exact reopen。
-新 query 在 BeginShutdown 后拒绝，在途 nested reads 持票直到真实返回。nil/历史协议不升级。
+新 query 在 BeginShutdown 后拒绝，在途 nested reads 持票直到真实返回。缺失或不符合当前合同的请求拒绝。
 本合同不枚举新文件、不是跨文件原子快照，也不证明子进程所有读取已被追踪。
 Unix current-dependency read 逐层以 pinned directory descriptor、`openat/O_NOFOLLOW` 打开原 canonical selector，
 避免检查后 parent/final symlink 替换重定向；`O_NONBLOCK` 防止 racing FIFO 在 regular-file gate 前阻塞。
@@ -75,7 +75,7 @@ managed validation 的 scratch 复制同时记录每个实际复制文件的全�
 Workspace、文件 bytes/size/mode 与 actual full-copy 协议、排除目录、文件/字节上界；recipe、command/args、check
 attestations 与 validation scope 不选择复制输入，仍由原 sealed operation、receipt 和 validation observation 完整绑定，
 不混入实际读取选择器。相同 bytes/mode 与复制策略的多 CWI 读取可幂等合并，版本或读取选择器冲突仍拒绝。
-旧 v1 原集合不升级、不重算；typed receipt 保存原集合，后续 exact replay 不重新复制。
+typed receipt 保存原集合，后续 exact replay 不重新复制。
 执行失败但已完成复制时同样保留该读取来源；未完成复制不补造完整集合。receipt-to-fact/hash/reload 的接收合同由
 Orchestrator 的原事务负责，不增加 SM-1～SM-4 transition、availability 或 credit。
 
@@ -90,7 +90,7 @@ Orchestrator 的原事务负责，不增加 SM-1～SM-4 transition、availabilit
 - `shell/command` 不得伪装成 `effect=none` validation；managed validation 不能退化为任意命令字符串。
 - execute 前必须验证 producer、同步 Result、sealed payload、owner catalog、target scope、execution key/fence 和 receipt authority。
 - managed validation 必须在隔离副本中运行；临时 effect 不得写回 deliverable，scratch 和进程组必须按策略释放。
-- activation-declared recipe 可以是固定 transport 或版本化的 `shell/project-native-validation/v1|v2|v3|v4|v5|v6|v7` owner-adapter ref；模板不得携带
+- activation-declared recipe 可以是固定 transport 或具有明确执行／隔离／诊断范围的 Shell owner-adapter ref；模板不得携带
   语言 command/args/env。Shell 只依据同一 request 绑定的 File-owner manifest 解析具体 recipe，且该解析只产生 owner fact，
   不触发 Runtime 状态。Shell 只有在 Orchestrator request 携带 exact Definition-owned
   `RuntimeValidationProofRequirement` 时，才可对 matching recipe 发布逐 CWI applicability binding；recipe ID、进程 exit 0、
@@ -126,7 +126,7 @@ Orchestrator 的原事务负责，不增加 SM-1～SM-4 transition、availabilit
 - 原始 stdout/stderr、secret 和自由文本 diagnostic 不得进入 Runtime authority；公开 diagnostic 只提供有界阶段事实及受限原文引用，不用脱敏改写的工具输出充当原文。
 - managed native check 的 failure feedback 从同一 JSON event 关联 check/case 与 assertion location，仅对 sealed validation
   scope 内的唯一相对路径发布 `CheckFailures`（最多 32 项，超限显式标记）。assertion 正文不导出，`DiagnosticHash` 保留
-  精确正文身份；新失败附带可选 `validation/check-failure/v2` 诊断协议，`ComparisonHash` 只归一本 owner 当前 scratch
+  精确正文身份；新失败附带可选 `validation/check-failure` 诊断协议，`ComparisonHash` 只归一本 owner 当前 scratch
   前缀及其中 Go testing 自动生成的目录后缀，不抹掉任意临时路径、文件名或断言值。旧回执及 v1 digest 不改写。
   只有 exact package/case 的 native fail 才可附带 `ReportedAssertion`；passing/skipped case 的日志不能描述另一个失败。
   自报的 expected/observed shape 是有界诊断而非独立事实、执行证明、通过标记或 repair authority。父检查 PASS 但子检查 skip 时发布
@@ -137,27 +137,27 @@ Orchestrator 的原事务负责，不增加 SM-1～SM-4 transition、availabilit
   宣称 AST 中出现断言即可证明任意 Goal/DoD，也不构成 DCE producer evidence。
 
 
-### Versioned validation input boundary
+### Validation input boundary
 
 The original Goal/DoD remains the acceptance baseline. Added checks may only
 refine or supplement it consistently and conjunctively; a new input version,
 approval, reference repository or passing test cannot waive an original criterion.
 An old test implementation is not itself the criterion: changing it still requires
 a criterion-preserving contract, not merely a failing result. Identity isolation
-alone grants no replacement authority. The v3 adapter below requires independent
+alone grants no replacement authority. The reviewed entrypoint adapter below requires independent
 input review and is not a way to bypass an original failed criterion.
 
-`shell/project-native-validation/v3` declares an independent native-check identity
-(`_InputV3`) and exact `workorch_validation/v3/` input path for a newly sealed
+`shell/reviewed-entrypoint-validation` declares an independent native-check identity
+(`_EntrypointInput`) and exact `workorch_validation/entrypoint/` input path for a newly sealed
 activation. It does not rename, delete or select older checks, and cannot change
-an already sealed v1/v2 activation, binding or receipt. The immutable Definition
+an already sealed activation, binding or receipt. The immutable Definition
 requirement/check identity is unchanged. A single-input contract cannot advertise
 partial support for a multi-check all-of requirement.
 
 Structural readiness and instrumented execution are necessary but not sufficient
 semantic calibration. An input that merely has a reachable assertion, starts a
 delivery process or passes its own tests cannot authorize replacement of the
-previous verification input. A ready v3 owner binding carries a mandatory exact
+previous verification input. A ready reviewed owner binding carries a mandatory exact
 `InputReview` subject: the complete versioned input namespace (helpers/fixtures
 included) and present Go module/workspace definitions, with content hashes and
 the immutable requirement/native mapping. The current envelope is 16 files and
@@ -172,22 +172,18 @@ Only a complete consistent LLM report can pass Orchestrator's subsequent binding
 gate, and actual validation/assessment remain required. Capability and scripted-provider
 tests do not constitute release-grade semantic calibration of arbitrary Goal/DoD.
 
-The review protocol is separately selected by the activation-sealed recipe's
-`InputReviewProtocolRef`. Current built-in activations explicitly select
-`validation/input-consistency/v2`; an absent selection retains the v1 subject and
-historical hashes. v3/v4 adapters publish the selected protocol in the exact subject
-and catalog commitment without changing the source bytes, native identities or paths.
-Unsupported protocol/adapter combinations fail closed. Shell provides source and
-scope facts only; it does not classify obligations, grant additions, open tickets or
-transition Runtime. `TestInputReviewProtocolSelectionPreservesOriginalInputsAndNativeMapping`
-covers the read-only selection and downgrade boundary.
+All review-capable recipes require the sole current `validation/input-consistency` contract.
+The complete criterion obligations and declared proof consumers are reviewed together; no earlier report format is selected.
+Adapters name distinct execution/isolation/diagnostic scopes, not historical releases.
+Unsupported protocol/adapter combinations fail closed. Shell supplies source and scope facts only; it does not grant credit,
+open tickets or transition Runtime.
 
 #### Per-CWI review and execution scope
 
-单检查 v4 显式声明为 `shell/project-native-validation/v4`，
-使用 `shell/go-test-json/workspace-behavior/v5` 与 `_InputV4` native identity；它保持原单检查限制。
+单检查隔离执行显式声明为 `shell/isolated-package-validation`，
+使用 `shell/go-test-json/isolated-package-behavior` 与 `_IsolatedInput` native identity；它保持原单检查限制。
 Each check has an independent package:
-`workorch_validation/v4/<lowercase-native-identity>/input_test.go`.
+`workorch_validation/isolated/<lowercase-native-identity>/input_test.go`.
 Its optional conjunctive supplement is `behavior_test.go` in the same package.
 The review subject contains this entire package directory (helpers/fixtures included)
 plus present root `go.mod`, `go.sum`, `go.work` and `go.work.sum`, still bounded by
@@ -245,11 +241,11 @@ that an arbitrary verification input preserves the workspace's Goal/DoD semantic
 
 #### 多检查 requirement 输入包
 
-新内置软件开发 activation 选择 `shell/project-native-validation/v5`，且必须显式声明
-`validation/input-consistency/v2`；缺失或降级 review protocol 在 recipe 解析与检查映射前拒绝。
-其 native observation 为 `shell/go-test-json/workspace-behavior/v6`。完整 canonical requirement 的
-SHA256 固定一个 `workorch_validation/v5/<requirement-digest>/input_test.go`，每个 required check
-具有不同 `_Check_<check-identity>_InputV5` native identity。共同 CWI 检查及各源 Obligation verification
+package 合取 activation 可选择 `shell/conjunctive-package-validation`，且必须显式声明
+`validation/input-consistency`；缺失或不支持的 review protocol 在 recipe 解析与检查映射前拒绝。
+其 native observation 为 `shell/go-test-json/conjunctive-package-behavior`。完整 canonical requirement 的
+SHA256 固定一个 `workorch_validation/conjunctive/<requirement-digest>/input_test.go`，每个 required check
+具有不同 `_Check_<check-identity>_ConjunctiveInput` native identity。共同 CWI 检查及各源 Obligation verification
 全部进入同一 package、完整 review 和同一合取执行；缺项、重复、别名或跨 requirement/protocol 混合均不可用。
 
 create-only preparation 返回一个 exact target 与完整 native mapping、
@@ -257,13 +253,13 @@ create-only preparation 返回一个 exact target 与完整 native mapping、
 全部 package helpers/fixtures 与根定义合计仍限 16 files / 64 KiB，native checks 仍限 32；
 超界显式 unavailable，不截断或提高限制。结构检查只允许已声明的原／补充 Test，拒绝额外 Test、init、
 TestMain、effectful initializer 和跨 harness 引用；每项仍需真实 testing.T 断言、逐判据一致性评审与实际行为观察。
-各成员的 supplement 使用同 package 中不同 exact 文件，不得别名；旧单输入 compile-repair 不因 v5 获得多成员修复权限。
+各成员的 supplement 使用同 package 中不同 exact 文件，不得别名；单输入 compile-repair 不获得多成员修复权限。
 当前能力不提供任意输入替换或一般多成员 compile-repair，不能用实现修复绕过输入保护。
 
 完整 scope contract `shell/go-test-input/conjunctive-package-review/v1` 随 catalog/hash/review 封存。
 实际执行只选择该 package 的所有 exact checks；任一 failed/skipped/incomplete、输出截断或 source drift
 均不能满足完整 proof。源 Criterion/Declaration 原文由 Definition 提供；Shell 不解释自然语言、裁决 credit
-或重建 authority。v3/v4 的单检查、native identity 与 scope 保持不变，旧 seal 不隐式升级。
+或重建 authority。各 adapter 的单检查限制、native identity 和执行 scope 独立，不因选择其他 adapter 扩大原 seal。
 
 `validation_input_conjunction_test.go` 覆盖完整 preparation/review、B 改判据后的新 package、mixed identity 拒绝、
 容量与降级拒绝、实际 A+B 执行、B 缺失／失败／跳过、extra Test、unlisted helper 与独立 supplement。
@@ -287,33 +283,33 @@ Shell-private `runShellProjectConjunction` 复用 `validation_project_conjunctio
 
 `validation_project_conjunction_runner_test.go` 使用真实 Go 和真实 managed copy 验证完整四阶段正例、
 旧输入失败、相邻编译失败、跳过、race、前三阶段成功而最后行为失败、source 变化、缺映射及准确期限。
-显式新 activation 可声明 `shell/project-native-validation/v6` 和 `validation/input-consistency/v2`。
-同一 v6 adapter 还支持显式 `validation/input-consistency/v3` 组合评审：Shell 从原 compiled requirement
+显式新 activation 可声明 `shell/project-conjunction-validation` 和 `validation/input-consistency`。
+同一 adapter 使用 `validation/input-consistency` 组合评审：Shell 从原 compiled requirement
 复制完整 typed lineage declarations 到实际输入 subject，重新绑定完整 subject hash；不裁决规则是否满足，
-不提供 Runtime/Git/未来 ACK 事实，不授 credit。其它现有 adapter 不能选择 v3，旧 activation 不升级。
+不提供 Runtime/Git/未来 ACK 事实，不授 credit。所有输入审查采用唯一当前合同；不同执行范围由各 adapter 明确声明。
 `biz/validation_proof_composition_test.go` 固定实际 publication、原声明隔离与 unsupported adapter fail-closed；
 组合语义见 [Validation Proof Composition](../../../../docs/00-core/runtime/validation-proof-composition.md)。
-它使用 `shell/go-test-json/project-conjunction-behavior/v1`、`_InputV6` native identity 及
-`workorch_validation/v6/<canonical-requirement-digest>/`，每个原／源义务检查完整映射同一 requirement package。
+它使用 `shell/go-test-json/project-conjunction-behavior`、`_ProjectInput` native identity 及
+`workorch_validation/project/<canonical-requirement-digest>/`，每个原／源义务检查完整映射同一 requirement package。
 每项 attestation 封存有序四阶段的 `ExecutionStagesHash`；content/review 合同分别为
 `shell/go-test-input/project-conjunction/v1` 与 `shell/go-test-input/project-conjunction-review/v1`，
 仍要求完整当前 package/helpers/fixtures 与根定义、16 files / 64 KiB，并且不替相邻 harness 补造评审。
-旧 v1～v5 recipe/native/scope 不升级；内置默认仍为 v5，implementation-work availability 不因此开放。
+recipe/native/scope 的差异由各执行 adapter 显式声明；implementation-work availability 仍独立核验。
 
-显式 `shell/project-native-validation/v7` 使用独立 observation
-`shell/go-test-json/project-conjunction-behavior/v2`，四项 mandatory stages/hash、完整原准则、native namespace、
+显式 `shell/project-failure-diagnostic-validation` 使用独立 observation
+`shell/go-test-json/project-failure-diagnostic-behavior`，四项 mandatory stages/hash、完整原准则、native namespace、
 输入评审上界与单 operation deadline 均不变。仅在 root test/race 的完整原生 transcript 证明失败仅来自当前
 exact reviewed checks、无相邻/未知/编译失败或 test skip、source 不变且原期限未到时，Shell 可追加一个
 `reviewed-cwi-failure-diagnostic` 实际阶段，用既有 instrumented exact-package 执行独立诊断。
 原项目失败、exit/code、每阶段原始 stdout/stderr 都完整保全；合取仍 incomplete、quality invalid、零 credit。
 只有失败 package/case 与每项 assertion detail 完全复现、实际 implementation 行为观测齐全且 source 未漂移，
 才能发布原 typed failure→repair candidate。诊断通过、失败集合/断言漂移、unknown、skip、输出/存储缺失、
-cleanup 或超时均不能授修复归因。v6 原失败语义不升级；默认和公开 availability 不由此开启。
+cleanup 或超时均不能授修复归因。该诊断范围不改变其它 adapter 的失败语义，不自行授予 availability。
 `validation_project_failure_diagnostic_test.go` 使用真实 Go/managed copy/raw store 覆盖精确正例、相邻失败、
 skip、独立诊断漂移与旧协议；这不代替公开 fullflow、真实 provider 或 live。
 
-显式 `shell/project-native-validation/v8` + `validation/input-consistency/v3` 使用独立 observation
-`shell/go-test-json/project-conjunction-behavior/v3`，不升级 v6/v7，也不发布默认工作权限。
+显式 `shell/project-multi-failure-validation` + `validation/input-consistency` 使用独立 observation
+`shell/go-test-json/project-multi-failure-behavior`，保留其它 adapter 的独立诊断范围，不发布工作权限。
 owner 从准确输入 bytes 编译完整项目测试来源（opaque source ref、package-qualified native case、input target），
 以 `validation/diagnostic-source-review/v1` 封存到 subject 并要求每个来源独立一致性评审。
 有界 corpus 包含全部 project `_test.go`、validation namespace helpers、普通非 Go fixture/documentation 和根定义；
@@ -429,7 +425,7 @@ facts separately from readiness and checks that repeated queries preserve bytes.
 | --- | --- | --- |
 | Conjunctive addition | Exact original check mapping, fresh supplemental identity, declared content contract and resource-owner feasibility | Original and supplemental checks remain mandatory; creation grants no validation credit |
 | Criterion-preserving symbol repair | Owner-observed compiler location, bounded exact symbol delta and matching before/after hashes | Only the attested input delta is writable; original and supplemental checks remain mandatory |
-| Different validation implementation or observation path | LLM consistency review against the original criteria, bound to exact input content, followed by owner execution facts | v3/v4 adapters supply mandatory review subjects; only Orchestrator can seal a consistent report after the independent request, with no waiver or review credit |
+| Different validation implementation or observation path | LLM consistency review against the original criteria, bound to exact input content, followed by owner execution facts | Entrypoint and package adapters supply mandatory review subjects; only Orchestrator can seal a consistent report after the independent request, with no waiver or review credit |
 
 The last row cannot borrow either of the first two authorizations. In particular,
 an unattributed test failure does not establish an input defect, and a compatible
@@ -465,24 +461,23 @@ consume the judged result without reinterpreting this owner diagnostic.
 
 ### Native check readiness and behavior observation
 
-新 Start/Restart 可显式选择 `shell/project-native-validation/v2`，其 Go binding 固定使用
-`shell/go-test-json/workspace-behavior/v4`。该版本同时观测 in-process 测试与本次 Go 构建的子进程；v1 resolver 和已封存
-v1/v2/v3 observation 的原有语义不变。Resume/recovery 不根据当前默认配置升级协议。
+新 Start/Restart 可显式选择 `shell/entrypoint-validation`，其 Go binding 固定使用
+`shell/go-test-json/entrypoint-behavior`。该 adapter 同时观测 in-process 测试与本次 Go 构建的子进程；Resume/recovery 仍使用原封存执行输入。
 
-v4 新发布的 `shell/go-test-input/conjunctive-entrypoint-test/v3` 允许 exact 补充文件中的同包具名 helper、type、const、无调用/闭包
+`shell/go-test-input/conjunctive-entrypoint-test` 允许 exact 补充文件中的同包具名 helper、type、const、无调用/闭包
 初始化的 var，仍拒绝 init、TestMain、method、额外 Test 定义与不可达的 testing.T 断言。旧输入只被重新检查，不被改写；
 原检查和补充检查仍是 all-of。结构无效或语义证据不足不授权改写判据，也不自动扩大 File repair surface。
 
 新增输入内容合同可以声明可选失败报告语法：实际 testing.T 断言失败时，在独立一行输出
 `WORKORCH_ASSERTION_V1 code=shape_mismatch expected=object observed=array`。必须精确四个有序 token；封闭 code/shape 配对
 由 shared typed DTO 校验，不接受额外正文、实际值或秘密。缺失/无效报告保留位置与 digest，并由 LLM 标记诊断不完整；
-不为补诊断改写已有测试，也不把报告语法纳入 native pass/fail 判据。旧 single-test v1 / entrypoint v2 内容合同保持封存，
-新声明分别为 v2 / v3 并进入 owner catalog revision，不能从新配置重建旧 authority。
+不为补诊断改写已有测试，也不把报告语法纳入 native pass/fail 判据。single-test 和 entrypoint 使用各自唯一当前内容合同；
+owner catalog 身份绑定真实能力声明，不维护旧格式选择或从新配置重建已封存 authority。
 `TestStdioEnvelopeReferenceGraderCalibration` 校准固定真实进程的正例、错误 result/framing/id、缺失工具、marker-only 和
 comment-only 反例；`TestShellAssertionComparisonUsesRealManagedTemporaryPaths` 校准真实两次执行的精确 digest 不同而比较
 身份相同。它们不是完整 MCP 或五语言验收器，也不提供 release DCE 证据。
 
-v4 对 exact bound supplement 的编译失败另发布最多 8 项 `InputLocations`（相对路径、行、列、封闭 code/symbol），
+隔离包 adapter 对 exact bound supplement 的编译失败另发布最多 8 项 `InputLocations`（相对路径、行、列、封闭 code/symbol），
 它们是诊断而非 writable target。仅当实际 compiler 的全部相关错误均为同一文件中的 undefined ASCII identifier，且
 唯一同文件 package const/var 声明只差大小写、无局部 shadow、位置命中 unresolved AST identifier、执行副本源码未变且
 输出未截断时，Shell 才发布 `InputRepair`：原 required/protocol/native/supplement identity、exact target、
@@ -503,11 +498,10 @@ operation deadline，并额外限时 10 秒；最多 128 个 artifact、8 MiB �
 recovery/delivery 合同。`TestEntrypointBehaviorObservesBuiltGoProcessWithoutRewritingInputs` 与 Orchestrator 的
 `TestDriveRuntimeEntrypointValidationUsesSameOwnerTransactionsAcrossRestart` 覆盖校准、旧协议隔离及四机联合回归。
 
-当前 `shell/project-native-validation/v1` adapter 的 Go-native binding 使用 `shell/go-test-json/workspace-behavior/v2`；已封存的
-v1/v2 binding 仍按原协议执行/重放，不修改历史 receipt、binding 或归档。fresh manifest 若含 exact CWI 补充输入，使用
-`shell/go-test-json/workspace-behavior/v3`。协议属于 Shell adapter，
-不进入模板身份或 Orchestrator 的状态选择逻辑。显式固定 command 的 legacy recipe 保持 v1 语义，不能被静默增加 coverage
-要求，也不能被声称具有 v2 的行为 grounding；需要该 grounding 的 Profile 应声明 project-native adapter。
+当前 `shell/project-native-validation` adapter 的 Go-native binding 使用 `shell/go-test-json/workspace-behavior`；
+包含 exact CWI 补充输入时使用 `shell/go-test-json/supplemented-behavior`。显式固定 command 的 recipe 仅证明其直接执行结果，
+不具有交付实现 grounding；需要 grounding 的 Profile 应声明 project-native adapter。两者是独立能力，不是历史格式兼容。
+既有 receipt、binding 或归档不被当前目录改写。
 
 - 结构就绪通过真实 `testing` import、`*testing.T` 对象身份和同包具名 helper / `t.Run` 子测试解析断言。
   未调用闭包、未引用 helper、遮蔽的同名变量、跨包 helper 与歧义入口不能代替断言；不支持的结构明确报告未解析。
@@ -542,7 +536,7 @@ binding/receipt 不升级或改写。
 补充仍未观测实现时返回 `validation_workspace_behavior_supplement_unobserved`，不再提供补充合同；补充的编译错误也
 不能把测试/owner harness 文件交给普通实现修复。具体 CWI 的真实交付入口断言仍不可由“任意函数被覆盖”替代。
 `TestValidationInputSupplementRequiresOriginalAndDeliveryBehavior` 校准原检查失败、实现错误、源码/dependency/fake bypass、
-skip、初始化/runner override、输入编译错误、v2 replay 与 v3 fresh all-of 正反例。
+skip、初始化/runner override、输入编译错误、精确重放与补充 all-of 正反例。
 `TestSupplementContentContractAndFreshReadinessAgreeWithoutReplacementPreparation` 覆盖 inline 正例与顶层 helper/const/var/type、
 runner/init、语法、无断言反例，并验证另一 CWI 不受影响、零替代 preparation 与零 `would_satisfy`。
 
@@ -562,7 +556,7 @@ instrumentation override、skip、临时资源清理及现有 typed receipt/rest
 | effect + receipt | declared/undeclared workspace effects、managed-session observation、accepted/rejected receipt、diagnostic hash field-drift tests | 已覆盖主要 effect、receipt 分类及 route 字段哈希完整性 |
 | boundary | `TestShellOwnerAcquiresManagedValidationCapabilityThroughTypedEventHubContract`、`TestShellRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls`、`TestShellOwnerFeasibilityAndSemanticProofHappyPathsUseTypedEventHub`、module execute、seal/authority tests | 覆盖七 topic 的 exact producer/strong-call/concrete payload，以及 owner adapter 的 typed EventHub admissibility、operation-feasibility 与 state-change semantic feasible 路径 |
 
-## Validation generation observations
+### Validation generation observations
 
 For isolated, conjunctive and project Go adapters that publish a content-bound missing-input preparation, the surface
 also publishes one `shell/go-validation-generation-context/v1` observation. It reads actual non-test `.go` source and

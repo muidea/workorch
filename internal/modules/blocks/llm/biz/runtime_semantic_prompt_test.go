@@ -1,7 +1,10 @@
 package llm
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -62,6 +65,9 @@ func runtimeSemanticWorkProviderRequestForTest(t *testing.T, purpose bool, revis
 		revision.InputTargetRefs = []string{"main.go"}
 		for i := range revision.Report.Checks {
 			revision.Report.Checks[i].InputTargetRefs = []string{"main.go"}
+			for j := range revision.Report.Checks[i].Obligations {
+				revision.Report.Checks[i].Obligations[j].InputTargetRefs = []string{"main.go"}
+			}
 		}
 		revision.Binding.InputReview.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*revision.Binding.InputReview, revision.Binding)
 		revision.Report.SubjectHash = revision.Binding.InputReview.Hash
@@ -77,6 +83,12 @@ func runtimeSemanticWorkProviderRequestForTest(t *testing.T, purpose bool, revis
 	observation.PrerequisiteID, observation.Kind, observation.ContentHash = scopeRequest.RequestID, runtimecontract.PrerequisiteKindTargetSelection, selection.SnapshotID
 	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
 	scope := runtimecontract.RuntimeImplementationWorkScopeObservation{Request: scopeRequest, Selection: selection, Observation: observation}
+	scope.Content = &runtimecontract.RuntimeImplementationWorkContent{ProtocolRef: runtimecontract.RuntimeImplementationWorkContentV1, ManifestRevision: selection.ObservedRevision}
+	for _, target := range selection.TargetRefs {
+		body := "original work bytes"
+		h := sha256.Sum256([]byte(body))
+		scope.Content.Snapshots = append(scope.Content.Snapshots, runtimecontract.TargetSnapshot{TargetRef: target, Content: body, ContentHash: hex.EncodeToString(h[:]), ContentState: runtimecontract.SnapshotContentStateComplete, Size: int64(len(body))})
+	}
 	var manifest runtimecontract.RuntimeSemanticPlanManifest
 	if purpose {
 		manifest, err = runtimecontract.CompileRuntimeSemanticImplementationPurposeManifest(ctx.WorkspaceID, ctx.RunID, ctx.Definition, ctx.DefinitionSeed, []runtimecontract.RuntimeDefinitionFocus{focus}, ctx.Activation.ExecutionContract, []runtimecontract.RuntimeOperationAdmissibility{catalog}, runtimecontract.RuntimeImplementationWorkScopePreview{Request: scopeRequest, Observation: &scope}, nil)
@@ -90,6 +102,7 @@ func runtimeSemanticWorkProviderRequestForTest(t *testing.T, purpose bool, revis
 		t.Fatal(err)
 	}
 	request.SemanticManifest = manifest
+	ctx.WorkContext = &runtimecontract.RuntimeSemanticWorkContext{Content: scope.Content.Clone()}
 	ctx.CoverageProgress, err = runtimecontract.BuildRuntimeSemanticCoverageProgress(*ctx, manifest, runtimecontract.RuntimeFacts{WorkspaceID: ctx.WorkspaceID, RunID: ctx.RunID, DefinitionRevision: ctx.Definition.Revision, DefinitionSeed: ctx.DefinitionSeed, EvidenceRevision: "evidence-1", Coverage: runtimecontract.InitialRuntimeCoverageFacts(ctx.DefinitionSeed.CoverageItems)}, 1)
 	if err != nil {
 		t.Fatal(err)
@@ -178,6 +191,12 @@ func TestRuntimeSemanticWorkPurposeNativeAndPromptRemainEquivalent(t *testing.T)
 	manifest := request.SemanticManifest
 	document := runtimecontract.RuntimeSemanticPlanDocument{SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
 		PlanStep: runtimecontract.RuntimeSemanticPlanStepCoverageOrder, CoverageOrder: []common.CoverageWorkItemID{manifest.CoverageItems[0].ID}, ImplementationPurpose: runtimecontract.RuntimeImplementationWorkPurposeEffect}
+	w := manifest.ProofObligations[0].ImplementationWork
+	document.ImplementationIntent = &runtimecontract.RuntimeImplementationIntent{DeclarationRef: manifest.ProofObligations[0].DeclarationRef, ContentHash: w.Scope.Content.Hash(), RemainingWork: "Implement the complete original requirement", Reason: "current content needs a bounded effect"}
+	for _, ref := range runtimecontract.RuntimeImplementationRequirementRefs(manifest, *w, document.ImplementationIntent.DeclarationRef) {
+		document.ImplementationIntent.RequirementReviews = append(document.ImplementationIntent.RequirementReviews, runtimecontract.RuntimeImplementationRequirementReview{RequirementRef: ref, WorkRequired: true})
+		document.ImplementationIntent.SelectedRequirementRefs = append(document.ImplementationIntent.SelectedRequirementRefs, ref)
+	}
 	payload, err := runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(manifest, document)
 	if err != nil {
 		t.Fatal(err)
@@ -220,6 +239,9 @@ func TestRuntimeSemanticWorkPurposeNativeAndPromptRemainEquivalent(t *testing.T)
 		work.EffectAvailable = ordinal <= work.Scope.Request.Policy.MaxRoundsPerCWI
 		changed.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(changed.SemanticManifest)
 		changed.SemanticContext = request.SemanticContext.Clone()
+		for n := 1; n < ordinal; n++ {
+			changed.SemanticContext.WorkContext.PriorRounds = append(changed.SemanticContext.WorkContext.PriorRounds, runtimecontract.RuntimeSemanticWorkRound{Ordinal: n, DispatchID: fmt.Sprint("dispatch-", n), ReceiptSetHash: fmt.Sprint("set-", n), Targets: []runtimecontract.RuntimeSemanticWorkTarget{{OperationID: "op", TargetRefs: []string{"main.go"}, ReceiptRef: "receipt", ReceiptHash: "hash"}}})
+		}
 		refreshSemanticProgressForTest(t, &changed)
 		next, err := runtimeSemanticPlanProviderRequest(changed)
 		if err != nil {
@@ -238,10 +260,20 @@ func TestRuntimeSemanticWorkPurposeNativeAndPromptRemainEquivalent(t *testing.T)
 			if err := json.Unmarshal([]byte(next.Schema), &schema); err != nil {
 				t.Fatal(err)
 			}
-			if strings.Contains(next.Schema, string(runtimecontract.RuntimeImplementationWorkPurposeEffect)) {
+			var choice struct {
+				Enum []string `json:"enum"`
+			}
+			if err := json.Unmarshal(mustSemanticSchemaProperty(t, next.Schema, "implementationPurpose"), &choice); err != nil {
+				t.Fatal(err)
+			}
+			if len(choice.Enum) != 1 || choice.Enum[0] != string(runtimecontract.RuntimeImplementationWorkPurposeTerminal) {
 				t.Fatal("exhausted rounds retained effect enum")
 			}
 			document.ManifestHash, document.ImplementationPurpose = changed.SemanticManifest.Hash, runtimecontract.RuntimeImplementationWorkPurposeTerminal
+			document.ImplementationIntent.SelectedRequirementRefs = nil
+			for n := range document.ImplementationIntent.RequirementReviews {
+				document.ImplementationIntent.RequirementReviews[n].WorkRequired = false
+			}
 			raw, err := runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(changed.SemanticManifest, document)
 			if err != nil {
 				t.Fatal(err)
@@ -275,18 +307,16 @@ func TestRuntimeSemanticWorkRenderingRejectsLegacyAndSeparatesSelectorDomains(t 
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
 	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
 	refreshSemanticProgressForTest(t, &request)
-	expected := runtimecontract.RuntimeExpectedDocumentContract{SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent, DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, PlanStep: request.SemanticContext.PlanStep, ManifestHash: request.SemanticManifest.Hash, DefinitionSeedHash: request.SemanticManifest.DefinitionSeedHash, LogicalRequestID: "work-render-version", StablePrefixHash: request.StablePrefixHash, MaxOutputTokens: 4096, MaxRecoveryAttempts: 1, BatchID: request.SemanticContext.BatchID, BatchSequence: request.SemanticContext.BatchSequence, BatchCoverageWorkItemIDs: request.SemanticContext.BatchCoverageWorkItemIDs}
+	expected := runtimecontract.RuntimeExpectedDocumentContract{SemanticContextEncoding: runtimecontract.RuntimeSemanticContextEncoding, SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent, DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, PlanStep: request.SemanticContext.PlanStep, ManifestHash: request.SemanticManifest.Hash, DefinitionSeedHash: request.SemanticManifest.DefinitionSeedHash, LogicalRequestID: "work-render-version", StablePrefixHash: request.StablePrefixHash, MaxOutputTokens: 4096, MaxRecoveryAttempts: 1, BatchID: request.SemanticContext.BatchID, BatchSequence: request.SemanticContext.BatchSequence, BatchCoverageWorkItemIDs: request.SemanticContext.BatchCoverageWorkItemIDs}
 	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
 	request.ExpectedDocument = &expected
-	if _, err := runtimeSemanticPlanProviderRequest(request); err == nil {
-		t.Fatal("legacy sealed work request was silently re-rendered")
-	}
-	legacyHash := expected.Hash
-	expected.SemanticRenderContractRef = runtimecontract.RuntimeSemanticRenderContractV2
+	expected.SemanticContextEncoding = "semantic-render/v1"
 	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
-	if expected.Hash == legacyHash {
-		t.Fatal("renderer upgrade reused old expected-document identity")
+	if _, err := runtimeSemanticPlanProviderRequest(request); err == nil {
+		t.Fatal("obsolete encoding accepted")
 	}
+	expected.SemanticContextEncoding = runtimecontract.RuntimeSemanticContextEncoding
+	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
 	before, _ := json.Marshal(request)
 	provider, err := runtimeSemanticPlanProviderRequest(request)
 	if err != nil {
@@ -303,4 +333,15 @@ func TestRuntimeSemanticWorkRenderingRejectsLegacyAndSeparatesSelectorDomains(t 
 	if string(before) != string(after) {
 		t.Fatal("rendering mutated workspace input")
 	}
+}
+
+func mustSemanticSchemaProperty(t *testing.T, schema, name string) json.RawMessage {
+	t.Helper()
+	var v struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal([]byte(schema), &v); err != nil {
+		t.Fatal(err)
+	}
+	return v.Properties[name]
 }

@@ -15,7 +15,7 @@ func TestBootstrapEvidencePurposeMappingRejectsPartialOriginalSource(t *testing.
 	i.Sources = append(i.Sources, runtimecontract.RuntimeDefinitionSource{CandidateItemRef: "source", ItemRef: "source-formal", SourceScope: "dodItem", SourceID: "dod-002", Text: "后继原普通验收"})
 	i.Obligations = append(i.Obligations, runtimecontract.RuntimeSourceObligation{ID: "purpose-source-obligation", RequirementID: i.Obligations[0].RequirementID, DoDItemRefs: []string{"source"}, Text: "后继原普通验收"})
 	i.Verifications = append(i.Verifications, runtimecontract.RuntimeSourceVerification{ID: "purpose-source-verification", ObligationID: "purpose-source-obligation", Declaration: "后继普通证明", ProfileID: i.Verifications[0].ProfileID, EvidenceRequirementID: "dod-002", Scope: "dodItem"})
-	i.EvidencePurposeMappings = []runtimecontract.RuntimeEvidencePurposeMapping{{ContractRef: runtimecontract.RuntimeCrossCWIEvidencePurposeV1, HistoricalItemRef: "dod", AcceptanceItemRef: "source"}}
+	i.EvidencePurposeMappings = []runtimecontract.RuntimeEvidencePurposeMapping{{ContractRef: runtimecontract.RuntimeCrossCWIEvidencePurpose, HistoricalItemRef: "dod", AcceptanceItemRef: "source"}}
 	i = i.WithHash()
 	if err := i.Validate(); err != nil {
 		t.Fatal(err)

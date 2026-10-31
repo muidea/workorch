@@ -9,21 +9,12 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-const RuntimeOperationsRenderContractV2 = "operations-render/compact-contract/v2"
-const RuntimeOperationsRenderContractV3 = "operations-render/parameter-cardinality/v3"
-const RuntimeOperationsRenderContractV4 = "operations-render/cache-layout/v4"
-
-const RuntimeSemanticRenderContractV3 = "semantic-render/owner-work-content/v3"
-const RuntimeSemanticRenderContractV5 = "semantic-render/shared-work/v5"
-const RuntimeSemanticRenderContractV4 = "semantic-render/cache-layout/v4"
-
-const RuntimeSemanticRenderContractV2 = "semantic-render/owner-work-vocabulary/v2"
-
+// Encoding identities describe the one current request shape, never a version selector.
 const RuntimeExpectedDocumentSchemaCurrent = "workorch.runtime_expected_document"
 
-// RuntimeExpectedDocumentContract is the sealed identity of one complete
-// authority document expected from every physical provider call. Recovery may
-// change only the physical call identity; it cannot change this value.
+const RuntimeOperationsContextEncoding = "operations/cache-layout"
+const RuntimeSemanticContextEncoding = "semantic/shared-work"
+
 type RuntimeExpectedDocumentContract struct {
 	SchemaVersion string
 	Hash          string
@@ -34,22 +25,21 @@ type RuntimeExpectedDocumentContract struct {
 	// manifest-derived provider proposal surface. Semantic-plan documents use
 	// their independent semantic schema and must leave this field empty.
 	WireContractHash string
-	// SemanticRenderContractRef seals semantic rendering independently of operations wire.
-	// Empty denotes the legacy renderer; a legacy work proof requires exact owner
-	// retirement before resubmission. Other semantic request kinds keep their renderer.
-	SemanticRenderContractRef string `json:",omitempty"`
-	// Empty preserves the original operations rendering, including recovery.
-	OperationsRenderContractRef string `json:",omitempty"`
-	DefinitionSeedHash          string
-	LogicalRequestID            string
-	CorrectionAttempt           int
-	StablePrefixHash            string
-	BatchID                     string
-	BatchSequence               int
-	BatchCoverageWorkItemIDs    []common.CoverageWorkItemID
-	CoverageOrderHash           string
-	MaxOutputTokens             int
-	MaxRecoveryAttempts         int
+	// SemanticContextEncoding seals semantic rendering independently of operations wire.
+	// The semantic document requires the sole current encoding.
+	SemanticContextEncoding string `json:",omitempty"`
+	// The operations document requires the sole current encoding.
+	OperationsContextEncoding string `json:",omitempty"`
+	DefinitionSeedHash        string
+	LogicalRequestID          string
+	CorrectionAttempt         int
+	StablePrefixHash          string
+	BatchID                   string
+	BatchSequence             int
+	BatchCoverageWorkItemIDs  []common.CoverageWorkItemID
+	CoverageOrderHash         string
+	MaxOutputTokens           int
+	MaxRecoveryAttempts       int
 }
 
 func (c RuntimeExpectedDocumentContract) Normalized() RuntimeExpectedDocumentContract {
@@ -59,8 +49,8 @@ func (c RuntimeExpectedDocumentContract) Normalized() RuntimeExpectedDocumentCon
 	c.PlanStep = RuntimeSemanticPlanStep(strings.TrimSpace(string(c.PlanStep)))
 	c.ManifestHash = strings.TrimSpace(c.ManifestHash)
 	c.WireContractHash = strings.TrimSpace(c.WireContractHash)
-	c.SemanticRenderContractRef = strings.TrimSpace(c.SemanticRenderContractRef)
-	c.OperationsRenderContractRef = strings.TrimSpace(c.OperationsRenderContractRef)
+	c.SemanticContextEncoding = strings.TrimSpace(c.SemanticContextEncoding)
+	c.OperationsContextEncoding = strings.TrimSpace(c.OperationsContextEncoding)
 	c.DefinitionSeedHash = strings.TrimSpace(c.DefinitionSeedHash)
 	c.LogicalRequestID = strings.TrimSpace(c.LogicalRequestID)
 	c.StablePrefixHash = strings.TrimSpace(c.StablePrefixHash)
@@ -90,11 +80,11 @@ func (c RuntimeExpectedDocumentContract) Validate() error {
 	}
 	switch c.DocumentKind {
 	case RuntimeProviderDocumentOperations:
-		if (c.OperationsRenderContractRef != "" && c.OperationsRenderContractRef != RuntimeOperationsRenderContractV2 && c.OperationsRenderContractRef != RuntimeOperationsRenderContractV3 && c.OperationsRenderContractRef != RuntimeOperationsRenderContractV4) || c.SemanticRenderContractRef != "" || c.WireContractHash == "" || c.PlanStep != "" || c.DefinitionSeedHash != "" || c.BatchID != "" || c.BatchSequence != 0 || len(c.BatchCoverageWorkItemIDs) != 0 || c.CoverageOrderHash != "" {
+		if c.OperationsContextEncoding != RuntimeOperationsContextEncoding || c.SemanticContextEncoding != "" || c.WireContractHash == "" || c.PlanStep != "" || c.DefinitionSeedHash != "" || c.BatchID != "" || c.BatchSequence != 0 || len(c.BatchCoverageWorkItemIDs) != 0 || c.CoverageOrderHash != "" {
 			return common.ErrInvalidArgument
 		}
 	case RuntimeProviderDocumentSemanticPlan:
-		if c.OperationsRenderContractRef != "" || (c.SemanticRenderContractRef != "" && c.SemanticRenderContractRef != RuntimeSemanticRenderContractV2 && c.SemanticRenderContractRef != RuntimeSemanticRenderContractV3 && c.SemanticRenderContractRef != RuntimeSemanticRenderContractV4 && c.SemanticRenderContractRef != RuntimeSemanticRenderContractV5) || c.WireContractHash != "" || c.DefinitionSeedHash == "" {
+		if c.OperationsContextEncoding != "" || c.SemanticContextEncoding != RuntimeSemanticContextEncoding || c.WireContractHash != "" || c.DefinitionSeedHash == "" {
 			return common.ErrInvalidArgument
 		}
 		switch c.PlanStep {
@@ -145,11 +135,11 @@ func StableRuntimeExpectedDocumentHash(contract RuntimeExpectedDocumentContract)
 	writeHashString(h, contract.CoverageOrderHash)
 	writeHashString(h, fmt.Sprintf("%d", contract.MaxOutputTokens))
 	writeHashString(h, fmt.Sprintf("%d", contract.MaxRecoveryAttempts))
-	if contract.SemanticRenderContractRef != "" {
-		writeHashString(h, contract.SemanticRenderContractRef)
+	if contract.SemanticContextEncoding != "" {
+		writeHashString(h, contract.SemanticContextEncoding)
 	}
-	if contract.OperationsRenderContractRef != "" {
-		writeHashString(h, contract.OperationsRenderContractRef)
+	if contract.OperationsContextEncoding != "" {
+		writeHashString(h, contract.OperationsContextEncoding)
 	}
 	return "runtime-expected-document-" + hex.EncodeToString(h.Sum(nil))[:20]
 }

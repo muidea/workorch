@@ -423,7 +423,7 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		evidence.OwnerRevisionSet = &dependencies
 		if len(dependencies.Entries) != 0 {
 			evidence.ApplicabilityDependencies = &runtimecontract.RuntimeEvidenceApplicabilityDependencies{
-				ProtocolRef:      runtimecontract.RuntimeEvidenceApplicabilityDependenciesV1,
+				ProtocolRef:      runtimecontract.RuntimeEvidenceApplicabilityDependenciesProtocol,
 				OwnerRevisionSet: *runtimecontract.CloneRuntimeOwnerRevisionSet(&dependencies),
 			}
 		}

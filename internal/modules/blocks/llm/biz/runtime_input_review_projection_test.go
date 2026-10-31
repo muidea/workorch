@@ -22,7 +22,7 @@ func TestRuntimeInputReviewSelectableProtocolsHaveCompleteOrderIndependentInstru
 	catalog.ValidationSurfaces = nil
 	catalog.ValidationRecipes = nil
 	catalog.ValidationRecipeRefs = nil
-	for i, protocol := range []string{runtimecontract.RuntimeValidationInputReviewProtocol, runtimecontract.RuntimeValidationInputReviewProtocolV2, runtimecontract.RuntimeValidationInputReviewProtocolV3} {
+	for i, protocol := range []string{runtimecontract.RuntimeValidationInputReviewProtocol, runtimecontract.RuntimeValidationInputReviewProtocol, runtimecontract.RuntimeValidationInputReviewProtocol} {
 		id := []string{"recipe-v1", "recipe-v2", "recipe-v3"}[i]
 		binding, err := runtimecontract.RuntimeValidationProofRequirementBindingForRecipe(*requirement, id, runtimeValidationCheckAttestationsForLLMTest(requirement.RequiredCheckRefs)...)
 		if err != nil {
@@ -59,15 +59,21 @@ func TestRuntimeInputReviewSelectableProtocolsHaveCompleteOrderIndependentInstru
 		t.Fatal(err)
 	}
 	instruction := projection.OutputInstruction
-	for _, required := range []string{"For validation/input-consistency/v2", "For validation/input-consistency/v3", "one independent report for EVERY exact sourceRef", "scopeContractRef/scopeRequirements", "V1 reports must omit obligations", "V1/V2 must omit proofConsumerRefs"} {
+	for _, required := range []string{"For validation/input-consistency", "one independent report for EVERY exact sourceRef", "scopeContractRef/scopeRequirements"} {
 		if strings.Count(instruction, required) != 1 {
 			t.Fatalf("missing or duplicated selected-contract explanation: %s", required)
 		}
 	}
 	reviews := projection.Manifest.ProofObligations[0].ValidationProofRequirement.InputReviews
-	if len(reviews) != 3 || reviews[0].RequiredProofConsumerRefs != nil || reviews[1].RequiredProofConsumerRefs != nil || !reflect.DeepEqual(reviews[2].RequiredProofConsumerRefs, []string{runtimecontract.RuntimeValidationInputConsumer}) {
-		t.Fatal("v3 required consumers missing or imposed on legacy protocol")
+	if len(reviews) != 3 {
+		t.Fatal("selectable recipe projections missing")
 	}
+	for _, review := range reviews {
+		if !reflect.DeepEqual(review.RequiredProofConsumerRefs, []string{runtimecontract.RuntimeValidationInputConsumer}) {
+			t.Fatal("current required consumers missing")
+		}
+	}
+
 	slices.Reverse(catalog.ValidationSurfaces)
 	if got := runtimeSemanticOutputInstruction(request.SemanticContext, request.SemanticManifest); got != instruction {
 		t.Fatal("selectable surface order changed review instructions")
@@ -99,6 +105,7 @@ func runtimeInputReviewProviderFixture(t *testing.T) llmmodels.RuntimeCandidateR
 		InputSchemaHash: "schema-review", InputBindingRef: "input-review", CheckRefs: requirement.RequiredCheckRefs, ProofRequirementBindings: []runtimecontract.RuntimeValidationProofRequirementBinding{binding},
 		ProofApplicability: runtimecontract.RuntimeValidationProofDirect, EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
 	}}}
+	catalog.ValidationRecipes = []runtimecontract.RuntimeValidationRecipe{{ID: "review-recipe", AdapterRef: "owner/review", Command: "check", InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol}}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	request.SemanticManifest.OwnerCatalogs = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	request.SemanticManifest.AllowedOwnerModuleIDs = []string{runtimecontract.RuntimeModuleShell}
@@ -161,8 +168,8 @@ func TestRuntimeInputReviewV2ObligationsSchemaAndFreshContentOnlyChangeC3(t *tes
 	request := runtimeInputReviewProviderFixture(t)
 	catalog := &request.SemanticManifest.OwnerCatalogs[0]
 	binding := &catalog.ValidationSurfaces[0].ProofRequirementBindings[0]
-	catalog.ValidationRecipes = []runtimecontract.RuntimeValidationRecipe{{ID: binding.ValidationRecipeID, AdapterRef: "owner/review/v1", Command: "check", InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV2}}
-	binding.InputReview.ProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV2
+	catalog.ValidationRecipes = []runtimecontract.RuntimeValidationRecipe{{ID: binding.ValidationRecipeID, AdapterRef: "owner/review/v1", Command: "check", InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol}}
+	binding.InputReview.ProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 	binding.InputReview.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, *binding)
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
 	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)

@@ -35,6 +35,7 @@ func Audit(m workspace.DefinitionAuthoringMapping) (workspace.DefinitionAuthorin
 	if err != nil {
 		return workspace.DefinitionAuthoringSuccessByteAudit{}, err
 	}
+	payload = OwnerBoundFixtureDocument(payload)
 	sum := sha256.Sum256(payload)
 	o := workspace.DefinitionProviderObservation{Content: payload, ObservedBytes: uint64(len(payload)), SHA256: hex.EncodeToString(sum[:]), Observed: true, Complete: true, Saved: true}
 	return workspace.DefinitionAuthoringSuccessByteAudit{Document: o, Wire: o.Clone()}, nil
@@ -51,12 +52,6 @@ func Proposal(d workspace.DefinitionDerivationRequest, v workspace.DefinitionAut
 		}
 	}
 	a, err := Audit(m)
-	if err == nil && workspace.OwnerBoundAuthoringWire(d.WireContractRef) {
-		raw := OwnerBoundFixtureDocument(a.Document.Content)
-		sum := sha256.Sum256(raw)
-		o := workspace.DefinitionProviderObservation{Content: raw, ObservedBytes: uint64(len(raw)), SHA256: hex.EncodeToString(sum[:]), Observed: true, Complete: true, Saved: true}
-		a = workspace.DefinitionAuthoringSuccessByteAudit{Document: o, Wire: o.Clone()}
-	}
 	if err != nil {
 		return m, a, workspace.GoalSpecification{}, err
 	}
@@ -76,12 +71,7 @@ func SelectProfileAcceptance(d workspace.DefinitionDerivationRequest, m workspac
 		return m, err
 	}
 	for _, r := range required {
-		if d.WireContractRef == workspace.DefinitionAuthoringOwnerBoundV3 {
-			m.ProfileAcceptanceSelections = append(m.ProfileAcceptanceSelections, workspace.DefinitionProfileAcceptanceSelection{SourceRef: r.HistoricalItemRef, AcceptanceItemRef: consumer})
-		} else {
-			r.AcceptanceItemRef = consumer
-			m.EvidencePurposeMappings = append(m.EvidencePurposeMappings, workspace.GoalEvidencePurposeMapping(r))
-		}
+		m.ProfileAcceptanceSelections = append(m.ProfileAcceptanceSelections, workspace.DefinitionProfileAcceptanceSelection{SourceRef: r.HistoricalItemRef, AcceptanceItemRef: consumer})
 	}
 	return m, nil
 }

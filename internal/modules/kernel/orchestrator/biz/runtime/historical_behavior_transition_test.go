@@ -30,7 +30,7 @@ func historicalBehaviorProjectionFixture(t *testing.T) RuntimeAggregate {
 			{ID: "history-check", ObligationID: "historical", Declaration: "真实行为", ProfileID: "profile", EvidenceRequirementID: "history", Scope: "dodItem"},
 			{ID: "acceptance-check", ObligationID: "current", Declaration: "真实普通验收", ProfileID: "profile", EvidenceRequirementID: "acceptance", Scope: "dodItem"},
 		},
-		EvidencePurposeMappings: []runtimecontract.RuntimeEvidencePurposeMapping{{ContractRef: runtimecontract.RuntimeCrossCWIEvidencePurposeV1, HistoricalItemRef: "history", AcceptanceItemRef: "acceptance"}},
+		EvidencePurposeMappings: []runtimecontract.RuntimeEvidencePurposeMapping{{ContractRef: runtimecontract.RuntimeCrossCWIEvidencePurpose, HistoricalItemRef: "history", AcceptanceItemRef: "acceptance"}},
 	}).WithHash()
 	if err := inventory.Validate(); err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func historicalBehaviorProjectionFixture(t *testing.T) RuntimeAggregate {
 	post.Entries[0].Revision = "after"
 	post = post.WithHash()
 	facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{ID: "effect", Kind: runtimecontract.EvidenceKindStateChange, FocusID: "history-focus", DispatchID: "dispatch", BindingRefs: []string{"binding"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"history"}, Quality: common.EvidenceQualityValid, OwnerRevisionSet: &reads,
-		ApplicabilityDependencies: &runtimecontract.RuntimeEvidenceApplicabilityDependencies{ProtocolRef: runtimecontract.RuntimeEvidenceApplicabilityDependenciesV2, OwnerRevisionSet: post, PurposeRef: runtimecontract.RuntimeHistoricalEffectProofV1, OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileWrite, OwnerContractRef: runtimecontract.RuntimeFileHistoricalEffectProofV1}}}
+		ApplicabilityDependencies: &runtimecontract.RuntimeEvidenceApplicabilityDependencies{ProtocolRef: runtimecontract.RuntimeEvidenceApplicabilityDependenciesProtocol, OwnerRevisionSet: post, PurposeRef: runtimecontract.RuntimeHistoricalEffectProofV1, OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileWrite, OwnerContractRef: runtimecontract.RuntimeFileHistoricalEffectProofV1}}}
 	return RuntimeAggregate{Facts: facts}
 }
 
@@ -142,7 +142,7 @@ func TestHistoricalBehaviorHandoffPersistsFirstOfSharedConsumerSources(t *testin
 	inventory.Sources = append(inventory.Sources, runtimecontract.RuntimeDefinitionSource{CandidateItemRef: "second", ItemRef: "formal-second", SourceScope: "dodItem", SourceID: "second", Text: "第二项原历史行为"})
 	inventory.Obligations = append(inventory.Obligations, runtimecontract.RuntimeSourceObligation{ID: "second-obligation", RequirementID: "requirement", DoDItemRefs: []string{"second"}, Text: "第二项原历史行为准则"})
 	inventory.Verifications = append(inventory.Verifications, runtimecontract.RuntimeSourceVerification{ID: "second-check", ObligationID: "second-obligation", Declaration: "第二项真实行为", ProfileID: "profile", EvidenceRequirementID: "second", Scope: "dodItem"})
-	inventory.EvidencePurposeMappings = append(inventory.EvidencePurposeMappings, runtimecontract.RuntimeEvidencePurposeMapping{ContractRef: runtimecontract.RuntimeCrossCWIEvidencePurposeV1, HistoricalItemRef: "second", AcceptanceItemRef: "acceptance"})
+	inventory.EvidencePurposeMappings = append(inventory.EvidencePurposeMappings, runtimecontract.RuntimeEvidencePurposeMapping{ContractRef: runtimecontract.RuntimeCrossCWIEvidencePurpose, HistoricalItemRef: "second", AcceptanceItemRef: "acceptance"})
 	inventory = inventory.WithHash()
 	items := runtimecontract.NormalizeRuntimeCoverageItems(aggregate.Facts.DefinitionSeed.CoverageItems)
 	items = append(items, runtimecontract.RuntimeCoverageItem{ID: "second", SourceScope: "dodItem", SourceID: "second", TargetText: "第二项原历史行为"})

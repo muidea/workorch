@@ -105,28 +105,31 @@ func addRuntimeSemanticInputReviewSchema(proposal map[string]any, manifest Runti
 						"inputTargetRefs":  stringEnumArraySchemaWithMaximum(refs, len(refs), 1),
 					},
 				}
-				if binding.InputReview.ProtocolRef != RuntimeValidationInputReviewProtocol {
-					checkSchema["required"] = append(checkSchema["required"].([]string), "obligations")
-					checkSchema["properties"].(map[string]any)["obligations"] = map[string]any{
-						"type": "array", "minItems": 1, "maxItems": RuntimeValidationInputReviewMaxObligations,
-						"items": map[string]any{
-							"type": "object", "additionalProperties": false,
-							"required": []string{"criterionText", "finding", "reason", "inputTargetRefs"},
-							"properties": map[string]any{
-								"criterionText":   map[string]any{"type": "string", "minLength": 1, "maxLength": RuntimeValidationInputReviewMaxReasonBytes},
-								"finding":         stringEnumSchema([]string{RuntimeValidationInputCovered, RuntimeValidationInputMissing, RuntimeValidationInputConflicting, RuntimeValidationInputUnknown}),
-								"reason":          map[string]any{"type": "string", "minLength": 1, "maxLength": RuntimeValidationInputReviewMaxReasonBytes},
-								"inputTargetRefs": stringEnumArraySchemaWithMaximum(refs, len(refs), 1),
-							},
+
+				checkSchema["required"] = append(checkSchema["required"].([]string), "obligations")
+				checkSchema["properties"].(map[string]any)["obligations"] = map[string]any{
+					"type": "array", "minItems": 1, "maxItems": RuntimeValidationInputReviewMaxObligations,
+					"items": map[string]any{
+						"type": "object", "additionalProperties": false,
+						"required": []string{"criterionText", "finding", "reason", "inputTargetRefs"},
+						"properties": map[string]any{
+							"criterionText":   map[string]any{"type": "string", "minLength": 1, "maxLength": RuntimeValidationInputReviewMaxReasonBytes},
+							"finding":         stringEnumSchema([]string{RuntimeValidationInputCovered, RuntimeValidationInputMissing, RuntimeValidationInputConflicting, RuntimeValidationInputUnknown}),
+							"reason":          map[string]any{"type": "string", "minLength": 1, "maxLength": RuntimeValidationInputReviewMaxReasonBytes},
+							"inputTargetRefs": stringEnumArraySchemaWithMaximum(refs, len(refs), 1),
 						},
-					}
-					if binding.InputReview.ProtocolRef == RuntimeValidationInputReviewProtocolV3 {
-						item := checkSchema["properties"].(map[string]any)["obligations"].(map[string]any)["items"].(map[string]any)
-						item["required"] = append(item["required"].([]string), "proofConsumerRefs")
-						refs := RuntimeValidationProofConsumerRefs(*binding.InputReview)
-						item["properties"].(map[string]any)["proofConsumerRefs"] = stringEnumArraySchemaWithMaximum(refs, len(refs), 1)
-					}
+					},
 				}
+
+				if len(binding.InputReview.LineageAssertions) != 0 {
+
+					item := checkSchema["properties"].(map[string]any)["obligations"].(map[string]any)["items"].(map[string]any)
+					item["required"] = append(item["required"].([]string), "proofConsumerRefs")
+					consumerRefs := RuntimeValidationProofConsumerRefs(*binding.InputReview)
+					item["properties"].(map[string]any)["proofConsumerRefs"] = stringEnumArraySchemaWithMaximum(consumerRefs, len(consumerRefs), 1)
+
+				}
+
 				var allChecks []any
 				for _, check := range binding.RequiredCheckRefs {
 					allChecks = append(allChecks, map[string]any{"contains": map[string]any{"required": []string{"requiredCheckRef"}, "properties": map[string]any{"requiredCheckRef": map[string]any{"const": check}}}})

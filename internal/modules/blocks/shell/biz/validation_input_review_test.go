@@ -13,7 +13,7 @@ import (
 )
 
 func TestVersionedInputReviewCompleteBoundedSourceAndFreshness(t *testing.T) {
-	recipe := runtimecontract.RuntimeValidationRecipe{ID: "native", Command: "go", Args: []string{"test", "./..."}, AdapterRef: modulecommon.ValidationRecipeAdapterVersionedEntrypoint}
+	recipe := runtimecontract.RuntimeValidationRecipe{ID: "native", Command: "go", Args: []string{"test", "./..."}, AdapterRef: modulecommon.ValidationRecipeAdapterReviewedEntrypoint}
 	requirement := shellValidationProofRequirementForTest(t, recipe.ID, "cwi-review")
 	checks, _ := shellValidationCheckAttestations(recipe, requirement)
 	binding, err := runtimecontract.RuntimeValidationProofRequirementBindingForRecipe(requirement, recipe.ID, checks...)
@@ -24,11 +24,11 @@ func TestVersionedInputReviewCompleteBoundedSourceAndFreshness(t *testing.T) {
 	target := shellValidationNativeCheckTargetRef(requirement, checks...)
 	input := fmt.Sprintf("package checks\nimport \"testing\"\nfunc %s(t *testing.T){ if false { t.Fatal(\"assertion\") } }", checks[0].NativeCheckRef)
 	writeNativeStructureSource(t, root, target, input)
-	writeNativeStructureSource(t, root, "workorch_validation/v3/helper.go", "package checks\n")
+	writeNativeStructureSource(t, root, "workorch_validation/entrypoint/helper.go", "package checks\n")
 	writeNativeStructureSource(t, root, "go.mod", "module fixture\ngo 1.26\n")
 	writeNativeStructureSource(t, root, "go.sum", "") // a complete empty auxiliary file is not missing context
-	refs := []string{target, "workorch_validation/v3/helper.go", "go.mod", "go.sum"}
-	subject, code := shellVersionedInputReview(root, refs, binding)
+	refs := []string{target, "workorch_validation/entrypoint/helper.go", "go.mod", "go.sum"}
+	subject, code := shellInputReview(root, refs, binding)
 	if code != "" || len(subject.Files) != 4 {
 		t.Fatalf("complete source: code=%s subject=%+v", code, subject)
 	}
@@ -47,23 +47,23 @@ func TestVersionedInputReviewCompleteBoundedSourceAndFreshness(t *testing.T) {
 	if !found {
 		t.Fatal("freshness observation blessed bytes not reviewed")
 	}
-	changed, _ := shellVersionedInputReview(root, refs, binding)
+	changed, _ := shellInputReview(root, refs, binding)
 	if changed.Hash == subject.Hash {
 		t.Fatal("content drift reused prior review identity")
 	}
-	writeNativeStructureSource(t, root, "workorch_validation/v3/helper.go", strings.Repeat("a", runtimecontract.RuntimeValidationInputReviewMaxBytes))
-	if _, code := shellVersionedInputReview(root, refs, binding); code != "validation_input_review_capacity_exceeded" {
+	writeNativeStructureSource(t, root, "workorch_validation/entrypoint/helper.go", strings.Repeat("a", runtimecontract.RuntimeValidationInputReviewMaxBytes))
+	if _, code := shellInputReview(root, refs, binding); code != "validation_input_review_capacity_exceeded" {
 		t.Fatalf("truncation admitted: %s", code)
 	}
-	if err := os.Symlink(filepath.Join(root, target), filepath.Join(root, "workorch_validation/v3/link.go")); err != nil {
+	if err := os.Symlink(filepath.Join(root, target), filepath.Join(root, "workorch_validation/entrypoint/link.go")); err != nil {
 		t.Fatal(err)
 	}
-	if _, code := shellVersionedInputReview(root, []string{target, "workorch_validation/v3/link.go"}, binding); code != "validation_input_review_source_unavailable" {
+	if _, code := shellInputReview(root, []string{target, "workorch_validation/entrypoint/link.go"}, binding); code != "validation_input_review_source_unavailable" {
 		t.Fatalf("symlink admitted: %s", code)
 	}
 }
 
-func TestInputReviewProtocolSelectionPreservesOriginalInputsAndNativeMapping(t *testing.T) {
+func TestCurrentInputReviewPreservesOriginalInputsAndNativeMapping(t *testing.T) {
 	root, recipe := t.TempDir(), isolatedInputRecipe()
 	requirement := shellValidationProofRequirementForTest(t, recipe.ID, "cwi-review-version")
 	checks, _ := shellValidationCheckAttestations(recipe, requirement)
@@ -81,26 +81,46 @@ func TestInputReviewProtocolSelectionPreservesOriginalInputsAndNativeMapping(t *
 		}
 		return surfaces[0].ProofRequirementBindings[0]
 	}
-	legacy := acquire(recipe)
+	current := acquire(recipe)
+	if current.InputReview.ProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocol {
+		t.Fatal("current input review contract not observed")
+	}
+	if repeated := acquire(recipe); !reflect.DeepEqual(current, repeated) {
+		t.Fatal("same current input changed its sealed identity")
+	}
+	changed := recipe
+	changed.InputReviewProtocolRef = "unsupported-review-contract"
+	if got := resolveRuntimeValidationRecipeDeclarations([]runtimecontract.RuntimeValidationRecipe{changed}, manifest.Manifest); len(got) != 0 {
+		t.Fatal("unknown review contract accepted")
+	}
 	updated := recipe
-	updated.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV2
-	current := acquire(updated)
-	if legacy.InputReview.ProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocol || current.InputReview.ProtocolRef != updated.InputReviewProtocolRef || legacy.InputReview.Hash == current.InputReview.Hash || shellValidationRecipeSchemaHash(recipe) == shellValidationRecipeSchemaHash(updated) {
-		t.Fatal("protocol selection did not require new sealed identities")
-	}
-	if !reflect.DeepEqual(legacy.CheckAttestations, current.CheckAttestations) || !reflect.DeepEqual(legacy.InputReview.Files, current.InputReview.Files) || legacy.RequirementHash != current.RequirementHash {
-		t.Fatal("new review protocol replaced the original inputs or criterion")
-	}
-	if repeated := acquire(recipe); !reflect.DeepEqual(legacy, repeated) {
-		t.Fatal("current protocol was hot-loaded into an old declaration")
-	}
+
 	unsupported := updated
-	unsupported.AdapterRef = modulecommon.ValidationRecipeAdapterProjectNative
+	unsupported.AdapterRef = "unknown-adapter"
+	unsupported.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 	if got := resolveRuntimeValidationRecipeDeclarations([]runtimecontract.RuntimeValidationRecipe{unsupported}, manifest.Manifest); len(got) != 0 {
 		t.Fatal("owner claimed an unsupported protocol/adapter combination")
 	}
 	content, err := os.ReadFile(filepath.Join(root, target))
 	if err != nil || string(content) != input {
 		t.Fatal("read-only protocol selection changed the original input")
+	}
+}
+
+// Current input review is shared by independent execution capabilities; a
+// project-corpus capability is not a newer format of the entrypoint capability.
+func TestCurrentReviewDeclarationSupportsEveryReviewedAdapter(t *testing.T) {
+	for _, adapter := range []string{modulecommon.ValidationRecipeAdapterReviewedEntrypoint, modulecommon.ValidationRecipeAdapterIsolatedEntrypoint, modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint, modulecommon.ValidationRecipeAdapterProjectConjunction, modulecommon.ValidationRecipeAdapterProjectFailureDiagnostic, modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic} {
+		t.Run(adapter, func(t *testing.T) {
+			declaration := runtimecontract.RuntimeValidationRecipe{ID: "reviewed", AdapterRef: adapter, InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, TimeoutMillis: 60000}
+			got := resolveRuntimeValidationRecipeDeclarations([]runtimecontract.RuntimeValidationRecipe{declaration}, runtimecontract.WorkspaceManifest{TargetRefs: []string{"go.mod"}})
+			if len(got) != 1 || got[0].AdapterRef != adapter || got[0].InputReviewProtocolRef != declaration.InputReviewProtocolRef {
+				t.Fatalf("current declaration rejected: %+v", got)
+			}
+			declaration.InputReviewProtocolRef = "unsupported-input-review"
+			if got := resolveRuntimeValidationRecipeDeclarations([]runtimecontract.RuntimeValidationRecipe{declaration}, runtimecontract.WorkspaceManifest{TargetRefs: []string{"go.mod"}}); len(got) != 0 {
+				t.Fatalf("unknown review accepted: %+v", got)
+			}
+		})
 	}
 }

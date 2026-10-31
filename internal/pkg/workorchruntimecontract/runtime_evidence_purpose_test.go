@@ -13,7 +13,7 @@ func historicalEffectPurposeFixture() EvidenceFact {
 	post = post.WithHash()
 	return EvidenceFact{ID: "original-effect", Kind: EvidenceKindStateChange, OwnerRevisionSet: &reads,
 		ApplicabilityDependencies: &RuntimeEvidenceApplicabilityDependencies{
-			ProtocolRef: RuntimeEvidenceApplicabilityDependenciesV2, OwnerRevisionSet: post,
+			ProtocolRef: RuntimeEvidenceApplicabilityDependenciesProtocol, OwnerRevisionSet: post,
 			PurposeRef: RuntimeHistoricalEffectProofV1, OwnerModuleID: RuntimeModuleFile,
 			OperationKind: StepKindFileEdit, OwnerContractRef: RuntimeFileHistoricalEffectProofV1,
 		}}
@@ -37,7 +37,7 @@ func TestHistoricalEffectPurposeDoesNotPromotePostimageToCurrent(t *testing.T) {
 		t.Fatal("historical effect alone supplies current ordinary acceptance")
 	}
 	validation := EvidenceFact{Kind: EvidenceKindValidation, Validation: &RuntimeValidationObservation{}, OwnerRevisionSet: CloneRuntimeOwnerRevisionSet(current),
-		ApplicabilityDependencies: &RuntimeEvidenceApplicabilityDependencies{ProtocolRef: RuntimeEvidenceApplicabilityDependenciesV1, OwnerRevisionSet: *current}}
+		ApplicabilityDependencies: &RuntimeEvidenceApplicabilityDependencies{ProtocolRef: RuntimeEvidenceApplicabilityDependenciesProtocol, OwnerRevisionSet: *current}}
 	if !RuntimeHistoricalEffectsHaveCurrentAcceptanceProof([]EvidenceFact{fact, validation}) {
 		t.Fatal("separately selected current ordinary proof was not conjoined")
 	}
@@ -54,7 +54,7 @@ func TestHistoricalEffectPurposeDoesNotPromotePostimageToCurrent(t *testing.T) {
 		t.Fatal("purpose reload changed historical input/postcondition")
 	}
 	legacy := cloneEvidenceFactRaw(fact)
-	legacy.ApplicabilityDependencies = &RuntimeEvidenceApplicabilityDependencies{ProtocolRef: RuntimeEvidenceApplicabilityDependenciesV1, OwnerRevisionSet: fact.ApplicabilityDependencies.OwnerRevisionSet}
+	legacy.ApplicabilityDependencies = &RuntimeEvidenceApplicabilityDependencies{ProtocolRef: RuntimeEvidenceApplicabilityDependenciesProtocol, OwnerRevisionSet: fact.ApplicabilityDependencies.OwnerRevisionSet}
 	if RuntimeEvidenceIsHistoricalEffect(legacy) || RuntimeEvidenceHasFreshProofApplicability(legacy, nil, "2", "") {
 		t.Fatal("old receipt was silently upgraded or stale credit restored")
 	}
@@ -76,7 +76,7 @@ func TestHistoricalEffectPurposeRejectsWrongOwnerKindProtocolAndSource(t *testin
 			case "contract":
 				value.OwnerContractRef += " "
 			case "protocol":
-				value.ProtocolRef = RuntimeEvidenceApplicabilityDependenciesV1
+				value.ProtocolRef = "evidence-applicability-dependencies/v1"
 			case "reads":
 				changed.OwnerRevisionSet = nil
 			case "definition":

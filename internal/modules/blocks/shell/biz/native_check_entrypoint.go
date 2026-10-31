@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// v4 re-observes existing input bytes under an explicitly selected contract;
-// it does not rewrite them, migrate a v3 binding or infer assertion semantics.
+// Entrypoint review observes existing input bytes under the declared scope;
+// it does not rewrite them or infer assertion semantics.
 // Reachable testing.T assertions still use the shared bounded native walker.
 func shellEntrypointSupplementDeclarations(file *ast.File, native string) bool {
 	for _, decl := range file.Decls {

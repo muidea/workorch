@@ -11,8 +11,8 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-// Seeding and automatic reviewed-version upgrades remain Soul-owner work.
-// Existing Run snapshots are never consulted or rewritten by this operation.
+// Builtin declarations are synchronized directly from the running program.
+// Custom Souls retain their own content; no historical revision table is used.
 func (s *service) ensureCurrentBuiltinSoulDefaults(ctx context.Context) error {
 	if err := ensureBuiltinSoulDefaults(ctx, s); err != nil {
 		return err
@@ -21,28 +21,32 @@ func (s *service) ensureCurrentBuiltinSoulDefaults(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	s.mutationMu.Lock()
+	defer s.mutationMu.Unlock()
 	for _, raw := range defaults {
 		stored, err := s.souls.Get(ctx, common.SoulID(raw.ID))
 		if errors.Is(err, common.ErrNotFound) {
-			continue // a concurrent delete is not consent to recreate again
+			continue
 		}
 		if err != nil {
 			return err
 		}
 		current, err := normalizedStoredSoul(stored)
 		if err != nil {
-			continue // unknown legacy identity is not an upgrade baseline
+			return err
 		}
-		target, err := normalizedSoulFromCommand(soulDefaultCreateCommand(raw))
+		if current.SourceProvenance != soulmodel.SoulSourceBuiltinSeed {
+			continue
+		}
+		cmd := soulDefaultCreateCommand(raw)
+		target, err := normalizedSoulFromCommand(cmd)
 		if err != nil {
 			return err
 		}
-		item := builtinSoulDefaultObservation(current, target)
-		if !item.UpgradeAvailable {
+		if current.ContentHash == target.ContentHash {
 			continue
 		}
-		_, err = s.submitBuiltinDefaultUpgrade(ctx, soulBuiltinUpgradeEvent{SoulID: item.SoulID, ExpectedContentHash: item.CurrentContentHash, TargetContentHash: item.BuiltinContentHash})
-		if err != nil && !errors.Is(err, common.ErrConflict) {
+		if _, err := s.updateSoulLocked(ctx, cmd, soulmodel.SoulSourceBuiltinSeed); err != nil {
 			return err
 		}
 	}

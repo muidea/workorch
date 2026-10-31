@@ -11,7 +11,7 @@ import (
 func requiredPurposeInventory(t *testing.T) (RuntimeSourceObligationInventory, []RuntimeProfileContract, []RuntimeCoverageItem) {
 	t.Helper()
 	i, p, items := profilePurposeFixture()
-	p[0].DeliverableExpectations[0].RequiredEvidencePurposeContractRef = RuntimeProfileDeliverableEvidencePurposeV2
+	p[0].DeliverableExpectations[0].RequiredEvidencePurposeContractRef = RuntimeProfileDeliverableEvidencePurpose
 	i.EvidencePurposeMappings[0].HistoricalProfileHash = StableRuntimeProfileContractsHash(p)
 	i = i.WithHash()
 	return i, p, items

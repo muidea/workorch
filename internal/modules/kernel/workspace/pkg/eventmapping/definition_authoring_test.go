@@ -30,7 +30,7 @@ func authoringMappingFixture(t *testing.T) workspace.DefinitionAuthoringRecord {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = record.CompleteDerivation(first.PermitID, nil, "provider_failed")
+	record, err = completeTestDerivation(record, first.PermitID, nil, "provider_failed")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,15 +39,15 @@ func authoringMappingFixture(t *testing.T) workspace.DefinitionAuthoringRecord {
 		t.Fatal(err)
 	}
 	derived := workspace.DefinitionDerivedAcceptance{AuthoringInputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"补充验收"}}
-	record, err = record.CompleteDerivation(second.PermitID, &derived, "")
+	record, err = completeTestDerivation(record, second.PermitID, &derived, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, request, _, err := record.ReserveSpecification(workspace.DefinitionAuthoringSpecificationRequest{RequestID: "proposal", DerivationPermitID: second.PermitID, Phase: workspace.DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
+	record, request, _, err := record.ReserveSpecification(workspace.DefinitionAuthoringSpecificationRequest{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal", DerivationPermitID: second.PermitID, Phase: workspace.DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = record.CompleteSpecification(request.PermitID, nil, nil, "invalid_proposal")
+	record, err = completeTestSpecification(record, request.PermitID, nil, nil, "invalid_proposal")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,8 +65,12 @@ func TestAuthoringDTOConversionPreservesIdentityBudgetAndDetachedSnapshots(t *te
 	if err := dto.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	expected := record.Clone()
+	for i := range expected.DerivationRequests {
+		expected.DerivationRequests[i] = expected.DerivationRequests[i].Metadata()
+	}
 	model, err := dto.Model()
-	if err != nil || !reflect.DeepEqual(model, record) {
+	if err != nil || !reflect.DeepEqual(model, expected) {
 		t.Fatalf("创作记录往返改变来源或请求预算: %v", err)
 	}
 	if len(dto.TemplateSnapshot.SoulBindings) != 2 || dto.TemplateSnapshot.SoulBindings[0].Stage != "planning" {
@@ -131,8 +135,17 @@ func TestAuthoringHistoryDTOConversionPreservesAfterImagesAndIsolation(t *testin
 	record := authoringMappingFixture(t)
 	history := []workspace.DefinitionAuthoringConfirmedRevision{{Record: record, Confirmation: workspace.DefinitionAuthoringConfirmation{FormalSequence: 1, DoD: workspace.DoD{Items: []string{"正式验收"}}}}}
 	dto := DefinitionAuthoringHistoryDTOs(history)
+	expected := make([]workspace.DefinitionAuthoringConfirmedRevision, len(history))
+	for i := range history {
+		expected[i] = history[i].Clone()
+	}
+	for i := range expected {
+		for j := range expected[i].Record.DerivationRequests {
+			expected[i].Record.DerivationRequests[j] = expected[i].Record.DerivationRequests[j].Metadata()
+		}
+	}
 	models, err := workspaceevents.AuthoringHistoryModels(dto)
-	if err != nil || !reflect.DeepEqual(history, models) {
+	if err != nil || !reflect.DeepEqual(expected, models) {
 		t.Fatalf("历史往返改变 after-image: %v", err)
 	}
 	clone := dto[0].Clone()

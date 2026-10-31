@@ -32,7 +32,7 @@ func TestOwnerBoundAuthoringExactLedgerAcrossReloadAndSixReviews(t *testing.T) {
 	r, _ := authoringLedgerFixture(t)
 	r.DerivationRequests = nil
 	r.SpecificationRequests = nil
-	r, d, fresh, err := r.ReserveDerivation("v2-derive", "provider", nil, DefinitionAuthoringOwnerBoundV2)
+	r, d, fresh, err := r.ReserveDerivation("v2-derive", "provider", nil)
 	if err != nil || !fresh {
 		t.Fatal(err)
 	}
@@ -60,8 +60,8 @@ func TestOwnerBoundAuthoringExactLedgerAcrossReloadAndSixReviews(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(m, decoded) {
 		t.Fatal(err)
 	}
-	if _, err := DecodeDefinitionAuthoringMapping(a.Document.Content); err == nil {
-		t.Fatal("v2 silently accepted by v1")
+	if _, err := DecodeAuthoringMappingFor(DefinitionDerivationRequest{}, a.Document.Content); err == nil {
+		t.Fatal("missing current reservation accepted")
 	}
 	r, err = r.CompleteSpecificationMapping(req.PermitID, m, a)
 	if err != nil {
@@ -96,7 +96,7 @@ func TestOwnerBoundAuthoringExactLedgerAcrossReloadAndSixReviews(t *testing.T) {
 	if err = json.Unmarshal(bytes, &reload); err != nil || reload.Validate() != nil {
 		t.Fatalf("reload: %v %v", err, reload.Validate())
 	}
-	if _, _, fresh, err = reload.ReserveDerivation("v2-derive", "provider", nil, DefinitionAuthoringOwnerBoundV2); err != nil || fresh {
+	if _, _, fresh, err = reload.ReserveDerivation("v2-derive", "provider", nil); err != nil || fresh {
 		t.Fatal("replay issued second permit", err)
 	}
 	if _, _, fresh, err = reload.ReserveSpecification(req); err != nil || fresh {
@@ -123,11 +123,11 @@ func TestOwnerBoundAuthoringExactLedgerAcrossReloadAndSixReviews(t *testing.T) {
 		t.Fatal("wire drift accepted")
 	}
 }
-func TestOwnerBoundAuthoringClosedSemanticDocumentsAndLegacyIsolation(t *testing.T) {
+func TestOwnerBoundAuthoringClosedSemanticDocumentsRejectUnknownFields(t *testing.T) {
 	r, _ := authoringLedgerFixture(t)
 	r.DerivationRequests = nil
 	r.SpecificationRequests = nil
-	_, d, _, err := r.ReserveDerivation("v2", "provider", nil, DefinitionAuthoringOwnerBoundV2)
+	_, d, _, err := r.ReserveDerivation("v2", "provider", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,20 +136,7 @@ func TestOwnerBoundAuthoringClosedSemanticDocumentsAndLegacyIsolation(t *testing
 			t.Fatalf("accepted %s", raw)
 		}
 	}
-	if _, _, _, err := r.ReserveDerivation("v2", "provider", nil, "unknown"); err == nil {
-		t.Fatal("unknown wire selected")
-	}
+
 }
 
 // Frozen from 439b3428's schema, independently hashed from the original source.
-func TestLegacyOwnerBoundV2WireHashesRemainExact(t *testing.T) {
-	for phase, want := range map[string]string{
-		"derive":       "authoring-wire-sha256:018582e6f647621e4bc358b14e7852b28f5f4168fc282d620c34e61d6243d7ef",
-		"proposal":     "authoring-wire-sha256:81b01904bf5bbb4c85336898d7e53448d4a14ecc2cb2d9e5b8796d6118ad4421",
-		"traceability": "authoring-wire-sha256:b94dbe284446d1fb54e6d8b21ebddb2708b86aa7f700c516a261dcfef4efdc9f",
-	} {
-		if got := AuthoringWireHash(DefinitionAuthoringOwnerBoundV2, phase); got != want {
-			t.Fatalf("%s: old wire identity changed: %s", phase, got)
-		}
-	}
-}

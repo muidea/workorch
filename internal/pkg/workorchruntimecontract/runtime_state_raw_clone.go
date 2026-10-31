@@ -980,7 +980,7 @@ func cloneRuntimeDefinitionClarificationRequestRecordRaw(in RuntimeDefinitionCla
 
 func cloneRuntimeDefinitionClarificationStateRaw(in RuntimeDefinitionClarificationState) RuntimeDefinitionClarificationState {
 	out := in
-	out.RequestContractRepair = cloneRuntimeStateRawPointer(in.RequestContractRepair, cloneRuntimeSemanticRequestRepairProofRaw)
+
 	out.Observation = cloneRuntimeDefinitionGapObservationRaw(in.Observation)
 	out.Dispatch = cloneRuntimeStateRawPointer(in.Dispatch, func(item RuntimeDefinitionClarificationDispatch) RuntimeDefinitionClarificationDispatch {
 		return cloneRuntimeDefinitionClarificationDispatchRaw(item)
@@ -1873,10 +1873,6 @@ func cloneRuntimeSemanticPlanManifestRaw(in RuntimeSemanticPlanManifest) Runtime
 
 func cloneRuntimeSemanticPlanningGenerationRaw(in RuntimeSemanticPlanningGeneration) RuntimeSemanticPlanningGeneration {
 	out := in
-	out.RequestContractRepair = cloneRuntimeStateRawPointer(in.RequestContractRepair, func(v RuntimeSemanticRequestRepairRecord) RuntimeSemanticRequestRepairRecord {
-		v.Proof = cloneRuntimeSemanticRequestRepairProofRaw(v.Proof)
-		return v
-	})
 	out.InvalidationSignatures = cloneRuntimeStateRawSlice(in.InvalidationSignatures, func(item string) string { return item })
 	out.PrerequisiteIDs = cloneRuntimeStateRawSlice(in.PrerequisiteIDs, func(item string) string { return item })
 	out.ReopenedCoverageIDs = cloneRuntimeStateRawSlice(in.ReopenedCoverageIDs, func(item common.CoverageWorkItemID) common.CoverageWorkItemID { return item })
@@ -2303,14 +2299,5 @@ func cloneValidationScratchRaw(in ValidationScratch) ValidationScratch {
 func cloneWorkspaceManifestRaw(in WorkspaceManifest) WorkspaceManifest {
 	out := in
 	out.TargetRefs = cloneRuntimeStateRawSlice(in.TargetRefs, func(item string) string { return item })
-	return out
-}
-
-func cloneRuntimeSemanticRequestRepairProofRaw(in RuntimeSemanticRequestRepairProof) RuntimeSemanticRequestRepairProof {
-	out := in
-	out.Manifest = cloneRuntimeSemanticPlanManifestRaw(in.Manifest)
-	out.Expected = cloneRuntimeExpectedDocumentContractRaw(in.Expected)
-	out.Observation = cloneRuntimeDefinitionGapObservationRaw(in.Observation)
-	out.Dispatch = cloneRuntimeDefinitionClarificationDispatchRaw(in.Dispatch)
 	return out
 }

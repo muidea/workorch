@@ -99,7 +99,7 @@ func TestRuntimeValidationRecipeDeclarationIsExplicitAndAllowsNoArguments(t *tes
 func TestRuntimeValidationRecipeDeclarationAllowsOwnerAdapterWithoutExecutableAuthority(t *testing.T) {
 	policy := RuntimeEvidencePolicy{
 		ID: "project-native", AppliesTo: StepKindShellCommand,
-		RecipeDeclared: true, RecipeAdapterRef: "shell/project-native-validation/v1", RecipeTimeoutMillis: 60_000,
+		RecipeDeclared: true, RecipeAdapterRef: "shell/project-native-validation", RecipeTimeoutMillis: 60_000,
 	}
 	if err := policy.Validate(); err != nil {
 		t.Fatalf("owner-adapted validation declaration rejected: %v", err)

@@ -29,14 +29,14 @@ func TestSealedMappingPreservesIndependentGoalByteBoundary(t *testing.T) {
 					t.Fatal(err)
 				}
 				derived := DefinitionDerivedAcceptance{AuthoringInputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash}
-				record, err = record.CompleteDerivation(derivation.PermitID, &derived, "")
+				record, err = completeTestDerivation(record, derivation.PermitID, &derived, "")
 				if err != nil {
 					t.Fatal(err)
 				}
 				derivation = record.DerivationRequests[0]
 				mapping := mappingFixtureForDerivation(t, derivation)
 				audit := mappingAuditFixture(t, mapping)
-				decoded, err := DecodeDefinitionAuthoringMapping(audit.Document.Content)
+				decoded, err := DecodeAuthoringMappingFor(derivation, audit.Document.Content)
 				if err != nil {
 					t.Fatal(err)
 				}

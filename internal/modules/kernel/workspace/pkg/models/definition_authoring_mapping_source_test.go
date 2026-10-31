@@ -56,7 +56,7 @@ func TestSealedMappingRejectsSourceNamespaceAndCanonicalSourceKindDrift(t *testi
 			}
 		})
 	}
-	pending, request, _, err := record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: "source-kind", DerivationPermitID: derivation.PermitID, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "mock-provider"})
+	pending, request, _, err := record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "source-kind", DerivationPermitID: derivation.PermitID, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "mock-provider"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -164,7 +164,7 @@ func TestPreparationMCPRegistryRepositoryOriginalCASCloneAndReopen(t *testing.T)
 				case "duplicate":
 					bad.PreparationMCPRegistryEvidence = append(bad.PreparationMCPRegistryEvidence, e.Clone())
 				case "legacy":
-					bad.StartupPreparation.Version = workspace.WorkspacePreparationRecordVersion
+					bad.StartupPreparation.Version = "unsupported-preparation-contract"
 				}
 				if len(bad.PreparationMCPRegistryEvidence) != 0 {
 					e.ContentHash = e.Hash()

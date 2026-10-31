@@ -8,10 +8,10 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestShellV3CompositionPublishesOriginalDeclarationsWithoutExecution(t *testing.T) {
+func TestShellCurrentCompositionPublishesOriginalDeclarationsWithoutExecution(t *testing.T) {
 	recipe, requirement, _ := conjunctiveSourceRequirement(t)
 	recipe.AdapterRef = modulecommon.ValidationRecipeAdapterProjectConjunction
-	recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV3
+	recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 	item := runtimecontract.RuntimeCoverageItem{ID: requirement.CoverageWorkItemID, SourceScope: requirement.SourceScope, SourceID: requirement.SourceID, TargetText: "original criterion"}
 	rules := []runtimecontract.RuntimeLineageAssertionRule{{Ref: "delivery", Kind: runtimecontract.RuntimeLineageDeliveryAcknowledgements, ConsumptionPoint: runtimecontract.RuntimeProofPhasePostTerminalDelivery}}
 	var err error
@@ -22,7 +22,7 @@ func TestShellV3CompositionPublishesOriginalDeclarationsWithoutExecution(t *test
 	requirement.Hash = runtimecontract.StableRuntimeValidationProofRequirementHash(requirement)
 	checks, supported := shellValidationCheckAttestations(recipe, requirement)
 	if !supported {
-		t.Fatal("v3 project adapter unavailable")
+		t.Fatal("current project adapter unavailable")
 	}
 	target := shellValidationNativeCheckTargetRef(requirement, checks...)
 	directory := t.TempDir()
@@ -37,7 +37,7 @@ func TestShellV3CompositionPublishesOriginalDeclarationsWithoutExecution(t *test
 	if err := binding.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if binding.InputReview.ProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocolV3 || !reflect.DeepEqual(binding.InputReview.LineageAssertions, requirement.LineageAssertions) {
+	if binding.InputReview.ProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocol || !reflect.DeepEqual(binding.InputReview.LineageAssertions, requirement.LineageAssertions) {
 		t.Fatal("owner altered Definition consumers")
 	}
 	binding.InputReview.LineageAssertions[0].SourceTextHash = "changed"
@@ -48,10 +48,10 @@ func TestShellV3CompositionPublishesOriginalDeclarationsWithoutExecution(t *test
 		t.Fatal("owner leaked caller declaration slice")
 	}
 	for _, adapter := range []string{modulecommon.ValidationRecipeAdapterIsolatedEntrypoint, modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint} {
-		unsupported := recipe
-		unsupported.AdapterRef = adapter
-		if len(resolveRuntimeValidationRecipeDeclarations([]runtimecontract.RuntimeValidationRecipe{unsupported}, manifest.Manifest)) != 0 {
-			t.Fatal("v3 silently widened unsupported adapter")
+		reviewed := recipe
+		reviewed.AdapterRef = adapter
+		if len(resolveRuntimeValidationRecipeDeclarations([]runtimecontract.RuntimeValidationRecipe{reviewed}, manifest.Manifest)) != 1 {
+			t.Fatal("current review contract rejected independent reviewed adapter")
 		}
 	}
 }

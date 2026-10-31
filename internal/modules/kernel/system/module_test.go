@@ -8,6 +8,7 @@ import (
 
 	mcpregistrybiz "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/biz"
 	soulbiz "github.com/muidea/workorch/internal/modules/blocks/soul/biz"
+	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	systembiz "github.com/muidea/workorch/internal/modules/kernel/system/biz"
 	workspacebiz "github.com/muidea/workorch/internal/modules/kernel/workspace/biz"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
@@ -176,6 +177,8 @@ func TestSystemModuleStartConvergesAfterPartialFailureWithoutOverwritingUserChan
 	customSoul := seededSouls[0]
 	customSoul.Name = "user-customized soul"
 	customSoul.AllowedSkillRefs = []string{"user-customized-skill"}
+	customSoul.SourceProvenance = soulmodel.SoulSourceUserManaged
+	customSoul.ContentHash = soulmodel.StableSoulContentHash(customSoul)
 	if err := souls.Update(ctx, customSoul); err != nil {
 		t.Fatalf("customize seeded soul: %v", err)
 	}
@@ -281,6 +284,8 @@ func TestSystemFreshProcessConvergesFileBackedPartialStartupWithoutOverwritingUs
 	}
 	customSoul := seededSouls[0]
 	customSoul.Name = "fresh-process customized soul"
+	customSoul.SourceProvenance = soulmodel.SoulSourceUserManaged
+	customSoul.ContentHash = soulmodel.StableSoulContentHash(customSoul)
 	if err := freshSouls.Update(ctx, customSoul); err != nil {
 		t.Fatal(err)
 	}

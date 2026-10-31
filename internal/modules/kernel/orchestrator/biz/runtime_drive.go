@@ -253,18 +253,7 @@ func (m *Biz) driveRuntime(ctx context.Context, command orchestratorevents.Drive
 	if loadErr != nil && !errors.Is(loadErr, common.ErrNotFound) {
 		return orchestratorevents.DriveRuntimeResult{}, loadErr
 	}
-	if loadErr == nil && current.DefinitionClarification != nil {
-		recovered, changed, repairErr := m.recoverRuntimeSemanticRequestContract(ctx, command.WorkspaceID, command.RunID)
-		if repairErr != nil {
-			return orchestratorevents.DriveRuntimeResult{}, repairErr
-		}
-		if changed {
-			if _, err := m.deliverPersistedRuntimeGovernanceContinuation(ctx, command.WorkspaceID, command.RunID); err != nil {
-				return orchestratorevents.DriveRuntimeResult{}, err
-			}
-			return runtimeTerminalDriveResult(recovered), nil
-		}
-	}
+
 	driveAttempted = true
 	result, driveErr := m.driveRuntimeLocked(ctx, command)
 	driveSucceeded = driveErr == nil
@@ -641,9 +630,7 @@ func (m *Biz) driveAndProjectRuntimeLocked(ctx context.Context, workspaceID comm
 }
 
 func (m *Biz) driveAndProjectRuntimeLockedWithCommand(ctx context.Context, command orchestratorevents.DriveRuntimeCommand) error {
-	if _, _, err := m.recoverRuntimeSemanticRequestContract(ctx, command.WorkspaceID, command.RunID); err != nil {
-		return err
-	}
+
 	continuationDelivered, err := m.deliverPersistedRuntimeGovernanceContinuation(ctx, command.WorkspaceID, command.RunID)
 	if err != nil {
 		return err

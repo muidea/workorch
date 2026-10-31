@@ -14,7 +14,7 @@ import (
 
 const RuntimeValidationFailureDetailLimit = 32
 
-const RuntimeValidationFailureDetailProtocolV2 = "validation/check-failure/v2"
+const RuntimeValidationFailureDetailProtocol = "validation/check-failure"
 
 // RuntimeValidationReportedAssertion is a failed check's bounded diagnostic
 // report, NOT an independently observed value or an acceptance attestation.
@@ -133,7 +133,7 @@ func (o RuntimeValidationObservation) ValidateFailureDetails() error {
 		len(RuntimeValidationConflictingChecks(o)) != 0) {
 		return fmt.Errorf("classified validation proof requires complete passing native checks")
 	}
-	if o.FailureDetailProtocolRef != "" && (o.FailureDetailProtocolRef != RuntimeValidationFailureDetailProtocolV2 || len(o.FailedChecks) == 0) {
+	if o.FailureDetailProtocolRef != "" && (o.FailureDetailProtocolRef != RuntimeValidationFailureDetailProtocol || len(o.FailedChecks) == 0) {
 		return fmt.Errorf("unsupported validation failure detail protocol or missing failed check")
 	}
 	if len(o.CheckFailures) > RuntimeValidationFailureDetailLimit {
@@ -238,7 +238,7 @@ func RuntimeValidationFailureFingerprint(fact EvidenceFact, bindings ...Coverage
 	diagnostics := make([]string, 0, len(o.CheckFailures))
 	for _, detail := range o.CheckFailures {
 		digest := detail.DiagnosticHash
-		if o.FailureDetailProtocolRef == RuntimeValidationFailureDetailProtocolV2 {
+		if o.FailureDetailProtocolRef == RuntimeValidationFailureDetailProtocol {
 			digest = detail.ComparisonHash
 		}
 		diagnostics = append(diagnostics, strings.Join([]string{detail.CheckRef, detail.CaseRef, detail.PackageRef, digest}, "\x00"))

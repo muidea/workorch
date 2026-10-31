@@ -167,6 +167,8 @@ func implementationWorkReceiptFixture(t *testing.T, ledger *RuntimeImplementatio
 	execution.AuthorityHash = StableRuntimeOperationExecutionAuthorityHash(execution)
 	receipt := RuntimeOperationReceipt{OperationID: op.ID, ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, Outcome: RuntimeOperationOutcomeAccepted,
 		ObservedEffectScope: RuntimeEffectWorkspaceDurable, Changed: true, TargetRefs: []string{"resource-a"}, BeforeHash: "before", AfterHash: "after", Evidence: RuntimeOperationEvidence{Quality: common.EvidenceQualityValid}}.Normalized()
+	dependency := r.WorkingBinding.CatalogObservation.Dependencies[0]
+	receipt.ResourceChanges = []RuntimeResourceChange{{OwnerModuleID: dependency.OwnerModuleID, Domain: dependency.Domain, SubjectRef: dependency.SubjectRef, BeforeRevision: dependency.Revision, AfterRevision: "fresh-tree"}}
 	evidence := EvidenceFact{ID: execution.EvidenceFactID, Kind: EvidenceKindStateChange, DispatchID: r.DispatchID, OperationID: op.ID, SourceRef: execution.OwnerReceiptRef, TargetRefs: []string{"resource-a"}, Quality: common.EvidenceQualityValid}
 	execution.EvidenceFactHash = StableRuntimeEvidenceFactHash(evidence)
 	execution.OwnerReceiptHash = StableRuntimeOperationReceiptHash(receipt)
@@ -279,12 +281,13 @@ func TestImplementationWorkCollectiveReceiptsRejectNoOpPartialStaleAndCrossSourc
 			m.Evidence.ContentHash = "invented"
 			m.Execution.EvidenceFactHash = StableRuntimeEvidenceFactHash(m.Evidence)
 		},
-		"wrong owner":      func(m *RuntimeImplementationWorkReceiptMember) { m.OwnerModuleID = RuntimeModuleShell },
-		"owner whitespace": func(m *RuntimeImplementationWorkReceiptMember) { m.OwnerModuleID = " " + RuntimeModuleFile },
-		"wrong key":        func(m *RuntimeImplementationWorkReceiptMember) { m.Receipt.ExecutionKey = "other" },
-		"wrong fence":      func(m *RuntimeImplementationWorkReceiptMember) { m.Receipt.Fence++ },
-		"wrong operation":  func(m *RuntimeImplementationWorkReceiptMember) { m.Receipt.OperationID = "other" },
-		"wrong targets":    func(m *RuntimeImplementationWorkReceiptMember) { m.Receipt.TargetRefs = []string{"resource-b"} },
+		"missing resource chain": func(m *RuntimeImplementationWorkReceiptMember) { m.Receipt.ResourceChanges = nil },
+		"wrong owner":            func(m *RuntimeImplementationWorkReceiptMember) { m.OwnerModuleID = RuntimeModuleShell },
+		"owner whitespace":       func(m *RuntimeImplementationWorkReceiptMember) { m.OwnerModuleID = " " + RuntimeModuleFile },
+		"wrong key":              func(m *RuntimeImplementationWorkReceiptMember) { m.Receipt.ExecutionKey = "other" },
+		"wrong fence":            func(m *RuntimeImplementationWorkReceiptMember) { m.Receipt.Fence++ },
+		"wrong operation":        func(m *RuntimeImplementationWorkReceiptMember) { m.Receipt.OperationID = "other" },
+		"wrong targets":          func(m *RuntimeImplementationWorkReceiptMember) { m.Receipt.TargetRefs = []string{"resource-b"} },
 		"cross dispatch": func(m *RuntimeImplementationWorkReceiptMember) {
 			m.Execution.ExecutionKey = StableRuntimeOperationExecutionKey("ws-1", "run-1", "other", "op-1")
 			m.Receipt.ExecutionKey = m.Execution.ExecutionKey

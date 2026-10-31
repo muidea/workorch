@@ -34,7 +34,6 @@ type DefinitionClarificationBinding struct {
 	FocusRef                    string
 	LogicalRequestID            string
 	SemanticDocumentHash        string
-	RequestContractRepairHash   string `json:",omitempty"`
 	ResolutionID                common.ResolutionID
 	ResolutionBindingHash       string
 	ResolutionCandidateID       string

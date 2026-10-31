@@ -8,26 +8,26 @@ import (
 	rc "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-const semanticWorkContextRefV5 = "C3.workContext"
-const semanticSharedWorkInstructionV5 = " For contextEncoding=semantic-render/shared-work/v5, workContext is the complete C3 work context (C4.workContextRef points here). Each prior-round target contains either its full value or receiptSequence referencing the same dispatch in C4.executionHistory.receipts; expand that receipt to operationId, targetRefs, receiptRef/hash, beforeHash, afterHash and changed. No history, original requirement or current resource content is omitted by these exact local references."
+const semanticWorkContextRef = "C3.workContext"
+const semanticSharedWorkInstruction = " For contextEncoding=semantic/shared-work, workContext is the complete C3 work context (C4.workContextRef points here). Each prior-round target contains either its full value or receiptSequence referencing the same dispatch in C4.executionHistory.receipts; expand that receipt to operationId, targetRefs, receiptRef/hash, beforeHash, afterHash and changed. No history, original requirement or current resource content is omitted by these exact local references."
 
 // This wire-only view is lossless. A receiptSequence is a local reference to
 // C4.executionHistory.receipts, never an owner receipt or authority substitute.
-type runtimeSemanticWorkProjectionV5 struct {
+type runtimeSemanticWorkProjection struct {
 	Content     *rc.RuntimeImplementationWorkContent `json:"content"`
-	PriorRounds []runtimeSemanticWorkRoundV5         `json:"priorRounds"`
+	PriorRounds []runtimeSemanticWorkRoundProjection `json:"priorRounds"`
 	Intent      *rc.RuntimeImplementationIntent      `json:"intent,omitempty"`
 }
 
-type runtimeSemanticWorkRoundV5 struct {
-	Ordinal        int                             `json:"ordinal"`
-	DispatchID     string                          `json:"dispatchId"`
-	ReceiptSetHash string                          `json:"receiptSetHash"`
-	Targets        []runtimeSemanticWorkTargetV5   `json:"targets"`
-	Intent         *rc.RuntimeImplementationIntent `json:"intent,omitempty"`
+type runtimeSemanticWorkRoundProjection struct {
+	Ordinal        int                                   `json:"ordinal"`
+	DispatchID     string                                `json:"dispatchId"`
+	ReceiptSetHash string                                `json:"receiptSetHash"`
+	Targets        []runtimeSemanticWorkTargetProjection `json:"targets"`
+	Intent         *rc.RuntimeImplementationIntent       `json:"intent,omitempty"`
 }
 
-type runtimeSemanticWorkTargetV5 struct {
+type runtimeSemanticWorkTargetProjection struct {
 	ReceiptSequence int                           `json:"receiptSequence,omitempty"`
 	Value           *rc.RuntimeSemanticWorkTarget `json:"value,omitempty"`
 }
@@ -37,23 +37,23 @@ func semanticWorkTargetFromReceipt(r rc.RuntimeSemanticReceiptObservation) rc.Ru
 		ReceiptRef: r.ReceiptRef, ReceiptHash: r.ReceiptHash, BeforeHash: r.BeforeHash, AfterHash: r.AfterHash, Changed: r.Changed}
 }
 
-func compactSemanticWorkContext(c *rc.RuntimeSemanticWorkContext, h rc.RuntimeSemanticExecutionHistory) *runtimeSemanticWorkProjectionV5 {
+func compactSemanticWorkContext(c *rc.RuntimeSemanticWorkContext, h rc.RuntimeSemanticExecutionHistory) *runtimeSemanticWorkProjection {
 	if c == nil {
 		return nil
 	}
 	c = c.Clone()
-	v := &runtimeSemanticWorkProjectionV5{Content: c.Content, Intent: c.Intent}
+	v := &runtimeSemanticWorkProjection{Content: c.Content, Intent: c.Intent}
 	if c.PriorRounds != nil {
-		v.PriorRounds = make([]runtimeSemanticWorkRoundV5, len(c.PriorRounds))
+		v.PriorRounds = make([]runtimeSemanticWorkRoundProjection, len(c.PriorRounds))
 	}
 	for n, round := range c.PriorRounds {
-		r := runtimeSemanticWorkRoundV5{Ordinal: round.Ordinal, DispatchID: round.DispatchID, ReceiptSetHash: round.ReceiptSetHash, Intent: round.Intent}
+		r := runtimeSemanticWorkRoundProjection{Ordinal: round.Ordinal, DispatchID: round.DispatchID, ReceiptSetHash: round.ReceiptSetHash, Intent: round.Intent}
 		if round.Targets != nil {
-			r.Targets = make([]runtimeSemanticWorkTargetV5, len(round.Targets))
+			r.Targets = make([]runtimeSemanticWorkTargetProjection, len(round.Targets))
 		}
 		for j, target := range round.Targets {
 			value := target
-			t := runtimeSemanticWorkTargetV5{Value: &value}
+			t := runtimeSemanticWorkTargetProjection{Value: &value}
 			matches, sequence := 0, 0
 			for _, receipt := range h.Receipts {
 				if receipt.DispatchID == round.DispatchID && reflect.DeepEqual(target, semanticWorkTargetFromReceipt(receipt)) {
@@ -62,7 +62,7 @@ func compactSemanticWorkContext(c *rc.RuntimeSemanticWorkContext, h rc.RuntimeSe
 				}
 			}
 			if matches == 1 && sequence > 0 {
-				t = runtimeSemanticWorkTargetV5{ReceiptSequence: sequence}
+				t = runtimeSemanticWorkTargetProjection{ReceiptSequence: sequence}
 			}
 			r.Targets[j] = t
 		}
@@ -71,7 +71,7 @@ func compactSemanticWorkContext(c *rc.RuntimeSemanticWorkContext, h rc.RuntimeSe
 	return v
 }
 
-func expandSemanticWorkContext(v *runtimeSemanticWorkProjectionV5, h rc.RuntimeSemanticExecutionHistory) (*rc.RuntimeSemanticWorkContext, error) {
+func expandSemanticWorkContext(v *runtimeSemanticWorkProjection, h rc.RuntimeSemanticExecutionHistory) (*rc.RuntimeSemanticWorkContext, error) {
 	if v == nil {
 		return nil, nil
 	}
@@ -112,5 +112,5 @@ func runtimeSemanticSharedWorkOutputInstruction(c rc.RuntimeSemanticPlanRequestC
 	if c.WorkContext == nil {
 		return runtimeSemanticOutputInstruction(c, m)
 	}
-	return strings.ReplaceAll(runtimeSemanticOutputInstruction(c, m), "C4 workContext", "C3 workContext") + semanticSharedWorkInstructionV5
+	return strings.ReplaceAll(runtimeSemanticOutputInstruction(c, m), "C4 workContext", "C3 workContext") + semanticSharedWorkInstruction
 }

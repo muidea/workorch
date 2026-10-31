@@ -17,7 +17,7 @@ func applicabilityProjectionFixture(t *testing.T) RuntimeStateRecord {
 	set.Entries[0].Revision = "independent-postcondition"
 	set.Entries[0].DependencyHash = "postcondition-selector"
 	set = set.WithHash()
-	fact.ApplicabilityDependencies = &RuntimeEvidenceApplicabilityDependencies{ProtocolRef: RuntimeEvidenceApplicabilityDependenciesV1, OwnerRevisionSet: set}
+	fact.ApplicabilityDependencies = &RuntimeEvidenceApplicabilityDependencies{ProtocolRef: RuntimeEvidenceApplicabilityDependenciesProtocol, OwnerRevisionSet: set}
 	return source
 }
 

@@ -19,7 +19,7 @@ func TestAuthoringDTOClonesPersistedProposalAndReviewWithoutRehashing(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, request, _, err := record.ReserveSpecification(workspace.DefinitionAuthoringSpecificationRequest{RequestID: "second-proposal", DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
+	record, request, _, err := record.ReserveSpecification(workspace.DefinitionAuthoringSpecificationRequest{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "proposal"), RequestID: "second-proposal", DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestAuthoringDTOClonesPersistedProposalAndReviewWithoutRehashing(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, request, _, err = record.ReserveSpecification(workspace.DefinitionAuthoringSpecificationRequest{RequestID: "critic", DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationCritic, ReviewKind: "dimension_coverage", ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"})
+	record, request, _, err = record.ReserveSpecification(workspace.DefinitionAuthoringSpecificationRequest{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "dimension_coverage"), RequestID: "critic", DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationCritic, ReviewKind: "dimension_coverage", ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,12 +36,15 @@ func TestAuthoringDTOClonesPersistedProposalAndReviewWithoutRehashing(t *testing
 		t.Fatal(err)
 	}
 	review := workspace.GoalSpecificationCompletenessReview{Kind: request.ReviewKind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立审查", EvidenceRefs: []string{items[0].CandidateItemRef}, RequirementIDs: ids}
-	record, err = record.CompleteSpecification(request.PermitID, nil, &review, "")
+	record, err = completeTestSpecification(record, request.PermitID, nil, &review, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	dto := DefinitionAuthoringRecordDTO(record)
 	expected := record.Clone()
+	for i := range expected.DerivationRequests {
+		expected.DerivationRequests[i] = expected.DerivationRequests[i].Metadata()
+	}
 	for i := range expected.SpecificationRequests {
 		expected.SpecificationRequests[i] = expected.SpecificationRequests[i].Metadata()
 	}

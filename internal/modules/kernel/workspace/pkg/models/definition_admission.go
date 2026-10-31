@@ -93,8 +93,8 @@ type DefinitionAdmissionCandidate struct {
 	AdmissionCompilerVersion          string
 	ResolvedProjectWorkspaceDirectory string
 	ProposedRelationInputs            []DefinitionProposedRelationInput
-	// Specification is an optional v1 pre-seal admission proposal. Nil retains
-	// the exact historical candidate schema and hash.
+	// Specification carries a pre-seal proposal when one is supplied.
+	// All candidates use the same current schema and owner admission gates.
 	Specification *GoalSpecification
 	// Optional owner compilation identity. Nil preserves archived specifications.
 	CompilationRef *DefinitionSpecificationCompilationRef

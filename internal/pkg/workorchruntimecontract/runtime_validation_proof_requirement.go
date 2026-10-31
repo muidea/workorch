@@ -87,7 +87,7 @@ func (r RuntimeValidationProofRequirement) Validate() error {
 		return err
 	}
 	for _, assertion := range r.LineageAssertions {
-		goalConsumer := assertion.Rule.ExecutionSourceContractRef == RuntimeGoalSourceExecutionProofV2 && assertion.SourceScope == "goal" && r.SourceScope == "dodItem"
+		goalConsumer := assertion.Rule.ExecutionSourceContractRef == RuntimeGoalSourceExecutionProof && assertion.SourceScope == "goal" && r.SourceScope == "dodItem"
 		if !goalConsumer && (assertion.SourceScope != r.SourceScope || assertion.SourceID != r.SourceID) {
 			return fmt.Errorf("validation composition assertion differs from original CWI source")
 		}

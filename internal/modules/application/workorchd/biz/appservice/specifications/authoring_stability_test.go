@@ -37,17 +37,17 @@ func stabilityDerivation(t *testing.T, id, goal string, wireRefs ...string) work
 	}
 	input := workspace.DefinitionAuthoringInput{Version: 1, WorkspaceID: common.WorkspaceID(id), Revision: 1, TemplateID: template.ID, GoalText: goal}
 	record := workspace.DefinitionAuthoringRecord{Input: input, InputHash: input.InputHash(), TemplateSnapshot: template, TemplateSnapshotHash: workspace.WorkspaceTemplateSnapshotHash(&template)}
-	wire := workspace.DefinitionAuthoringOwnerBoundV2
+	wire := workspace.DefinitionAuthoringOwnerBound
 	if len(wireRefs) != 0 {
 		wire = wireRefs[0]
 	}
-	record, d, _, err := record.ReserveDerivation("derive-stability", "provider", nil, wire)
+	record, d, _, err := record.ReserveDerivation("derive-stability", "provider", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	derived := workspace.DefinitionDerivedAcceptance{AuthoringInputHash: input.InputHash(), TemplateSnapshotHash: record.TemplateSnapshotHash}
 	if wire == "" {
-		record, err = record.CompleteDerivation(d.PermitID, &derived, "")
+		record, err = completeTestDerivation(record, d.PermitID, &derived, "")
 	} else {
 		raw := []byte(" {\"AdditionalItems\":[]}\r\n")
 		derived, err = workspace.DecodeOwnerBoundDerivation(d, raw)
@@ -141,7 +141,7 @@ func TestAuthoringStableSingleReferenceRetainsMergedTerminalConsumers(t *testing
 }
 
 func TestAuthoringStabilityReplaysOriginalDocumentsWithoutChangingFailureOrCoverage(t *testing.T) {
-	for _, wire := range []string{"", workspace.DefinitionAuthoringOwnerBoundV2, workspace.DefinitionAuthoringOwnerBoundV3} {
+	for _, wire := range []string{workspace.DefinitionAuthoringOwnerBound} {
 		d := stabilityDerivation(t, "ws-review-replay", "保持完整需求与真实失败", wire)
 		p := stabilityProposal(t, d)
 		before, _ := json.Marshal(d)
@@ -190,8 +190,8 @@ func TestAuthoringStabilityReplaysOriginalDocumentsWithoutChangingFailureOrCover
 
 func TestAuthoringStabilityConcurrentWorkspacesPreserveExactContexts(t *testing.T) {
 	// Same Profile, unrelated projects; no shared mutable prompt or candidate.
-	first := stabilityDerivation(t, "ws-project-a", "实现音乐分类项目", workspace.DefinitionAuthoringOwnerBoundV3)
-	second := stabilityDerivation(t, "ws-project-b", "实现库存统计项目", workspace.DefinitionAuthoringOwnerBoundV3)
+	first := stabilityDerivation(t, "ws-project-a", "实现音乐分类项目", workspace.DefinitionAuthoringOwnerBound)
+	second := stabilityDerivation(t, "ws-project-b", "实现库存统计项目", workspace.DefinitionAuthoringOwnerBound)
 	firstProposal, secondProposal := stabilityProposal(t, first), stabilityProposal(t, second)
 	target := runtimecontract.ProviderModelTarget{ProviderID: "mock", ModelID: "model"}
 	var wg sync.WaitGroup
@@ -224,7 +224,7 @@ func TestAuthoringStabilityConcurrentWorkspacesPreserveExactContexts(t *testing.
 }
 
 func TestRequiredPurposeV3ProductionCompilerAndReviewInputs(t *testing.T) {
-	d := stabilityDerivation(t, "ws-v3-required", "保留完整原义务并完成交付", workspace.DefinitionAuthoringOwnerBoundV3)
+	d := stabilityDerivation(t, "ws-v3-required", "保留完整原义务并完成交付", workspace.DefinitionAuthoringOwnerBound)
 	p := stabilityProposal(t, d)
 	if len(p.EvidencePurposeMappings) != 1 || p.EvidencePurposeMappings[0].HistoricalText == "" {
 		t.Fatal("minimal provider choice did not compile full mapping")

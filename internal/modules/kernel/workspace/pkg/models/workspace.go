@@ -79,7 +79,7 @@ type Workspace struct {
 	PreparationSkillHubEffects         []WorkspacePreparationSkillHubEffects         `json:"-"`
 	FirstExecutionPreparationEvidence  *WorkspaceFirstExecutionPreparationEvidence   `json:"-"`
 	// PreparationFence is owner-private coordination, not execution authority.
-	// A nil fence is legacy; ordinary updates must never invent a creation epoch.
+	// An absent creation fence grants no execution; updates must not invent its epoch.
 	PreparationFence *WorkspacePreparationFence
 	// TerminalDelivery is the Workspace owner's persisted release fence. It is
 	// written only by the lifecycle reducer and never by generic metadata update.

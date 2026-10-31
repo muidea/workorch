@@ -20,7 +20,7 @@ func reviewedDefinitionChangeFixture(t *testing.T) (*Workspace, DefinitionChange
 	}
 	derived := *original.DerivationRequests[0].Proposal
 	derived.AuthoringInputHash = record.InputHash
-	record, err = record.CompleteDerivation(derivation.PermitID, &derived, "")
+	record, err = completeTestDerivation(record, derivation.PermitID, &derived, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func reviewedDefinitionChangeFixture(t *testing.T) (*Workspace, DefinitionChange
 	proposal.Requirements[0].Text = record.Input.GoalText
 	_, _, proposal = currentProposalFixture(t, record.DerivationRequests[len(record.DerivationRequests)-1], proposal)
 	var request DefinitionAuthoringSpecificationRequest
-	record, request, _, err = record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: "candidate-proposal", DerivationPermitID: derivation.PermitID, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
+	record, request, _, err = record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "candidate-proposal", DerivationPermitID: derivation.PermitID, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,12 +37,12 @@ func reviewedDefinitionChangeFixture(t *testing.T) (*Workspace, DefinitionChange
 		t.Fatal(err)
 	}
 	for _, kind := range goalReviewKinds {
-		record, request, _, err = record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: "candidate-review-" + kind, DerivationPermitID: derivation.PermitID, Phase: DefinitionSpecificationCritic, ReviewKind: kind, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"})
+		record, request, _, err = record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, kind), RequestID: "candidate-review-" + kind, DerivationPermitID: derivation.PermitID, Phase: DefinitionSpecificationCritic, ReviewKind: kind, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		review := GoalSpecificationCompletenessReview{Kind: kind, Status: GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立完整覆盖", EvidenceRefs: []string{DefinitionAuthoringGoalItemRef}, RequirementIDs: currentRequiredRequirementIDsFixture(proposal)}
-		record, err = record.CompleteSpecification(request.PermitID, nil, &review, "")
+		record, err = completeTestSpecification(record, request.PermitID, nil, &review, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -57,6 +57,9 @@ func reviewedDefinitionChangeFixture(t *testing.T) (*Workspace, DefinitionChange
 
 func reviewedDefinitionChangeMetadata(c DefinitionChangeCandidate) DefinitionChangeCandidate {
 	c = c.Clone()
+	for i := range c.Record.DerivationRequests {
+		c.Record.DerivationRequests[i] = c.Record.DerivationRequests[i].Metadata()
+	}
 	for n := range c.Record.SpecificationRequests {
 		c.Record.SpecificationRequests[n] = c.Record.SpecificationRequests[n].Metadata()
 	}

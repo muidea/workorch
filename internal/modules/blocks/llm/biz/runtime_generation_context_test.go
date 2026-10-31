@@ -230,8 +230,9 @@ func TestRuntimeGenerationContextIntegrityRejectsLostForgedAndForeignSource(t *t
 				expected.Resources.OperationAdmissibilities = nil
 			}
 			data, err := json.Marshal(struct {
-				Context runtimeCandidateAuthorityProjection `json:"context"`
-			}{actual})
+				Context  runtimeCandidateAuthorityProjection `json:"context"`
+				Decision struct{ FocusRef string }           `json:"decision"`
+			}{Context: actual, Decision: struct{ FocusRef string }{"context.focus"}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -253,7 +254,7 @@ func TestRuntimeGenerationContextIntegrityRejectsLostForgedAndForeignSource(t *t
 			if scenario == "invented source" {
 				manifest.OwnerFactDependencyCatalogs = nil
 			}
-			data, err = json.Marshal(runtimeSemanticAuthorityProjection{Manifest: projection, OutputInstruction: runtimeSemanticOutputInstruction(semantic.SemanticContext, manifest)})
+			data, err = json.Marshal(runtimeSemanticAuthorityProjection{ContextEncoding: runtimecontract.RuntimeSemanticContextEncoding, Manifest: projection, OutputInstruction: runtimeSemanticOutputInstruction(semantic.SemanticContext, manifest)})
 			if err != nil {
 				t.Fatal(err)
 			}

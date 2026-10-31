@@ -20,7 +20,7 @@ func shellProjectDiagnosticInputCurrent(directory string, request RuntimeCommand
 	if binding.InputReview == nil || binding.InputReview.DiagnosticSourceContractRef != runtimecontract.RuntimeValidationDiagnosticSourceReviewV1 || binding.Validate() != nil || !slices.Equal(binding.CheckAttestations, request.ValidationCheckAttestations) {
 		return false
 	}
-	current, code := shellVersionedInputReview(directory, request.ValidationScopeTargetRefs, binding)
+	current, code := shellInputReview(directory, request.ValidationScopeTargetRefs, binding)
 	if code != "" {
 		return false
 	}
@@ -119,8 +119,8 @@ func runShellProjectMultiFailureDiagnostic(ctx context.Context, directory string
 	if baseline.ValidationObservation == nil || baseline.ValidationObservation.ValidateFailureDetails() != nil || baseline.ValidationObservation.FailureDetailsTruncated {
 		return nil, nil, nil
 	}
-	// The parser's legacy JSON protocol is only an owner-local decode result.
-	// The version selected by the sealed project binding must survive receipt
+	// The basic JSON parser produces an owner-local decode result.
+	// The exact capability selected by the sealed project binding must survive receipt
 	// projection; otherwise the original stages/raw references would be lost.
 	baseline.ValidationObservation.ObservationProtocolRef = shellProjectMultiFailureDiagnosticProtocolRef
 	coveragePackages, err := shellIsolatedCoveragePackages(directory, request.ValidationScopeTargetRefs, "")

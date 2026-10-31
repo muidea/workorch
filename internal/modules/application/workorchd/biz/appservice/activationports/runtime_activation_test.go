@@ -20,21 +20,21 @@ func TestCompileRuntimeEvidencePoliciesPreservesOwnerAdapterDeclaration(t *testi
 	policies, err := compileRuntimeEvidencePolicies("software-dev", []workorcheventpayload.Payload{workorcheventpayload.New(
 		workorcheventpayload.StringField("id", "project-native"),
 		workorcheventpayload.StringField("appliesTo", runtimecontract.StepKindShellCommand),
-		workorcheventpayload.StringField("recipeAdapterRef", "shell/project-native-validation/v1"),
+		workorcheventpayload.StringField("recipeAdapterRef", "shell/project-native-validation"),
 		workorcheventpayload.BoolField("recipeDeclared", true),
 		workorcheventpayload.IntField("recipeTimeoutMillis", 60_000),
 	)})
 	if err != nil {
 		t.Fatalf("compile owner-adapter evidence policy: %v", err)
 	}
-	if len(policies) != 1 || policies[0].RecipeAdapterRef != "shell/project-native-validation/v1" ||
+	if len(policies) != 1 || policies[0].RecipeAdapterRef != "shell/project-native-validation" ||
 		policies[0].CommandName != "" || len(policies[0].RecipeArgs) != 0 {
 		t.Fatalf("compiled owner-adapter evidence policy = %+v", policies)
 	}
 }
 
 func TestCompileRuntimeEvidencePoliciesSealsInputReviewProtocolForNewActivation(t *testing.T) {
-	for _, ref := range []string{"", runtimecontract.RuntimeValidationInputReviewProtocolV2, "unsupported"} {
+	for _, ref := range []string{"", runtimecontract.RuntimeValidationInputReviewProtocol, "unsupported"} {
 		policies, err := compileRuntimeEvidencePolicies("review-profile", []workorcheventpayload.Payload{workorcheventpayload.New(
 			workorcheventpayload.StringField("id", "review"), workorcheventpayload.StringField("appliesTo", runtimecontract.StepKindShellCommand),
 			workorcheventpayload.StringField("recipeAdapterRef", "owner/review/v1"), workorcheventpayload.BoolField("recipeDeclared", true),

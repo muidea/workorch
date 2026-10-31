@@ -115,14 +115,14 @@ func TestAuthoringProcessDerivationPermitRecovery(t *testing.T) {
 		if _, err := owners.workspace.createDefinitionAuthoring(ctx, create); err != nil {
 			t.Fatal(err)
 		}
-		reserve := workspaceevents.ReserveDefinitionDerivationCommand{WorkspaceID: id, InputHash: input.InputHash(), RequestID: "original-derive", ProviderBindingHash: "provider", ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil)}
+		reserve := workspaceevents.ReserveDefinitionDerivationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "derive"), WorkspaceID: id, InputHash: input.InputHash(), RequestID: "original-derive", ProviderBindingHash: "provider", ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil)}
 		result, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, DeriveReserve: &reserve})
 		if err != nil || result.Derivation.FreshPermitID == "" {
 			t.Fatalf("首次持久 reserve: %v", err)
 		}
 		if os.Getenv(helperCut) == "completed" {
 			derived := workspace.DefinitionDerivedAcceptance{AuthoringInputHash: input.InputHash(), TemplateSnapshotHash: workspace.WorkspaceTemplateSnapshotHash(&template), AdditionalItems: []string{"验收"}}
-			done := workspaceevents.CompleteDefinitionDerivationCommand{WorkspaceID: id, PermitID: result.Derivation.FreshPermitID, Proposal: &derived}
+			done := workspaceevents.CompleteDefinitionDerivationCommand{SuccessAudit: derivationTestAudit(t, &derived), WorkspaceID: id, PermitID: result.Derivation.FreshPermitID, Proposal: &derived}
 			if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, DeriveComplete: &done}); err != nil {
 				t.Fatal(err)
 			}
@@ -145,7 +145,7 @@ func TestAuthoringProcessDerivationPermitRecovery(t *testing.T) {
 			}
 			revision := current.Revision
 			original := current.DefinitionAuthoring.DerivationRequests[0].Clone()
-			reserve := workspaceevents.ReserveDefinitionDerivationCommand{WorkspaceID: id, InputHash: current.DefinitionAuthoring.InputHash, RequestID: "original-derive", ProviderBindingHash: "provider", ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil)}
+			reserve := workspaceevents.ReserveDefinitionDerivationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "derive"), WorkspaceID: id, InputHash: current.DefinitionAuthoring.InputHash, RequestID: "original-derive", ProviderBindingHash: "provider", ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil)}
 			replay, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, DeriveReserve: &reserve})
 			if err != nil || replay.Derivation.FreshPermitID != "" || replay.Derivation.Request.PermitID != original.PermitID {
 				t.Fatalf("重启重放重新授权: %+v %v", replay, err)

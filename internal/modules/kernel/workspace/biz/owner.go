@@ -157,11 +157,6 @@ func (m *Biz) Start() error {
 	if err := m.subscribeOwner(workspaceevents.TopicWorkspaceTemplateCommandEnsureDefaults, m.handleSystemDefaultsCommand, false); err != nil {
 		return err
 	}
-	for _, topic := range []string{workspaceevents.TopicWorkspaceTemplateCommandQueryBuiltinDefaults, workspaceevents.TopicWorkspaceTemplateCommandUpgradeBuiltinDefault} {
-		if err := m.subscribeOwner(topic, m.handleBuiltinTemplateDefaultsCommand, false); err != nil {
-			return err
-		}
-	}
 	if err := m.startRunProjectionReconciliation(); err != nil {
 		return err
 	}

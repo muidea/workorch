@@ -215,7 +215,7 @@ func TestPreparationNoRunFinalFenceRehashedTamperingRejected(t *testing.T) {
 			case "unknown":
 				a.State = workspace.WorkspacePreparationUnknown
 			case "legacy":
-				w.StartupPreparation.Version = workspace.WorkspacePreparationRecordVersion
+				w.StartupPreparation.Version = "unsupported-record-contract"
 			case "commit_revision":
 				a.CommittedWorkspaceRevision++
 			case "downgrade":

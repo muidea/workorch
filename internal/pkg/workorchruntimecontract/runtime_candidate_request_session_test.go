@@ -117,7 +117,7 @@ func TestRuntimeCandidateRequestSessionBindsPersistedManifestWireContract(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := RuntimeExpectedDocumentContract{
+	expected := RuntimeExpectedDocumentContract{OperationsContextEncoding: RuntimeOperationsContextEncoding,
 		SchemaVersion:    RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:     RuntimeProviderDocumentOperations,
 		ManifestHash:     manifest.Hash,
@@ -170,7 +170,7 @@ func TestRuntimeCandidateRequestOutcomeRequiresClosedIdentity(t *testing.T) {
 }
 
 func TestRuntimeCandidateRequestSessionRecoveryExhaustedRequiresRecoverableFraming(t *testing.T) {
-	expected := RuntimeExpectedDocumentContract{
+	expected := RuntimeExpectedDocumentContract{OperationsContextEncoding: RuntimeOperationsContextEncoding,
 		SchemaVersion: RuntimeExpectedDocumentSchemaCurrent, DocumentKind: RuntimeProviderDocumentOperations,
 		ManifestHash: "manifest-1", WireContractHash: "wire-1", LogicalRequestID: "logical-1", StablePrefixHash: "prefix-1",
 		MaxOutputTokens: 1024, MaxRecoveryAttempts: 1,

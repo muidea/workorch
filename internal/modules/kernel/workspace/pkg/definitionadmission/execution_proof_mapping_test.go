@@ -15,7 +15,7 @@ func candidateWithExecutionProofMapping() workspace.DefinitionAdmissionCandidate
 	second.Text = "原工作和修复要求，不能以 consumer 的行为代替"
 	candidate.DoDInputs = append(candidate.DoDInputs, second)
 	profile := &candidate.RuntimeProfileContracts[0]
-	profile.EvidenceRequirements[0].LineageAssertions = []runtimecontract.RuntimeLineageAssertionRule{{Ref: "original-work", Kind: runtimecontract.RuntimeLineageCompletedWorkRounds, ConsumptionPoint: runtimecontract.RuntimeProofPhaseExecution, MinCompletedRounds: 2, ExecutionSourceContractRef: runtimecontract.RuntimeCrossSourceExecutionProofV1}}
+	profile.EvidenceRequirements[0].LineageAssertions = []runtimecontract.RuntimeLineageAssertionRule{{Ref: "original-work", Kind: runtimecontract.RuntimeLineageCompletedWorkRounds, ConsumptionPoint: runtimecontract.RuntimeProofPhaseExecution, MinCompletedRounds: 2, ExecutionSourceContractRef: runtimecontract.RuntimeDoDSourceExecutionProof}}
 	declaration := profile.EvidenceRequirements[0]
 	declaration.ID, declaration.LineageAssertions = "dod-002", nil
 	profile.EvidenceRequirements = append(profile.EvidenceRequirements, declaration)
@@ -27,7 +27,7 @@ func candidateWithExecutionProofMapping() workspace.DefinitionAdmissionCandidate
 	verification := spec.Verifications[0]
 	verification.ID, verification.ObligationID, verification.EvidenceRequirementID = "verify-source", obligation.ID, "dod-002"
 	spec.Verifications = append(spec.Verifications, verification)
-	spec.ExecutionProofMappings = []workspace.GoalExecutionProofMapping{{ContractRef: runtimecontract.RuntimeCrossSourceExecutionProofV1, ConsumerItemRef: candidate.DoDInputs[0].CandidateItemRef, RuleRef: "original-work", SourceItemRef: second.CandidateItemRef}}
+	spec.ExecutionProofMappings = []workspace.GoalExecutionProofMapping{{ContractRef: runtimecontract.RuntimeDoDSourceExecutionProof, ConsumerItemRef: candidate.DoDInputs[0].CandidateItemRef, RuleRef: "original-work", SourceItemRef: second.CandidateItemRef}}
 	for index := range spec.Reviews {
 		spec.Reviews[index].SpecificationHash = spec.ContentHash()
 	}

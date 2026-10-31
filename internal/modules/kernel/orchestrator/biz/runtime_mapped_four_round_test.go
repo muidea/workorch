@@ -21,7 +21,7 @@ func runtimeMappedFourRoundBootstrap(t *testing.T, b runtimecontract.RuntimeBoot
 		AllowedOperations: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileEdit}}, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
 		TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: "profile/test-file-shell-git", TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: nil, MaxRoundsPerCWI: 8, MaxTargetsPerRound: 4, RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true}
 	p := &b.Activation.ExecutionContract.ProfileContracts[0]
-	p.DeliverableExpectations[0].RequiredEvidencePurposeContractRef = runtimecontract.RuntimeProfileDeliverableEvidencePurposeV2
+	p.DeliverableExpectations[0].RequiredEvidencePurposeContractRef = runtimecontract.RuntimeProfileDeliverableEvidencePurpose
 	p.EvidenceRequirements[1].ImplementationWorkPolicy = &policy
 	p.EvidenceRequirements[1].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	p.EvidenceRequirements[1].AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
@@ -90,6 +90,11 @@ func runtimeMappedFourRoundSemantic(command llmevents.RequestRuntimeCandidateCom
 			d.ImplementationIntent = implementationWorkIntentForTest(m)
 			if work.Ordinal <= 4 {
 				d.ImplementationPurpose = runtimecontract.RuntimeImplementationWorkPurposeEffect
+			} else {
+				d.ImplementationIntent.SelectedRequirementRefs = nil
+				for i := range d.ImplementationIntent.RequirementReviews {
+					d.ImplementationIntent.RequirementReviews[i].WorkRequired = false
+				}
 			}
 		}
 	} else {

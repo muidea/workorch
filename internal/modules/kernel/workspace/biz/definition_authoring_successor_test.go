@@ -56,14 +56,14 @@ func reviewedAuthoringSuccessor(t *testing.T, owners *fileDefinitionAdmissionOwn
 		t.Fatal(err)
 	}
 	record := current.DefinitionAuthoring.Clone()
-	reserveDerivation := workspaceevents.ReserveDefinitionDerivationCommand{WorkspaceID: id, InputHash: record.InputHash, RequestID: "derive-successor/" + record.InputHash, ProviderBindingHash: "provider", ResourceSnapshotHash: workspacemodel.DefinitionAuthoringResourcesHash(nil)}
+	reserveDerivation := workspaceevents.ReserveDefinitionDerivationCommand{WireContractRef: workspacemodel.DefinitionAuthoringOwnerBound, WireContractHash: workspacemodel.AuthoringWireHash(workspacemodel.DefinitionAuthoringOwnerBound, "derive"), WorkspaceID: id, InputHash: record.InputHash, RequestID: "derive-successor/" + record.InputHash, ProviderBindingHash: "provider", ResourceSnapshotHash: workspacemodel.DefinitionAuthoringResourcesHash(nil)}
 	reservedDerivation, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, DeriveReserve: &reserveDerivation})
 	if err != nil || reservedDerivation.Derivation == nil || reservedDerivation.Derivation.FreshPermitID == "" {
 		t.Fatalf("reserve successor derivation: %v", err)
 	}
 	derivation := reservedDerivation.Derivation.Request
 	derived := workspacemodel.DefinitionDerivedAcceptance{AuthoringInputHash: input.InputHash(), TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"补充验收"}}
-	completeDerivation := workspaceevents.CompleteDefinitionDerivationCommand{WorkspaceID: id, PermitID: derivation.PermitID, Proposal: &derived}
+	completeDerivation := workspaceevents.CompleteDefinitionDerivationCommand{SuccessAudit: derivationTestAudit(t, &derived), WorkspaceID: id, PermitID: derivation.PermitID, Proposal: &derived}
 	if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, DeriveComplete: &completeDerivation}); err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func reviewedAuthoringSuccessor(t *testing.T, owners *fileDefinitionAdmissionOwn
 		proof.EvidenceRequirementID = "*"
 		proof.Scope = "dodItem"
 	}
-	reserveProposal := workspaceevents.ReserveAuthoringSpecificationCommand{WorkspaceID: id, InputHash: record.InputHash, RequestID: "proposal-successor/" + record.InputHash, DerivationPermitID: derivation.PermitID, ProviderBindingHash: "provider"}
+	reserveProposal := workspaceevents.ReserveAuthoringSpecificationCommand{WireContractRef: workspacemodel.DefinitionAuthoringOwnerBound, WireContractHash: workspacemodel.AuthoringWireHash(workspacemodel.DefinitionAuthoringOwnerBound, "proposal"), WorkspaceID: id, InputHash: record.InputHash, RequestID: "proposal-successor/" + record.InputHash, DerivationPermitID: derivation.PermitID, ProviderBindingHash: "provider"}
 	reservedProposal, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecReserve: &reserveProposal})
 	if err != nil || reservedProposal.AuthoringSpecification == nil || reservedProposal.AuthoringSpecification.FreshPermitID == "" {
 		t.Fatalf("reserve successor proposal: %v", err)
@@ -89,13 +89,18 @@ func reviewedAuthoringSuccessor(t *testing.T, owners *fileDefinitionAdmissionOwn
 		t.Fatal(err)
 	}
 	for _, kind := range []string{workspacemodel.GoalReviewDimensionCoverage, workspacemodel.GoalReviewNegativePath, workspacemodel.GoalReviewRegression, workspacemodel.GoalReviewResourceEnvironment, workspacemodel.GoalReviewTraceability, workspacemodel.GoalReviewVerifierFeasibility} {
-		reserveReview := workspaceevents.ReserveAuthoringSpecificationCommand{WorkspaceID: id, InputHash: record.InputHash, RequestID: "successor-" + kind + "/" + record.InputHash, DerivationPermitID: derivation.PermitID, ReviewKind: kind, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"}
+		reserveReview := workspaceevents.ReserveAuthoringSpecificationCommand{WireContractRef: workspacemodel.DefinitionAuthoringOwnerBound, WireContractHash: workspacemodel.AuthoringWireHash(workspacemodel.DefinitionAuthoringOwnerBound, func() string {
+			if kind == "" {
+				return "proposal"
+			}
+			return kind
+		}()), WorkspaceID: id, InputHash: record.InputHash, RequestID: "successor-" + kind + "/" + record.InputHash, DerivationPermitID: derivation.PermitID, ReviewKind: kind, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"}
 		reservedReview, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecReserve: &reserveReview})
 		if err != nil || reservedReview.AuthoringSpecification == nil || reservedReview.AuthoringSpecification.FreshPermitID == "" {
 			t.Fatalf("reserve successor review %s: %v", kind, err)
 		}
 		review := workspacemodel.GoalSpecificationCompletenessReview{Kind: kind, Status: workspacemodel.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "逐项覆盖", EvidenceRefs: []string{workspacemodel.DefinitionAuthoringGoalItemRef}, RequirementIDs: authoringRequiredRequirementIDs(t, proposal, kind)}
-		completeReview := workspaceevents.CompleteAuthoringSpecificationCommand{WorkspaceID: id, PermitID: reservedReview.AuthoringSpecification.FreshPermitID, Review: &review}
+		completeReview := workspaceevents.CompleteAuthoringSpecificationCommand{WorkspaceID: id, PermitID: reservedReview.AuthoringSpecification.FreshPermitID, Review: &review, SuccessAudit: reviewTestAudit(t, &review)}
 		if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecComplete: &completeReview}); err != nil {
 			t.Fatal(err)
 		}

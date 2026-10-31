@@ -10,28 +10,25 @@ const StepKindCommand = runtimemodel.StepKindShellCommand
 // for a project-native validation command. Profiles may name this adapter,
 // but only Shell may translate it from File-owner manifest facts into an
 // executable recipe.
-const ValidationRecipeAdapterProjectNative = "shell/project-native-validation/v1"
+const ValidationRecipeAdapterProjectNative = "shell/project-native-validation"
 
-// ValidationRecipeAdapterProjectEntrypoint is opt-in on a new activation. The
-// previous resolver and its sealed native protocols keep their original meaning.
-const ValidationRecipeAdapterProjectEntrypoint = "shell/project-native-validation/v2"
+// ValidationRecipeAdapterProjectEntrypoint observes the declared project entrypoint.
+const ValidationRecipeAdapterProjectEntrypoint = "shell/entrypoint-validation"
 
-// Versioned inputs are opt-in on a new activation, not a default. Their owner
-// bindings require independent exact-content review before Runtime may seal a
-// proof. Older adapters retain their native identities and conjunctive checks.
-const ValidationRecipeAdapterVersionedEntrypoint = "shell/project-native-validation/v3"
-const ValidationRecipeAdapterIsolatedEntrypoint = "shell/project-native-validation/v4"
+// Reviewed and isolated inputs require independent exact-content review.
+// Each adapter names a distinct execution and isolation scope.
+const ValidationRecipeAdapterReviewedEntrypoint = "shell/reviewed-entrypoint-validation"
+const ValidationRecipeAdapterIsolatedEntrypoint = "shell/isolated-package-validation"
 
 // 多检查包以完整 requirement 固定成员，不扩大既有单检查协议。
-const ValidationRecipeAdapterConjunctiveEntrypoint = "shell/project-native-validation/v5"
+const ValidationRecipeAdapterConjunctiveEntrypoint = "shell/conjunctive-package-validation"
 
-// 显式新 activation 选择根 module 四阶段合取，不升级旧 package-only 协议。
-const ValidationRecipeAdapterProjectConjunction = "shell/project-native-validation/v6"
+// 根 module 四阶段合取与 package-only 验证属于不同执行范围。
+const ValidationRecipeAdapterProjectConjunction = "shell/project-conjunction-validation"
 
-// Explicit opt-in; v6 and archived executions keep their original fail-closed
-// project-stage behavior without an additional diagnostic process.
-const ValidationRecipeAdapterProjectFailureDiagnostic = "shell/project-native-validation/v7"
-const ValidationRecipeAdapterProjectMultiFailureDiagnostic = "shell/project-native-validation/v8"
+// Diagnostic variants add bounded failure reproduction to project validation.
+const ValidationRecipeAdapterProjectFailureDiagnostic = "shell/project-failure-diagnostic-validation"
+const ValidationRecipeAdapterProjectMultiFailureDiagnostic = "shell/project-multi-failure-validation"
 
 // Validation owner diagnostic codes are Shell-owned, stable facts. Profiles
 // may match these exact values; Runtime core must not infer them from stderr.

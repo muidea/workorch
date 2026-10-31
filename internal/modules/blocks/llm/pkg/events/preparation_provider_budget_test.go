@@ -45,7 +45,7 @@ func TestPreparationProviderBudgetResultRequiresExactFreshSource(t *testing.T) {
 	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "exact"}
 	command := ObserveProviderCatalogCacheCommand{WorkspaceID: "ws", Target: &target}
 	base := catalogCacheResultFixture()
-	base.Configuration = &PreparationProviderConfiguration{Version: PreparationProviderConfigurationVersion, DefaultChat: target}
+	base.Configuration = &PreparationProviderConfiguration{Version: PreparationProviderConfigurationSnapshotVersion, DefaultChat: target}
 	base.Budget = &PreparationProviderBudget{Version: PreparationProviderBudgetVersion, Target: target, ContextWindowTokens: 32000, ProviderMaxOutputTokens: 4000, EffectiveMaxOutputTokens: 4000, MaxInputTokens: 20000, MaxRequestBytes: 80000, EstimatedTokensPerByte: 0.25, CapabilityRevision: "original-capability"}
 	if base.ValidateFor(command) != nil || base.ValidateFor(ObserveProviderCatalogCacheCommand{WorkspaceID: "ws"}) != nil {
 		t.Fatal("exact explicit or default target rejected")

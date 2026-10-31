@@ -4,7 +4,7 @@ import "testing"
 
 func TestEvidenceApplicabilityFreshConsumerSeparatesHistoryAndGeneration(t *testing.T) {
 	set := *applicabilityIdentityObservation(10, "original").CurrentDependencies
-	fact := EvidenceFact{ID: "evidence", ApplicabilityDependencies: &RuntimeEvidenceApplicabilityDependencies{ProtocolRef: RuntimeEvidenceApplicabilityDependenciesV1, OwnerRevisionSet: set}}
+	fact := EvidenceFact{ID: "evidence", ApplicabilityDependencies: &RuntimeEvidenceApplicabilityDependencies{ProtocolRef: RuntimeEvidenceApplicabilityDependenciesProtocol, OwnerRevisionSet: set}}
 	original := applicabilityIdentityObservation(10, "original")
 	original.Request.SourceEvidenceHash = StableRuntimeEvidenceFactHash(fact)
 	original.Request.ReconciliationRequestHash = "generation-1"

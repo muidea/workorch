@@ -9,6 +9,9 @@ import (
 
 // Original complete work validator, independent of the new session path.
 func referenceSemanticWorkValidation(w RuntimeSemanticImplementationWork) error {
+	if w.Scope.Content == nil {
+		return fmt.Errorf("missing current content")
+	}
 	maxOrdinal := w.Scope.Request.Policy.MaxRoundsPerCWI
 	if w.PurposeChoiceOnly {
 		maxOrdinal++
@@ -47,6 +50,10 @@ func semanticWorkValidationManifest(t *testing.T) RuntimeSemanticPlanManifest {
 	ledger, sources := implementationWorkLedgerFixture(t)
 	round := ledger.Rounds[0]
 	work := RuntimeSemanticImplementationWork{RoundHash: round.Hash, Ordinal: round.Ordinal, PolicyHash: round.PolicyHash, Scope: round.ScopeObservation.Clone()}
+	work.Scope.Content = &RuntimeImplementationWorkContent{ProtocolRef: RuntimeImplementationWorkContentV1, ManifestRevision: work.Scope.Selection.ObservedRevision}
+	for _, target := range work.Scope.Selection.TargetRefs {
+		work.Scope.Content.Snapshots = append(work.Scope.Content.Snapshots, workContentSnapshot(target, "original content\n"))
+	}
 	work.MutationInputCatalogs = []RuntimeOperationAdmissibility{round.WorkingBinding.OwnerCatalog.Clone()}
 	work.ExcludedTargetRefs = runtimeValidationInputMutationExclusions(work.Scope.Request.Policy.OwnerModuleID, RuntimeCandidateManifestOwnerFacts{OperationAdmissibilities: work.MutationInputCatalogs}, RequiredOutputContract{}, nil)
 	m := RuntimeSemanticPlanManifest{SchemaVersion: RuntimeSemanticPlanManifestSchemaCurrent, WorkspaceID: sources.WorkspaceID, RunID: sources.RunID,

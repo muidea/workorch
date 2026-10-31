@@ -25,7 +25,7 @@ Runtime `file/read` 与 target snapshot 按实际读取保全原文、字节数�
 其独立路径、凭据内容与容量拒绝策略不改写原文，也不用于推断 Runtime 文件状态。原始材料通过 owner 读取权限与受限存储保护。
 
 `file/mutation-historical-effect/v1` 是 File edit/write/patch-apply 的显式用途合同。只有原 sealed all-of
-effect+validation binding 派生的 execution context 声明该用途时，owner 才输出 dependency pair v2；否则保持 v1。
+effect+validation binding 派生的 execution context 声明该用途时，owner 才输出用途绑定的 dependency pair；普通读取与 effect 仍使用对应的独立能力合同。
 actual input reads 与真实 postcondition 均保全，用途不改变 effect 授权、replay proof 或 receipt 身份反查。
 后续修改使旧后像 stale 时，历史 receipt 仅证明行为；终验须独立当前普通证明，不提升旧 bytes 为 current。
 Core 边界与 current union 门禁见 [Evidence Proof Purpose](../../../../docs/00-core/runtime/evidence-proof-purpose.md)。

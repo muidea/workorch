@@ -89,7 +89,7 @@ func (b *Biz) deriveDefinitionAcceptanceBound(ctx context.Context, id common.Wor
 	}
 	providerBindingHash := definitionProviderBindingHash(configuration)
 	identity.ProviderBindingHash = providerBindingHash
-	pending := workspace.DefinitionDerivationRequest{WireContractRef: workspace.DefinitionAuthoringOwnerBoundV3, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBoundV3, "derive"), RequestID: requestID, Input: record.Input.Clone(), Template: record.TemplateSnapshot.Clone(), Resources: resources, ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(resources), ProviderBindingHash: providerBindingHash}
+	pending := workspace.DefinitionDerivationRequest{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "derive"), RequestID: requestID, Input: record.Input.Clone(), Template: record.TemplateSnapshot.Clone(), Resources: resources, ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(resources), ProviderBindingHash: providerBindingHash}
 	pending.PermitID = pending.ExpectedPermitID()
 	command, err := specifications.DerivationCommand(pending, configuration.DefaultChat)
 	if err != nil {
@@ -150,9 +150,9 @@ func (b *Biz) deriveDefinitionAcceptanceBound(ctx context.Context, id common.Wor
 			completion.Diagnostic = &diagnostic
 		} else {
 			completion.Proposal = &proposal
-			if pending.WireContractRef != "" {
-				completion.SuccessAudit = &workspace.DefinitionAuthoringSuccessByteAudit{Document: authoringProviderObservation(response.ObservedDocument), Wire: authoringProviderObservation(response.Wire)}
-			}
+
+			completion.SuccessAudit = &workspace.DefinitionAuthoringSuccessByteAudit{Document: authoringProviderObservation(response.ObservedDocument), Wire: authoringProviderObservation(response.Wire)}
+
 		}
 	}
 	completed, settlementErr := b.settleDerivation(ctx, completion)

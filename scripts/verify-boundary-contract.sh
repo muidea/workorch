@@ -1915,6 +1915,20 @@ if [[ -n "$runtime_persistence_compatibility_matches" ]]; then
 	echo "$runtime_persistence_compatibility_matches" >&2
 	exit 1
 fi
+internal_version_selection_matches="$(source_matches 'SemanticRenderContractRef|OperationsRenderContractRef|Runtime(Semantic|Operations)RenderContractV[0-9]|DefinitionAuthoringOwnerBoundV[0-9]|KnownBuiltinContentRevision|BuiltinContentRevisions|UpgradeBuiltin(Soul|WorkspaceTemplate)Default|RuntimeSemanticRequestRepair|ReceiptProtocolRef|progressProtocolRef' internal || true)"
+if [[ -n "$internal_version_selection_matches" ]]; then
+	echo "boundary contract violation: retired internal version management or compatibility selection returned" >&2
+	echo "$internal_version_selection_matches" >&2
+	exit 1
+fi
+if rg -n 'workorch-preparation-record/v[0-9]+' web/workorch-console/src; then
+	echo "boundary contract violation: Web preparation accepts a historical record format" >&2
+	exit 1
+fi
+if compgen -G 'internal/modules/kernel/workspace/biz/testdata/software-dev-template-*.json' >/dev/null; then
+	echo "boundary contract violation: retired builtin template fingerprint registry returned" >&2
+	exit 1
+fi
 if grep -q -E -- 'LineageState[[:space:]]*==[[:space:]]*""' internal/modules/kernel/workspace/biz/goal_dod_manager.go internal/modules/blocks/run/biz/lifecycle_reducer.go; then
 	echo "boundary contract violation: Workspace/Run owner silently upgrades a missing current lineage" >&2
 	exit 1
@@ -5834,9 +5848,9 @@ policies = template.get("evidencePolicies", [])
 if len(policies) != 1:
     raise SystemExit(1)
 policy = policies[0]
-if policy.get("recipeAdapterRef") != "shell/project-native-validation/v8":
+if policy.get("recipeAdapterRef") != "shell/project-multi-failure-validation":
     raise SystemExit(1)
-if policy.get("recipeInputReviewProtocolRef") != "validation/input-consistency/v3":
+if policy.get("recipeInputReviewProtocolRef") != "validation/input-consistency":
     raise SystemExit(1)
 if any(key in policy for key in ("commandName", "recipeArgs", "requiredArgs", "argsContain", "workEvidenceMarkers")):
     raise SystemExit(1)
@@ -5848,12 +5862,12 @@ then
 	echo "boundary contract violation: software-dev template must select the reviewed Shell owner adapter without an unconsumed Profile policy or language-specific recipe" >&2
 	exit 1
 fi
-if ! grep -q -F 'ValidationRecipeAdapterProjectNative = "shell/project-native-validation/v1"' internal/modules/blocks/shell/pkg/common/common.go ||
-	! grep -q -F 'ValidationRecipeAdapterProjectEntrypoint = "shell/project-native-validation/v2"' internal/modules/blocks/shell/pkg/common/common.go ||
-	! grep -q -F 'ValidationRecipeAdapterVersionedEntrypoint = "shell/project-native-validation/v3"' internal/modules/blocks/shell/pkg/common/common.go ||
-	! grep -q -F 'ValidationRecipeAdapterIsolatedEntrypoint = "shell/project-native-validation/v4"' internal/modules/blocks/shell/pkg/common/common.go ||
-	! grep -q -F 'ValidationRecipeAdapterConjunctiveEntrypoint = "shell/project-native-validation/v5"' internal/modules/blocks/shell/pkg/common/common.go ||
-	! grep -q -F 'ValidationRecipeAdapterProjectMultiFailureDiagnostic = "shell/project-native-validation/v8"' internal/modules/blocks/shell/pkg/common/common.go ||
+if ! grep -q -F 'ValidationRecipeAdapterProjectNative = "shell/project-native-validation"' internal/modules/blocks/shell/pkg/common/common.go ||
+	! grep -q -F 'ValidationRecipeAdapterProjectEntrypoint = "shell/entrypoint-validation"' internal/modules/blocks/shell/pkg/common/common.go ||
+	! grep -q -F 'ValidationRecipeAdapterReviewedEntrypoint = "shell/reviewed-entrypoint-validation"' internal/modules/blocks/shell/pkg/common/common.go ||
+	! grep -q -F 'ValidationRecipeAdapterIsolatedEntrypoint = "shell/isolated-package-validation"' internal/modules/blocks/shell/pkg/common/common.go ||
+	! grep -q -F 'ValidationRecipeAdapterConjunctiveEntrypoint = "shell/conjunctive-package-validation"' internal/modules/blocks/shell/pkg/common/common.go ||
+	! grep -q -F 'ValidationRecipeAdapterProjectMultiFailureDiagnostic = "shell/project-multi-failure-validation"' internal/modules/blocks/shell/pkg/common/common.go ||
 	! grep -q -F 'resolveRuntimeValidationRecipeDeclarations(command.ValidationRecipes, command.WorkspaceManifestBinding.Manifest)' internal/modules/blocks/shell/biz/owner.go; then
 	echo "boundary contract violation: project-native validation recipe is not resolved solely inside the Shell owner from the bound File manifest" >&2
 	exit 1

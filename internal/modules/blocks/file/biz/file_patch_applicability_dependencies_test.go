@@ -41,7 +41,7 @@ func TestFileMutationSeparatesActualHistoricalAndPostconditionReads(t *testing.T
 			if err != nil || runtimecontract.ValidateRuntimeEvidenceDependencyPair(reads, proof, "definition") != nil {
 				t.Fatalf("pair: %v %+v", err, proof)
 			}
-			if proof.ProtocolRef != runtimecontract.RuntimeEvidenceApplicabilityDependenciesV1 || proof.PurposeRef != "" {
+			if proof.ProtocolRef != runtimecontract.RuntimeEvidenceApplicabilityDependenciesProtocol || proof.PurposeRef != "" {
 				t.Fatal("undeclared operation was upgraded to historical effect use")
 			}
 			historicalScope := scope

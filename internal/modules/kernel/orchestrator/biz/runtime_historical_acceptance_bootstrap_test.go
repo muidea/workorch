@@ -16,7 +16,7 @@ func runtimeTestWithHistoricalPurposeMapping(t *testing.T, bootstrap runtimecont
 		CandidateHash: "historical-purpose-original-candidate", SpecificationHash: "historical-purpose-confirmed-specification",
 		DefinitionRevision: bootstrap.Definition.Revision, StartupInputHash: bootstrap.Definition.StartupInputHash,
 		Sources:                 []runtimecontract.RuntimeDefinitionSource{{CandidateItemRef: "original-goal", ItemRef: "formal-goal", SourceScope: "goal", SourceID: "goal", Text: bootstrap.Definition.GoalDefinition}},
-		EvidencePurposeMappings: []runtimecontract.RuntimeEvidencePurposeMapping{{ContractRef: runtimecontract.RuntimeCrossCWIEvidencePurposeV1, HistoricalItemRef: string(historicalID), AcceptanceItemRef: string(acceptanceID)}},
+		EvidencePurposeMappings: []runtimecontract.RuntimeEvidencePurposeMapping{{ContractRef: runtimecontract.RuntimeCrossCWIEvidencePurpose, HistoricalItemRef: string(historicalID), AcceptanceItemRef: string(acceptanceID)}},
 	}
 	for index := range bootstrap.CoverageItems {
 		item := &bootstrap.CoverageItems[index]

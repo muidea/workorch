@@ -49,8 +49,7 @@ func (c *RuntimeController) applyAuthorityInternalEvent(ctx context.Context, eve
 		RuntimeInternalEventGovernanceRequestObserved,
 		RuntimeInternalEventValidationFailureObserved,
 		RuntimeInternalEventRepairSurfaceConfirmationObserved,
-		RuntimeInternalEventSemanticRequestRepairPrepared,
-		RuntimeInternalEventSemanticRequestRepairResolved,
+
 		RuntimeInternalEventDefinitionGapObserved:
 		return c.applyAuthorityConvergenceInternalEvent(ctx, event)
 	default:
@@ -214,10 +213,6 @@ func (c *RuntimeController) applyAuthorityConvergenceInternalEvent(ctx context.C
 		}
 		aggregate, err := c.authority.recordRepairSurfaceConfirmation(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Authority.RepairSurfaceConfirmation)
 		result.Aggregate = aggregate
-		return result, err
-	case RuntimeInternalEventSemanticRequestRepairPrepared, RuntimeInternalEventSemanticRequestRepairResolved:
-		a, err := c.authority.observeRuntimeSemanticRequestRepair(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Authority.RequestContractRepairProof, event.Authority.RequestContractRepairResolution, event.Authority.RequestContractRepairDriveLease)
-		result.Aggregate = a
 		return result, err
 	case RuntimeInternalEventDefinitionGapObserved:
 		if event.Authority.DefinitionGap == nil {

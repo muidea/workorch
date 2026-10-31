@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"time"
 
+	filepreparation "github.com/muidea/workorch/internal/modules/blocks/file/pkg/preparation"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -86,9 +87,9 @@ func PreparationFileRevalidationStaleForAttempt(w *Workspace, a WorkspacePrepara
 		if d.ContentHash != a.DirectoryEvidenceHash {
 			continue
 		}
-		if d.RevalidationVersion == "" {
-			return false, nil
-		} // no upgrade of old histories
+		if d.RevalidationVersion != filepreparation.Version {
+			return false, common.ErrConflict
+		}
 		if d.Validate() != nil {
 			return false, common.ErrConflict
 		}

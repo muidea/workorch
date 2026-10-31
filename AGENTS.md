@@ -114,6 +114,14 @@ Do not commit generated runtime data: `.workorch-data`, `.workorch-workspaces`, 
 - Web: TypeScript, React, Vite, Ant Design under `web/workorch-console/src`.
 - Commits: concise imperative summaries (`fix runtime incremental artifact convergence`, `docs: reorganize workorch documentation structure`); keep scoped. PRs: behavior change, verification commands, config/migration impact, UI screenshots when relevant.
 
+### 当前开发阶段：单一当前合同，不维护历史版本
+
+- 未经用户明确要求，不新增版本管理、版本选择、历史协议兼容、自动迁移、升级登记表、旧字段别名或回退路径；不以未来兼容需求作为保留这些逻辑的理由。
+- 内部 prompt、schema、解析器、compiler、owner 校验和调用方同步采用唯一当前合同。通用处理规则直接由组件实现，不为框架改进增加 Profile 版本开关，不把内部协议升级变成项目规格升级。
+- 修改现有合同应同步清理旧实现、选择分支、兼容测试和文档。缺失或不符合当前合同的输入明确拒绝，不猜测历史格式、不自动修复或迁移数据，不维护多套实现。
+- CAS revision、真实文件版本边、幂等请求身份、内容 hash、原始规格及人工确认绑定属于执行正确性和证据，不属于历史软件版本管理，必须保留。外部服务已明确要求的协议协商与依赖版本由对应 adapter/工具链负责，不扩展为内部兼容框架。
+- 不为满足新合同改写既有 Run、Result、原始诊断或封存规格；需要改变业务目标、验收、权限或预算时仍遵守原 owner 和精确确认边界。不得把删除版本管理解释为删除这些门禁。
+
 ## 数据保真原则
 
 - 业务输入、provider 输出及诊断材料必须保持原样；禁止为脱敏而替换、清洗或改写内容，禁止用摘要替代原始数据或静默截断，避免跨层传递产生偏差。

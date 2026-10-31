@@ -66,7 +66,7 @@ func TestOwnerInfeasibilityCauseSurvivesAllPublicProjectionsWithoutAuthority(t *
 
 func TestInputReviewFeedbackSurvivesPublicProjectionsWithoutNewAuthority(t *testing.T) {
 	diagnostic := &runtimecontract.RuntimeOriginalDiagnostic{OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator, OriginalCode: "validation_input_review_coverage_incomplete", ValidationInputReviews: []runtimecontract.RuntimeValidationInputReviewFeedback{{
-		ReviewRef: "review-1", ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV2, CoverageWorkItemID: "cwi-1", RequirementHash: "original-requirement", ReportHash: "report-hash",
+		ReviewRef: "review-1", ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, CoverageWorkItemID: "cwi-1", RequirementHash: "original-requirement", ReportHash: "report-hash",
 		Report: runtimecontract.RuntimeValidationInputReview{SubjectHash: "exact-input", Checks: []runtimecontract.RuntimeValidationInputCheckReview{{
 			RequiredCheckRef: "original-check", Conclusion: runtimecontract.RuntimeValidationInputConflict, Reason: "documentation is not checked", InputTargetRefs: []string{"checks/input"},
 			Obligations: []runtimecontract.RuntimeValidationInputObligationReview{{CriterionText: "document tools", Finding: runtimecontract.RuntimeValidationInputMissing, Reason: "no assertion", InputTargetRefs: []string{"checks/input"}}},

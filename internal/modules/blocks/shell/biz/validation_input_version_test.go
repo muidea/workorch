@@ -21,7 +21,7 @@ func TestVersionedValidationInputDoesNotBorrowLegacyNativeIdentity(t *testing.T)
 	if !ok {
 		t.Fatal("legacy mapping missing")
 	}
-	recipe.AdapterRef = modulecommon.ValidationRecipeAdapterVersionedEntrypoint
+	recipe.AdapterRef = modulecommon.ValidationRecipeAdapterReviewedEntrypoint
 	current, ok := shellValidationCheckAttestations(recipe, requirement)
 	if !ok || current[0].RequiredCheckRef != legacy[0].RequiredCheckRef || current[0].NativeCheckRef == legacy[0].NativeCheckRef {
 		t.Fatal("input version changed requirement or reused old proof identity")
@@ -46,7 +46,7 @@ func TestVersionedValidationInputDoesNotBorrowLegacyNativeIdentity(t *testing.T)
 		t.Fatalf("old adapter changed: %+v", got)
 	}
 	target := shellValidationNativeCheckTargetRef(requirement, current...)
-	if !strings.HasPrefix(target, "workorch_validation/v3/") || target == shellValidationNativeCheckTargetRef(requirement) {
+	if !strings.HasPrefix(target, "workorch_validation/entrypoint/") || target == shellValidationNativeCheckTargetRef(requirement) {
 		t.Fatal("input target not versioned")
 	}
 	writeNativeStructureSource(t, root, "wrong_test.go", "package fixture\nimport \"testing\"\nfunc "+current[0].NativeCheckRef+"(t *testing.T){ t.Fatal(\"wrong location\") }")
@@ -56,7 +56,7 @@ func TestVersionedValidationInputDoesNotBorrowLegacyNativeIdentity(t *testing.T)
 }
 
 func TestVersionedValidationInputExecutionCalibration(t *testing.T) {
-	const native = "TestWorkOrchCWI_CALIBRATION_InputV3"
+	const native = "TestWorkOrchCWI_CALIBRATION_EntrypointInput"
 	for _, scenario := range []string{"delivery", "wrong-response", "dependency-only", "runner-override"} {
 		t.Run(scenario, func(t *testing.T) {
 			old := "package fixture\nimport \"testing\"\nfunc TestWorkOrchCWI_CALIBRATION(t *testing.T){ t.Fatal(\"historical input must not be selected\") }"
@@ -66,7 +66,7 @@ func TestVersionedValidationInputExecutionCalibration(t *testing.T) {
 				delivery = strings.ReplaceAll(delivery, "src/rust/symbol", "wrong/symbol")
 			}
 			writeNativeStructureSource(t, root, "cmd/delivery/main.go", delivery)
-			target := shellVersionedNativeCheckTarget(native)
+			target := shellReviewedNativeCheckTarget(native)
 			body := `bin:=filepath.Join(t.TempDir(),"delivery"); build:=exec.Command("go","build","-buildvcs=false","-o",bin,"./cmd/delivery"); build.Dir="../.."
 if out,e:=build.CombinedOutput(); e!=nil { t.Fatalf("build: %v %s",e,out) }
 for _, language:=range []string{"go","rust","python","typescript","shell"} {
@@ -106,7 +106,7 @@ if json.Unmarshal(out,&got)!=nil || got.Path!="src/"+language+"/symbol" || got.L
 }
 
 func TestVersionedInputPublishesExactReviewSubjectNotConsistencyVerdict(t *testing.T) {
-	recipe := runtimecontract.RuntimeValidationRecipe{ID: "native", Command: "go", Args: []string{"test", "./..."}, AdapterRef: modulecommon.ValidationRecipeAdapterVersionedEntrypoint}
+	recipe := runtimecontract.RuntimeValidationRecipe{ID: "native", Command: "go", Args: []string{"test", "./..."}, AdapterRef: modulecommon.ValidationRecipeAdapterReviewedEntrypoint}
 	requirement := shellValidationProofRequirementForTest(t, recipe.ID, "cwi-versioned")
 	checks, ok := shellValidationCheckAttestations(recipe, requirement)
 	if !ok {

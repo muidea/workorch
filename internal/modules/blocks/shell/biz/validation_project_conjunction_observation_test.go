@@ -7,7 +7,7 @@ import (
 )
 
 func TestProjectConjunctionObservationPreservesActualOwnerFacts(t *testing.T) {
-	specs := shellProjectFixedStages([]string{"test", "-json", "-count=1", "-run", "^TestExact$", "./workorch_validation/v4/exact"}, "workorch_validation/v4/exact")
+	specs := shellProjectFixedStages([]string{"test", "-json", "-count=1", "-run", "^TestExact$", "./workorch_validation/isolated/exact"}, "workorch_validation/isolated/exact")
 	raw := newShellProjectRawBuffer()
 	_, _ = raw.Write([]byte("原始输出\r\n\x00\xff"))
 	source, err := shellProjectSourceSetHash(t.TempDir())

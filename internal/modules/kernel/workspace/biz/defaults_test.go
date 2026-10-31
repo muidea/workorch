@@ -56,7 +56,7 @@ func TestBuiltinTemplatesAreCurrentWithoutPersistingAcrossRestart(t *testing.T) 
 					t.Fatal(err)
 				}
 				profile := declaration["contextHints"].(map[string]any)["profileContracts"].(map[string]any)["software-dev"].(map[string]any)
-				if profile["deliverableExpectations"].([]any)[0].(map[string]any)["requiredEvidencePurposeContractRef"] != "runtime/profile-deliverable-evidence-purpose/v2" {
+				if profile["deliverableExpectations"].([]any)[0].(map[string]any)["requiredEvidencePurposeContractRef"] != "runtime/profile-deliverable-evidence-purpose" {
 					t.Fatal("required profile purpose not current")
 				}
 				found := false
@@ -81,7 +81,11 @@ func TestBuiltinCatalogIgnoresPersistedOverridesAndPreservesFrozenSnapshot(t *te
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "templates.json")
 	repo := filerepo.NewWorkspaceTemplateRepository(path)
-	historical := historicalSoftwareTemplate(t)
+	declarations, err := builtinWorkspaceTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	historical := declarations[0]
 	historical.Description = "unknown customized old builtin"
 	custom := &workspacemodel.WorkspaceTemplate{ID: "project-specific", Name: "custom", ParentTemplateIDs: []string{"software-dev"}}
 	if err := repo.Create(ctx, historical); err != nil {

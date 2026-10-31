@@ -9,19 +9,17 @@ import (
 )
 
 func RuntimeValidationInputReviewProtocolSupported(ref string) bool {
-	return ref == RuntimeValidationInputReviewProtocol || ref == RuntimeValidationInputReviewProtocolV2 || ref == RuntimeValidationInputReviewProtocolV3
+	return ref == RuntimeValidationInputReviewProtocol
 }
 
 func validateRuntimeValidationInputObligations(check RuntimeValidationInputCheckReview) error {
 	return validateRuntimeValidationInputObligationShape(check, true)
 }
 
-// Historical redacted diagnostics retain their original reference order.
-// New projections preserve exact report content and canonical references;
-// cardinality, provenance, findings and conclusion remain mandatory in both.
+// Every report preserves exact content and canonical references.
 func validateRuntimeValidationInputObligationShape(check RuntimeValidationInputCheckReview, canonicalReferences bool) error {
 	if len(check.Obligations) == 0 || len(check.Obligations) > RuntimeValidationInputReviewMaxObligations {
-		return fmt.Errorf("v2 input review requires a complete bounded obligation mapping")
+		return fmt.Errorf("input review requires a complete bounded obligation mapping")
 	}
 	seen := make(map[string]bool, len(check.Obligations))
 	conclusion := RuntimeValidationInputConsistent
@@ -63,13 +61,14 @@ func validateRuntimeValidationInputObligationShape(check RuntimeValidationInputC
 
 // ValidateCriterionText proves complete textual provenance, not semantic
 // entailment. No non-whitespace part of the immutable criterion may disappear
-// from a v2 mapping. The reviewer must still judge the actual assertions;
+// from the mapping. The reviewer must still judge the actual assertions;
 // quoting criterion text is not proof.
 func (r RuntimeValidationInputReview) ValidateCriterionText(original string) error {
 	for _, check := range r.Checks {
-		if len(check.Obligations) == 0 { // V1 retains its existing contract.
-			continue
+		if len(check.Obligations) == 0 {
+			return fmt.Errorf("criterion requires complete obligation excerpts")
 		}
+
 		covered := make([]bool, len(original))
 		for _, obligation := range check.Obligations {
 			if obligation.CriterionText == "" || !strings.Contains(original, obligation.CriterionText) {
@@ -117,7 +116,7 @@ func (r RuntimeValidationInputReview) ValidateCoverageCriteria(item RuntimeCover
 }
 
 // RuntimeValidationInputReviewOnlyCoverageOmissions classifies an already
-// admitted v2 report. It does not choose repair, grant write authority, or turn
+// admitted report. It does not choose repair, grant write authority, or turn
 // an omission into validation credit. Unknown facts and contradictions prohibit
 // the additive-only classification, even when another obligation is missing.
 func RuntimeValidationInputReviewOnlyCoverageOmissions(r RuntimeValidationInputReview) bool {

@@ -320,7 +320,7 @@ func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinition
 				return fmt.Errorf("implementation round differs from original pre-dispatch commitment")
 			}
 			joined[dispatch.ID] = true
-			if round.WorkingBinding.ReceiptProtocolRef == RuntimeImplementationWorkReceiptChainV1 {
+			{
 				for _, execution := range dispatch.OperationExecutions {
 					if execution.State != OperationExecutionEvidenceCommitted {
 						continue

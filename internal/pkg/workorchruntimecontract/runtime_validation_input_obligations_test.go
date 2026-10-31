@@ -53,7 +53,7 @@ func TestValidationInputReviewV2BoundsWholeReportAndPreservesUnicodeCriteria(t *
 func semanticInputReviewV2Fixture(t *testing.T) (RuntimeSemanticPlanManifest, RuntimeSemanticPlanDocument, RuntimeValidationProofRequirementBinding) {
 	t.Helper()
 	manifest, document, _, binding := semanticInputReviewFixture(t)
-	binding.InputReview.ProtocolRef = RuntimeValidationInputReviewProtocolV2
+	binding.InputReview.ProtocolRef = RuntimeValidationInputReviewProtocol
 	binding.InputReview.Hash = StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, binding)
 	for i := range manifest.OwnerCatalogs {
 		catalog := &manifest.OwnerCatalogs[i]
@@ -61,7 +61,7 @@ func semanticInputReviewV2Fixture(t *testing.T) (RuntimeSemanticPlanManifest, Ru
 			continue
 		}
 		catalog.ValidationSurfaces[0].ProofRequirementBindings[0] = binding.Clone()
-		catalog.ValidationRecipes = []RuntimeValidationRecipe{{ID: binding.ValidationRecipeID, AdapterRef: "owner/review/v1", Command: "check", InputReviewProtocolRef: RuntimeValidationInputReviewProtocolV2}}
+		catalog.ValidationRecipes = []RuntimeValidationRecipe{{ID: binding.ValidationRecipeID, AdapterRef: "owner/review/v1", Command: "check", InputReviewProtocolRef: RuntimeValidationInputReviewProtocol}}
 		catalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
 	}
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
@@ -179,11 +179,11 @@ func TestValidationInputReviewV2DistinguishesMissingDocumentationFromContradicti
 	}
 }
 
-func TestValidationInputReviewV2KeepsLegacyShapeAndRejectsProtocolDowngrade(t *testing.T) {
+func TestValidationInputReviewRequiresCompleteCurrentShapeAndRejectsUnknownProtocol(t *testing.T) {
 	manifest, document, _, old := semanticInputReviewFixture(t)
 	legacy := document.Proposals[1].ValidationInputReview
 	bytes, _ := json.Marshal(legacy)
-	if strings.Contains(string(bytes), "obligations") || legacy.ValidateAgainstBinding(old) != nil {
+	if !strings.Contains(string(bytes), "obligations") || legacy.ValidateAgainstBinding(old) != nil {
 		t.Fatal("legacy report was changed")
 	}
 	empty := legacy.Clone()
@@ -204,7 +204,7 @@ func TestValidationInputReviewV2KeepsLegacyShapeAndRejectsProtocolDowngrade(t *t
 			case "drop review":
 				binding.InputReview = nil
 			case "downgrade protocol":
-				binding.InputReview.ProtocolRef = RuntimeValidationInputReviewProtocol
+				binding.InputReview.ProtocolRef = "validation/input-consistency/v1"
 				binding.InputReview.Hash = StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, *binding)
 			default:
 				bad.ValidationRecipes[0].InputReviewProtocolRef = ""

@@ -16,7 +16,7 @@
         "committedWorkspaceRevision": 3
       }
     ],
-    "version": "workorch-preparation-record/v2",
+    "version": "workorch-preparation-record",
     "attempts": [
       {
         "definitionCompilation": {

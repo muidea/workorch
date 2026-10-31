@@ -26,7 +26,7 @@ func MappingCompletionIdentity(permit string, mapping DefinitionAuthoringMapping
 }
 
 // ReparseMappingFailure 从 owner 原文重新证明失败 completion 的身份，不信持久自报 hash。
-func ReparseMappingFailure(r DefinitionAuthoringSpecificationRequest, derivations ...DefinitionDerivationRequest) (DefinitionAuthoringMapping, DefinitionAuthoringSuccessByteAudit, error) {
+func ReparseMappingFailure(r DefinitionAuthoringSpecificationRequest, derivation DefinitionDerivationRequest) (DefinitionAuthoringMapping, DefinitionAuthoringSuccessByteAudit, error) {
 	d := r.Diagnostic
 	if r.Phase != DefinitionSpecificationProposal || r.FailureCode != "invalid_proposal" || r.Proposal != nil || r.Review != nil || r.Mapping != nil || r.SuccessAudit != nil || d == nil || d.Validate() != nil || d.ProviderCode != "" || d.ProviderDocument == nil || d.ProviderWire == nil {
 		return DefinitionAuthoringMapping{}, DefinitionAuthoringSuccessByteAudit{}, fmt.Errorf("mapping failure lacks exact owner diagnostic")
@@ -35,11 +35,7 @@ func ReparseMappingFailure(r DefinitionAuthoringSpecificationRequest, derivation
 	if a.Validate() != nil || !reflect.DeepEqual(a.Document.Content, d.Payload) {
 		return DefinitionAuthoringMapping{}, a, fmt.Errorf("mapping failure document differs from payload")
 	}
-	var derivation DefinitionDerivationRequest
-	if len(derivations) == 1 {
-		derivation = derivations[0]
-	}
-	if r.WireContractRef != "" && (derivation.WireContractRef != r.WireContractRef || derivation.PermitID != r.DerivationPermitID) {
+	if derivation.WireContractRef != r.WireContractRef || derivation.PermitID != r.DerivationPermitID {
 		return DefinitionAuthoringMapping{}, a, fmt.Errorf("mapping failure missing exact wire derivation")
 	}
 	m, err := DecodeAuthoringMappingFor(derivation, a.Document.Content)

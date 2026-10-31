@@ -25,7 +25,7 @@ func TestAuthoringCommandsKeepSealedIdentitiesAndIndependentCriticContext(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = record.CompleteDerivation(derivation.PermitID, &derived, "")
+	record, err = completeTestDerivation(record, derivation.PermitID, &derived, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestAuthoringCommandsKeepSealedIdentitiesAndIndependentCriticContext(t *tes
 	}
 	changedDerived := derived
 	changedDerived.AuthoringInputHash = changedInput.InputHash()
-	changedRecord, changeErr = changedRecord.CompleteDerivation(changedDerivation.PermitID, &changedDerived, "")
+	changedRecord, changeErr = completeTestDerivation(changedRecord, changedDerivation.PermitID, &changedDerived, "")
 	if changeErr != nil {
 		t.Fatal(changeErr)
 	}
@@ -211,7 +211,7 @@ func TestResourceBoundAuthoringCommandsBindSameSnapshotAndRejectProviderResource
 		t.Fatalf("derivation resource context changed: %+v %v", derivePayload, err)
 	}
 	derived := workspace.DefinitionDerivedAcceptance{AuthoringInputHash: input.InputHash(), TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"派生验收"}}
-	record, err = record.CompleteDerivation(derivation.PermitID, &derived, "")
+	record, err = completeTestDerivation(record, derivation.PermitID, &derived, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,7 @@ func authoringCommandFixture(t *testing.T, input workspace.DefinitionAuthoringIn
 func TestSpecificationRequestBoundIncludesStableContract(t *testing.T) {
 	target := runtimecontract.ProviderModelTarget{ProviderID: "mock", ModelID: "model"}
 	payload := []byte(strings.Repeat("x", maxDocumentBytes-len(authoringProposalInstructions)))
-	if _, err := authoringSpecificationCommand("ws", target, "proposal", authoringProposalInstructions, payload); err == nil {
+	if _, err := authoringSpecificationCommandFor(workspace.DefinitionAuthoringOwnerBound, "ws", target, "proposal", authoringProposalInstructions, payload); err == nil {
 		t.Fatal("schema bytes omitted from bounded context")
 	}
 	legacyPayload := []byte(strings.Repeat("x", maxDocumentBytes-len(proposalInstructions)))

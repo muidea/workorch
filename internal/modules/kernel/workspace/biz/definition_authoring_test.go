@@ -73,7 +73,7 @@ func TestAuthoringLedgerCASPublishesWorkspaceRefreshOnlyAfterWrite(t *testing.T)
 func recordDerivationForReadSummary(record workspacemodel.DefinitionAuthoringRecord) (workspacemodel.DefinitionDerivationRequest, error) {
 	updated, _, _, err := record.ReserveDerivation("derive/"+record.InputHash, "provider", nil)
 	if err != nil {
-		return workspacemodel.DefinitionDerivationRequest{}, err
+		return workspacemodel.DefinitionDerivationRequest{WireContractRef: workspacemodel.DefinitionAuthoringOwnerBound, WireContractHash: workspacemodel.AuthoringWireHash(workspacemodel.DefinitionAuthoringOwnerBound, "derive")}, err
 	}
 	return updated.DerivationRequests[0], nil
 }

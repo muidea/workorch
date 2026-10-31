@@ -340,7 +340,7 @@ func TestRuntimeSemanticBatchCorrectionRejectsUnclassifiedDiagnostic(t *testing.
 		Signature: "semantic-plan/batch/invalid-json",
 	}
 	directive := semanticPlanningCorrectionDirective(manifest, aggregate.SemanticPlanning.StablePrefixHash, runtimecontract.RuntimeSemanticPlanStepProofBatch, diagnostic)
-	expected := runtimecontract.RuntimeExpectedDocumentContract{DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, PlanStep: directive.PlanStep, ManifestHash: directive.ManifestHash, DefinitionSeedHash: directive.DefinitionSeedHash, CorrectionAttempt: 1}
+	expected := runtimecontract.RuntimeExpectedDocumentContract{SemanticContextEncoding: runtimecontract.RuntimeSemanticContextEncoding, DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, PlanStep: directive.PlanStep, ManifestHash: directive.ManifestHash, DefinitionSeedHash: directive.DefinitionSeedHash, CorrectionAttempt: 1}
 	if _, err := controller.requireSemanticPlanCorrection(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.SemanticPlanning.StablePrefixHash, "correction-request", expected, diagnostic); err == nil {
 		t.Fatal("unclassified batch diagnostic created correction authority")
 	}
@@ -382,7 +382,7 @@ func TestRuntimeSemanticBatchCorrectionRejectsCoverageOutsideActiveBatch(t *test
 		}},
 	}
 	directive := semanticPlanningCorrectionDirective(manifest, aggregate.SemanticPlanning.StablePrefixHash, runtimecontract.RuntimeSemanticPlanStepProofBatch, diagnostic)
-	expected := runtimecontract.RuntimeExpectedDocumentContract{DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, PlanStep: directive.PlanStep, ManifestHash: directive.ManifestHash, DefinitionSeedHash: directive.DefinitionSeedHash, CorrectionAttempt: 1}
+	expected := runtimecontract.RuntimeExpectedDocumentContract{SemanticContextEncoding: runtimecontract.RuntimeSemanticContextEncoding, DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, PlanStep: directive.PlanStep, ManifestHash: directive.ManifestHash, DefinitionSeedHash: directive.DefinitionSeedHash, CorrectionAttempt: 1}
 	if _, err := controller.requireSemanticPlanCorrection(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.SemanticPlanning.StablePrefixHash, "correction-request", expected, diagnostic); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("out-of-batch correction error = %v", err)
 	}
@@ -474,7 +474,7 @@ func TestRuntimeSemanticPlanningCorrectionRejectsStaleAndSealsWithBatchGeneratio
 		Actual: "empty_array", Required: []string{"workspace_durable"},
 	}}
 	directive := semanticPlanningCorrectionDirective(manifest, "semantic-prefix-1", runtimecontract.RuntimeSemanticPlanStepProofBatch, rejection)
-	expectedCorrection := runtimecontract.RuntimeExpectedDocumentContract{DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, PlanStep: directive.PlanStep, ManifestHash: directive.ManifestHash, DefinitionSeedHash: directive.DefinitionSeedHash, CorrectionAttempt: 1}
+	expectedCorrection := runtimecontract.RuntimeExpectedDocumentContract{SemanticContextEncoding: runtimecontract.RuntimeSemanticContextEncoding, DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, PlanStep: directive.PlanStep, ManifestHash: directive.ManifestHash, DefinitionSeedHash: directive.DefinitionSeedHash, CorrectionAttempt: 1}
 	beforeCorrection := aggregate.StateRevision
 	corrected, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
 		Kind: RuntimeInternalEventSemanticPlanCorrectionRequired, Scope: RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &RuntimeInternalTransactionPayload{StablePrefixHash: "semantic-prefix-1", LogicalRequestID: "semantic-request-2", ExpectedDocument: &expectedCorrection, SemanticDiagnostic: &rejection},
@@ -645,7 +645,7 @@ func TestRuntimeSemanticFeasibilityRejectsProviderCorrectionAfterOwnerFactsBegin
 		ProposalIndex: 0, Rule: runtimecontract.RuntimeSemanticConstraintRelational,
 		Actual: "empty_array", Required: []string{string(runtimecontract.RuntimeEffectWorkspaceDurable)},
 	}}
-	expected := runtimecontract.RuntimeExpectedDocumentContract{
+	expected := runtimecontract.RuntimeExpectedDocumentContract{SemanticContextEncoding: runtimecontract.RuntimeSemanticContextEncoding,
 		DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch,
 		ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, CorrectionAttempt: 1,
 	}
@@ -698,7 +698,7 @@ func TestRuntimeSemanticCoverageOrderCorrectionPersistsAndReplaysIdempotently(t 
 		RequiredCoverageWorkItemIDs: required,
 	}}
 	directive := semanticPlanningCorrectionDirective(manifest, "semantic-prefix-coverage", runtimecontract.RuntimeSemanticPlanStepCoverageOrder, rejection)
-	expected := runtimecontract.RuntimeExpectedDocumentContract{
+	expected := runtimecontract.RuntimeExpectedDocumentContract{SemanticContextEncoding: runtimecontract.RuntimeSemanticContextEncoding,
 		DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, PlanStep: runtimecontract.RuntimeSemanticPlanStepCoverageOrder,
 		ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, CorrectionAttempt: 1,
 	}
@@ -1719,7 +1719,7 @@ func TestRuntimeSemanticRetirementClearsPriorProviderDocumentFraming(t *testing.
 	// helper is tested against a complete generation, not a hand-written shape.
 	_, _, aggregate, _, prerequisite, _ := sealedSemanticPlanningAggregate(t)
 	ledger = aggregate.SemanticPlanning.Clone()
-	expected := runtimecontract.RuntimeExpectedDocumentContract{
+	expected := runtimecontract.RuntimeExpectedDocumentContract{SemanticContextEncoding: runtimecontract.RuntimeSemanticContextEncoding,
 		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:  runtimecontract.RuntimeProviderDocumentSemanticPlan,
 		PlanStep:      runtimecontract.RuntimeSemanticPlanStepProofBatch,
@@ -1759,7 +1759,7 @@ func TestRuntimeSemanticRetirementClearsPriorProviderDocumentFraming(t *testing.
 func TestRuntimeSemanticRetirementRejectsUnsettledSubmittedRequestWithoutMutation(t *testing.T) {
 	_, _, aggregate, _, prerequisite, _ := sealedSemanticPlanningAggregate(t)
 	ledger := aggregate.SemanticPlanning.Clone()
-	expected := runtimecontract.RuntimeExpectedDocumentContract{
+	expected := runtimecontract.RuntimeExpectedDocumentContract{SemanticContextEncoding: runtimecontract.RuntimeSemanticContextEncoding,
 		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:  runtimecontract.RuntimeProviderDocumentSemanticPlan,
 		PlanStep:      runtimecontract.RuntimeSemanticPlanStepProofBatch,

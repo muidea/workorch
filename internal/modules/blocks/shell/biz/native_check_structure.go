@@ -128,7 +128,7 @@ func inspectShellNativeValidationChecks(directory string, targetRefs []string, a
 					return shellNativeCheckInspection{Code: "native_check_versioned_contract_invalid", CheckRef: native, TargetRefs: []string{ref}}
 				}
 			}
-			if shellVersionedNativeCheck(check) && check.ObservationProtocolRef != shellGoConjunctiveEntrypointObservationProtocolRef && !shellProjectObservationProtocol(check.ObservationProtocolRef) && ref == shellVersionedNativeCheckTarget(check.NativeCheckRef) && !shellEntrypointSupplementDeclarations(file, check.NativeCheckRef) {
+			if shellReviewedNativeCheck(check) && check.ObservationProtocolRef != shellGoConjunctiveEntrypointObservationProtocolRef && !shellProjectObservationProtocol(check.ObservationProtocolRef) && ref == shellReviewedNativeCheckTarget(check.NativeCheckRef) && !shellEntrypointSupplementDeclarations(file, check.NativeCheckRef) {
 				return shellNativeCheckInspection{Code: "native_check_versioned_contract_invalid", CheckRef: check.NativeCheckRef, TargetRefs: []string{ref}}
 			}
 			if shellEntrypointObservationProtocol(check.ObservationProtocolRef) && strings.HasSuffix(ref, "_test.go") && shellNativeRunnerOverride(file) {
@@ -203,7 +203,7 @@ func inspectShellNativeValidationChecks(directory string, targetRefs []string, a
 			return shellNativeCheckInspection{Code: "native_check_ambiguous", CheckRef: raw.NativeCheckRef, TargetRefs: normalizeShellStrings(refs)}
 		}
 		entry := matches[0]
-		if shellVersionedNativeCheck(raw) && !strings.HasSuffix(raw.NativeCheckRef, "_Behavior") && entry.targetRef != shellVersionedNativeCheckTarget(raw.NativeCheckRef) {
+		if shellReviewedNativeCheck(raw) && !strings.HasSuffix(raw.NativeCheckRef, "_Behavior") && entry.targetRef != shellReviewedNativeCheckTarget(raw.NativeCheckRef) {
 			return shellNativeCheckInspection{Code: "native_check_versioned_out_of_scope", CheckRef: raw.NativeCheckRef, TargetRefs: []string{entry.targetRef}}
 		}
 		if (raw.ObservationProtocolRef == shellGoSupplementObservationProtocolRef || shellEntrypointObservationProtocol(raw.ObservationProtocolRef)) && strings.HasSuffix(raw.NativeCheckRef, "_Behavior") && entry.targetRef != shellSupplementTargetRef(strings.TrimSuffix(raw.NativeCheckRef, "_Behavior")) {

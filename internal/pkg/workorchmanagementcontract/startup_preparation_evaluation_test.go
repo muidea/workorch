@@ -9,7 +9,7 @@ import (
 func TestPreparationPerCheckJudgmentShapeNeverGrantsReadiness(t *testing.T) {
 	fixture := func() StartupPreparationView {
 		v := preparationViewFixture()
-		v.Record.Version, v.OperationState = "workorch-preparation-record/v2", "blocked"
+		v.Record.Version, v.OperationState = "workorch-preparation-record", "blocked"
 		a := &v.Record.Attempts[0]
 		a.State, a.CreationEpoch = "blocked", strings.Repeat("a", 32)
 		a.EvaluationVersion = "workorch-preparation-check-evaluation/v1"
@@ -43,7 +43,7 @@ func TestPreparationPerCheckJudgmentShapeNeverGrantsReadiness(t *testing.T) {
 func TestPreparationSoulJudgmentRequiresVersionAndOriginalReference(t *testing.T) {
 	fixture := func() StartupPreparationView {
 		v := preparationViewFixture()
-		v.Record.Version, v.OperationState = "workorch-preparation-record/v2", "blocked"
+		v.Record.Version, v.OperationState = "workorch-preparation-record", "blocked"
 		a := &v.Record.Attempts[0]
 		a.State, a.CreationEpoch = "blocked", strings.Repeat("a", 32)
 		a.EvaluationVersion = "workorch-preparation-check-evaluation/v1"

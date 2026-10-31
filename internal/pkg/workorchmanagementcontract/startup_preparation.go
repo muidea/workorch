@@ -171,7 +171,7 @@ func (v StartupPreparationView) ValidateFor(workspaceID string) error {
 		return common.ErrConflict
 	}
 	if v.SkillHubProjectIssue != "" {
-		if v.SkillHubProjectIssue != "project_registration_required" || v.Record == nil || v.Record.Version != "workorch-preparation-record/v2" || len(v.Record.Attempts) == 0 {
+		if v.SkillHubProjectIssue != "project_registration_required" || v.Record == nil || v.Record.Version != "workorch-preparation-record" || len(v.Record.Attempts) == 0 {
 			return common.ErrConflict
 		}
 		a := v.Record.Attempts[len(v.Record.Attempts)-1]
@@ -195,29 +195,29 @@ func (v StartupPreparationView) ValidateFor(workspaceID string) error {
 		}
 		return nil
 	}
-	if (v.Record.Version != "workorch-preparation-record/v1" && v.Record.Version != "workorch-preparation-record/v2") || len(v.Record.Attempts) == 0 || len(v.Record.Attempts) > 64 || (v.CurrentValidity != "not_evaluated" && v.CurrentValidity != "stale" && v.CurrentValidity != "observed") {
+	if v.Record.Version != "workorch-preparation-record" || len(v.Record.Attempts) == 0 || len(v.Record.Attempts) > 64 || (v.CurrentValidity != "not_evaluated" && v.CurrentValidity != "stale" && v.CurrentValidity != "observed") {
 		return common.ErrConflict
 	}
 	lastRevision := uint64(0)
 	seen := make(map[string]bool, len(v.Record.Attempts))
 	for _, a := range v.Record.Attempts {
-		if a.ExecutionInputVersion != "" && (v.Record.Version != "workorch-preparation-record/v2" || a.State != "blocked" || a.EvaluationVersion != "workorch-preparation-check-evaluation/v1" || a.ExecutionInputVersion != "workorch-preparation-execution-inputs/v1" || a.SealEvidenceRef == "") {
+		if a.ExecutionInputVersion != "" && (a.State != "blocked" || a.EvaluationVersion != "workorch-preparation-check-evaluation/v1" || a.ExecutionInputVersion != "workorch-preparation-execution-inputs/v1" || a.SealEvidenceRef == "") {
 			return common.ErrConflict
 		}
-		if a.EmptySelectionEvaluationVersion != "" && (v.Record.Version != "workorch-preparation-record/v2" || a.State != "blocked" || a.EvaluationVersion != "workorch-preparation-check-evaluation/v1" || a.EmptySelectionEvaluationVersion != "workorch-preparation-empty-selection-evaluation/v1") {
+		if a.EmptySelectionEvaluationVersion != "" && (a.State != "blocked" || a.EvaluationVersion != "workorch-preparation-check-evaluation/v1" || a.EmptySelectionEvaluationVersion != "workorch-preparation-empty-selection-evaluation/v1") {
 			return common.ErrConflict
 		}
-		if a.Assessment != nil && (v.Record.Version != "workorch-preparation-record/v2" || a.State != "blocked" || a.EvaluationVersion != "workorch-preparation-check-evaluation/v1" || a.Assessment.ValidateFor(a.Binding.ManifestHash, a.Checks) != nil) {
+		if a.Assessment != nil && (a.State != "blocked" || a.EvaluationVersion != "workorch-preparation-check-evaluation/v1" || a.Assessment.ValidateFor(a.Binding.ManifestHash, a.Checks) != nil) {
 			return common.ErrConflict
 		}
-		if a.DefinitionCompilation != nil && (v.Record.Version != "workorch-preparation-record/v2" || a.DefinitionCompilation.ValidateFor(a) != nil) {
+		if a.DefinitionCompilation != nil && (a.DefinitionCompilation.ValidateFor(a) != nil) {
 			return common.ErrConflict
 		}
-		if a.NoRunEvaluationVersion != "" && (v.Record.Version != "workorch-preparation-record/v2" || !validPreparationNoRunFinalShape(a)) {
+		if a.NoRunEvaluationVersion != "" && (!validPreparationNoRunFinalShape(a)) {
 			return common.ErrConflict
 		}
 		if ref := a.MCPRegistryEvidenceRef; ref != "" {
-			if v.Record.Version != "workorch-preparation-record/v2" || a.State != "blocked" || !strings.HasPrefix(ref, "mcp-registry-observation:") || len(strings.TrimPrefix(ref, "mcp-registry-observation:")) != 32 || strings.Trim(strings.TrimPrefix(ref, "mcp-registry-observation:"), "0123456789abcdef") != "" {
+			if a.State != "blocked" || !strings.HasPrefix(ref, "mcp-registry-observation:") || len(strings.TrimPrefix(ref, "mcp-registry-observation:")) != 32 || strings.Trim(strings.TrimPrefix(ref, "mcp-registry-observation:"), "0123456789abcdef") != "" {
 				return common.ErrConflict
 			}
 			found := false
@@ -230,11 +230,11 @@ func (v StartupPreparationView) ValidateFor(workspaceID string) error {
 				return common.ErrConflict
 			}
 		}
-		if a.EvaluationVersion != "" && (v.Record.Version != "workorch-preparation-record/v2" || a.EvaluationVersion != "workorch-preparation-check-evaluation/v1") {
+		if a.EvaluationVersion != "" && (a.EvaluationVersion != "workorch-preparation-check-evaluation/v1") {
 			return common.ErrConflict
 		}
 		if ref := a.RunHistoryEvidenceRef; ref != "" {
-			if v.Record.Version != "workorch-preparation-record/v2" || a.State != "blocked" || !strings.HasPrefix(ref, "run-history-observation:") || len(strings.TrimPrefix(ref, "run-history-observation:")) != 32 || strings.Trim(strings.TrimPrefix(ref, "run-history-observation:"), "0123456789abcdef") != "" {
+			if a.State != "blocked" || !strings.HasPrefix(ref, "run-history-observation:") || len(strings.TrimPrefix(ref, "run-history-observation:")) != 32 || strings.Trim(strings.TrimPrefix(ref, "run-history-observation:"), "0123456789abcdef") != "" {
 				return common.ErrConflict
 			}
 			found := false
@@ -247,7 +247,7 @@ func (v StartupPreparationView) ValidateFor(workspaceID string) error {
 				return common.ErrConflict
 			}
 		}
-		if ref := a.ProviderCacheEvidenceRef; ref != "" && (v.Record.Version != "workorch-preparation-record/v2" || a.State != "blocked" || !strings.HasPrefix(ref, "provider-cache-observation:") || len(strings.TrimPrefix(ref, "provider-cache-observation:")) != 32 || strings.Trim(strings.TrimPrefix(ref, "provider-cache-observation:"), "0123456789abcdef") != "") {
+		if ref := a.ProviderCacheEvidenceRef; ref != "" && (a.State != "blocked" || !strings.HasPrefix(ref, "provider-cache-observation:") || len(strings.TrimPrefix(ref, "provider-cache-observation:")) != 32 || strings.Trim(strings.TrimPrefix(ref, "provider-cache-observation:"), "0123456789abcdef") != "") {
 			return common.ErrConflict
 		}
 		if a.ProviderCacheEvidenceRef != "" {
@@ -262,7 +262,7 @@ func (v StartupPreparationView) ValidateFor(workspaceID string) error {
 			}
 		}
 		if ref := a.MemoryInventoryEvidenceRef; ref != "" {
-			if v.Record.Version != "workorch-preparation-record/v2" || a.State != "blocked" || !strings.HasPrefix(ref, "memory-inventory-observation:") || len(strings.TrimPrefix(ref, "memory-inventory-observation:")) != 32 || strings.Trim(strings.TrimPrefix(ref, "memory-inventory-observation:"), "0123456789abcdef") != "" {
+			if a.State != "blocked" || !strings.HasPrefix(ref, "memory-inventory-observation:") || len(strings.TrimPrefix(ref, "memory-inventory-observation:")) != 32 || strings.Trim(strings.TrimPrefix(ref, "memory-inventory-observation:"), "0123456789abcdef") != "" {
 				return common.ErrConflict
 			}
 			found := false
@@ -275,19 +275,19 @@ func (v StartupPreparationView) ValidateFor(workspaceID string) error {
 				return common.ErrConflict
 			}
 		}
-		if a.SkillContextState != "" && (v.Record.Version != "workorch-preparation-record/v2" || a.State != "blocked" || a.SkillSelectionState != "compiled_checks_pending" || a.SkillContextState != "compiled_checks_pending" && a.SkillContextState != "bounded_checks_pending" && a.SkillContextState != "rejected") {
+		if a.SkillContextState != "" && (a.State != "blocked" || a.SkillSelectionState != "compiled_checks_pending" || a.SkillContextState != "compiled_checks_pending" && a.SkillContextState != "bounded_checks_pending" && a.SkillContextState != "rejected") {
 			return common.ErrConflict
 		}
-		if a.SkillReferenceState != "" && (v.Record.Version != "workorch-preparation-record/v2" || a.State != "blocked" || a.SkillSelectionState != "compiled_checks_pending" || a.SkillReferenceState != "observed_checks_pending" && a.SkillReferenceState != "sources_incomplete" && a.SkillReferenceState != "source_unresolved" && a.SkillReferenceState != "unavailable") {
+		if a.SkillReferenceState != "" && (a.State != "blocked" || a.SkillSelectionState != "compiled_checks_pending" || a.SkillReferenceState != "observed_checks_pending" && a.SkillReferenceState != "sources_incomplete" && a.SkillReferenceState != "source_unresolved" && a.SkillReferenceState != "unavailable") {
 			return common.ErrConflict
 		}
-		if a.SkillStatusState != "" && (v.Record.Version != "workorch-preparation-record/v2" || a.State != "blocked" || a.SkillSelectionState != "compiled_checks_pending" || a.SkillStatusState != "observed_freshness_pending" && a.SkillStatusState != "sources_incomplete" && a.SkillStatusState != "status_blocked" && a.SkillStatusState != "version_conflict") {
+		if a.SkillStatusState != "" && (a.State != "blocked" || a.SkillSelectionState != "compiled_checks_pending" || a.SkillStatusState != "observed_freshness_pending" && a.SkillStatusState != "sources_incomplete" && a.SkillStatusState != "status_blocked" && a.SkillStatusState != "version_conflict") {
 			return common.ErrConflict
 		}
-		if a.SkillSelectionState != "" && (v.Record.Version != "workorch-preparation-record/v2" || a.State != "blocked" || a.SkillRegistryEvidenceRef == "" || a.SkillSelectionState != "compiled_checks_pending" && a.SkillSelectionState != "sources_incomplete" && a.SkillSelectionState != "conflict" || a.SkillSelectionState == "compiled_checks_pending" && (a.SoulEvidenceRef == "" || a.SkillHubEffectState != "recorded" || a.SkillHubInstalledState != "observed_selection_pending")) {
+		if a.SkillSelectionState != "" && (a.State != "blocked" || a.SkillRegistryEvidenceRef == "" || a.SkillSelectionState != "compiled_checks_pending" && a.SkillSelectionState != "sources_incomplete" && a.SkillSelectionState != "conflict" || a.SkillSelectionState == "compiled_checks_pending" && (a.SoulEvidenceRef == "" || a.SkillHubEffectState != "recorded" || a.SkillHubInstalledState != "observed_selection_pending")) {
 			return common.ErrConflict
 		}
-		if a.SkillHubInstalledState != "" && (v.Record.Version != "workorch-preparation-record/v2" || a.State != "blocked" || a.SkillHubEffectRef == "" || a.SkillHubInstalledState != "incomplete" && a.SkillHubInstalledState != "observed_selection_pending") {
+		if a.SkillHubInstalledState != "" && (a.State != "blocked" || a.SkillHubEffectRef == "" || a.SkillHubInstalledState != "incomplete" && a.SkillHubInstalledState != "observed_selection_pending") {
 			return common.ErrConflict
 		}
 		if a.SkillHubEffectRef == "" {
@@ -296,7 +296,7 @@ func (v StartupPreparationView) ValidateFor(workspaceID string) error {
 			}
 		} else {
 			ref := strings.TrimPrefix(a.SkillHubEffectRef, "skillhub-status:")
-			if v.Record.Version != "workorch-preparation-record/v2" || ref == a.SkillHubEffectRef || len(ref) != 32 || strings.Trim(ref, "0123456789abcdef") != "" {
+			if ref == a.SkillHubEffectRef || len(ref) != 32 || strings.Trim(ref, "0123456789abcdef") != "" {
 				return common.ErrConflict
 			}
 			if a.State == "accepted" || a.State == "unknown" {
@@ -310,7 +310,7 @@ func (v StartupPreparationView) ValidateFor(workspaceID string) error {
 		if a.SkillRegistryEvidenceRef != "" && (a.State != "blocked" || !strings.HasPrefix(a.SkillRegistryEvidenceRef, "skill-registry-observation:") || len(strings.TrimPrefix(a.SkillRegistryEvidenceRef, "skill-registry-observation:")) != 32 || strings.Trim(strings.TrimPrefix(a.SkillRegistryEvidenceRef, "skill-registry-observation:"), "0123456789abcdef") != "") {
 			return common.ErrConflict
 		}
-		if a.SealEvidenceRef != "" && (v.Record.Version != "workorch-preparation-record/v2" || a.State != "blocked" || a.EvaluationVersion != "workorch-preparation-check-evaluation/v1" || !strings.HasPrefix(a.SealEvidenceRef, "seal-observation:") || len(strings.TrimPrefix(a.SealEvidenceRef, "seal-observation:")) != 32 || strings.Trim(strings.TrimPrefix(a.SealEvidenceRef, "seal-observation:"), "0123456789abcdef") != "") {
+		if a.SealEvidenceRef != "" && (a.State != "blocked" || a.EvaluationVersion != "workorch-preparation-check-evaluation/v1" || !strings.HasPrefix(a.SealEvidenceRef, "seal-observation:") || len(strings.TrimPrefix(a.SealEvidenceRef, "seal-observation:")) != 32 || strings.Trim(strings.TrimPrefix(a.SealEvidenceRef, "seal-observation:"), "0123456789abcdef") != "") {
 			return common.ErrConflict
 		}
 		if a.SoulEvidenceRef != "" && (a.State != "blocked" || !strings.HasPrefix(a.SoulEvidenceRef, "soul-observation:") || len(strings.TrimPrefix(a.SoulEvidenceRef, "soul-observation:")) != 32 || strings.Trim(strings.TrimPrefix(a.SoulEvidenceRef, "soul-observation:"), "0123456789abcdef") != "") {
@@ -330,47 +330,43 @@ func (v StartupPreparationView) ValidateFor(workspaceID string) error {
 		}
 		seen[a.RequestID] = true
 		lastRevision = a.CommittedWorkspaceRevision
-		if v.Record.Version == "workorch-preparation-record/v2" {
-			if len(a.CreationEpoch) != 32 || strings.Trim(a.CreationEpoch, "0123456789abcdef") != "" || len(a.Checks) == 0 || len(a.Checks) > 128 {
+		if len(a.CreationEpoch) != 32 || strings.Trim(a.CreationEpoch, "0123456789abcdef") != "" || len(a.Checks) == 0 || len(a.Checks) > 128 {
+			return common.ErrConflict
+		}
+		lastID := ""
+		for _, check := range a.Checks {
+			if check.ID == "provider_cache" && isPreparationProviderSelectionReason(check.Reason) && (a.ProviderCacheEvidenceRef == "" || check.Owner != "llm" || !check.Required || a.EvaluationVersion != "workorch-preparation-check-evaluation/v1" || a.State != "blocked" || check.State != "blocked") {
 				return common.ErrConflict
 			}
-			lastID := ""
-			for _, check := range a.Checks {
-				if check.ID == "provider_cache" && isPreparationProviderSelectionReason(check.Reason) && (a.ProviderCacheEvidenceRef == "" || check.Owner != "llm" || !check.Required || a.EvaluationVersion != "workorch-preparation-check-evaluation/v1" || a.State != "blocked" || check.State != "blocked") {
-					return common.ErrConflict
-				}
-				if check.ID == "mcp_selection" && preparationMCPReasonRequiresEvidence(check.Reason) && (a.MCPRegistryEvidenceRef == "" || check.Owner != "mcpregistry" || !check.Required) {
-					return common.ErrConflict
-				}
-				if check.ID == "mcp_selection" && isPreparationMCPSelectionReason(check.Reason) && (a.EvaluationVersion != "workorch-preparation-check-evaluation/v1" || a.State != "blocked" || check.State != "blocked") {
-					return common.ErrConflict
-				}
-				if check.ID == "memory_selection" && preparationMemoryReasonRequiresEvidence(check.Reason) && a.MemoryInventoryEvidenceRef == "" {
-					return common.ErrConflict
-				}
-				if check.ID == "skill_selection" && strings.HasPrefix(check.Reason, "skill_selection_") && (a.SkillSelectionState == "" || check.Reason != "skill_selection_"+a.SkillSelectionState) {
-					return common.ErrConflict
-				}
-				if check.ID == "skill_selection" && check.Reason == "skill_registry_observed_selection_pending" && a.SkillRegistryEvidenceRef == "" {
-					return common.ErrConflict
-				}
-				if check.ID == "soul_selection" && check.Reason == "souls_observed_remaining_checks" && a.SoulEvidenceRef == "" {
-					return common.ErrConflict
-				}
-				if !preparationViewIdentity(check.ID) || !preparationViewIdentity(check.Owner) || check.ID <= lastID {
-					return common.ErrConflict
-				}
-				lastID = check.ID
-				if a.State == "accepted" || a.State == "unknown" {
-					if check.State != "pending" || check.Reason != "not_observed" {
-						return common.ErrConflict
-					}
-				} else if !validPreparationEvaluatedCheck(a, check) {
-					return common.ErrConflict
-				}
+			if check.ID == "mcp_selection" && preparationMCPReasonRequiresEvidence(check.Reason) && (a.MCPRegistryEvidenceRef == "" || check.Owner != "mcpregistry" || !check.Required) {
+				return common.ErrConflict
 			}
-		} else if a.CreationEpoch != "" || a.PreparationEpoch != 0 || len(a.Checks) != 0 || a.DirectoryEvidenceHash != "" || a.ResourceEvidenceHash != "" || a.ManagedConfigEvidenceRef != "" || a.SoulEvidenceRef != "" || a.SkillRegistryEvidenceRef != "" {
-			return common.ErrConflict
+			if check.ID == "mcp_selection" && isPreparationMCPSelectionReason(check.Reason) && (a.EvaluationVersion != "workorch-preparation-check-evaluation/v1" || a.State != "blocked" || check.State != "blocked") {
+				return common.ErrConflict
+			}
+			if check.ID == "memory_selection" && preparationMemoryReasonRequiresEvidence(check.Reason) && a.MemoryInventoryEvidenceRef == "" {
+				return common.ErrConflict
+			}
+			if check.ID == "skill_selection" && strings.HasPrefix(check.Reason, "skill_selection_") && (a.SkillSelectionState == "" || check.Reason != "skill_selection_"+a.SkillSelectionState) {
+				return common.ErrConflict
+			}
+			if check.ID == "skill_selection" && check.Reason == "skill_registry_observed_selection_pending" && a.SkillRegistryEvidenceRef == "" {
+				return common.ErrConflict
+			}
+			if check.ID == "soul_selection" && check.Reason == "souls_observed_remaining_checks" && a.SoulEvidenceRef == "" {
+				return common.ErrConflict
+			}
+			if !preparationViewIdentity(check.ID) || !preparationViewIdentity(check.Owner) || check.ID <= lastID {
+				return common.ErrConflict
+			}
+			lastID = check.ID
+			if a.State == "accepted" || a.State == "unknown" {
+				if check.State != "pending" || check.Reason != "not_observed" {
+					return common.ErrConflict
+				}
+			} else if !validPreparationEvaluatedCheck(a, check) {
+				return common.ErrConflict
+			}
 		}
 		switch a.State {
 		case "accepted", "unknown":
@@ -536,7 +532,7 @@ type PreparationCompletionView struct {
 }
 
 func validatePreparationCompletionViews(r *PreparationRecordView) error {
-	if len(r.Completions) > len(r.Attempts) || len(r.Completions) > 0 && r.Version != "workorch-preparation-record/v2" {
+	if len(r.Completions) > len(r.Attempts) || len(r.Completions) > 0 && r.Version != "workorch-preparation-record" {
 		return common.ErrConflict
 	}
 	seen := map[string]bool{}

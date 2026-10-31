@@ -20,12 +20,16 @@ func TestAuthoringHTTPCurrentProposalRoundTripAndSemanticRejects(t *testing.T) {
 	input := workspace.DefinitionAuthoringInput{Version: 1, WorkspaceID: "ws", Revision: 1, GoalText: "交付目标", TemplateID: "t", AcceptanceRequirements: []string{"用户验收"}}
 	template := workspace.WorkspaceTemplate{ID: "t", DoDItems: []string{"模板验收"}}
 	record := workspace.DefinitionAuthoringRecord{Input: input, InputHash: input.InputHash(), TemplateSnapshot: template, TemplateSnapshotHash: workspace.WorkspaceTemplateSnapshotHash(&template)}
-	_, request, _, err := record.ReserveDerivation("derive", "provider", nil)
+	record, request, _, err := record.ReserveDerivation("derive", "provider", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	derived := workspace.DefinitionDerivedAcceptance{AuthoringInputHash: input.InputHash(), TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"派生验收"}}
-	request.Proposal = &derived
+	record, err = completeTestDerivation(record, request.PermitID, &derived, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request = record.DerivationRequests[0]
 	command, err := AuthoringProposalCommand(request, runtimecontract.ProviderModelTarget{ProviderID: "mock", ModelID: "model"})
 	if err != nil {
 		t.Fatal(err)
@@ -50,6 +54,7 @@ func TestAuthoringHTTPCurrentProposalRoundTripAndSemanticRejects(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				payload = testkit.OwnerBoundFixtureDocument(payload)
 				if scenario == "wrong_source_kind" {
 					// 来源由 owner 编译；provider 连自报同名字段也不能混入当前 wire。
 					payload = []byte(strings.Replace(string(payload), `"SourceItemRefs":`, `"SourceKind":"DERIVED","SourceItemRefs":`, 1))

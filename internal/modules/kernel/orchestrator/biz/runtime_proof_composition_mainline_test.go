@@ -10,7 +10,7 @@ import (
 // Real File/Shell/Run/Result owners; scripted reviewer and private startup.
 // This proves the opt-in composition transaction, not public work availability.
 func TestDriveRuntimeProofCompositionV3OwnerMainlineAndRestart(t *testing.T) {
-	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectConjunction, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV3, SourceObligations: true, DeliveryGuard: true}
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectConjunction, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, SourceObligations: true, DeliveryGuard: true}
 	baseline := runValidationInputReviewMainline(t, "consistent", "", options)
 	for _, cut := range []string{"after_review_document", "after_review_binding", "after_project_receipt", "after_result_persistence", "after_workspace_persistence", "after_run_persistence"} {
 		t.Run(cut, func(t *testing.T) {

@@ -105,11 +105,11 @@ func cacheLayoutJSON(raw []byte, path string) ([]byte, error) {
 
 func cacheLayoutOrder(path string) (first, last []string) {
 	switch path {
-	case "semantic-v5":
+	case "semantic-shared":
 		return []string{"workspaceId", "runId", "soul", "definitionSeed", "contextEncoding", "workContext"}, []string{"planStep", "outputInstruction", "schema", "manifest", "batchId", "batchSequence", "batchCoverageWorkItemIds"}
-	case "semantic-v5/workContext/content":
+	case "semantic-shared/workContext/content":
 		return []string{"ProtocolRef", "Snapshots"}, []string{"ManifestRevision"}
-	case "semantic-v5/workContext/content/Snapshots/[]":
+	case "semantic-shared/workContext/content/Snapshots/[]":
 		return []string{"TargetRef", "Content"}, []string{"ContentHash"}
 	case "semantic":
 		return []string{"workspaceId", "runId", "soul", "definitionSeed", "planStep", "outputInstruction", "schema"}, []string{"manifest", "batchId", "batchSequence", "batchCoverageWorkItemIds"}

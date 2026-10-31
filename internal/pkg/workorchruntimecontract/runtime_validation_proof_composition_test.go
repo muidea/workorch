@@ -33,7 +33,7 @@ func compositionFixture(t *testing.T) (RuntimeValidationProofRequirement, Runtim
 		t.Fatal(err)
 	}
 	content := "complete original input bytes"
-	binding.InputReview = &RuntimeValidationInputReviewSubject{ProtocolRef: RuntimeValidationInputReviewProtocolV3, Files: []RuntimeValidationInputReviewFile{{TargetRef: "checks/input_test.go", Content: content, ContentHash: RuntimeValidationInputContentHash(content)}}, LineageAssertions: slices.Clone(requirement.LineageAssertions)}
+	binding.InputReview = &RuntimeValidationInputReviewSubject{ProtocolRef: RuntimeValidationInputReviewProtocol, Files: []RuntimeValidationInputReviewFile{{TargetRef: "checks/input_test.go", Content: content, ContentHash: RuntimeValidationInputContentHash(content)}}, LineageAssertions: slices.Clone(requirement.LineageAssertions)}
 	binding.InputReview.Hash = StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, binding)
 	report := RuntimeValidationInputReview{SubjectHash: binding.InputReview.Hash, Checks: []RuntimeValidationInputCheckReview{{RequiredCheckRef: binding.RequiredCheckRefs[0], Conclusion: RuntimeValidationInputConsistent, Reason: "joint review only; no execution credit", InputTargetRefs: []string{"checks/input_test.go"}, Obligations: []RuntimeValidationInputObligationReview{{CriterionText: item.TargetText, Finding: RuntimeValidationInputCovered, Reason: "actual input assertions AND independently consumed sealed rules", InputTargetRefs: []string{"checks/input_test.go"}, ProofConsumerRefs: RuntimeValidationProofConsumerRefs(*binding.InputReview)}}}}}
 	return requirement, binding, report
@@ -90,7 +90,7 @@ func TestValidationProofCompositionRejectsMissingForeignAndLegacyMappings(t *tes
 			}
 		})
 	}
-	for _, protocol := range []string{RuntimeValidationInputReviewProtocol, RuntimeValidationInputReviewProtocolV2} {
+	for _, protocol := range []string{"validation/input-consistency/v1", "validation/input-consistency/v2", "unknown"} {
 		changed := binding.Clone()
 		changed.InputReview.ProtocolRef = protocol
 		changed.InputReview.Hash = StableRuntimeValidationInputReviewSubjectHash(*changed.InputReview, changed)
@@ -137,7 +137,7 @@ func TestValidationProofCompositionRejectsRehashedOwnerSourceSubstitution(t *tes
 
 func TestValidationProofCompositionV3ClosedSemanticWireAndNegativeObservations(t *testing.T) {
 	manifest, document, binding := semanticInputReviewV2Fixture(t)
-	binding.InputReview.ProtocolRef = RuntimeValidationInputReviewProtocolV3
+	binding.InputReview.ProtocolRef = RuntimeValidationInputReviewProtocol
 	binding.InputReview.Hash = StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, binding)
 	for i := range manifest.OwnerCatalogs {
 		catalog := &manifest.OwnerCatalogs[i]
@@ -145,7 +145,7 @@ func TestValidationProofCompositionV3ClosedSemanticWireAndNegativeObservations(t
 			continue
 		}
 		catalog.ValidationSurfaces[0].ProofRequirementBindings[0] = binding.Clone()
-		catalog.ValidationRecipes[0].InputReviewProtocolRef = RuntimeValidationInputReviewProtocolV3
+		catalog.ValidationRecipes[0].InputReviewProtocolRef = RuntimeValidationInputReviewProtocol
 		catalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
 	}
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
@@ -180,13 +180,13 @@ func TestValidationProofCompositionV3ClosedSemanticWireAndNegativeObservations(t
 	}
 }
 
-func TestValidationProofCompositionLegacyWireRejectsExtensionIncludingNull(t *testing.T) {
+func TestValidationProofCompositionRejectsMalformedConsumerRefs(t *testing.T) {
 	manifest, document, _ := semanticInputReviewV2Fixture(t)
 	payload, err := EncodeRuntimeSemanticPlanPayloadWithManifest(manifest, document)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []string{"null", "[]", `["validation_input"]`, `"validation_input"`, `[123]`} {
+	for _, value := range []string{"null", "[]", `"validation_input"`, `[123]`} {
 		t.Run(value, func(t *testing.T) {
 			changed := strings.Replace(string(payload), `"criterionText":`, `"proofConsumerRefs":`+value+`,"criterionText":`, 1)
 			if changed == string(payload) {
@@ -282,7 +282,7 @@ func TestValidationProofCompositionManifestRejectsRehashedRequirementReplacement
 		}
 		obligation.ValidationProofRequirement.Hash = StableRuntimeValidationProofRequirementHash(*obligation.ValidationProofRequirement)
 		binding.RequirementHash = obligation.ValidationProofRequirement.Hash
-		binding.InputReview.ProtocolRef = RuntimeValidationInputReviewProtocolV3
+		binding.InputReview.ProtocolRef = RuntimeValidationInputReviewProtocol
 		binding.InputReview.LineageAssertions = slices.Clone(obligation.ValidationProofRequirement.LineageAssertions)
 		binding.InputReview.Hash = StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, binding)
 	}
@@ -290,7 +290,7 @@ func TestValidationProofCompositionManifestRejectsRehashedRequirementReplacement
 		catalog := &manifest.OwnerCatalogs[i]
 		if catalog.OwnerModuleID == RuntimeModuleShell {
 			catalog.ValidationSurfaces[0].ProofRequirementBindings[0] = binding.Clone()
-			catalog.ValidationRecipes[0].InputReviewProtocolRef = RuntimeValidationInputReviewProtocolV3
+			catalog.ValidationRecipes[0].InputReviewProtocolRef = RuntimeValidationInputReviewProtocol
 			catalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
 		}
 	}

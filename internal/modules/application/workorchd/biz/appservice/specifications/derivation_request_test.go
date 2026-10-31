@@ -110,11 +110,12 @@ func TestDerivationCommandKeepsFullStableContract(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if command.Request.Schema != derivationOutputSchema || command.Request.SchemaFormat != llmmodels.ProviderSchemaFormatJSONSchema {
+		schema, _ := workspace.AuthoringWireSchema(workspace.DefinitionAuthoringOwnerBound, "derive")
+		if command.Request.Schema != schema || command.Request.SchemaFormat != llmmodels.ProviderSchemaFormatJSONSchema {
 			t.Fatal("派生请求未携带显式完整 schema")
 		}
 		sections := command.Request.PromptContext.Sections
-		if len(sections) != 2 || sections[0].Content != derivationOutputContract() || !strings.Contains(sections[1].Content, input.InputHash()) || strings.Contains(sections[0].Content, goal) {
+		if len(sections) != 2 || !strings.Contains(sections[0].Content, workspace.DefinitionAuthoringOwnerBound) || !strings.Contains(sections[1].Content, input.GoalText) || strings.Contains(sections[0].Content, goal) {
 			t.Fatal("派生请求稳定合同与动态输入分区漂移")
 		}
 		if stable != "" && stable != sections[0].Content {

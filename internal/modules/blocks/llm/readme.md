@@ -2,7 +2,7 @@
 
 Status: active
 
-v3 composition 的 versioned terminal-material rule/body/source selector 仍只按 exact subject 投影到 C3。
+当前 composition 的 terminal-material rule/body/source selector 仍只按 exact subject 投影到 C3。
 instruction 区分未来义务映射与真实 owner facts，明确普通 operation receipt 不证明最终 repository HEAD/tree/blob bytes。
 `runtime_proof_composition_test.go` 固定完整声明／版本、输入漂移时 C0～C2 与 stable-prefix 不变及删声明拒绝。
 
@@ -69,10 +69,10 @@ DefaultChat 和完整排序的 exact model override 声明（仅模型 ID、容�
 endpoint 或其派生 hash）。override 最多 4096 项、每项最多 64 个 operation，且仍受完整结果 1 MiB 限制。
 旧无该字段的历史仍可读；不会在 GET、恢复或重新解码时补出默认模型。结果 clone 深拷贝嵌套声明，
 loader 后续变化和返回值修改不能改变 frozen source。该声明不证明预算、远端授权或连通性。
-v2 的准备检查消费已冻结的本地配置，不要求 catalog 预热、独立网关授权回执或探测调用。
+当前准备检查消费已冻结的本地配置，不要求 catalog 预热、独立网关授权回执或探测调用。
 启动执行仍通过 LLM owner 校验精确模型选择并封存到 Runtime activation；后续 loop 消费该封存选择，
 实际请求继续遵守原 ProviderCeiling、配置 revision、预算和失败记录合同。凭据与 endpoint 留在 LLM owner，
-不复制到 Workspace 或运行上下文。v1 及无配置历史按原语义保留，不在读取时升级。
+不复制到 Workspace 或运行上下文。没有当前配置观察时明确阻塞，不猜测或迁移旧格式。
 超限/损坏整体拒绝，不裁剪后声明完整。缓存里异常的 observation/诊断字段同样拒绝，不清洗后授信。
 原 catalog/provider 诊断路径不变。embedding 的零 context/output 元数据原值保留为未知；精确 endpoint 与非负元数据
 允许 `embeddingReady`，并消费 `workorch.embedding-transport/v1` 的独立 64 KiB 输入、512 KiB JSON 请求、4 MiB
@@ -148,24 +148,24 @@ miss/fresh/TTL/LKG、未完 refresh、配置轮换、完整性/隔离、生命�
   仅当前 proof batch 渲染内容，保护预算不得截断，context-integrity 重验准确投影；response-format 开关不改变 local
   admission。LLM 不创建 ticket，不处理 Runtime 转换；完整无法判断与格式错误由 Orchestrator 分流。
   `biz/runtime_input_review_projection_test.go` 覆盖完整内容/信息、schema、C0～C2 稳定和截断拒绝。
-  activation 显式选择 `validation/input-consistency/v2` 时，每个 check 必须有完整有界的 `obligations`：原准则
+  当前 `validation/input-consistency` 合同要求，每个 check 必须有完整有界的 `obligations`：原准则
   exact excerpts、`covered|missing|conflicting|unknown`、reason 和已观测 input refs。摘录合起来须覆盖原准则全部
   非空白文本（包括连接词）；这只是防止漏报的来源约束，不是语义证明。每 check 最多 16 项，单报告 JSON 不超过
   32 KiB。schema 与本地 decoder 同源，缺项、未知字段或相互矛盾的结论仍是文档准入错误，不是事实 ticket。
-  V1 不出现新字段；协议-specific schema/instruction、输入和信息均在 C3，同一 activation 的 C0～C2 不因评审变动。
-  v3 组合评审额外完整投影同 CWI 的 `LineageAssertions`，逐义务 `proofConsumerRefs` 只允许
+  当前 schema/instruction、输入和信息均在 C3，同一 activation 的 C0～C2 不因评审变动。
+  组合评审完整投影同 CWI 的 `LineageAssertions`，逐义务 `proofConsumerRefs` 只允许
   `validation_input` 和该 subject 原 rule refs。模型须解释 ordinary assertions 与 typed consumer 的合取覆盖，
-  不能以规则名、README 自述、未来 ACK 或一致结论替代实际证明；旧协议禁止该扩展。
+  不能以规则名、README 自述、未来 ACK 或一致结论替代实际证明。
   `biz/runtime_proof_composition_test.go` 固定 C3 完整声明/schema/instruction、删改拒绝及输入变化时
   C0～C2/StablePrefixHash 不变。来源与边界遵守
   [Validation Proof Composition](../../../../docs/00-core/runtime/validation-proof-composition.md)。
-  每份 v3 subject 同时投影 owner 纯计算的 canonical `requiredProofConsumerRefs`，明确逐 check 必须完整合取的集合；
-  它不证明这些消费者已执行，也不代填模型结论。v1/v2 不出现该投影。批内存在多个可选 recipe 时，说明覆盖全部
+  每份 subject 同时投影 owner 纯计算的 canonical `requiredProofConsumerRefs`，明确逐 check 必须完整合取的集合；
+  它不证明这些消费者已执行，也不代填模型结论。批内存在多个可选 recipe 时，说明覆盖全部
   实际可选协议、scope 与 diagnostic-source 扩展，每类只出现一次，按选中的 exact recipe/subject 使用；不得沿用
   第一份 recipe 的协议解释其余候选。C3 的完整输入投影与阶段说明均经 context-integrity 重验，删改仍拒绝。
   subject 可声明有界 `ScopeContractRef + ScopeRequirements`，描述 owner 实际执行/观测范围；它随 subject hash 封存并
   完整放入 C3，不能由 recipe 名推测更广的验证范围。缺省保持旧请求；范围变动不能复用旧报告。
-  显式 `validation/diagnostic-source-review/v1` 在 v3 subject 的 C3 额外完整投影逐 native source identity 与输入来源；
+  显式 `validation/diagnostic-source-review/v1` 在当前 subject 的 C3 额外完整投影逐 native source identity 与输入来源；
   provider 必须对每个 `sourceRef` 独立报告结论、reason/input refs。它是与原准则一致的附加项目约束评审，
   不是另一个 CWI 的普通检查覆盖、failure-to-target 猜测、执行 credit 或 repair 权。缺项、未知、duplicate、
   来源/hash 漂移及完整输入/报告超界均 fail-closed；schema 和 local decoder 共同验收，不影响 C0-C2。
@@ -187,7 +187,7 @@ miss/fresh/TTL/LKG、未完 refresh、配置轮换、完整性/隔离、生命�
 - `parameter_entry_encoding` correction 在 physical call 前 exact 核对 operation kind/index、container 与每个 fixed parameter 的
   name/type；C4 仅渲染由 contract type 推导的 `{name, wireValueField}` 结构提示，不携带 attempt-0 value，也不把合法 parameter
   错写为删除指令。该投影与 `JSONSchemaResponse` capability 无关，只改变 C4，不改变 C0～C3/stable prefix。
-- `operation_value_rule` 的 C3 必须投影 manifest v7 中适用于 operation/selected variant 的 exact `valueRules`；unary rule 可收紧
+- `operation_value_rule` 的 C3 必须投影 当前 manifest 中适用于 operation/selected variant 的 exact `valueRules`；unary rule 可收紧
   JSON Schema，但本地 strict evaluator 仍是字节范围及跨参数关系的权威。C4 只渲染 exact rule ref/path 和 closed
   `actual_shape -> required_shape`，不得携带 raw rejected/corrected value。LLM block 只消费 Orchestrator 封存的 detached witness，
   不选择规则、修改 candidate、触发 owner event 或取得 attempt transition authority。
@@ -198,7 +198,7 @@ miss/fresh/TTL/LKG、未完 refresh、配置轮换、完整性/隔离、生命�
   block 不自行判定。
   declaration 投影同时保留 operation-level 与 variant-level constraints；`file/edit` 等无 variant operation 仍使用
   原有 correction 合同。相同规则可被不同 operation 引用，lookup 必须绑定 exact operation kind，不能按 ref 跨 kind 推断。
-- `operation_set_cardinality` correction 只投影 manifest v7 封存的 exact owner/target、operation kind/index violation 与
+- `operation_set_cardinality` correction 只投影 当前 manifest 封存的 exact owner/target、operation kind/index violation 与
   `one_operation_per_owner_target` objective；不得让模型通过修改 operation ID、顺序、依赖或 target 规避。attempt 1 不得改变
   原 owner/target 覆盖或非冲突 operation，必须合并为一个 ordinary durable operation，除非 manifest 的 exact required sequence
   明确授权例外。
@@ -218,8 +218,8 @@ miss/fresh/TTL/LKG、未完 refresh、配置轮换、完整性/隔离、生命�
   current validation failure 的 receipt/check/case/location/digest、环境/exit/timeout facts 和 missing/truncated 标记；该
   receipt 不受 recent-history 四项窗口裁剪。raw logs、自由诊断与 expected/actual 内容不进入 provider。comparison count
   是只读事实，不授权模型选择 retry、next focus 或 terminal；最终 rendered request 回归必须证明 C0～C2 bytes/hash 不漂移。
-- C4 只接纳校验通过的可选 `validation/check-failure/v2`、`comparisonHash` 与封闭 `reportedAssertion` 形态；报告是检查
-  自报，不是独立验收事实。v2 缺少报告时，即使有 location/hash 也必须 `failureDetailsIncomplete=true`；非法协议或形态
+- C4 只接纳校验通过的可选 `validation/check-failure`、`comparisonHash` 与封闭 `reportedAssertion` 形态；报告是检查
+  自报，不是独立验收事实。缺少报告时，即使有 location/hash 也必须 `failureDetailsIncomplete=true`；非法协议或形态
   不向 provider 转发。没有扩展的历史请求不添加默认字段、不改变原字节；这些诊断不能改变 C3 授权或 C0～C2 前缀。
 - 验证输入补充的 owner-authored `contentContractRef + contentRequirements` 与 exact target/native identity 一起由既有 typed
   projection 保留：semantic repair 放入 C3，operations 当前失败放入 C4；不另按语言推导规则，不改 C0～C2。
@@ -230,7 +230,7 @@ miss/fresh/TTL/LKG、未完 refresh、配置轮换、完整性/隔离、生命�
 - catalog control-plane 允许实现内的有界 GET retry；completion、embedding 与 Runtime provider execution 不以 retry/fallback
   发起第二次 physical call。
 
-## Authoring section-message 缓存边界
+### Authoring section-message 缓存边界
 
 STEP02 的 derive/proposal/review 显式选择 `PromptContext.MessageLayout=section_messages/v1`。
 空布局保留既有 Runtime scalar wire；未知布局、重复 section、乱序、非法 role 或未渲染 turns 在物理调用前拒绝。
@@ -270,7 +270,7 @@ STEP02 的 derive/proposal/review 显式选择 `PromptContext.MessageLayout=sect
 | generic caller authorization | `TestLLMGenericCommandMatrixRequiresExactApplicationSourceBeforePayload` | 覆盖 6 个 generic topic 的 exact Application source matrix，并证明拒绝发生在 payload 读取前 |
 | deployed real provider | [Service Acceptance](../../../../docs/50-product-interface/service-acceptance.md)、[Deployed Convergence DC-01/DC-02](../../../../docs/50-product-interface/deployed-convergence-scenarios.md) | 组件级未覆盖；真实 ai-proxy endpoint、credential、模型 catalog 与 provider behavior 仅由显式 real-provider deployed gate 验收，不能计入组件单测完成度 |
 
-## Validation preparation context
+### Validation preparation context
 
 Runtime operations and semantic-plan use `section_messages/v1`. The actual Responses prefix is C0-C2; dynamic C3-C5
 does not enter the explicit prefix key. Provider/model/schema-family/format/reasoning and Workspace remain isolated. Runtime's sealed
@@ -293,46 +293,24 @@ Source observations never authorize writing another target, skipping review or c
 
 ### Runtime 请求渲染与缓存观测
 
-- operations 新请求使用 `operations-render/cache-layout/v4`，semantic 新请求使用 `semantic-render/cache-layout/v4`，
-  由 Orchestrator 在 SM-3 ExpectedDocument 中封存。空引用和既有 v2/v3 保留原渲染；transport recovery、进程重载及
-  同合同 correction 继承原引用，包括没有 ExpectedDocument 的旧 session。LLM 不自行升级，未知引用拒绝。
-- v2 的 C0 是通用结构说明和原 effect 指引；C3 保留完整原 schema、wireRules、operationContracts、例子以及精确
-  requiredOperationSequence 对应关系，只去除这些值的重复长篇说明。raw-text 与 strict-output 适用同一合同和本地 decoder。
-  C1/C2 与 C4/C5 不变；缓存 scope 只认可 owner 的精确 C0/version，继续隔离 Workspace、Profile 内容及模型/transport。
-- `workorch.context_budget_audit/v2` 将处理来源列表放入 `processing`，保留平铺的 measurements 与 sectionHashes，
-  在 Eventstream 原 32 字段/深度/字节限制内传递六分区身份。`cacheObservation` v1 记录实际 renderer/layout/stage、
-  元数据 complete/bounded/incomplete/unavailable 和数量；Eventstream 的 `auditPayloadTruncated` 在只读用量投影中保留。
-  requestedHints 只说明客户端请求，effectiveHints 无网关证明时始终 unknown。哈希不替代原输入或成为执行权威。
-- 只读 nativeCache 汇总按 Workspace/Run/logical/physical 身份去重，排除 preflight；已知零为 measured miss，
-  缺失、估算或不合法原生 cache usage 为 unknown。调用命中比例和 token 加权比例均只用已测分母，并保留未知计数。
-  当前查询窗口不代表全部历史；旧记录原文不回填。字节减少、缓存命中均不授予运行或验收 credit。
-
-- v3 从同一 wire rule 的 provider 参数集合生成按 name 的 `minContains`/`maxContains=1`：必需恰好一次、可选至多一次，
-  闭合集合 `maxItems` 为真实可选名称数。动态 MCP 参数保留授权前缀与容量，动态 name 唯一仍由 strict decoder 核验。
-  transport schema 与 C3 schema 完全相同；原生结构化输出与 raw text 均遵守完整合同，不以 provider 启用 strict 与否替代本地校验。
-  C0 明确 File adapter 单对替换及完整连续原文要求；不是新增多编辑操作或 Profile 权限。v3/version 参与实际缓存身份。
-- v4 只改变 provider-facing C3 纯投影：在同一 user 消息内将相对可复用的 context、instruction/schema 放在易变身份之前，
-  schema 中 manifest/slot 常量靠后。原数组顺序、每份原文、当前身份、全部约束及观察仍完整保留；它们仍是 volatile，
-  不能获得 readiness、receipt、credit 或新的缓存权威。无全局可变状态或跨 Workspace 输入缓存。
-  operations 仅在 `decision.Focus` 和 `context.focus` 精确相等时，用闭合 `FocusRef="context.focus"` 指向仍完整存在的当前
-  focus；不相等时保留原 Focus，并由 integrity 核验当前事实。其它 decision/transaction 字段不精简。
-  仅对相等且没有引用/anchor/ID 的 parameters schema 提取 prompt 内的 `$defs`；有既存定义、引用或无体积收益则保留原 schema。
-  展开引用必须与原 v3 grammar 相等；**native transport schema 与本地 strict decoder 仍消费完整原 v3 grammar**，不要求
-  上游支持新增引用，也不放宽 required、重复参数、slot、variant 或 owner 约束。raw-text prompt 表达同一完整规则。
-  C0～C2、C4～C5 和角色保持原值；operations 继续使用 v3 的精确 C0/cache family，semantic 继续使用既有 C0/cache family。
-  `RenderContractRef` 明确记录 v4，`PromptRenderer` 保留原 C0 vocabulary 身份；不是隐藏渲染版本或按动态 schema 分裂稳定 key。
-  `runtime_cache_layout_test.go`、`runtime_cache_schema_test.go` 覆盖全值/引用展开等价、schema engine 正负例、attempt 1、
-  并发 Workspace/context 隔离、当前 focus/原文完整性及 provider 前预算拒绝。实际缓存收益和模型输出稳定性另需部署验收。
+- operations 和 semantic 请求仅支持当前 `operations/cache-layout` 与 `semantic/shared-work` 编码。
+  Orchestrator 封存 ExpectedDocument；LLM adapter 校验当前合同，不选择历史 renderer、不自动迁移输入。
+- 通用 instructions/schema 约定位于 C0，Goal/DoD 位于 C1，能力与治理合同位于 C2；完整易变事实位于 C3–C5。
+  schema、wire rules、operation constraints、参数 cardinality 与 canonical examples 保持一致；raw text 和 strict output
+  均由同一本地 decoder 核验。原始数据、角色和原顺序不得因缓存复用而改变。
+- C3 内仅对精确相等的 Focus/schema 子树使用闭合本地引用，并在 provider I/O 前展开比较全部输入。
+  当前内容和 workContext 保全；不同 Workspace/Profile 的上下文、预算及身份独立，不建立跨请求输入缓存。
+- nativeCache 按精确 logical/physical 请求身份去重；已知零为 measured miss，未提供或非法原生 usage 为 unknown。
+  requested hints 不证明网关实际缓存行为，压缩字节或缓存命中不授予执行及验收 credit。
 - `parameter_cardinality` correction 消费 exact manifest、原首错及完整 v1 fact；C4 只投影结构坐标和不可逆值 hash，
   不复制原始 provider 值或诊断 Cause。只能重新生成重复 name 的值以表达完整语义，其余参数/操作 scope 冻结。
   同合同 attempt0/1 保持 C0–C3、schema、wire、rendered stable prefix；LLM 不选择是否重试，不证明修订语义正确，
   不授予 effect、readiness 或验收 credit。真实效果仍需 File owner，普通 validation/repair/终态沿原合同。
 
 
-### Semantic shared work rendering v5
+### Semantic shared work rendering
 
-`semantic-render/shared-work/v5` is sealed by the Orchestrator for new semantic requests; the adapter never upgrades an
-existing request, recovery or correction. C0-C2, their roles, and their actual stable prefix remain unchanged for the same
+The sole current `semantic/shared-work` encoding is sealed by the Orchestrator; the adapter rejects other encodings. C0-C2, their roles, and their actual stable prefix remain unchanged for the same
 sealed Profile. Complete current work content and prior rounds move to volatile user C3 `workContext`, before planStep,
 schema and generation identity. C4 uses the closed local `workContextRef="C3.workContext"` and retains complete budgets,
 coverage progress, execution history, feedback and correction context. This location is not a stable authority tier.
@@ -345,9 +323,9 @@ A missing/ambiguous/wrong-dispatch/mixed local reference fails integrity. Before
 original content, rounds, intents, history, coverage, budget and feedback are compared with the detached typed owner inputs.
 Hashes, local references, compressed byte count and cache reuse never grant owner readiness, effect, validation or CWI credit.
 No cross-request cache or mutable global dictionary is introduced; Workspace/Profile differences remain in their own inputs.
-The original renderers retain their bytes, schema and source contracts. Native transport schema/local decoder stay complete.
+Native transport schema and local decoder retain the complete current source contract.
 
-Tests: `runtime_semantic_shared_work_test.go` covers exact expansion, inline old receipts, tampering, cross-stage prefix,
-legacy-compatible C1/C2, and concurrent unrelated projects. `runtime_implementation_progress_test.go` tests original-set
+Regressions: `runtime_semantic_shared_work_test.go` covers exact expansion, inline old receipts, tampering, cross-stage prefix,
+stable C1/C2, and concurrent unrelated projects. `runtime_implementation_progress_test.go` tests original-set
 coverage and purpose consistency; owner tests exercise real File rounds with per-event CAS/reload. These deterministic
 checks do not establish upstream cached-token gains or model semantic sufficiency; both still need deployment observation.

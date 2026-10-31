@@ -156,7 +156,7 @@ func TestAuthoringPreparationCurrentTracksNextUnreservedTargetOnly(t *testing.T)
 	if err != nil || view.State != "outcome_unresolved" || view.PreparationDiagnostics[0].Current {
 		t.Fatalf("non-stable pending was masked by preparation failure: %+v %v", view, err)
 	}
-	record, err = next.CompleteDerivation(pending.PermitID, nil, "provider_failed")
+	record, err = completeTestDerivation(next, pending.PermitID, nil, "provider_failed")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestAuthoringPreparationCurrentTracksNextUnreservedTargetOnly(t *testing.T)
 		t.Fatal(err)
 	}
 	acceptance := workspace.DefinitionDerivedAcceptance{AuthoringInputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"派生验收"}}
-	record, err = record.CompleteDerivation(derivation.PermitID, &acceptance, "")
+	record, err = completeTestDerivation(record, derivation.PermitID, &acceptance, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestAuthoringPreparationCurrentTracksNextUnreservedTargetOnly(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, request, _, err := record.ReserveSpecification(workspace.DefinitionAuthoringSpecificationRequest{RequestID: "proposal/" + derivation.PermitID, DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationProposal, ProviderBindingHash: "binding"})
+	record, request, _, err := record.ReserveSpecification(workspace.DefinitionAuthoringSpecificationRequest{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal/" + derivation.PermitID, DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationProposal, ProviderBindingHash: "binding"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestAuthoringPreparationCurrentTracksNextUnreservedTargetOnly(t *testing.T)
 	if !authoringPreparationDiagnosticCurrent(record, &derivation, current) {
 		t.Fatal("next unreserved review preparation not current")
 	}
-	record, _, _, err = record.ReserveSpecification(workspace.DefinitionAuthoringSpecificationRequest{RequestID: identity.TargetRequestID, DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationCritic, ReviewKind: identity.ReviewKind, ProposalHash: identity.ProposalHash, ProviderBindingHash: "binding"})
+	record, _, _, err = record.ReserveSpecification(workspace.DefinitionAuthoringSpecificationRequest{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, identity.ReviewKind), RequestID: identity.TargetRequestID, DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationCritic, ReviewKind: identity.ReviewKind, ProposalHash: identity.ProposalHash, ProviderBindingHash: "binding"})
 	if err != nil {
 		t.Fatal(err)
 	}

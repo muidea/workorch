@@ -58,7 +58,7 @@ func TestProjectAdapterBindsExactStagesReviewAndOriginalRequirements(t *testing.
 		changed := recipe
 		switch scenario {
 		case "protocol":
-			changed.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
+			changed.InputReviewProtocolRef = "unsupported-review-contract"
 		case "command":
 			changed.Command = "true"
 		case "args":
@@ -70,9 +70,9 @@ func TestProjectAdapterBindsExactStagesReviewAndOriginalRequirements(t *testing.
 			t.Fatalf("unsupported project declaration resolved: %s", scenario)
 		}
 	}
-	legacy, ok := shellValidationCheckAttestations(runtimecontract.RuntimeValidationRecipe{ID: recipe.ID, AdapterRef: modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint, InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV2, Command: "go", Args: []string{"test", "-v", "./..."}}, requirement)
-	if !ok || !reflect.DeepEqual(legacy, oldChecks) {
-		t.Fatal("new adapter upgraded old mapping")
+	isolated, ok := shellValidationCheckAttestations(runtimecontract.RuntimeValidationRecipe{ID: recipe.ID, AdapterRef: modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint, InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, Command: "go", Args: []string{"test", "-v", "./..."}}, requirement)
+	if !ok || !reflect.DeepEqual(isolated, oldChecks) {
+		t.Fatal("project adapter changed isolated input mapping")
 	}
 }
 
@@ -124,7 +124,7 @@ func TestProjectAdapterPreparationAndReviewCapacityRemainExact(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if subject, code := shellVersionedInputReview(directory, refs, binding); subject != nil || code != "validation_input_review_capacity_exceeded" {
+			if subject, code := shellInputReview(directory, refs, binding); subject != nil || code != "validation_input_review_capacity_exceeded" {
 				t.Fatal("project review truncated or expanded original capacity")
 			}
 		})
@@ -135,7 +135,7 @@ func projectAdapterOwnerCommand(t *testing.T, adapter *RuntimeAdapter, failed bo
 	t.Helper()
 	diagnostic := len(adapters) != 0 && adapters[0] == modulecommon.ValidationRecipeAdapterProjectFailureDiagnostic
 	request, execution := projectExecutionFixture(t, failed && !diagnostic, adapters...)
-	recipe := runtimecontract.RuntimeValidationRecipe{ID: request.ValidationRecipeID, AdapterRef: modulecommon.ValidationRecipeAdapterProjectConjunction, InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV2, Command: "go", Args: []string{"test", "-v", "./..."}, TimeoutMillis: 60000}
+	recipe := runtimecontract.RuntimeValidationRecipe{ID: request.ValidationRecipeID, AdapterRef: modulecommon.ValidationRecipeAdapterProjectConjunction, InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, Command: "go", Args: []string{"test", "-v", "./..."}, TimeoutMillis: 60000}
 	if diagnostic {
 		recipe.AdapterRef = modulecommon.ValidationRecipeAdapterProjectFailureDiagnostic
 		if failed {
@@ -303,8 +303,8 @@ func TestProjectAdapterReconciliationCannotBorrowPackageOnlySuccess(t *testing.T
 			changed := command
 			switch scenario {
 			case "old-failure":
-				writeNativeStructureSource(t, origin.WorkspaceDeliverableDirectory, "workorch_validation/v3/old_test.go", "package old\nimport \"testing\"\nfunc TestOld(t *testing.T){t.Fatal(\"原工程失败\")}\n")
-				changed.ValidationScopeTargetRefs = append(append([]string(nil), changed.ValidationScopeTargetRefs...), "workorch_validation/v3/old_test.go")
+				writeNativeStructureSource(t, origin.WorkspaceDeliverableDirectory, "workorch_validation/entrypoint/old_test.go", "package old\nimport \"testing\"\nfunc TestOld(t *testing.T){t.Fatal(\"原工程失败\")}\n")
+				changed.ValidationScopeTargetRefs = append(append([]string(nil), changed.ValidationScopeTargetRefs...), "workorch_validation/entrypoint/old_test.go")
 			case "missing-scope":
 				changed.ValidationScopeTargetRefs = nil
 			case "missing-internal":
@@ -390,7 +390,7 @@ func TestProjectReconciliationRawScopeBindsFullIdentityAndRejectsUnsafeRequests(
 
 func TestProjectAdapterExecutionProducesPersistableExactObservation(t *testing.T) {
 	request, execution := projectExecutionFixture(t, false)
-	declaration := runtimecontract.RuntimeValidationRecipe{ID: request.ValidationRecipeID, AdapterRef: modulecommon.ValidationRecipeAdapterProjectConjunction, InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV2, Command: "go", Args: []string{"test", "-v", "./..."}, TimeoutMillis: 60000}
+	declaration := runtimecontract.RuntimeValidationRecipe{ID: request.ValidationRecipeID, AdapterRef: modulecommon.ValidationRecipeAdapterProjectConjunction, InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, Command: "go", Args: []string{"test", "-v", "./..."}, TimeoutMillis: 60000}
 	requirement := shellValidationProofRequirementForTest(t, declaration.ID, "execution-cwi")
 	checks, ok := shellValidationCheckAttestations(declaration, requirement)
 	if !ok {

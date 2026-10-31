@@ -148,7 +148,7 @@ func TestRuntimeShellRawOutputQueryPairsPersistedReceiptAuthority(t *testing.T) 
 	stageIdentity := runtimecontract.RuntimeValidationExecutionStageIdentity{ID: stageID, Scope: "root-module", RequireTests: true}
 	at := time.Now().UTC().Format(time.RFC3339Nano)
 	conjunction := runtimecontract.RuntimeValidationExecutionConjunction{
-		ProtocolRef: "shell/go-test-json/project-conjunction-behavior/v1", RequiredStagesHash: runtimecontract.StableRuntimeValidationExecutionStagesHash([]runtimecontract.RuntimeValidationExecutionStageIdentity{stageIdentity}),
+		ProtocolRef: "shell/go-test-json/project-conjunction-behavior", RequiredStagesHash: runtimecontract.StableRuntimeValidationExecutionStagesHash([]runtimecontract.RuntimeValidationExecutionStageIdentity{stageIdentity}),
 		Stages: []runtimecontract.RuntimeValidationExecutionStage{{Identity: stageIdentity, Argv: []string{"go", "test", "-json", "-count=1", "./..."}, Started: true, StartedAt: at, FinishedAt: at, TerminalComplete: true, KnownFailure: true, ExitCode: 7, FailureCode: "original_known_failure", SourceBefore: identity.SHA256, SourceAfter: identity.SHA256, Stdout: identity, Stderr: identity.Clone()}},
 	}
 	conjunction.Stages[0].Stderr.Storage = &runtimecontract.RuntimeValidationOutputStorage{OmittedReason: "fixture_stderr_not_saved"}

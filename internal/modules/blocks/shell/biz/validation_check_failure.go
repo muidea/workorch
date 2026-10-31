@@ -25,7 +25,7 @@ func attachShellValidationCheckFailures(output *RuntimeCommandResult, request Ru
 	observation.FailureDetailsTruncated = false
 	observation.FailureDetailProtocolRef = ""
 	if len(observation.FailedChecks) != 0 {
-		observation.FailureDetailProtocolRef = runtimecontract.RuntimeValidationFailureDetailProtocolV2
+		observation.FailureDetailProtocolRef = runtimecontract.RuntimeValidationFailureDetailProtocol
 	}
 	observation.OutputTruncated = output.OutputTruncated
 	if output.OutputTruncated {

@@ -64,8 +64,8 @@ func runtimeSourceObligationProviderFixture(t *testing.T) llmmodels.RuntimeCandi
 		t.Fatal(err)
 	}
 	inputReview := surface.ProofRequirementBindings[0].InputReview.Clone()
-	inputReview.ProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV2
-	catalog.ValidationRecipes = []runtimecontract.RuntimeValidationRecipe{{ID: "review-recipe", AdapterRef: "owner/review/v1", Command: "check", InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV2}}
+	inputReview.ProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
+	catalog.ValidationRecipes = []runtimecontract.RuntimeValidationRecipe{{ID: "review-recipe", AdapterRef: "owner/review/v1", Command: "check", InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol}}
 	binding.InputReview = &inputReview
 	binding.InputReview.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, binding)
 	surface.CheckRefs = requirement.RequiredCheckRefs

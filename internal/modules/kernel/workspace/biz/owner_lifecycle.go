@@ -54,7 +54,7 @@ func (m *Biz) subscribeOwner(topic string, handler magicevent.ObserverFunc, matc
 		workspaceevents.TopicWorkspaceCommandGetGoal, workspaceevents.TopicWorkspaceCommandListGoalsByWS,
 		workspaceevents.TopicWorkspaceCommandGetDoD, workspaceevents.TopicWorkspaceCommandListDoDsByWS,
 		workspaceevents.TopicWorkspaceTemplateCommandGet, workspaceevents.TopicWorkspaceTemplateCommandList,
-		workspaceevents.TopicWorkspaceTemplateCommandQueryBuiltinDefaults, workspaceevents.TopicWorkspaceFactTerminalDelivery,
+		workspaceevents.TopicWorkspaceFactTerminalDelivery,
 		workspaceevents.TopicWorkspaceDerivationComplete, workspaceevents.TopicWorkspaceAuthoringSpecificationComplete,
 		workspaceevents.TopicWorkspaceSpecificationComplete, workspaceevents.TopicWorkspacePreparationDiagnosticRecord,
 		workspaceevents.TopicWorkspaceDefinitionChangeQuery,

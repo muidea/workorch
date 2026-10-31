@@ -20,7 +20,6 @@ Last Verified: 2026-08-30
 | --- | --- | --- |
 | `application/workorchd` | Workspace/Goal/DoD/Template CRUD；`ConfirmDefinitionAuthoringCommand/Result`；`DefinitionAdmissionIntentCommand/Result`；`WorkspaceExecutionIntentCommand/Result`；`DeleteWorkspaceCommand/Result` | Application 提交输入和意图；Workspace 决定自身聚合转换。authoring confirmation、definition admission、execution intent 只接受 Application source。 |
 | `kernel/system` | `EnsureWorkspaceTemplateDefaultsCommand/Result` | startup ensure 唯一 producer；owner 校验当前程序内置模板；不创建或升级持久副本；只接受 `kernel/system`。 |
-| `application/workorchd` | `QueryBuiltinWorkspaceTemplateDefaultsCommand/Result`、`UpgradeBuiltinWorkspaceTemplateDefaultCommand/Result` | exact `application/workorchd/appservice`；内置模板观察始终来自当前程序；旧升级入口仅接受当前精确 hash 的只读重放，不改变 catalog、已 admission Workspace 或 Run。 |
 | `blocks/decision` | `QueryWorkspaceDefinitionClarificationFactCommand/Result` | Workspace 在 promotion 前读取 Decision 已持久化的 ticket/resolution 事实，不接受 caller 自证 binding。 |
 | `blocks/run` | Workspace→Run execution/retirement/purge；Run→Workspace lifecycle fact/inventory | Workspace 管 active slot 投影；Run 管 SM-1 与 retirement 事实。 |
 | `kernel/orchestrator` | `RuntimeTerminalDeliveryFact → WorkspaceLifecycleCommandResult`；Runtime quiescence command/result | terminal delivery 只接受 Orchestrator；Workspace 只映射已验证事实到自身 journal。 |
@@ -64,7 +63,7 @@ fresh execution reservation，不能从中取得 readiness、M3 或执行权限�
 明确未保存原因，保留已知失败。GET 只投影 request/revision、pending/blocked/completed 及已消耗次数，不重试初始化，
 不将创建完成当作资源可用性。初始化不会改写旧检查；随后须显式发起新检查，由 File、SkillHub、Skill、MCP 等重新观察。
 
-生产入口使用私有初始化 journal v2，包含不可变 SkillHub 登记计划（精确交付目录、原 Hub home、由 Workspace＋
+生产入口使用私有初始化 journal，包含不可变 SkillHub 登记计划（精确交付目录、原 Hub home、由 Workspace＋
 初始化身份确定的 request-id），该计划计入原 BindingHash。File 完成后先通过 CAS 保存登记 attempt，才返回
 一次 Application 私有延续。Application 执行 v0.13.7 `project register`，随后通过 Workspace state lane 的
 `/workspace/activation-preparation/resources/registration-settle`（`SettlePreparationRegistrationCommand`，
@@ -74,14 +73,14 @@ fresh execution reservation，不能从中取得 readiness、M3 或执行权限�
 
 登记/查询总预算独立为 4，首次派发后所有显式恢复仅查询同一 Hub home 的原回执，不能重发登记。
 已派发但尚无结果的 attempt 也消耗预算；查询缺失不证明从未执行。scope 漂移、未知/运行中、无效/部分输出
-均阻塞，确定失败不再查询。只有完整原成功回执可将 v2 初始化标记 completed；File 完成不能提前解锁准备/执行。
-GET、普通重放、已完成恢复、旧 v1 重放均无外部效果；v1 不自动迁移到 v2。Clone/reopen 保留原计划、全部
+均阻塞，确定失败不再查询。只有完整原成功回执可将当前初始化标记 completed；File 完成不能提前解锁准备/执行。
+GET、普通重放和已完成恢复均无外部效果。Clone/reopen 保留原计划、全部
 历史和字节隔离。公开仅增加有限 registrationState/registrationAttempts；旧 status 未决不能用新登记回执清除。
 
 
 ### 完整准备结算与历史 M3
 
-`workorch-preparation-completion/v1` 是 `workorch-preparation-record/v2` 的 append-only 联合合同。
+`workorch-preparation-completion/v1` 是 `workorch-preparation-record` 的 append-only 联合合同。
 保留原 observation attempt 的 `blocked` 编码与完整旧材料，不改写旧历史；只有原 accepted 的正常延续
 在同一次结算 CAS 中，所有 required 真正 passed、all-of 完整重算、原封存与 owner/File 最终反查通过、
 完整 PreparedBootstrap 从原归档独立编译、no-Run final fence 与真实 CAS 前像一致，才追加 completion。
@@ -230,7 +229,7 @@ Workspace/request/payload/revision 与时间窗，随原 seal 在同一 blocked 
 原来源不齐仍阻塞，不为凑结构重复查询；GET/replay/recover 不重读这些 owner，不续期、不改历史逐项结果，
 旧操作不补造观察。该材料仍是时点事实，不是全资源有效性、ready、M3 或执行授权；公开投影不含原文和内部版本。
 owner 反查 exact snapshot 并纯编译完整 manifest 后，私有 `workspacePreparationAccepted` reducer
-经 CAS 保存 v2 原意图 hash、封存绑定、creation/preparation epoch 和逐项 pending 清单；
+经 CAS 保存当前原意图 hash、封存绑定、creation/preparation epoch 和逐项 pending 清单；
 只有初始 CAS 明确成功的调用获得一次非持久延续提示；Application 释放 Workspace 事件调用后，
 向 LLM/Run owner 发 cache-only/完整历史 query，再以具体 `SettleWorkspacePreparationBlockedCommand`
 经内部 state-lane `/workspace/activation-preparation/settle-blocked` 返回负向分类。
@@ -278,8 +277,8 @@ LLM owner 的目录、capability 列表、revision、获取/过期/观察时间�
 原原因码和引用一一对应，完成历史 append-only。公开仅投影 `providerCacheEvidenceRef`
 （`provider-cache-observation:` 加 32 位随机小写 hex），不是内容摘要或成功凭据。
 旧 cache-only 历史的完整 miss/expired/fresh 仍为 miss/expired/declaration_only 阻塞；观察无效或未保存不补造历史。
-新原非 stale 结算从 LLM owner 冻结的 `workorch-preparation-provider-configuration/v2` 和
-原 Workspace.DefaultLLMSelection 编译 `workorch-preparation-provider-selection/v2`。
+新原非 stale 结算从 LLM owner 冻结的 `workorch-preparation-provider-configuration` 和
+原 Workspace.DefaultLLMSelection 编译 `workorch-preparation-provider-selection`。
 显式 Workspace 选择优先；nil 才使用同次 LLM owner 的 DefaultChat，不按 catalog 顺序猜模型。
 私有 archive 保存原完整配置声明、catalog 诊断、owner epoch、来源、精确选择与有限失败码；
 公开沿用稳定检查 ID `provider_cache` 和随机 `providerCacheEvidenceRef`，页面显示“LLM 配置”。
@@ -290,12 +289,12 @@ Responses、配置缺失、选择无效或绑定冲突仍阻塞，不自动换�
 请求 allocation、Run 物理预算或远端授权。预览目标与原选择冲突仍拒绝，不借用相邻模型。
 完整原材料仍独立复编、clone、hash、append-only 校验；首次 CAS 反查真实 Workspace 原声明。
 新非 stale configuration 归档不得省略 Selection，stale 不产生新编译，完成历史不可覆盖、删除或降级。
-旧 selection v1、无 configuration 或仅 cache-only 历史保留原 miss/expired/declaration_only、
+缺 configuration 或只有 cache-only 观察时保留原 miss/expired/declaration_only、
 authorization_pending 等阻塞分类；GET、重放、恢复和 owner 重开不补编或升级原结果。
-当前 v2 配置检查不使用诊断 catalog 的 ExpiresAt 使配置失效；原 owner epoch 的绑定及 revision 与其余
+当前配置检查不使用诊断 catalog 的 ExpiresAt 使配置失效；原 owner epoch 的绑定及 revision 与其余
 资源当前性门禁照常生效，已知漂移保留历史并投影 stale。此处不重新查询当前 LLM epoch，
 原 epoch 仅绑定历史来源，不证明当前配置仍相同；启动必须独立读取活动 owner 配置。
-旧 v1 继续按原 catalog 到期点投影 stale。
+仅消费当前冻结配置合同；不保留旧 catalog 授权判据。
 启动执行由 Application 从 LLM owner 的活动配置读取默认模型（显式 Workspace 选择优先），
 验证后封入 RuntimeActivationContext.ProviderSelection；后续 loop 使用该封存选择，
 实际调用仍由 LLM owner 执行原配置 revision、ProviderCeiling 和预算校验并如实保存失败。
@@ -339,7 +338,7 @@ MCP 完整 registry 观察采用 `workorch-preparation-mcp-registry-evidence/v1`
 消费编译结果，并随同一 CAS 保存公共 `mcp_selection` 原因。非空成功是
 `mcp_selection_compiled_connection_pending`，真实空选择是 `mcp_selection_empty_policy_pending`；
 原编译失败映射为有限的 `mcp_selection_` 原因，具体清单见 service-api。所有原因均保持 blocked，
-不将未知前缀当有效分类，也不从错误的失败码生成成功/空选择分类。公共结果必须为 v2、原裁决版本、
+不将未知前缀当有效分类，也不从错误的失败码生成成功/空选择分类。公共结果必须符合当前合同、原裁决身份、
 required/mcpregistry、原完整 registry 引用；私有读回从原材料重编并核对精确原因。
 旧 registry-only 或无选择裁决版本的历史不补算、不升级；新归档不能省略该消费者版本，完成历史不可降级。
 完整 registry 或选择编译均不证明 required connection、连接 epoch 或持续有效性；GET/重放/恢复/重开
@@ -349,7 +348,7 @@ required/mcpregistry、原完整 registry 引用；私有读回从原材料重�
 原绑定并记录 `binding_changed`/stale，不把新输入冒充原检查。
 
 同键异完整输入冲突，未决原操作不能被新键绕过；完成记录不可改写或删除，新检查只能追加（最多 64 次）。
-file/memory repository 的 v2 backstop 拒绝非 CAS 变更、伪造正状态和历史覆盖，并深克隆逐项结果。
+file/memory repository 的持久化 backstop 拒绝非 CAS 变更、伪造正状态和历史覆盖，并深克隆逐项结果。
 内部 settlement 的目录验证由 Workspace 从原 accepted 操作的当前 exact seal 解析路径，再通过 File-only concrete query
 实际观察（不持有 definition/reducer 锁跨 owner I/O）。独立 `fileobservation.Directory` 仅为无权威纯值；
 File 结果经显式 typed mapping 进入私有 `WorkspacePreparationDirectoryEvidence`，不是 JSON 权威桥。
@@ -416,7 +415,7 @@ Workspace 独立反查原 accepted request/revision、当前 exact seal，核验
 不完整则 `skill_registry_observation_unavailable_not_saved`，明确完整材料未保存。
 GET、完成重放、恢复与 owner 重开不重新查询；结算 epoch/revision 漂移只保存历史并 binding_changed。
 这不是 Registry＋SkillHub 组合目录、精确选择证明、ready 或 M3；Registry 查询本身不执行外部效果。
-v1 保持只读 trace，不自动升级；legacy 缺 creation fence 拒绝。资源查询发生在两个 owner 事务之间，
+缺 creation fence 的输入拒绝；不推测或补造创建身份。资源查询发生在两个 owner 事务之间，
 不持 Workspace 锁执行跨 owner I/O；没有收费调用。
 查询和服务重开不推进事务；恢复先结算原中断操作，不重跑读取。
 
@@ -578,12 +577,8 @@ Workspace 私有结算及生产 ingress 已有真实 Run owner EventHub 配对�
   `WorkspaceChangedData` 的公开字段实际变化时才发布 `WorkspaceStateChanged`。cursor-only CAS 不得伪装成公开 Workspace
   状态变化；workorchd 继续直接消费 typed Run notification 更新运行视图。
 - 删除 journal 的转换只由 Workspace-private event/reducer 触发；下游 owner result 只能作为已验证事实输入。
-- Template builtin upgrade 只进入 `workspaceTemplateUpgradeEvent → submitBuiltinTemplateUpgrade`；比较与替换在同一
-  owner-local lock 内，并与普通 Template CRUD/ensure 串行。current full-content hash 必须精确命中 reviewed historical
-  fingerprint 与 caller expected hash，target hash 必须等于当前内嵌值。未知/定制/stale 内容拒绝；已达目标的 exact replay
-  不写入。此私有 catalog 事务不修改 definition admission、active-run slot 或 SM-1～SM-4。
-  内置 adapter 升版必须登记此前发布内容的精确指纹，并以完整 frozen fixture 验证自动更新及定制保护；
-  `TestEntrypointTemplateUpgradeReopensReviewedPreviousDefault` 覆盖 memory/file reopen，不凭内置 ID 扩大升级范围。
+- 内置 Template 直接从当前程序定义读取，不持久化目录副本，不保留历史指纹或升级事务。
+  用户自定义 Template 仍由 Workspace owner 管理，封存规格及 Run 原始内容不会随当前目录读取改写。
 - 不拥有 Run SM-1、Orchestrator SM-2/SM-3/SM-4、Result 裁决、Decision/Approval 生命周期或 capability 执行。
 - 不解析默认项目目录，不读取 capability catalog，不选择 Runtime operation/target，也不跨 owner 直接清理资源。
 
@@ -591,9 +586,9 @@ Workspace 私有结算及生产 ingress 已有真实 Run owner EventHub 配对�
 
 - Template 的 `ParentTemplateIDs` 由 Workspace owner 解析为有界 DAG；父声明顺序决定稳定拓扑顺序，共享祖先只合并一次。循环、缺失、重复父、深度/规模超限或无法安全合并的冲突拒绝。DoD 合取，不允许子模板覆盖父验收要求；同路径 context、同 ID evidence policy 的不一致当前直接拒绝，不猜测哪个更严格。
 - 模板读取返回 effective 内容及只读 `EffectiveSources`。父内容及拓扑参与派生快照身份；create/update 只能提交原始声明，不能自报 effective 来源。新 Start/Restart 在 owner mutation lock 内核对整个有效快照，既有 Run 不热替换；无父模板保留既有 snapshot hash 算法。
-- `DefinitionAdmissionCandidate.Specification` 是可选、版本化的规格提案。资源、维度、需求来源、义务、exact Profile 验证声明和六类 completeness review 全部进入候选身份；审查绑定不含审查自身的 content hash，startup 的 `SpecificationHash` 绑定包含审查的 admission hash。
+- `DefinitionAdmissionCandidate.Specification` 是当前 typed 规格提案。资源、维度、需求来源、义务、exact Profile 验证声明和六类 completeness review 全部进入候选身份；审查绑定不含审查自身的 content hash，startup 的 `SpecificationHash` 绑定包含审查的 admission hash。
 - 独立 Goal requirement 必须唯一绑定 `GoalItemRef`、`USER_EXPLICIT` 与完整原 Goal 文本；它不是候选 DoD，不要求借用或补造 DoD obligation。仅 Required 且精确独立绑定的 Goal 沿用输入的 32 KiB 字节上限，普通 requirement 与 obligation 保持 4096 字节；不截断或扩大请求预算。非 exact、重复或混来源的无义务 requirement 仍阻断；各 DoD 的义务、验证声明、Profile 适用性和六份唯一 PASS 审查保持完整合取。Application 的六审请求携带同一 owner 派生的 `ExpectedResources` 和无 Reviews 的 immutable proposal；critic 只判断，不修改 proposal 或回显不属于 review wire 的资源字段。
-- 新 authoring 事务选择 `workorch.authoring.owner-bound/v3`，保留 v2 的 owner 身份绑定和原始输出保全。derive 仅返回 AdditionalItems，mapping 不回显 protocol/input/template/resource hash，review 不回显 kind/proposal hash；owner 从原 permit 封存身份构造独立 typed 结果，原 provider bytes 不重写。版本及阶段 schema hash 进入持久 permit，成功 derive/review 也保存原 document/wire 并在重开时重解码；普通 DTO 仅有 metadata。空 wire 身份的旧账本仍严格按原 v1 解释，已封存 v2 的 schema/hash 不变，不 fallback、不改旧失败、不重发已消费 permit。提案采用顶层 `mapping`：provider 提出分组、来源与资源引用以及验证声明，owner 按封存 input／derivation 编译 canonical 规格。每个候选恰好属于一个分组并有一个 obligation，Goal 单独绑定；provider 不指定义务原文、SourceKind、Required、资源事实或 canonical IDs。成功 completion 必须从完整原文重新解码，与 typed mapping 精确相同，再重新编译验证 canonical proposal；原文与 wire 的 byte count／SHA256 进入 completion 身份，但不成为准入或执行权威。普通 DTO 仅带 metadata，受限 success-byte-audit query 才返回原 bytes；save／replay／archive／derivation／preparation／私有 reducer 与 CAS 前后像均反证 current/history 的原封存来源。
+- authoring 仅采用当前 `workorch.authoring.owner-bound`。derive 仅返回 AdditionalItems，mapping 不回显 protocol/input/template/resource hash，review 不回显 kind/proposal hash；owner 从原 permit 封存身份构造 typed 结果，原 provider bytes 不重写。阶段 schema hash 进入持久 permit，成功 derive/review 必须保存原 document/wire 并在重开时重解码；普通 DTO 仅有 metadata。不接受历史 wire、空审计或旧字段回显，不迁移已有账本。提案采用顶层 `mapping`：provider 提出分组、来源与资源引用以及验证声明，owner 按封存 input／derivation 编译 canonical 规格。每个候选恰好属于一个分组并有一个 obligation，Goal 单独绑定；provider 不指定义务原文、SourceKind、Required、资源事实或 canonical IDs。成功 completion 必须从完整原文重新解码，与 typed mapping 精确相同，再重新编译验证 canonical proposal；原文与 wire 的 byte count／SHA256 进入 completion 身份，但不成为准入或执行权威。普通 DTO 仅带 metadata，受限 success-byte-audit query 才返回原 bytes；save／replay／archive／derivation／preparation／私有 reducer 与 CAS 前后像均反证 current/history 的原封存来源。
 - provider 的 derive/proposal/review 文档仅接受当前封闭 wire 形状：所有字段必填、精确大小写，标量与数组不得为 null；未知／重复字段、多 root、超出 256 KiB／32 层、非法 UTF-8 与孤立 UTF-16 surrogate 均拒绝。不修复或重写原始输出；结构拒绝保留 field path／错误分类，owner 来源、声明、独立审查及精确确认仍独立校验。`SourceItemRefs`、`ResourceIDs` 与候选 `DoDItemRefs` 是分离的身份空间，资源路径／章节不能充当来源。`UNVERIFIED` 的三个 Profile 绑定字段必须为空，不能静默清空非法绑定再继续。
 - 六类审查分别覆盖维度、负路径、回归、资源环境、显式约束追踪和可验证性。`RequiredReviewRequirementIDs` 从 owner 编译规格派生每类应审的全部 Required IDs（含独立 Goal），Application 以 `requiredRequirementIDs` 提供给 critic。PASS 的 `RequirementIDs` 必须覆盖完整集合，合法 optional 项可额外审查但不能替代；缺少资源、负面路径或回归声明不是免审事实，不接受 N/A 或空范围自豁免。`goalSpecificationReviewContext` 在模型与持久 ledger 中反证覆盖，provider parser 同样尽早拒绝并保留 kind／缺失 ID；不补写 provider 结果。FAIL/UNKNOWN、缺必需资源、缺必需维度/义务、缺 DoD 映射或不匹配的 Profile 声明不能晋升。PASS 只是有来源的评审事实，不直接授予 Runtime evidence credit，也不证明任意自然语言目标的完整性。
 - 验证声明适用性必须逐项沿 `Verification → Obligation → DoDItemRefs → 正式 DoD sourceID → Profile(scope,id|*)` 反证；一个义务引用多个 DoD 时全部检查，不因同名 declaration 存在或另一个 DoD 命中而通过。正式候选引用中的 `:item:NNNNNN` 保留原序号；derived 引用按确认 after-image 的 user、template、generated 分组及组内原序号解析，不能使用准入 normalize 后的 slice 位置。`dod-001` 是 sourceID，不是 `cwi-001`；Profile bootstrap artifact 和其他 work unit 独立占用 CWI 序号。
@@ -606,20 +601,20 @@ Workspace 私有结算及生产 ingress 已有真实 Run owner EventHub 配对�
 ### 跨源 execution 证明映射
 
 规格可选 `ExecutionProofMappings` 随完整 proposal hash、六审及 exact confirmation 封存，只有声明
-`runtime/cross-source-execution-proof/v1` 的 execution work/repair rule 可以消费。consumer/source 必须是不同原 DoD
+`runtime/dod-source-execution-proof` 的 execution work/repair rule 可以消费。consumer/source 必须是不同原 DoD
 candidate refs；缺失、重复、未知、未声明或未重新评审的映射阻断准入。库存完整保留原文与映射，不授予 proof。
 详见 [跨源证明合同](../../../../docs/00-core/runtime/cross-source-execution-proof.md)。wire 扩展可省略；存在时每个字段
 仍必须精确且非 null，旧基础字段的必填门禁不变。
 
-独立 `EvidencePurposeMappings` 使用 `runtime/cross-cwi-evidence-purpose/v1`，封存原历史行为 DoD 与唯一普通当前
+独立 `EvidencePurposeMappings` 使用 `runtime/cross-cwi-evidence-purpose`，封存原历史行为 DoD 与唯一普通当前
 验收 DoD candidate ref；不借用 execution work/repair rule。完整映射进入相同 proposal／六审／confirmation／startup
 身份，原文不改写，clone／inventory 不共享来源存储；未知、自映射、重复历史来源、映射链及无用途资格／普通验收的
 声明拒绝。`evidence_purpose_mapping_test.go` 证明 pre-seal 原图、exact admission 投影与身份替换拒绝，不证明 Runtime
 延期终验已执行；mapped bootstrap／seed 的 executable availability 独立保持 fail-closed。
 
-Profile deliverable 来源另使用 `runtime/profile-deliverable-evidence-purpose/v2`：原 Profile ID、唯一 required deliverable ID、单 Profile 完整快照 hash 和原 Description 全文随六审／用户确认封存，不将其伪装成原 DoD。接受端仍为唯一原 DoD，运行期独立反查原快照；完整字段进入 content/admission/startup hash，v1 不接受扩展。普通验收及双用途依赖闭包不放宽。
+Profile deliverable 来源另使用 `runtime/profile-deliverable-evidence-purpose`：原 Profile ID、唯一 required deliverable ID、单 Profile 完整快照 hash 和原 Description 全文随六审／用户确认封存，不将其伪装成原 DoD。接受端仍为唯一原 DoD，运行期独立反查原快照；完整字段进入 content/admission/startup hash，v1 不接受扩展。普通验收及双用途依赖闭包不放宽。
 
-Profile 的 required deliverable 可用 `RequiredEvidencePurposeContractRef` 显式要求该 v2 关系；默认 software-dev 的 source_change 启用此要求，Core 不识别业务名称。空字段保留原 JSON/hash 及原 Profile 语义。owner 从完整封存 Profile 和精确来源顺序编译必需清单及普通验收候选；v3 模型仅以 `ProfileAcceptanceSelections` 返回 SourceRef 与 AcceptanceItemRef，完整原文和快照由纯编译填充，不修补原 provider 输出。每个必需来源恰好一个原 DoD 消费者，缺项、重复、错域、漂移、无普通 validation 或隐藏结算环在六审前／确认／准入／bootstrap 被拒绝。编译结果不代表 readiness、行为或验收 credit；六审及人工精确确认仍审查语义充分性。确认面展示要求、原文、快照、选定原 DoD 和缺项。不同 Workspace/Profile 不共享可变选择。
+Profile 的 required deliverable 可用 `RequiredEvidencePurposeContractRef` 显式要求该 v2 关系；默认 software-dev 的 source_change 启用此要求，Core 不识别业务名称。空字段保留原 JSON/hash 及原 Profile 语义。owner 从完整封存 Profile 和精确来源顺序编译必需清单及普通验收候选；模型仅以 `ProfileAcceptanceSelections` 返回 SourceRef 与 AcceptanceItemRef，完整原文和快照由纯编译填充，不修补原 provider 输出。每个必需来源恰好一个原 DoD 消费者，缺项、重复、错域、漂移、无普通 validation 或隐藏结算环在六审前／确认／准入／bootstrap 被拒绝。编译结果不代表 readiness、行为或验收 credit；六审及人工精确确认仍审查语义充分性。确认面展示要求、原文、快照、选定原 DoD 和缺项。不同 Workspace/Profile 不共享可变选择。
 
 ### 原始创作诊断
 
@@ -655,7 +650,7 @@ Get/List 从当前未确认创作 record 派生有界 `AuthoringSummary`，仅�
 | 创作 EventHub DTO 来源与隔离 | `pkg/eventmapping/definition_authoring_test.go`、`pkg/events/definition_derivation_test.go` | record／derivation／history 显式往返保留快照与 permit／预算；模板、资源、派生结果、回执与正式 after-image 深拷贝；当前／嵌套／历史的重复或空 binding 在 map 转换前拒绝 |
 | 创作阻塞后继与确认恢复 | `biz/definition_authoring_successor_test.go` | 同 CandidateID 连续 revision、旧票据 resolved／新票据 open、候选追加与 pending startup 重开、安全 resolution、prepared／Goal／DoD／materialized cutpoint 及零自动 Run；不是 HTTP/Web 闭环验收 |
 | 多父模板 DAG 与解析结果隔离 | `pkg/models/template_inheritance_dag_test.go`、`biz/template_inheritance_test.go` | 覆盖 diamond 去重、父顺序身份、共享祖先最长路径上限、父引用深拷贝及 owner 模板操作 |
-| 验证声明 source 适用性与生产 Start 对照 | `pkg/definitionadmission/goal_specification_test.go::TestCompileVerificationAppliesToEveryObligationDoD`、`TestSpecificationDoDSourceOrderIsConfirmationAfterImageNotNormalizedSlice`、`biz/definition_authoring_admission_test.go::TestAuthoringVerificationApplicabilityBlocksWrongDeclarationBeforeRun`、`TestAuthoringApplicableDeclarationsSurviveProductionBootstrapAndExplicitStart`、`activationports/definition_admission_test.go::TestBuiltinSoftwareDevSpecificationWildcardRemainsApplicableToProductionBootstrap`、`workorchruntimecontract/runtime_profile_contract_test.go::TestRuntimeSourceEvidencePolicyPreservesExactAndWildcardContributions` | wrongid proof／wrongscope／otherdod／多义务／单义务多 DoD、recipe/check stripping、shadowed recipe 与 exact/* 冲突 fail closed；合法 exact/* 保留贡献，经真实 production bootstrap 和 Workspace/Run owner 显式首次执行创建单一 Run；默认模板可用；不代表 SM-2/3/4 执行或验证 credit |
+| 验证声明 source 适用性与生产 Start 对照 | `pkg/definitionadmission/goal_specification_test.go::TestCompileVerificationAppliesToEveryObligationDoD`、`TestSpecificationDoDSourceOrderIsConfirmationAfterImageNotNormalizedSlice`、`biz/definition_authoring_admission_test.go::TestAuthoringVerificationApplicabilityBlocksWrongDeclarationBeforeRun`、`TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition`、`activationports/definition_admission_test.go::TestBuiltinSoftwareDevSpecificationWildcardRemainsApplicableToProductionBootstrap`、`workorchruntimecontract/runtime_profile_contract_test.go::TestRuntimeSourceEvidencePolicyPreservesExactAndWildcardContributions` | wrongid proof／wrongscope／otherdod／多义务／单义务多 DoD、recipe/check stripping、shadowed recipe 与 exact/* 冲突 fail closed；合法 exact/* 保留贡献，经真实 production bootstrap 和 Workspace/Run owner 显式首次执行创建单一 Run；默认模板可用；不代表 SM-2/3/4 执行或验证 credit |
 | 确认 snapshot 恢复与冲突保护 | `biz/definition_authoring_confirmation_test.go::TestAuthoringConfirmationRejectsTemplateAndConfigurationDrift`、`TestAuthoringConfirmationRejectsConflictingFormalRows`、`biz/definition_authoring_resource_final_test.go::TestResourceBoundConfirmationRejectsDriftBeforePrepareAndAtPreparedCut` | 恢复原 Template／资源 snapshot 后原 identity exact replay；file owner 重开、prepared/materialized 差异、正式行冲突仍拒绝且零覆盖／自动 Run；不提供 abandon |
 | 未 opt-in lineage Profile 的持久化身份 | `internal/pkg/runtimeprofiledecode/lineage_assertion_test.go::TestRuntimeProfileWithoutLineageRulesPreservesExactPersistenceIdentity`、`biz/definition_authoring_process_recovery_test.go::TestAuthoringProcessDecisionAdmissionRecovery` | 缺声明保持 nil，JSON/file reopen 保持 exact Profile 身份；不得以放宽 owner 比较或回填历史修复空切片漂移 |
 | 独立 exact Goal requirement 与 DoD 门禁 | `pkg/definitionadmission/goal_independent_requirement_test.go::TestCompileIndependentExactGoalDoesNotInventDoDObligation` | 唯一原 Goal 无伪 DoD obligation 正例、重复／混来源／改原文／错 kind 拒绝、普通 DoD obligation／DECLARED／六审缺口仍阻断；只证明纯准入，不替代 current mapping 全事务验收 |
@@ -663,7 +658,7 @@ Get/List 从当前未确认创作 record 派生有界 `AuthoringSummary`，仅�
 | module lifecycle与 owner repository binding | `module_test.go::TestModuleIdentityConfigureStartStopContract`、`module_test.go::TestModuleConfigureRequiresBoundOwnerRepositoriesAndEventHub`、`internal/pkg/repository/resource_owner_repositories_test.go::TestResourceOwnerRepositoryBundlesRejectMixedMemorySets`、`TestResourceOwnerRepositoryBundlesValidateForMemoryAndReopenedFileBackends` | 已覆盖必需 aggregate/EventHub、memory/file factory 正向构造、zero/unbound/mixed set 启动前拒绝与 file reopen binding 重建 |
 | Workspace create/get；Goal/DoD scope与definition revision；Template mapping clone | `biz/goal_dod_manager_test.go::TestGoalDoDManager_CreateWorkspace`、`biz/goal_dod_manager_test.go::TestGoalDoDManager_DefinitionRevisionIsMonotonicAcrossContentReversion`、`biz/command_router_test.go::TestWorkspaceDefinitionCommandsEnforceScopeAcrossBackends`、`biz/template_commands_test.go::TestWorkspaceTemplateOwnerMappingsDeepCloneCommandAndRepositoryValues` | 已覆盖这些明确路径 |
 | Workspace update/list、Goal/DoD update/delete/list、Template CRUD | `biz/command_router_test.go::TestWorkspacePublicManagementCRUDPositivePaths` | 已覆盖；Workspace coordinated delete由下方deletion矩阵验收 |
-| Program-owned builtin templates | [`biz/builtin_defaults_test.go`](biz/builtin_defaults_test.go)、[`biz/defaults_test.go`](biz/defaults_test.go) | 当前程序定义优先、空目录不 seed、不依赖历史指纹、旧目录重开、只读 ingress 重放与 stale/source/Post 拒绝、并发写入拒绝、自定义继承与历史 snapshot 保全 |
+| Program-owned builtin templates | [`biz/defaults_test.go`](biz/defaults_test.go) | 当前程序定义优先、空目录不 seed、不依赖历史指纹、旧目录重开、只读 ingress 重放与 stale/source/Post 拒绝、并发写入拒绝、自定义继承与历史 snapshot 保全 |
 | automatic configuration / archive isolation | [`biz/current_configuration_admission_test.go`](biz/current_configuration_admission_test.go)、[`biz/defaults_test.go`](biz/defaults_test.go)、[`pkg/models/template_test.go`](pkg/models/template_test.go) | file reopen、旧 schema 原样保存、当前配置准入与幂等、无效配置阻塞、并发 fence、Soul fresh read、历史 Run 零改写、内置 Template 从当前程序直接读取且不写持久 catalog |
 | Definition normal/unsupported/duplicate/stale/provenance | `biz/definition_admission_test.go::TestDefinitionAdmissionIntentAutomaticallyPromotesEligibleCandidate`、`biz/definition_admission_test.go::TestDefinitionAdmissionIntentKeepsUnsupportedAlternativePreseal`、`biz/definition_admission_test.go::TestDefinitionAdmissionRejectsSelfConsistentUnpersistedDecisionTicketWithoutPromotion`、`biz/definition_admission_test.go::TestDefinitionAdmissionRejectsStaleLineageCAS` | 已覆盖 |
 | lossless Profile identity / current-schema restart | `biz/definition_profile_identity_test.go::TestDefinitionProfileIdentityRejectionSurvivesOwnerRestart`、`workorchruntimecontract/runtime_profile_identity_test.go` | required→optional 重复声明不能消失；file-backed candidate 保留两项、fresh owner 重复零写、零 startup/activation、同 hash 篡改拒绝；无 Run/provider/capability 依赖 |

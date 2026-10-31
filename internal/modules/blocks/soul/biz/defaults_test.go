@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"testing"
 
+	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -43,7 +44,7 @@ func TestEnsureBuiltinSoulDefaultsSeedsMissingAndPreservesExisting(t *testing.T)
 				SoulMD:           "# User customization",
 				AllowedSkillRefs: []string{"custom-skill"},
 			}
-			if err := repo.Create(ctx, existing); err != nil {
+			if _, err := newService(repo).createSoulCommand(ctx, soulevents.CreateSoulCommand{SoulID: existing.ID, Name: existing.Name, Description: existing.Description, BusinessDomains: existing.BusinessDomains, SoulMD: existing.SoulMD, AllowedSkillRefs: existing.AllowedSkillRefs}); err != nil {
 				t.Fatalf("create customized soul: %v", err)
 			}
 			existing, err = repo.Get(ctx, existing.ID)
@@ -71,7 +72,7 @@ func TestEnsureBuiltinSoulDefaultsSeedsMissingAndPreservesExisting(t *testing.T)
 	}
 }
 
-func TestStartupAutomaticallyLoadsReviewedBuiltinSoulAfterReopen(t *testing.T) {
+func TestStartupSynchronizesProgramOwnedSoulAfterReopen(t *testing.T) {
 	for _, backend := range []string{"memory", "file"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx := context.Background()
@@ -80,7 +81,7 @@ func TestStartupAutomaticallyLoadsReviewedBuiltinSoulAfterReopen(t *testing.T) {
 			if backend == "file" {
 				repo = filerepo.NewSoulRepository(path)
 			}
-			old, err := newService(repo).createSoul(ctx, historicalExecutionSoul(t), soulmodel.SoulSourceBuiltinSeed)
+			old, err := newService(repo).createSoul(ctx, modifiedBuiltinSoul(t), soulmodel.SoulSourceBuiltinSeed)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -94,10 +95,10 @@ func TestStartupAutomaticallyLoadsReviewedBuiltinSoulAfterReopen(t *testing.T) {
 				}
 				current, err := s.getSoul(ctx, old.ID)
 				if err != nil || current.Revision != old.Revision+1 || current.ContentHash == old.ContentHash || current.SourceProvenance != soulmodel.SoulSourceBuiltinSeed {
-					t.Fatalf("automatic upgrade/replay: %+v %v", current, err)
+					t.Fatalf("current synchronization/reopen: %+v %v", current, err)
 				}
 			}
-			custom := historicalExecutionSoul(t)
+			custom := modifiedBuiltinSoul(t)
 			custom.SoulMD += "\nUser extension."
 			s := newService(repo)
 			before, err := s.updateSoul(ctx, custom)
@@ -138,4 +139,15 @@ func TestEnsureSoulDefaultsRejectsInvalidSeedBeforePersistence(t *testing.T) {
 			}
 		})
 	}
+}
+
+func modifiedBuiltinSoul(t *testing.T) soulevents.CreateSoulCommand {
+	t.Helper()
+	defaults, err := workorchdefaults.BuiltinSoulDefaults()
+	if err != nil || len(defaults) == 0 {
+		t.Fatalf("defaults: %v", err)
+	}
+	cmd := soulDefaultCreateCommand(defaults[0])
+	cmd.SoulMD += "\nChanged program-owned instructions."
+	return cmd
 }

@@ -8,7 +8,7 @@ import (
 )
 
 func TestProfileEvidencePurposeWireVersionFieldsAndFullText(t *testing.T) {
-	m := GoalEvidencePurposeMapping{ContractRef: runtimecontract.RuntimeProfileDeliverableEvidencePurposeV2,
+	m := GoalEvidencePurposeMapping{ContractRef: runtimecontract.RuntimeProfileDeliverableEvidencePurpose,
 		HistoricalItemRef: "profile/p/deliverable/d", AcceptanceItemRef: "original-dod",
 		HistoricalProfileID: "p", HistoricalDeliverableID: "d", HistoricalProfileHash: "snapshot", HistoricalText: "  全文\n不能摘要。  "}
 	body, _ := json.Marshal(m)
@@ -35,7 +35,7 @@ func TestProfileEvidencePurposeWireVersionFieldsAndFullText(t *testing.T) {
 		}
 		fields[key] = original
 	}
-	fields["ContractRef"] = json.RawMessage(`"runtime/cross-cwi-evidence-purpose/v1"`)
+	fields["ContractRef"] = json.RawMessage(`"runtime/cross-cwi-evidence-purpose"`)
 	for _, key := range []string{"HistoricalProfileID", "HistoricalDeliverableID", "HistoricalProfileHash", "HistoricalText"} {
 		fields[key] = json.RawMessage(`""`)
 	}

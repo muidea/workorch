@@ -72,10 +72,6 @@ func runtimeInternalTransitionContract(kind RuntimeInternalEventKind) (runtimeIn
 		RuntimeInternalEventDefinitionGapObserved:
 		return sm2, true
 
-	case RuntimeInternalEventSemanticRequestRepairPrepared:
-		return sm2, true
-	case RuntimeInternalEventSemanticRequestRepairResolved:
-		return runtimeInternalTransitionDescriptor{Primary: eventcontract.StateMachineSM2, WriteSet: runtimeInternalWriteSM2 | runtimeInternalWriteSM3 | runtimeInternalWriteSM4}, true
 	case RuntimeInternalEventSemanticContractRequired:
 		// A catalog refresh retires the SM-3 semantic transaction, rewrites
 		// SM-2 authority and consumes the bounded SM-4 refresh ledger.

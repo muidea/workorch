@@ -27,7 +27,7 @@ func TestDriveRuntimeShellApplicabilityCASRecoveryUsesOriginalReceipt(t *testing
 func TestDriveRuntimeShellApplicabilityResumeSettlesSubmittedRequestBeforeSampling(t *testing.T) {
 	for _, fault := range []string{"", "before_cas", "after_cas"} {
 		t.Run("settlement/"+fault, func(t *testing.T) {
-			runValidationInputReviewMainline(t, "consistent", "after_assessment_submission", validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterVersionedEntrypoint, ValidationCount: 1, SubmittedSettlementFault: fault})
+			runValidationInputReviewMainline(t, "consistent", "after_assessment_submission", validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterReviewedEntrypoint, ValidationCount: 1, SubmittedSettlementFault: fault})
 		})
 	}
 }

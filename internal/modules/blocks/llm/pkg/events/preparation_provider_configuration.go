@@ -7,11 +7,9 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-const PreparationProviderConfigurationVersion = "workorch-preparation-provider-configuration/v1"
-
 // v2 checks the frozen local configuration used by activation. Catalog
 // availability and a separate remote authorization receipt are not prerequisites.
-const PreparationProviderConfigurationSnapshotVersion = "workorch-preparation-provider-configuration/v2"
+const PreparationProviderConfigurationSnapshotVersion = "workorch-preparation-provider-configuration"
 
 // Complete non-secret selection declarations of one frozen owner lifecycle.
 // OwnerEpoch on the containing observation binds these to its private active
@@ -39,7 +37,7 @@ func (c PreparationProviderConfiguration) Clone() PreparationProviderConfigurati
 }
 
 func (c PreparationProviderConfiguration) Validate() error {
-	if (c.Version != PreparationProviderConfigurationVersion && c.Version != PreparationProviderConfigurationSnapshotVersion) || c.DefaultChat.Validate() != nil || c.DefaultChat != c.DefaultChat.Normalized() || c.DefaultChat.ProviderID != runtimecontract.BuiltinAIProxyProviderID || !cacheObservationText(c.DefaultChat.ModelID, 256) || len(c.Overrides) > CatalogCacheObservationModelLimit {
+	if c.Version != PreparationProviderConfigurationSnapshotVersion || c.DefaultChat.Validate() != nil || c.DefaultChat != c.DefaultChat.Normalized() || c.DefaultChat.ProviderID != runtimecontract.BuiltinAIProxyProviderID || !cacheObservationText(c.DefaultChat.ModelID, 256) || len(c.Overrides) > CatalogCacheObservationModelLimit {
 		return common.ErrConflict
 	}
 	previous := ""

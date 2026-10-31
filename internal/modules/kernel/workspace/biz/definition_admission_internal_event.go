@@ -13,7 +13,7 @@ import (
 
 // definitionAdmissionInternalEvent is the sole Workspace owner input selecting
 // pre-seal admission, including confirmed authoring. Exactly one candidate
-// ingress is present; legacy intents may carry one Decision-owner fact.
+// ingress is present; admission intents may carry one Decision-owner fact.
 type definitionAdmissionInternalEvent struct {
 	WorkspaceID       common.WorkspaceID
 	Intent            *workspaceevents.DefinitionAdmissionIntentCommand
@@ -414,8 +414,8 @@ func persistDefinitionAdmissionCandidate(current *workspacemodel.Workspace, comm
 		return *current, workspaceevents.DefinitionAdmissionCandidateDuplicate, false, nil
 	}
 	// The latest immutable authoring attempt cannot lose a submitted
-	// specification by bypassing the Application adapter. Archived legacy
-	// candidates remain readable; only a new successor is subject to this gate.
+	// specification by bypassing the Application adapter. A successor must retain
+	// the proposal required by its original immutable authoring lineage.
 	if latestHasSpecification && candidate.Specification == nil {
 		return workspacemodel.Workspace{}, "", false, common.ErrConflict
 	}
@@ -552,7 +552,7 @@ func (m *Biz) submitDefinitionAdmissionInternalEvent(ctx context.Context, event 
 	}
 	// Provenance validation also reads the resolved Template when an active
 	// compilation epoch exists. Keep that read and the admission CAS under the
-	// same owner mutation fence, even on a legacy CurrentTemplate=false intent.
+	// same owner mutation fence, including CurrentTemplate=false intents.
 	// The caller already holds definitionMu, so the lock order remains
 	// definitionMu -> templateMutationMu across every admission path.
 	m.templateMutationMu.Lock()

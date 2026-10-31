@@ -18,7 +18,7 @@ func TestBootstrapExecutionProofMappingSealsExactPredecessorAndReload(t *testing
 	inventory.Requirements[0].SourceItemRefs = append(inventory.Requirements[0].SourceItemRefs, "source")
 	inventory.Obligations = append(inventory.Obligations, runtimecontract.RuntimeSourceObligation{ID: "source-obligation", RequirementID: "requirement", DoDItemRefs: []string{"source"}, Text: dod.Items[1]})
 	inventory.Verifications = append(inventory.Verifications, runtimecontract.RuntimeSourceVerification{ID: "verify-source", ObligationID: "source-obligation", Declaration: "独立原工作证明", ProfileID: "test-deterministic-proof-dodItem", EvidenceRequirementID: "dod-002", Scope: "dodItem"})
-	inventory.ExecutionProofMappings = []runtimecontract.RuntimeExecutionProofMapping{{ContractRef: runtimecontract.RuntimeCrossSourceExecutionProofV1, ConsumerItemRef: "dod", RuleRef: "original-work", SourceItemRef: "source"}}
+	inventory.ExecutionProofMappings = []runtimecontract.RuntimeExecutionProofMapping{{ContractRef: runtimecontract.RuntimeDoDSourceExecutionProof, ConsumerItemRef: "dod", RuleRef: "original-work", SourceItemRef: "source"}}
 	inventory = inventory.WithHash()
 	activation := withTestDeterministicProof(goal, dod, runtimecontract.RuntimeActivationContext{
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "mock", ModelID: "mock"}},
@@ -28,7 +28,7 @@ func TestBootstrapExecutionProofMappingSealsExactPredecessorAndReload(t *testing
 		for m := range activation.ExecutionContract.ProfileContracts[n].EvidenceRequirements {
 			requirement := &activation.ExecutionContract.ProfileContracts[n].EvidenceRequirements[m]
 			if requirement.Scope == "dodItem" && requirement.ID == "dod-001" {
-				requirement.LineageAssertions = []runtimecontract.RuntimeLineageAssertionRule{{Ref: "original-work", Kind: runtimecontract.RuntimeLineageCompletedWorkRounds, ConsumptionPoint: runtimecontract.RuntimeProofPhaseExecution, MinCompletedRounds: 2, ExecutionSourceContractRef: runtimecontract.RuntimeCrossSourceExecutionProofV1}}
+				requirement.LineageAssertions = []runtimecontract.RuntimeLineageAssertionRule{{Ref: "original-work", Kind: runtimecontract.RuntimeLineageCompletedWorkRounds, ConsumptionPoint: runtimecontract.RuntimeProofPhaseExecution, MinCompletedRounds: 2, ExecutionSourceContractRef: runtimecontract.RuntimeDoDSourceExecutionProof}}
 			}
 		}
 	}

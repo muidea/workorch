@@ -8,7 +8,7 @@ import (
 func TestPreparationProviderConfigurationDetachedAndFinite(t *testing.T) {
 	fixture := func() ObserveProviderCatalogCacheResult {
 		r := catalogCacheResultFixture()
-		r.Configuration = &PreparationProviderConfiguration{Version: PreparationProviderConfigurationVersion, DefaultChat: catalogCacheModelFixture().Target, Overrides: []PreparationProviderModelOverride{{ModelID: "model", ContextWindowTokens: 32000, MaxOutputTokens: 4000, Operations: []string{"responses"}}}}
+		r.Configuration = &PreparationProviderConfiguration{Version: PreparationProviderConfigurationSnapshotVersion, DefaultChat: catalogCacheModelFixture().Target, Overrides: []PreparationProviderModelOverride{{ModelID: "model", ContextWindowTokens: 32000, MaxOutputTokens: 4000, Operations: []string{"responses"}}}}
 		return r
 	}
 	command := ObserveProviderCatalogCacheCommand{WorkspaceID: "ws"}

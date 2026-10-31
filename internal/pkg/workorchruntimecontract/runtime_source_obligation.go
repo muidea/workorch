@@ -177,7 +177,7 @@ func StableRuntimeSourceObligationInventoryHash(i RuntimeSourceObligationInvento
 		writeHashString(h, verification.Scope)
 	}
 	if len(i.ExecutionProofMappings) != 0 {
-		writeHashString(h, RuntimeCrossSourceExecutionProofV1)
+		writeHashString(h, RuntimeDoDSourceExecutionProof)
 		writeHashString(h, fmt.Sprint(len(i.ExecutionProofMappings)))
 		for _, mapping := range i.ExecutionProofMappings {
 			writeHashString(h, mapping.ContractRef)
@@ -185,13 +185,13 @@ func StableRuntimeSourceObligationInventoryHash(i RuntimeSourceObligationInvento
 			writeHashString(h, mapping.RuleRef)
 			writeHashString(h, mapping.SourceItemRef)
 			if mapping.ConsumerGoalText != "" {
-				writeHashString(h, RuntimeGoalSourceExecutionProofV2)
+				writeHashString(h, RuntimeGoalSourceExecutionProof)
 				writeHashString(h, mapping.ConsumerGoalText)
 			}
 		}
 	}
 	if len(i.EvidencePurposeMappings) != 0 {
-		writeHashString(h, RuntimeCrossCWIEvidencePurposeV1)
+		writeHashString(h, RuntimeCrossCWIEvidencePurpose)
 		writeHashString(h, fmt.Sprint(len(i.EvidencePurposeMappings)))
 		for _, mapping := range i.EvidencePurposeMappings {
 			writeHashString(h, mapping.ContractRef)
@@ -260,7 +260,7 @@ func (i RuntimeSourceObligationInventory) Validate() error {
 			return fmt.Errorf("runtime execution proof mapping requires unique exact original consumer/rule/DoD source")
 		}
 		proofKeys[key] = true
-		if mapping.ContractRef == RuntimeGoalSourceExecutionProofV2 {
+		if mapping.ContractRef == RuntimeGoalSourceExecutionProof {
 			if prior := goalProofSources[mapping.ConsumerItemRef]; prior != "" && prior != mapping.SourceItemRef {
 				return fmt.Errorf("Goal mappings have ambiguous execution sources")
 			}

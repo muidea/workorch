@@ -236,7 +236,7 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, options ...val
 	}
 	if mode.GoalExecutionSource {
 		bootstrap.Activation.EvidencePolicies[0].RecipeAdapterRef = shellcommon.ValidationRecipeAdapterConjunctiveEntrypoint
-		bootstrap.Activation.EvidencePolicies[0].RecipeInputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV2
+		bootstrap.Activation.EvidencePolicies[0].RecipeInputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 	}
 	if mode.BehaviorRepair {
 		convergence := bootstrap.DefinitionFocuses[1].ValidationFailureRepairConvergence.Clone()
@@ -605,7 +605,7 @@ func assertDelivery(t *testing.T) {
 						continue
 					}
 					detail := fact.Validation.CheckFailures[0]
-					seen = fact.Validation.FailureDetailProtocolRef == runtimecontract.RuntimeValidationFailureDetailProtocolV2 &&
+					seen = fact.Validation.FailureDetailProtocolRef == runtimecontract.RuntimeValidationFailureDetailProtocol &&
 						(mode.HistoricalPurposeMapping || detail.CheckRef == addition.NativeCheckRef && detail.TargetRef == addition.TargetRef) && detail.ComparisonHash != "" &&
 						detail.ReportedAssertion.Code == "value_mismatch" && len(fact.CoverageWorkItemIDs) == 0
 				}
@@ -974,9 +974,9 @@ func %s(t *testing.T) { assertDelivery(t) }
 	acceptedValidation, rejectedValidation, createdInputs := 0, 0, 0
 	for _, receipt := range aggregate.OperationReceipts {
 		if receipt.Evidence.Validation != nil {
-			wantProtocol := "shell/go-test-json/workspace-behavior/v4"
+			wantProtocol := "shell/go-test-json/entrypoint-behavior"
 			if mode.GoalExecutionSource {
-				wantProtocol = "shell/go-test-json/workspace-behavior/v6"
+				wantProtocol = "shell/go-test-json/conjunctive-package-behavior"
 			}
 			if mode.Entrypoint && receipt.Evidence.Validation.ObservationProtocolRef != wantProtocol {
 				t.Fatal("entrypoint receipt lost its sealed owner protocol")
@@ -1126,9 +1126,9 @@ func %s(t *testing.T) { assertDelivery(t) }
 		}
 	}
 	nativeBindings := 0
-	wantProtocol := "shell/go-test-json/workspace-behavior/v3"
+	wantProtocol := "shell/go-test-json/supplemented-behavior"
 	if mode.Entrypoint {
-		wantProtocol = "shell/go-test-json/workspace-behavior/v4"
+		wantProtocol = "shell/go-test-json/entrypoint-behavior"
 	}
 	for _, binding := range freshValidation.Facts.Focus.CoverageEvidenceBindings {
 		for _, proof := range binding.Proofs {
@@ -1303,7 +1303,7 @@ func assertSemanticRepairContinuationTamperRejected(t *testing.T, fresh runtime.
 func validationInputAdditionMainlineBootstrap() runtimecontract.RuntimeBootstrap {
 	bootstrap := runtimeBootstrap()
 	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindManagedValidationSession}
-	bootstrap.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{{ID: "behavior-validation", AppliesTo: runtimecontract.StepKindShellCommand, RecipeDeclared: true, RecipeAdapterRef: "shell/project-native-validation/v1", RecipeTimeoutMillis: 60_000}}
+	bootstrap.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{{ID: "behavior-validation", AppliesTo: runtimecontract.StepKindShellCommand, RecipeDeclared: true, RecipeAdapterRef: "shell/project-native-validation", RecipeTimeoutMillis: 60_000}}
 	convergence := runtimecontract.RuntimeValidationFailureRepairConvergence{ID: "behavior-input-repair", RequireFreshValidation: true, MaxAttempts: 1, Routes: []runtimecontract.RuntimeValidationFailureRepairRoute{{
 		ID: "missing-behavior-to-new-validation-input", TriggerOwnerModuleID: runtimecontract.RuntimeModuleShell, TriggerOperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 		TriggerDiagnosticClass: runtimecontract.ValidationDiagnosticOutputInconclusive, TriggerEvidenceTargetType: runtimecontract.ValidationEvidenceTargetValidationOutput, TriggerOwnerDiagnosticCode: "validation_workspace_behavior_unobserved",

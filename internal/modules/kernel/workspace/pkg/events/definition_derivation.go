@@ -23,7 +23,7 @@ type ReserveDefinitionDerivationCommand struct {
 }
 
 func (c ReserveDefinitionDerivationCommand) Validate() error {
-	if c.WireContractRef != "" && (c.WireContractHash == "" || c.WireContractHash != workspace.AuthoringWireHash(c.WireContractRef, "derive")) || c.WireContractRef == "" && c.WireContractHash != "" {
+	if !workspace.OwnerBoundAuthoringWire(c.WireContractRef) || c.WireContractHash == "" || c.WireContractHash != workspace.AuthoringWireHash(c.WireContractRef, "derive") {
 		return common.ErrInvalidArgument
 	}
 	if c.WorkspaceID == "" || c.InputHash == "" || len(c.InputHash) > 256 || c.RequestID == "" || len(c.RequestID) > 128 || c.ProviderBindingHash == "" || len(c.ProviderBindingHash) > 256 || len(c.Resources) > workspace.DefinitionAuthoringResourceLimit || c.ResourceSnapshotHash != workspace.DefinitionAuthoringResourcesHash(c.Resources) || (len(c.Resources) > 0 && c.WorkspaceRevision == 0) {

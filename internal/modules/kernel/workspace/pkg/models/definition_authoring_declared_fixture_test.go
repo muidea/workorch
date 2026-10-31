@@ -29,7 +29,7 @@ func declaredAuthoringLedgerFixture(t testing.TB) (DefinitionAuthoringRecord, Go
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = record.CompleteDerivation(request.PermitID, &derived, "")
+	record, err = completeTestDerivation(record, request.PermitID, &derived, "")
 	if err != nil {
 		t.Fatal(err)
 	}

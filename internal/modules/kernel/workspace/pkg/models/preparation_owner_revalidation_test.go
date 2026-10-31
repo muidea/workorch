@@ -117,9 +117,10 @@ func TestPreparationOwnerRevalidationMissingFinalAndAmbiguousOriginals(t *testin
 	if stale, err := PreparationOwnerRevalidationStale(w, r.CompletedAt); err != nil || !stale {
 		t.Fatal("omitted final observation bypassed new operation contract", err)
 	}
+	w, r = ownerRevalidationFixture(t)
 	w.StartupPreparation.Attempts[0].OwnerRevalidationVersion = ""
-	if stale, err := PreparationOwnerRevalidationStale(w, r.CompletedAt); err != nil || stale {
-		t.Fatal("query upgraded legacy operation", err)
+	if _, err := PreparationOwnerRevalidationStale(w, r.CompletedAt); err == nil {
+		t.Fatal("missing current revalidation contract accepted")
 	}
 	w, r = ownerRevalidationFixture(t)
 	w.PreparationSkillRegistryEvidence = append(w.PreparationSkillRegistryEvidence, w.PreparationSkillRegistryEvidence[0].Clone())

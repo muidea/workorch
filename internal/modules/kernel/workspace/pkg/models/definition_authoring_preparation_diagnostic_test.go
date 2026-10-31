@@ -261,7 +261,7 @@ func TestAuthoringSummaryIgnoresHistoricalPreparationDiagnosticsAfterTargetCompl
 		t.Fatalf("current preparation failure summary = %q/%q/%q", state, phase, code)
 	}
 	var request DefinitionAuthoringSpecificationRequest
-	record, request, _, err = record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: requestID, DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
+	record, request, _, err = record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: requestID, DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +291,7 @@ func TestPreparationDiagnosticSpecificationScopeConfigDriftAndReview(t *testing.
 	if _, _, _, err := r.RecordPreparationDiagnostic(d); err != nil {
 		t.Fatal(err)
 	}
-	request := DefinitionAuthoringSpecificationRequest{RequestID: "proposal", DerivationPermitID: d.DerivationPermitID, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}
+	request := DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal", DerivationPermitID: d.DerivationPermitID, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}
 	r, request, _, _ = r.ReserveSpecification(request)
 	var err error
 	r, err = completeCurrentProposalFixture(t, r, request.PermitID, &proposal)
@@ -309,13 +309,13 @@ func TestPreparationDiagnosticSpecificationScopeConfigDriftAndReview(t *testing.
 		t.Fatal("review has no exact proposal")
 	}
 	for n := 0; n < DefinitionAuthoringSpecificationAttemptLimit; n++ {
-		req := DefinitionAuthoringSpecificationRequest{RequestID: fmt.Sprintf("review-%d", n), DerivationPermitID: d.DerivationPermitID, Phase: DefinitionSpecificationCritic, ReviewKind: GoalReviewTraceability, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"}
+		req := DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, GoalReviewTraceability), RequestID: fmt.Sprintf("review-%d", n), DerivationPermitID: d.DerivationPermitID, Phase: DefinitionSpecificationCritic, ReviewKind: GoalReviewTraceability, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"}
 		r, _, _, err = r.ReserveSpecification(req)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	_, noPermit, fresh, err := r.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: "review-overflow", DerivationPermitID: d.DerivationPermitID, Phase: DefinitionSpecificationCritic, ReviewKind: GoalReviewTraceability, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"})
+	_, noPermit, fresh, err := r.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, GoalReviewTraceability), RequestID: "review-overflow", DerivationPermitID: d.DerivationPermitID, Phase: DefinitionSpecificationCritic, ReviewKind: GoalReviewTraceability, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"})
 	var refusal *DefinitionAuthoringBudgetRefusalError
 	if !errors.As(err, &refusal) || refusal.Stage != DefinitionAuthoringPreparationReview || refusal.RequestID != "review-overflow" || fresh || noPermit.PermitID != "" {
 		t.Fatalf("review typed guard: %v", err)

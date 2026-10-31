@@ -75,7 +75,7 @@ func reduceWorkspaceFreshIntentReserved(current *workspacemodel.Workspace, fact 
 	}
 	fence := current.PreparationFence
 	if fence == nil || fence.Validate(current.ID) != nil {
-		return workspaceExecutionTransition{}, fmt.Errorf("%w: legacy or invalid preparation creation fence", common.ErrConflict)
+		return workspaceExecutionTransition{}, fmt.Errorf("%w: missing or invalid preparation creation fence", common.ErrConflict)
 	}
 	// Resolve original identity before consulting mutable admission/revision.
 	// Neither a changed Definition nor a process restart permits re-forward.

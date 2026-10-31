@@ -11,7 +11,7 @@ import (
 
 func runtimeDefinitionGapObservationForAggregate(t *testing.T, repository *controllerRepository, aggregate RuntimeAggregate) runtimecontract.RuntimeDefinitionGapObservation {
 	t.Helper()
-	expected := runtimecontract.RuntimeExpectedDocumentContract{
+	expected := runtimecontract.RuntimeExpectedDocumentContract{SemanticContextEncoding: runtimecontract.RuntimeSemanticContextEncoding,
 		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:  runtimecontract.RuntimeProviderDocumentSemanticPlan,
 		PlanStep:      runtimecontract.RuntimeSemanticPlanStepCoverageOrder,

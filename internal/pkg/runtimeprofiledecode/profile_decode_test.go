@@ -13,7 +13,7 @@ func TestDecodePreservesNestedProfileContractValues(t *testing.T) {
 		"repairDeclarationTargetSelectorCandidateRefs": []any{"candidate"}, "repairOperationTargetSelectorRef": "operation",
 	}
 	implementation := map[string]any{
-		"protocolRef": "protocol", "ownerModuleId": "owner", "progressProtocolRef": "implementation-work-progress/v1", "inputRevisionProtocolRef": "validation/input-revision/v1",
+		"protocolRef": "protocol", "ownerModuleId": "owner", "inputRevisionProtocolRef": "validation/input-revision/v1",
 		"allowedOperations":     []any{map[string]any{"kind": "operation", "variantId": "variant"}},
 		"allowedTargetPolicies": []any{"existing"}, "targetSelectorRef": "selector", "targetSelectorOwnerRef": "selector-owner",
 		"targetSelectorSubjectRef": "selector-subject", "targetSelectorCandidateRefs": []any{"candidate"},
@@ -60,7 +60,6 @@ func TestDecodePreservesNestedProfileContractValues(t *testing.T) {
 		decodedEvidence.ValidationFailureRepairConvergence.Routes[0].RepairDeclarationTargetSelectorCandidateRefs[0] != "candidate" ||
 		decodedEvidence.ImplementationWorkPolicy.AllowedOperations[0].VariantID != "variant" ||
 		decodedEvidence.ImplementationWorkPolicy.InputRevisionProtocolRef != "validation/input-revision/v1" ||
-		decodedEvidence.ImplementationWorkPolicy.ProgressProtocolRef != "implementation-work-progress/v1" ||
 		got[0].BootstrapRecipes[0].Artifacts[0].DependsOnArtifactIDs[0] != "prior" ||
 		decodedEvidence.OwnerFactConvergences[0].MaxAcquisitionAttempts != 2 {
 		t.Fatalf("nested Profile policies lost: %+v", got)
@@ -90,5 +89,17 @@ func TestMergeTemplateWorkspaceProfileContractClonesAndOverlaysByIdentity(t *tes
 	items[0]["description"] = "changed"
 	if MapSlice(template["evidenceRequirements"])[0]["description"] != "template" {
 		t.Fatal("merge result aliases template input")
+	}
+}
+
+func TestProfileShapeRejectsRetiredProgressVersionSwitch(t *testing.T) {
+	for _, field := range []string{"progressProtocolRef", "schemaVersion", "compatibilityMode"} {
+		t.Run(field, func(t *testing.T) {
+			work := map[string]any{field: "implementation-work-progress/v1"}
+			input := map[string]any{"profileContracts": map[string]any{"project": map[string]any{"evidenceRequirements": []any{map[string]any{"id": "work", "implementationWorkPolicy": work}}}}}
+			if err := ValidateInputShape(input); err == nil {
+				t.Fatalf("retired management field %s accepted", field)
+			}
+		})
 	}
 }

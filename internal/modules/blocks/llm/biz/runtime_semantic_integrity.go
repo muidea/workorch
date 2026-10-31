@@ -15,6 +15,9 @@ func validateRuntimeSemanticContextIntegrity(context runtimecontract.RuntimeSema
 		return fmt.Errorf("runtime semantic context integrity requires prompt and budget metadata")
 	}
 	missing := make([]string, 0, 6)
+	if budget.RenderContractRef != runtimecontract.RuntimeSemanticContextEncoding {
+		missing = append(missing, "P0.context_encoding")
+	}
 	contents := make(map[string]string, len(prompt.Sections))
 	for _, section := range prompt.Sections {
 		contents[promptSectionGroup(section.ID)] += strings.TrimSpace(section.Content)
@@ -49,20 +52,17 @@ func validateRuntimeSemanticContextIntegrity(context runtimecontract.RuntimeSema
 	var authority runtimeSemanticAuthorityProjection
 	tailErr := json.Unmarshal([]byte(contents["C4"]), &tail)
 	authorityErr := json.Unmarshal([]byte(contents["C3"]), &authority)
-	if budget.RenderContractRef == runtimecontract.RuntimeSemanticRenderContractV5 {
-		if authorityErr != nil || authority.ContextEncoding != runtimecontract.RuntimeSemanticRenderContractV5 || tail.WorkContext != nil || (context.WorkContext != nil && tail.WorkContextRef != semanticWorkContextRefV5) || (context.WorkContext == nil && tail.WorkContextRef != "") {
+	if authorityErr != nil || authority.ContextEncoding != runtimecontract.RuntimeSemanticContextEncoding || tail.WorkContext != nil || (context.WorkContext != nil && tail.WorkContextRef != semanticWorkContextRef) || (context.WorkContext == nil && tail.WorkContextRef != "") {
+		missing = append(missing, "P4.semantic_work_reference")
+	} else {
+		expanded, err := expandSemanticWorkContext(authority.WorkContext, tail.ExecutionHistory)
+		if err != nil {
 			missing = append(missing, "P4.semantic_work_reference")
 		} else {
-			expanded, err := expandSemanticWorkContext(authority.WorkContext, tail.ExecutionHistory)
-			if err != nil {
-				missing = append(missing, "P4.semantic_work_reference")
-			} else {
-				tail.WorkContext = expanded
-			}
+			tail.WorkContext = expanded
 		}
-	} else if tail.WorkContextRef != "" || authority.WorkContext != nil || authority.ContextEncoding != "" {
-		missing = append(missing, "P4.unsealed_semantic_work_encoding")
 	}
+
 	for _, field := range []struct {
 		name  string
 		equal bool
@@ -104,10 +104,7 @@ func validateRuntimeSemanticContextIntegrity(context runtimecontract.RuntimeSema
 		if json.Unmarshal([]byte(contents["C3"]), &actual) != nil {
 			missing = append(missing, "P0.semantic_authority")
 		} else {
-			expectedInstruction := runtimeSemanticOutputInstruction(context, manifest)
-			if budget.RenderContractRef == runtimecontract.RuntimeSemanticRenderContractV5 {
-				expectedInstruction = runtimeSemanticSharedWorkOutputInstruction(context, manifest)
-			}
+			expectedInstruction := runtimeSemanticSharedWorkOutputInstruction(context, manifest)
 			if actual.OutputInstruction != expectedInstruction {
 				missing = append(missing, "P0.semantic_output_instruction")
 			}

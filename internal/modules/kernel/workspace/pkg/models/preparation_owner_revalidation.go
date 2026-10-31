@@ -143,18 +143,13 @@ func PreparationOwnerRevalidationStaleForAttempt(w *Workspace, a WorkspacePrepar
 		return false, common.ErrInvalidArgument
 	}
 
-	if a.OwnerRevalidationVersion == "" {
-		return false, nil // reads cannot upgrade old histories
-	}
-	if a.OwnerRevalidationVersion != PreparationOwnerRevalidationVersion {
-		return false, common.ErrConflict
-	}
+	// An unfinished phase has no final owner observation to assess.
 	for _, e := range w.PreparationSealEvidence {
 		if e.Ref != a.SealEvidenceRef || e.FinalOwners == nil {
 			continue
 		}
 		r := e.FinalOwners
-		if r.Validate() != nil {
+		if a.OwnerRevalidationVersion != PreparationOwnerRevalidationVersion || r.Validate() != nil {
 			return false, common.ErrConflict
 		}
 		return !r.MatchesOriginal(w, a) || now.Before(r.CompletedAt) || !now.Before(r.StartedAt.Add(PreparationOwnerRevalidationMaxAge)), nil

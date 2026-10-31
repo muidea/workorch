@@ -14,18 +14,18 @@ import (
 )
 
 func TestAuthoringReviewsShareFullSnapshotWithIndependentTail(t *testing.T) {
-	for _, wireRef := range []string{"", workspace.DefinitionAuthoringOwnerBoundV2, workspace.DefinitionAuthoringOwnerBoundV3} {
+	for _, wireRef := range []string{workspace.DefinitionAuthoringOwnerBound} {
 		t.Run(wireRef, func(t *testing.T) {
 			input := workspace.DefinitionAuthoringInput{Version: 1, WorkspaceID: "ws-cache", Revision: 1, GoalText: "完整目标\n不能省略条件", TemplateID: "t", AcceptanceRequirements: []string{"用户验收"}}
 			template := workspace.WorkspaceTemplate{ID: "t", DoDItems: []string{"模板验收"}}
 			record := workspace.DefinitionAuthoringRecord{Input: input, InputHash: input.InputHash(), TemplateSnapshot: template, TemplateSnapshotHash: workspace.WorkspaceTemplateSnapshotHash(&template)}
-			record, d, _, err := record.ReserveDerivation("derive", "provider", nil, wireRef)
+			record, d, _, err := record.ReserveDerivation("derive", "provider", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 			derived := workspace.DefinitionDerivedAcceptance{AuthoringInputHash: input.InputHash(), TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"派生验收"}}
 			if wireRef == "" {
-				record, err = record.CompleteDerivation(d.PermitID, &derived, "")
+				record, err = completeTestDerivation(record, d.PermitID, &derived, "")
 			} else {
 				raw := []byte(`{"AdditionalItems":["派生验收"]}`)
 				derived, err = workspace.DecodeOwnerBoundDerivation(d, raw)

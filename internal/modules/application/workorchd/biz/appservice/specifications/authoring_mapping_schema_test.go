@@ -9,33 +9,33 @@ import (
 )
 
 func TestAuthoringMappingProviderSchemaIsClosedAndDTOAligned(t *testing.T) {
-	var schema map[string]any
-	if err := json.Unmarshal([]byte(authoringSpecificationOutputSchema("proposal")), &schema); err != nil {
+	raw, err := workspace.AuthoringWireSchema(workspace.DefinitionAuthoringOwnerBound, "proposal")
+	if err != nil {
 		t.Fatal(err)
 	}
-	properties, ok := schema["properties"].(map[string]any)
-	required, requiredOK := schema["required"].([]any)
-	if !ok || !requiredOK || schema["type"] != "object" || schema["additionalProperties"] != false || len(properties) != 1 || len(required) != 1 || required[0] != "mapping" {
-		t.Fatal("提案 wrapper 不是唯一封闭 mapping")
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(raw), &schema); err != nil {
+		t.Fatal(err)
 	}
-	mapping, ok := properties["mapping"].(map[string]any)
-	if !ok {
-		t.Fatal("缺少 mapping schema")
-	}
-	// The immutable v1/v2 schema intentionally excludes the v3 extension.
+	props := schema["properties"].(map[string]any)
+	mapping := props["mapping"].(map[string]any)
 	typ := reflect.TypeOf(workspace.DefinitionAuthoringMapping{})
 	fields := []reflect.StructField{}
 	for n := 0; n < typ.NumField(); n++ {
-		if typ.Field(n).Name != "ProfileAcceptanceSelections" {
-			fields = append(fields, typ.Field(n))
+		f := typ.Field(n)
+		switch f.Name {
+		case "Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash":
+			continue
 		}
+		fields = append(fields, f)
 	}
 	checkSchemaDTO(t, mapping, reflect.StructOf(fields))
-	protocol := mapping["properties"].(map[string]any)["Protocol"].(map[string]any)["enum"]
-	if !reflect.DeepEqual(protocol, []any{workspace.DefinitionAuthoringMappingProtocol}) {
-		t.Fatal("mapping schema 协议不是唯一当前版本")
+	for _, name := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash"} {
+		if _, ok := mapping["properties"].(map[string]any)[name]; ok {
+			t.Fatal("provider receives owner field", name)
+		}
 	}
-	if authoringSpecificationOutputSchema("review/traceability") != specificationOutputSchema("review/traceability") {
-		t.Fatal("独立 review 合同被提案 mapping 替换")
+	if _, err := workspace.AuthoringWireSchema("workorch.authoring.owner-bound/v1", "proposal"); err == nil {
+		t.Fatal("obsolete schema alias accepted")
 	}
 }

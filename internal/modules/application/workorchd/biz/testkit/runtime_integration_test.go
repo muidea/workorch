@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
@@ -105,8 +106,11 @@ func TestRuntimeStartsSystemDefaultsModule(t *testing.T) {
 	if _, err := exports.Repositories.MCPCapabilities.Get(ctx, common.MCPCapabilityID("mcp-lsp-bridge:tool:lsp_status")); err != nil {
 		t.Fatalf("lsp_status capability err = %v, want system default", err)
 	}
-	if _, err := exports.Repositories.WorkspaceTemplates.Get(ctx, "software-dev"); err != nil {
+	if _, err := workspaceports.ReadWorkspaceTemplateRecord(ctx, exports.Infrastructure.CommandHub, "software-dev"); err != nil {
 		t.Fatalf("software-dev template err = %v, want system default", err)
+	}
+	if _, err := exports.Repositories.WorkspaceTemplates.Get(ctx, "software-dev"); err == nil {
+		t.Fatal("builtin template must not be persisted")
 	}
 }
 

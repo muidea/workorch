@@ -121,7 +121,7 @@ func compileRuntimeSourceObligationChecksValidated(inventory RuntimeSourceObliga
 		}
 	}
 	for _, mapping := range inventory.EvidencePurposeMappings {
-		if mapping.ContractRef == RuntimeProfileDeliverableEvidencePurposeV2 && sourceRefs[mapping.HistoricalItemRef] {
+		if mapping.ContractRef == RuntimeProfileDeliverableEvidencePurpose && sourceRefs[mapping.HistoricalItemRef] {
 			ret = append(ret, runtimeProfileEvidencePurposeCheck(inventory, mapping, item))
 		}
 	}

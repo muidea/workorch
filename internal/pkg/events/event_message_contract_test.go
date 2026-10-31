@@ -115,7 +115,9 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// reserves first, Application executes CLI, recovery queries the same receipt.
 	// Decision adds exact legacy request-contract repair; no criteria approval, evidence or Run transition.
 	// File adds one original-result-only delivery topic; no new effect ingress.
-	const expectedProductionTopicCount = 335
+	// Remove four builtin-default query/upgrade topics and the Decision
+	// request-contract repair ingress; ordinary owner query/repair topics remain.
+	const expectedProductionTopicCount = 330
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the owning component contracts and README", len(contracts), expectedProductionTopicCount)
 	}

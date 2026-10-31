@@ -19,7 +19,7 @@ import (
 
 // 此文件只提供尚未接线的 Shell-private 执行事实生产器。它不发布
 // Runtime proof、receipt 或新 adapter availability；生产接线必须另行完成。
-const shellProjectConjunctionProtocolRef = "shell/go-test-json/project-conjunction-behavior/v1"
+const shellProjectConjunctionProtocolRef = "shell/go-test-json/project-conjunction-behavior"
 
 const shellProjectConjunctionReviewScopeRequirements = "Shell 在一个隔离副本和一个原 operation deadline 内按固定 all_of 执行 go build ./...、go test -json -count=1 ./...、go test -race -json -count=1 ./...，最后独立执行当前 CWI 准确评审的原始/补充 InputV4 检查及实际实现行为观测。前三阶段覆盖整个根 Go module 的 ./...，包括旧输入和相邻 CWI harness；它们不是当前 CWI 语义证明，也不从当前 CWI 的评审推断相邻输入已评审。任何失败、跳过的测试、未结束事件、零实际测试或不完整输出均不能完成合取。完整 source/member set 的执行前后 hash 必须一致；GOWORK=off。评审字节仍必须包含当前 CWI 完整 package/helpers/fixtures 和根 module/workspace 定义，不提高 16 files / 64 KiB 边界。依赖未评审外部 harness/fixtures 才能解释当前准则的输入不能判为 consistent；必须明确缺失上下文或超限不可用。所有原 Goal/DoD 准则保持 mandatory，完整项目执行不代替逐 CWI 行为断言、一致性判断或验收 credit。"
 

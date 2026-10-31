@@ -502,7 +502,7 @@ func TestRuntimeSemanticExistingTargetPayloadAndCorrectionUseOwnerReplacementKin
 		}},
 		SemanticViolations: append([]RuntimeSemanticContractViolation(nil), diagnostic.SemanticViolations...),
 	}
-	expected := RuntimeExpectedDocumentContract{
+	expected := RuntimeExpectedDocumentContract{SemanticContextEncoding: RuntimeSemanticContextEncoding,
 		SchemaVersion: RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:  RuntimeProviderDocumentSemanticPlan, PlanStep: RuntimeSemanticPlanStepProofBatch,
 		ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,

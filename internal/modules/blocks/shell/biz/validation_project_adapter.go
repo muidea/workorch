@@ -18,10 +18,10 @@ const shellProjectReviewScopeContractRef = "shell/go-test-input/project-conjunct
 const shellProjectInputContentRequirements = "按 targetRef 创建一个 Go 测试文件，逐一声明所有 nativeCheckRef，签名为 func(t *testing.T)，每项原判据和来源义务均须通过真实 testing.T 独立断言。全部检查属于同一个不可变 requirement package；不能省略、别名化或替代成员。允许同包命名 helper、type、const 和纯数据 var；禁止 init、TestMain、method、未声明 Test、全局 initializer 调用/闭包、嵌套 module、cgo 或导入其他 validation package。全部 helper/fixture 必须留在当前 package，完整评审仍限 16 files/64 KiB，包括现存根 module/workspace 定义。实际调用 workspace delivery，或通过继承 owner instrumentation 的新 Go-built executable 观察真实行为；依赖缺失、skip、源码标记、测试内替身和 instrumentation override 均不授 proof。Shell 按同一不超过 60000ms 的 operation deadline 执行根 module go build ./...、go test -json -count=1 ./...、go test -race -json -count=1 ./...，最后执行当前 package 的全部 exact checks 并独立观察实际非测试 delivery 行为。任一阶段失败、零测试、skip、unfinished、source 漂移、原文容量不足或 cleanup/deadline 失败均不能合取通过；前三阶段不能代替逐 CWI 判据。保留全部历史检查和原判据；创建、readiness、评审均零执行/acceptance credit。scratch 不是 OS/网络/凭据强隔离。"
 const shellProjectReviewScopeRequirements = "供应完整当前 requirement package，包括每个 original/supplemental native check、全部 helper/fixture 和现存根 module/workspace 定义；保持 16 files/64 KiB，不静默省略或截断。当前 package 的判据一致性评审不替相邻 harness 补造评审。Shell 的根 module build/test/race 另外实际执行，包括现存相邻 package 的失败；最后阶段独立证明当前 CWI 的 exact 判据和真实 delivery 行为。全项目成功不能反推逐义务语义正确；任何原 Goal/DoD 判据仍 mandatory，禁止 criterion replacement 或自动放宽。未评审外部 harness 依赖保持明确不完整；package scope 不提供 OS 安全沙箱。"
 
-var shellProjectNativeIdentity = regexp.MustCompile(`^TestWorkOrchCWI_([A-F0-9]{64})_Check_[A-Z0-9_]+_InputV6$`)
+var shellProjectNativeIdentity = regexp.MustCompile(`^TestWorkOrchCWI_([A-F0-9]{64})_Check_[A-Z0-9_]+_ProjectInput$`)
 
-const shellProjectFailureDiagnosticProtocolRef = "shell/go-test-json/project-conjunction-behavior/v2"
-const shellProjectMultiFailureDiagnosticProtocolRef = "shell/go-test-json/project-conjunction-behavior/v3"
+const shellProjectFailureDiagnosticProtocolRef = "shell/go-test-json/project-failure-diagnostic-behavior"
+const shellProjectMultiFailureDiagnosticProtocolRef = "shell/go-test-json/project-multi-failure-behavior"
 
 func shellProjectAdapter(adapter string) bool {
 	return adapter == modulecommon.ValidationRecipeAdapterProjectConjunction || adapter == modulecommon.ValidationRecipeAdapterProjectFailureDiagnostic || adapter == modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic
@@ -46,7 +46,7 @@ func shellProjectNativePackage(native string) string {
 	if len(match) != 2 {
 		return ""
 	}
-	return "workorch_validation/v6/" + strings.ToLower(match[1])
+	return "workorch_validation/project/" + strings.ToLower(match[1])
 }
 
 func shellProjectRequirementIdentity(requirement runtimecontract.RuntimeValidationProofRequirement) string {
@@ -65,11 +65,9 @@ func shellProjectExecutionStageIdentities(pkg string) []runtimecontract.RuntimeV
 }
 
 func shellProjectRecipeDeclared(recipe runtimecontract.RuntimeValidationRecipe) bool {
-	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic && recipe.InputReviewProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocolV3 {
-		return false
-	}
+
 	return shellProjectAdapter(recipe.AdapterRef) &&
-		(recipe.InputReviewProtocolRef == runtimecontract.RuntimeValidationInputReviewProtocolV2 || recipe.InputReviewProtocolRef == runtimecontract.RuntimeValidationInputReviewProtocolV3) &&
+		recipe.InputReviewProtocolRef == runtimecontract.RuntimeValidationInputReviewProtocol &&
 		(recipe.Command == "" && len(recipe.Args) == 0 || recipe.Command == "go" && strings.Join(recipe.Args, "\x00") == "test\x00-v\x00./...") &&
 		recipe.TimeoutMillis >= 0 && recipe.TimeoutMillis <= DefaultCommandTimeout.Milliseconds()
 }

@@ -182,7 +182,7 @@ func TestEvidencePurposeSharedObligationIsRequiredOnceAndManySourcesAllOf(t *tes
 	i.Sources = append(i.Sources, RuntimeDefinitionSource{CandidateItemRef: "second-history", ItemRef: "second-formal", SourceScope: "dodItem", SourceID: "dod-003", Text: "另一个原历史行为"})
 	i.Obligations = append(i.Obligations, RuntimeSourceObligation{ID: "D", RequirementID: "requirement", DoDItemRefs: []string{"second-history"}, Text: " D 原始义务\n"})
 	i.Verifications = append(i.Verifications, RuntimeSourceVerification{ID: "verify-D", ObligationID: "D", Declaration: "原始验证 D", ProfileID: "profile", EvidenceRequirementID: "dod-003", Scope: "dodItem"})
-	i.EvidencePurposeMappings = append(i.EvidencePurposeMappings, RuntimeEvidencePurposeMapping{ContractRef: RuntimeCrossCWIEvidencePurposeV1, HistoricalItemRef: "second-history", AcceptanceItemRef: "acceptance"})
+	i.EvidencePurposeMappings = append(i.EvidencePurposeMappings, RuntimeEvidencePurposeMapping{ContractRef: RuntimeCrossCWIEvidencePurpose, HistoricalItemRef: "second-history", AcceptanceItemRef: "acceptance"})
 	i = i.WithHash()
 	checks, err = CompileRuntimeSourceObligationChecks(i, items[1])
 	if err != nil || len(checks) != 4 || checks[3].Criterion != " D 原始义务\n" {

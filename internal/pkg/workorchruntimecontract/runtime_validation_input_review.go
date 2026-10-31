@@ -15,9 +15,7 @@ import (
 )
 
 const (
-	RuntimeValidationInputReviewProtocol          = "validation/input-consistency/v1"
-	RuntimeValidationInputReviewProtocolV2        = "validation/input-consistency/v2"
-	RuntimeValidationInputReviewProtocolV3        = "validation/input-consistency/v3"
+	RuntimeValidationInputReviewProtocol          = "validation/input-consistency"
 	RuntimeValidationInputConsumer                = "validation_input"
 	RuntimeValidationInputReviewMaxFiles          = 16
 	RuntimeValidationInputReviewMaxBytes          = 64 * 1024
@@ -76,9 +74,9 @@ type RuntimeValidationInputCheckReview struct {
 	Conclusion       string   `json:"conclusion"`
 	Reason           string   `json:"reason"`
 	InputTargetRefs  []string `json:"inputTargetRefs"`
-	// V2 decomposes the immutable criterion into exact excerpts and describes
+	// Decompose the immutable criterion into exact excerpts and describe
 	// input coverage. These are observations, not new acceptance criteria or a
-	// repair authorization. V1 reports must not carry this extension.
+	// repair authorization.
 	Obligations []RuntimeValidationInputObligationReview `json:"obligations,omitempty"`
 }
 
@@ -302,27 +300,22 @@ func (r RuntimeValidationInputReview) ValidateAgainstBinding(b RuntimeValidation
 				return fmt.Errorf("validation input review references an unobserved input")
 			}
 		}
-		if b.InputReview.ProtocolRef == RuntimeValidationInputReviewProtocol {
-			if check.Obligations != nil {
-				return fmt.Errorf("v1 input review cannot carry v2 obligation observations")
-			}
-		} else {
-			if err := validateRuntimeValidationInputObligations(check); err != nil {
-				return err
-			}
+		if err := validateRuntimeValidationInputObligations(check); err != nil {
+			return err
 		}
+
 		if err := validateRuntimeValidationCompositionCheck(check, *b.InputReview); err != nil {
 			return err
 		}
 	}
-	// Do not retroactively impose a new capacity limit on archived v1 reports.
-	if b.InputReview.ProtocolRef != RuntimeValidationInputReviewProtocol {
-		encoded, err := json.Marshal(r)
-		_, _, maxReport := RuntimeValidationInputReviewBounds(*b.InputReview)
-		if err != nil || len(encoded) > maxReport {
-			return fmt.Errorf("validation input review report capacity exceeded")
-		}
+	// Every current report observes the same explicit capacity bound.
+
+	encoded, err := json.Marshal(r)
+	_, _, maxReport := RuntimeValidationInputReviewBounds(*b.InputReview)
+	if err != nil || len(encoded) > maxReport {
+		return fmt.Errorf("validation input review report capacity exceeded")
 	}
+
 	return nil
 }
 
@@ -365,14 +358,14 @@ func writeRuntimeValidationInputReviewHash(h interface{ Write([]byte) (int, erro
 		writeHashString(h, check.Reason)
 		writeHashStrings(h, check.InputTargetRefs)
 		if len(check.Obligations) != 0 {
-			writeHashString(h, RuntimeValidationInputReviewProtocolV2)
+			writeHashString(h, "obligations")
 			for _, obligation := range check.Obligations {
 				writeHashString(h, obligation.CriterionText)
 				writeHashString(h, obligation.Finding)
 				writeHashString(h, obligation.Reason)
 				writeHashStrings(h, obligation.InputTargetRefs)
 				if len(obligation.ProofConsumerRefs) != 0 {
-					writeHashString(h, RuntimeValidationInputReviewProtocolV3)
+					writeHashString(h, "proof-consumers")
 					writeHashStrings(h, obligation.ProofConsumerRefs)
 				}
 			}

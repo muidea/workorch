@@ -121,7 +121,7 @@ func TestPreparationFileRevalidationRejectsRehashedScopeAndPreservesHistory(t *t
 	d.RevalidationVersion = ""
 	d.ContentHash = d.Hash()
 	w.StartupPreparation.Attempts[0].DirectoryEvidenceHash = d.ContentHash
-	if stale, err := PreparationFileRevalidationStale(w, d.CompletedAt, ""); stale || err != nil || d.Revalidation != nil {
-		t.Fatal("legacy history upgraded")
+	if stale, err := PreparationFileRevalidationStale(w, d.CompletedAt, ""); stale || err == nil || d.Revalidation != nil {
+		t.Fatal("missing current revalidation contract accepted")
 	}
 }

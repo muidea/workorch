@@ -14,7 +14,7 @@ func runtimeManifestBoundSessionForTest(t testing.TB, manifest RuntimeCandidateC
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := RuntimeExpectedDocumentContract{
+	expected := RuntimeExpectedDocumentContract{OperationsContextEncoding: RuntimeOperationsContextEncoding,
 		SchemaVersion: RuntimeExpectedDocumentSchemaCurrent, DocumentKind: RuntimeProviderDocumentOperations,
 		ManifestHash: manifest.Hash, WireContractHash: wire.Hash,
 		LogicalRequestID: "request-manifest-validation", StablePrefixHash: "stable-prefix",

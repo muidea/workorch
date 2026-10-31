@@ -459,7 +459,7 @@ func referenceLineagePreimageruntimeExecutionProofSourceBinding(assertion Runtim
 		return CoverageEvidenceBinding{}, fmt.Errorf("execution proof lacks unique confirmed original source binding")
 	}
 	inventory := sources.Definition.SourceObligations
-	if (assertion.Rule.ExecutionSourceContractRef != RuntimeCrossSourceExecutionProofV1 && assertion.Rule.ExecutionSourceContractRef != RuntimeGoalSourceExecutionProofV2) || inventory == nil || inventory.Validate() != nil ||
+	if (assertion.Rule.ExecutionSourceContractRef != RuntimeDoDSourceExecutionProof && assertion.Rule.ExecutionSourceContractRef != RuntimeGoalSourceExecutionProof) || inventory == nil || inventory.Validate() != nil ||
 		inventory.StartupInputHash != sources.Definition.StartupInputHash || inventory.DefinitionRevision != sources.Definition.Revision ||
 		!SameRuntimeSourceObligationInventory(inventory, sources.Facts.DefinitionSeed.SourceObligations) ||
 		ValidateRuntimeExecutionProofMappings(*inventory, sources.Facts.Activation.ExecutionContract.ProfileContracts) != nil {
@@ -468,7 +468,7 @@ func referenceLineagePreimageruntimeExecutionProofSourceBinding(assertion Runtim
 	consumerRef, consumers := "", 0
 	for _, source := range inventory.Sources {
 		text := strings.TrimSpace(source.Text)
-		if assertion.Rule.ExecutionSourceContractRef == RuntimeGoalSourceExecutionProofV2 {
+		if assertion.Rule.ExecutionSourceContractRef == RuntimeGoalSourceExecutionProof {
 			text = source.Text
 		}
 		if source.SourceScope == assertion.SourceScope && source.SourceID == assertion.SourceID && RuntimeLineageSourceTextHash(text) == assertion.SourceTextHash {
@@ -504,7 +504,7 @@ func referenceLineagePreimageruntimeExecutionProofSourceBinding(assertion Runtim
 			item, items = candidate, items+1
 		}
 	}
-	goalConsumer := assertion.Rule.ExecutionSourceContractRef == RuntimeGoalSourceExecutionProofV2
+	goalConsumer := assertion.Rule.ExecutionSourceContractRef == RuntimeGoalSourceExecutionProof
 	if items != 1 || (!goalConsumer && item.ID == assertion.CoverageWorkItemID) || (goalConsumer && item.ID != assertion.CoverageWorkItemID) {
 		return invalid()
 	}

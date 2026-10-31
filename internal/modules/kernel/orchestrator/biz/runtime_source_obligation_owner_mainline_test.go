@@ -216,7 +216,7 @@ func restartSourceObligationTerminalDelivery(t *testing.T, ctx context.Context, 
 
 // provider 为脚本替身；File/Shell 执行、Run CAS 与三 owner 终态交接使用既有真实装配。
 func TestDriveRuntimeSharedSourceObligationOwnerMainline(t *testing.T) {
-	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterConjunctiveEntrypoint, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV2, SourceObligations: true}
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterConjunctiveEntrypoint, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, SourceObligations: true}
 	baseline := runValidationInputReviewMainline(t, "consistent", "", options)
 	t.Run("B actual failure", func(t *testing.T) {
 		runValidationInputReviewMainline(t, "source_B_failure", "", options)

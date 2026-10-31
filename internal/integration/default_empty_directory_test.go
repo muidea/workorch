@@ -439,7 +439,7 @@ operations = ["responses"]
 		if len(reviewed.Proposal.RequiredEvidencePurposes) != 1 || len(current.DefinitionAdmissionCandidates) != 1 || len(current.DefinitionAdmissionCandidates[0].Specification.EvidencePurposeMappings) != 1 {
 			t.Fatal("required relation not confirmed")
 		}
-		if d := current.DefinitionAuthoring.DerivationRequests[0]; d.WireContractRef != workspace.DefinitionAuthoringOwnerBoundV3 {
+		if d := current.DefinitionAuthoring.DerivationRequests[0]; d.WireContractRef != workspace.DefinitionAuthoringOwnerBound {
 			t.Fatal("new producer did not use v3")
 		}
 		request := current.DefinitionAuthoring.SpecificationRequests[0]
@@ -671,7 +671,7 @@ func (p *emptyDirectoryProvider) serveHTTP(w http.ResponseWriter, r *http.Reques
 			if pending.ReviewKind == "" {
 				kind = "proposal"
 				mapping, buildErr := productionMapping(record)
-				if record.DerivationRequests[0].WireContractRef == workspace.DefinitionAuthoringOwnerBoundV3 && p.mappingProposal == nil && buildErr == nil {
+				if record.DerivationRequests[0].WireContractRef == workspace.DefinitionAuthoringOwnerBound && p.mappingProposal == nil && buildErr == nil {
 					// Consume the real production prompt catalog, returning only a scenario's
 					// explicit semantic original DoD choice; no full mapping injection hook.
 					mapping.ProfileAcceptanceSelections = nil
@@ -816,7 +816,7 @@ func emptyDirectoryRuntimeDocument(input string) ([]byte, string, error) {
 					}
 					target := map[string]any{"policy": acquisition.Policy, "ownerSelectorRefs": []string{acquisition.Selector}}
 					if acquisition.Policy == string(runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget) {
-						target["prospectiveConstraintRefs"], target["prospectiveTargetRefs"] = acquisition.Constraints, []string{"workorch_validation/v3/project_test.go"}
+						target["prospectiveConstraintRefs"], target["prospectiveTargetRefs"] = acquisition.Constraints, []string{"workorch_validation/entrypoint/project_test.go"}
 					}
 					proposal["target"] = target
 				} else {

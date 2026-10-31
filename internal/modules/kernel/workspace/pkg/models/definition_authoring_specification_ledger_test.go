@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -48,7 +49,7 @@ func TestDefinitionAuthoringDiagnosticPreservesBytesAndBounds(t *testing.T) {
 func TestAuthoringSpecificationFailureDiagnosticExactDuplicateAndConflict(t *testing.T) {
 	record, _ := authoringLedgerFixture(t)
 	derivationPermit := record.DerivationRequests[0].PermitID
-	request := DefinitionAuthoringSpecificationRequest{RequestID: "proposal-diagnostic", DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}
+	request := DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal-diagnostic", DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}
 	reservedRecord, reserved, _, err := record.ReserveSpecification(request)
 	if err != nil {
 		t.Fatal(err)
@@ -57,16 +58,16 @@ func TestAuthoringSpecificationFailureDiagnosticExactDuplicateAndConflict(t *tes
 		t.Fatal(err)
 	}
 	diagnostic := NewDefinitionAuthoringDiagnostic("  parse error\n", []byte("{\ninvalid\n}"))
-	failed, err := reservedRecord.CompleteSpecification(reserved.PermitID, nil, nil, "invalid_proposal", &diagnostic)
+	failed, err := completeTestSpecification(reservedRecord, reserved.PermitID, nil, nil, "invalid_proposal", &diagnostic)
 	if err != nil {
 		t.Fatal(err)
 	}
-	replayed, err := failed.CompleteSpecification(reserved.PermitID, nil, nil, "invalid_proposal", &diagnostic)
+	replayed, err := completeTestSpecification(failed, reserved.PermitID, nil, nil, "invalid_proposal", &diagnostic)
 	if err != nil || !reflect.DeepEqual(failed, replayed) {
 		t.Fatalf("exact duplicate changed diagnosis: %v", err)
 	}
 	conflict := NewDefinitionAuthoringDiagnostic("different parse error", []byte("raw"))
-	if _, err := failed.CompleteSpecification(reserved.PermitID, nil, nil, "invalid_proposal", &conflict); err == nil {
+	if _, err := completeTestSpecification(failed, reserved.PermitID, nil, nil, "invalid_proposal", &conflict); err == nil {
 		t.Fatal("conflicting duplicate diagnosis accepted")
 	}
 	if err := failed.Validate(); err != nil {
@@ -84,7 +85,7 @@ func authoringLedgerFixture(t testing.TB) (DefinitionAuthoringRecord, GoalSpecif
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = record.CompleteDerivation(derivation.PermitID, &derived, "")
+	record, err = completeTestDerivation(record, derivation.PermitID, &derived, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,19 +122,19 @@ func TestDefinitionAuthoringSummaryUsesCurrentInputAndPendingPriority(t *testing
 	if state != "outcome_unresolved" {
 		t.Fatalf("pending derivation must be unresolved, got %q", state)
 	}
-	completed, err := reserved.CompleteDerivation(derivation.PermitID, &DefinitionDerivedAcceptance{AuthoringInputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"item"}}, "")
+	completed, err := completeTestDerivation(reserved, derivation.PermitID, &DefinitionDerivedAcceptance{AuthoringInputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"item"}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	failedPending, _, _, err := completed.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: "proposal-fail", DerivationPermitID: derivation.PermitID, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
+	failedPending, _, _, err := completed.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal-fail", DerivationPermitID: derivation.PermitID, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	failed, err := failedPending.CompleteSpecification(failedPending.SpecificationRequests[0].PermitID, nil, nil, "invalid_proposal")
+	failed, err := completeTestSpecification(failedPending, failedPending.SpecificationRequests[0].PermitID, nil, nil, "invalid_proposal")
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending, _, _, err := failed.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: "proposal-pending", DerivationPermitID: derivation.PermitID, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
+	pending, _, _, err := failed.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal-pending", DerivationPermitID: derivation.PermitID, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +147,7 @@ func TestDefinitionAuthoringSummaryUsesCurrentInputAndPendingPriority(t *testing
 func TestDefinitionAuthoringSummaryMatchesSixReviewViewSemantics(t *testing.T) {
 	record, proposal := summaryAuthoringLedgerFixture(t)
 	permit := record.DerivationRequests[0].PermitID
-	request := DefinitionAuthoringSpecificationRequest{RequestID: "proposal/" + permit, DerivationPermitID: permit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}
+	request := DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal/" + permit, DerivationPermitID: permit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}
 	var err error
 	record, request, _, err = record.ReserveSpecification(request)
 	if err != nil {
@@ -166,7 +167,7 @@ func TestDefinitionAuthoringSummaryMatchesSixReviewViewSemantics(t *testing.T) {
 	}
 
 	for index, kind := range goalReviewKinds {
-		request = DefinitionAuthoringSpecificationRequest{RequestID: "review/" + kind + "/" + permit, DerivationPermitID: permit, Phase: DefinitionSpecificationCritic, ReviewKind: kind, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"}
+		request = DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, kind), RequestID: "review/" + kind + "/" + permit, DerivationPermitID: permit, Phase: DefinitionSpecificationCritic, ReviewKind: kind, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"}
 		record, request, _, err = record.ReserveSpecification(request)
 		if err != nil {
 			t.Fatal(err)
@@ -180,7 +181,7 @@ func TestDefinitionAuthoringSummaryMatchesSixReviewViewSemantics(t *testing.T) {
 			wantState = "review_blocked"
 		}
 		review := GoalSpecificationCompletenessReview{Kind: kind, Status: status, SpecificationHash: proposal.ContentHash(), Reason: "review", EvidenceRefs: []string{DefinitionAuthoringGoalItemRef}, RequirementIDs: currentRequiredRequirementIDsFixture(proposal)}
-		record, err = record.CompleteSpecification(request.PermitID, nil, &review, "")
+		record, err = completeTestSpecification(record, request.PermitID, nil, &review, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -194,6 +195,9 @@ func TestDefinitionAuthoringSummaryMatchesSixReviewViewSemantics(t *testing.T) {
 	unknown := record.Clone()
 	last := len(unknown.SpecificationRequests) - 1
 	unknown.SpecificationRequests[last].Review.Status = GoalReviewUnknown
+	raw, _ := json.Marshal(map[string]any{"review": map[string]any{"Status": GoalReviewUnknown, "Reason": unknown.SpecificationRequests[last].Review.Reason, "EvidenceRefs": unknown.SpecificationRequests[last].Review.EvidenceRefs, "RequirementIDs": unknown.SpecificationRequests[last].Review.RequirementIDs}})
+	audit := semanticAudit(raw)
+	unknown.SpecificationRequests[last].ReviewAudit = &audit
 	if err := unknown.Validate(); err != nil {
 		t.Fatalf("UNKNOWN review fixture invalid: %v", err)
 	}
@@ -209,13 +213,13 @@ func TestDefinitionAuthoringSummaryMatchesSixReviewViewSemantics(t *testing.T) {
 func TestDefinitionAuthoringSummaryDoesNotConfuseHistoricalRequestFailure(t *testing.T) {
 	record, _ := summaryAuthoringLedgerFixture(t)
 	derivationPermit := record.DerivationRequests[0].PermitID
-	request := DefinitionAuthoringSpecificationRequest{RequestID: "proposal-fail", DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}
+	request := DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal-fail", DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}
 	var err error
 	record, request, _, err = record.ReserveSpecification(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = record.CompleteSpecification(request.PermitID, nil, nil, "invalid_proposal")
+	record, err = completeTestSpecification(record, request.PermitID, nil, nil, "invalid_proposal")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +242,7 @@ func TestDefinitionAuthoringSummaryDoesNotConfuseHistoricalRequestFailure(t *tes
 func TestAuthoringSpecificationLedgerReservesAndReplaysWithoutSecondPermit(t *testing.T) {
 	record, spec := authoringLedgerFixture(t)
 	derivationPermit := record.DerivationRequests[0].PermitID
-	request := DefinitionAuthoringSpecificationRequest{RequestID: "proposal-1", DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}
+	request := DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal-1", DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}
 	first, reserved, fresh, err := record.ReserveSpecification(request)
 	if err != nil || !fresh || len(record.SpecificationRequests) != 0 {
 		t.Fatalf("reserve: fresh=%v err=%v", fresh, err)
@@ -247,13 +251,13 @@ func TestAuthoringSpecificationLedgerReservesAndReplaysWithoutSecondPermit(t *te
 	if err != nil || fresh || replay.PermitID != reserved.PermitID {
 		t.Fatalf("replay granted another physical permit: %+v %v", replay, err)
 	}
-	if _, _, _, err := first.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: "binding-drift", DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "other"}); err == nil {
+	if _, _, _, err := first.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "binding-drift", DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "other"}); err == nil {
 		t.Fatal("specification used a different provider configuration from derivation")
 	}
-	if _, _, _, err := first.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: request.RequestID, DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "other"}); err == nil {
+	if _, _, _, err := first.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: request.RequestID, DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "other"}); err == nil {
 		t.Fatal("request ID changed provider identity")
 	}
-	if _, _, _, err := first.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: "critic-early", DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationCritic, ReviewKind: GoalReviewTraceability, ProposalHash: spec.ContentHash(), ProviderBindingHash: "provider"}); err == nil {
+	if _, _, _, err := first.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, GoalReviewTraceability), RequestID: "critic-early", DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationCritic, ReviewKind: GoalReviewTraceability, ProposalHash: spec.ContentHash(), ProviderBindingHash: "provider"}); err == nil {
 		t.Fatal("critic reserved without completed proposal")
 	}
 	completed, err := completeCurrentProposalFixture(t, first, reserved.PermitID, &spec)
@@ -263,7 +267,7 @@ func TestAuthoringSpecificationLedgerReservesAndReplaysWithoutSecondPermit(t *te
 	if _, err := completeCurrentProposalFixture(t, completed, reserved.PermitID, &spec); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := completed.CompleteSpecification(reserved.PermitID, nil, nil, "provider_failed"); err == nil {
+	if _, err := completeTestSpecification(completed, reserved.PermitID, nil, nil, "provider_failed"); err == nil {
 		t.Fatal("completed proposal changed outcome")
 	}
 	originalText := completed.SpecificationRequests[0].Proposal.Requirements[0].Text
@@ -271,13 +275,13 @@ func TestAuthoringSpecificationLedgerReservesAndReplaysWithoutSecondPermit(t *te
 	if completed.SpecificationRequests[0].Proposal.Requirements[0].Text != originalText {
 		t.Fatal("completion retained mutable caller proposal")
 	}
-	critic := DefinitionAuthoringSpecificationRequest{RequestID: "critic-1", DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationCritic, ReviewKind: GoalReviewTraceability, ProposalHash: completed.SpecificationRequests[0].Proposal.ContentHash(), ProviderBindingHash: "provider"}
+	critic := DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, GoalReviewTraceability), RequestID: "critic-1", DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationCritic, ReviewKind: GoalReviewTraceability, ProposalHash: completed.SpecificationRequests[0].Proposal.ContentHash(), ProviderBindingHash: "provider"}
 	withCritic, criticPermit, fresh, err := completed.ReserveSpecification(critic)
 	if err != nil || !fresh {
 		t.Fatalf("critic reserve: %v", err)
 	}
 	review := GoalSpecificationCompletenessReview{Kind: critic.ReviewKind, Status: GoalReviewUnknown, SpecificationHash: critic.ProposalHash}
-	withCritic, err = withCritic.CompleteSpecification(criticPermit.PermitID, nil, &review, "")
+	withCritic, err = completeTestSpecification(withCritic, criticPermit.PermitID, nil, &review, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,18 +301,18 @@ func TestAuthoringSpecificationBudgetSurvivesRevisionAndRequestIDChanges(t *test
 	permit := record.DerivationRequests[0].PermitID
 	for n := 0; n < DefinitionAuthoringSpecificationAttemptLimit; n++ {
 		var err error
-		record, _, _, err = record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: "proposal-" + string(rune('a'+n)), DerivationPermitID: permit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
+		record, _, _, err = record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal-" + string(rune('a'+n)), DerivationPermitID: permit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, _, _, err := record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: "proposal-extra", DerivationPermitID: permit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}); err == nil {
+	if _, _, _, err := record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal-extra", DerivationPermitID: permit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}); err == nil {
 		t.Fatal("request ID reset attempt budget")
 	}
 	record.Input.Revision++
 	record.Input.GoalText = "新目标"
 	record.InputHash = record.Input.InputHash()
-	if _, _, _, err := record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: "proposal-new-revision", DerivationPermitID: permit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}); err == nil {
+	if _, _, _, err := record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal-new-revision", DerivationPermitID: permit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}); err == nil {
 		t.Fatal("new revision reused stale derivation")
 	}
 }

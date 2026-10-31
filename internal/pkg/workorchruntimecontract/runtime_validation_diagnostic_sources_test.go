@@ -12,7 +12,7 @@ import (
 func diagnosticSourceReviewFixture(t *testing.T) (RuntimeValidationProofRequirementBinding, RuntimeValidationInputReview) {
 	t.Helper()
 	_, document, _, binding := semanticInputReviewFixture(t)
-	binding.InputReview.ProtocolRef = RuntimeValidationInputReviewProtocolV3
+	binding.InputReview.ProtocolRef = RuntimeValidationInputReviewProtocol
 	binding.InputReview.DiagnosticSourceContractRef = RuntimeValidationDiagnosticSourceReviewV1
 	binding.InputReview.DiagnosticSources = []RuntimeValidationDiagnosticSource{{SourceRef: "source-a", NativeCaseRef: "owner-native-a", InputTargetRef: binding.InputReview.Files[0].TargetRef}, {SourceRef: "source-b", NativeCaseRef: "owner-native-b", InputTargetRef: binding.InputReview.Files[0].TargetRef}}
 	binding.InputReview.Hash = StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, binding)
@@ -57,7 +57,7 @@ func TestDiagnosticSourceReviewIsCompleteIndependentAndVersioned(t *testing.T) {
 	if changed.ValidateAgainstBinding(legacy) == nil {
 		t.Fatal("legacy source extension accepted")
 	}
-	for _, version := range []string{RuntimeValidationInputReviewProtocol, RuntimeValidationInputReviewProtocolV2} {
+	for _, version := range []string{"validation/input-consistency/v1", "validation/input-consistency/v2", "unknown"} {
 		changed := binding.Clone()
 		changed.InputReview.ProtocolRef = version
 		changed.InputReview.Hash = StableRuntimeValidationInputReviewSubjectHash(*changed.InputReview, changed)

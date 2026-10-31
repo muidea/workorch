@@ -53,20 +53,15 @@ class AuthoringMockTest(unittest.TestCase):
                                           **mapping['Obligations'][index]['Verification']})
         return {**value, 'kind': 'verifier_feasibility', 'proposalHash': 'exact', 'specification': spec}
 
-    def test_owner_bound_v2_only_returns_semantic_fields(self):
-        wire = 'workorch.authoring.owner-bound/v2'
-        self.assertEqual(authoring_response(prompt({'wireContractRef': wire, 'outputShape': {'AdditionalItems': []}}, 'C3.derivation-input')), {'AdditionalItems': []})
-        value = self.candidate()
-        value['wireContractRef'] = wire
-        mapping = authoring_response(prompt(value))['mapping']
+    def test_current_wire_returns_only_semantic_fields(self):
+        self.assertEqual(authoring_response(prompt({'outputShape': {'AdditionalItems': []}}, 'C3.derivation-input')), {'AdditionalItems': []})
+        mapping = authoring_response(prompt(self.candidate()))['mapping']
         for field in ('Protocol', 'InputHash', 'TemplateSnapshotHash', 'ResourceSnapshotHash'):
             self.assertNotIn(field, mapping)
-        # Build a separate legacy-shaped critic input; only its response changes.
         review_input = self.canonical_review_fixture(self.candidate())
-        legacy_review = authoring_response(prompt(review_input))['review']
-        review_input['wireContractRef'] = wire
-        semantic_review = authoring_response(prompt(review_input))['review']
-        self.assertEqual(semantic_review, {key: value for key, value in legacy_review.items() if key not in ('Kind', 'SpecificationHash')})
+        review = authoring_response(prompt(review_input))['review']
+        self.assertNotIn('Kind', review)
+        self.assertNotIn('SpecificationHash', review)
 
     def test_section_messages_preserve_full_independent_review(self):
         value = self.canonical_review_fixture(self.candidate())
@@ -85,10 +80,10 @@ class AuthoringMockTest(unittest.TestCase):
     def test_non_authoring_is_not_intercepted(self):
         self.assertIsNone(authoring_response('### C3.semantic-authority\n{}'))
 
-    def test_derivation_echoes_identity_without_inventing_items(self):
-        value = {'outputShape': {'AuthoringInputHash': 'input', 'TemplateSnapshotHash': 'template'}}
-        self.assertEqual(authoring_response(prompt(value, 'C3.derivation-input')),
-                         {**value['outputShape'], 'AdditionalItems': []})
+    def test_derivation_does_not_return_owner_identity(self):
+        self.assertEqual(authoring_response(prompt({'outputShape': {'AdditionalItems': []}}, 'C3.derivation-input')), {'AdditionalItems': []})
+        with self.assertRaises(AuthoringMockError):
+            authoring_response(prompt({'outputShape': {'AuthoringInputHash': 'input', 'TemplateSnapshotHash': 'template'}}, 'C3.derivation-input'))
 
     def test_proposal_only_maps_sealed_sources(self):
         value = self.candidate()
@@ -97,9 +92,8 @@ class AuthoringMockTest(unittest.TestCase):
         self.assertEqual(value, original)
         self.assertEqual(set(response), {'mapping'})
         mapping = response['mapping']
-        self.assertEqual(mapping['Protocol'], 'workorch.authoring.sealed-ref-mapping/v1')
-        self.assertEqual((mapping['InputHash'], mapping['TemplateSnapshotHash'], mapping['ResourceSnapshotHash']),
-                         ('input', 'template', 'resources'))
+        for field in ('Protocol', 'InputHash', 'TemplateSnapshotHash', 'ResourceSnapshotHash'):
+            self.assertNotIn(field, mapping)
         refs = [item['CandidateItemRef'] for item in value['candidateAcceptance']]
         self.assertEqual([r['SourceItemRefs'] for r in mapping['Requirements']], [[ref] for ref in refs])
         self.assertEqual([o['CandidateItemRef'] for o in mapping['Obligations']], refs)
@@ -132,7 +126,7 @@ class AuthoringMockTest(unittest.TestCase):
         review = self.canonical_review_fixture(value)
         result = authoring_response(prompt(review))['review']
         self.assertEqual(result['Status'], 'PASS')
-        self.assertEqual(result['SpecificationHash'], 'exact')
+        self.assertNotIn('SpecificationHash', result)
         self.assertEqual(result['RequirementIDs'], [r['ID'] for r in review['specification']['Requirements']])
         for field in ('ProfileID', 'EvidenceRequirementID', 'Scope', 'Status'):
             forged = copy.deepcopy(review)

@@ -76,7 +76,7 @@ func TestInputReviewInformationBudgetAppliesOnlyToUnresolvedExactSubjects(t *tes
 	}
 }
 
-func TestInputReviewV2InformationBudgetCannotResetWithInputSubject(t *testing.T) {
+func TestInputReviewInformationBudgetCannotResetWithInputSubject(t *testing.T) {
 	document := runtimecontract.RuntimeSemanticPlanDocument{BatchID: "batch", Proposals: []runtimecontract.RuntimeSemanticProofProposal{{
 		CoverageWorkItemID: "cwi-original", OwnerModuleID: runtimecontract.RuntimeModuleShell, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 		ValidationRecipeID: "recipe", DeclarationRef: "original-declaration", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
@@ -85,7 +85,7 @@ func TestInputReviewV2InformationBudgetCannotResetWithInputSubject(t *testing.T)
 	manifest := &runtimecontract.RuntimeSemanticPlanManifest{OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{{
 		PrerequisiteID: "review-catalog", OwnerModuleID: runtimecontract.RuntimeModuleShell, ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
 			ID: "recipe", OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
-			ProofRequirementBindings: []runtimecontract.RuntimeValidationProofRequirementBinding{{RequirementHash: "original-requirement", CoverageWorkItemID: "cwi-original", DeclarationRef: "original-declaration", InputReview: &runtimecontract.RuntimeValidationInputReviewSubject{ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV2}}},
+			ProofRequirementBindings: []runtimecontract.RuntimeValidationProofRequirementBinding{{RequirementHash: "original-requirement", CoverageWorkItemID: "cwi-original", DeclarationRef: "original-declaration", InputReview: &runtimecontract.RuntimeValidationInputReviewSubject{ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol}}},
 		}},
 	}}}
 	prior := runtimecontract.RuntimeSemanticPlanningGeneration{Reason: runtimecontract.RuntimeSemanticPlanningRetirementInputReviewInformation,
@@ -94,14 +94,10 @@ func TestInputReviewV2InformationBudgetCannotResetWithInputSubject(t *testing.T)
 		name, protocol, subject, check, want string
 		coverage                             common.CoverageWorkItemID
 	}{
-		{name: "new content", protocol: runtimecontract.RuntimeValidationInputReviewProtocolV2, subject: "new-content", check: "original-check", coverage: "cwi-original", want: "validation_input_review_information_exhausted"},
-		{name: "new path and native", protocol: runtimecontract.RuntimeValidationInputReviewProtocolV2, subject: "new-path-native-and-catalog", check: "original-check", coverage: "cwi-original", want: "validation_input_review_information_exhausted"},
-		{name: "v3 changed subject retains original budget", protocol: runtimecontract.RuntimeValidationInputReviewProtocolV3, subject: "new-composite-subject", check: "original-check", coverage: "cwi-original", want: "validation_input_review_information_exhausted"},
-		{name: "v3 different CWI", protocol: runtimecontract.RuntimeValidationInputReviewProtocolV3, subject: "other", check: "original-check", coverage: "cwi-other"},
-		{name: "v3 different original check", protocol: runtimecontract.RuntimeValidationInputReviewProtocolV3, subject: "other", check: "other-check", coverage: "cwi-original"},
-		{name: "different CWI", protocol: runtimecontract.RuntimeValidationInputReviewProtocolV2, subject: "other", check: "original-check", coverage: "cwi-other"},
-		{name: "different original check", protocol: runtimecontract.RuntimeValidationInputReviewProtocolV2, subject: "other", check: "other-check", coverage: "cwi-original"},
-		{name: "legacy subject budget unchanged", protocol: runtimecontract.RuntimeValidationInputReviewProtocol, subject: "new-content", check: "original-check", coverage: "cwi-original"},
+		{name: "new content", protocol: runtimecontract.RuntimeValidationInputReviewProtocol, subject: "new-content", check: "original-check", coverage: "cwi-original", want: "validation_input_review_information_exhausted"},
+		{name: "new path and native", protocol: runtimecontract.RuntimeValidationInputReviewProtocol, subject: "new-path-native-and-catalog", check: "original-check", coverage: "cwi-original", want: "validation_input_review_information_exhausted"},
+		{name: "different CWI", protocol: runtimecontract.RuntimeValidationInputReviewProtocol, subject: "other", check: "original-check", coverage: "cwi-other"},
+		{name: "different original check", protocol: runtimecontract.RuntimeValidationInputReviewProtocol, subject: "other", check: "other-check", coverage: "cwi-original"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			current := document.Clone()

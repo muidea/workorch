@@ -10,7 +10,7 @@ func TestConfirmableSpecificationRequiresUniqueCompletedPASSReviews(t *testing.T
 	record, proposal := declaredAuthoringLedgerFixture(t)
 	permit := record.DerivationRequests[0].PermitID
 	proposalHash := proposal.ContentHash()
-	request := DefinitionAuthoringSpecificationRequest{RequestID: "proposal", DerivationPermitID: permit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}
+	request := DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal", DerivationPermitID: permit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}
 	var err error
 	var reserved DefinitionAuthoringSpecificationRequest
 	record, reserved, _, err = record.ReserveSpecification(request)
@@ -25,13 +25,13 @@ func TestConfirmableSpecificationRequiresUniqueCompletedPASSReviews(t *testing.T
 		t.Fatal("proposal without six reviews was confirmable")
 	}
 	for _, kind := range goalReviewKinds {
-		request = DefinitionAuthoringSpecificationRequest{RequestID: "review-" + kind, DerivationPermitID: permit, Phase: DefinitionSpecificationCritic, ReviewKind: kind, ProposalHash: proposalHash, ProviderBindingHash: "provider"}
+		request = DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, kind), RequestID: "review-" + kind, DerivationPermitID: permit, Phase: DefinitionSpecificationCritic, ReviewKind: kind, ProposalHash: proposalHash, ProviderBindingHash: "provider"}
 		record, reserved, _, err = record.ReserveSpecification(request)
 		if err != nil {
 			t.Fatal(err)
 		}
 		review := GoalSpecificationCompletenessReview{Kind: kind, Status: GoalReviewPass, SpecificationHash: proposalHash, Reason: "覆盖", EvidenceRefs: []string{DefinitionAuthoringGoalItemRef}, RequirementIDs: currentRequiredRequirementIDsFixture(proposal)}
-		record, err = record.CompleteSpecification(reserved.PermitID, nil, &review, "")
+		record, err = completeTestSpecification(record, reserved.PermitID, nil, &review, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -70,7 +70,7 @@ func TestAuthoringConfirmationJournalRejectsChangedAfterImages(t *testing.T) {
 	permit := record.DerivationRequests[0].PermitID
 	var err error
 	var request DefinitionAuthoringSpecificationRequest
-	record, request, _, err = record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: "proposal", DerivationPermitID: permit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
+	record, request, _, err = record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal", DerivationPermitID: permit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,12 +79,12 @@ func TestAuthoringConfirmationJournalRejectsChangedAfterImages(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, kind := range goalReviewKinds {
-		record, request, _, err = record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: "review-" + kind, DerivationPermitID: permit, Phase: DefinitionSpecificationCritic, ReviewKind: kind, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"})
+		record, request, _, err = record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, kind), RequestID: "review-" + kind, DerivationPermitID: permit, Phase: DefinitionSpecificationCritic, ReviewKind: kind, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		review := GoalSpecificationCompletenessReview{Kind: kind, Status: GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "覆盖", EvidenceRefs: []string{DefinitionAuthoringGoalItemRef}, RequirementIDs: currentRequiredRequirementIDsFixture(proposal)}
-		record, err = record.CompleteSpecification(request.PermitID, nil, &review, "")
+		record, err = completeTestSpecification(record, request.PermitID, nil, &review, "")
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -19,7 +19,7 @@ type executionReceiptObserved struct {
 }
 
 // Known inability to preserve an original response must fail before a new
-// effect. Existing legacy/replay branches remain independent and never backfill.
+// effect. Replay preserves its original response and never backfills one.
 func (m *Biz) requireFreshExecutionReceiptSink(ctx context.Context, c runevents.WorkspaceExecutionIntentCommand) error {
 	reader, ok := m.runs.(repository.RunExecutionIntentReceiptReader)
 	if !ok {
@@ -46,7 +46,7 @@ func reduceExecutionReceiptObserved(current *runmodel.Run, fact executionReceipt
 			if prior.PayloadHash != r.PayloadHash {
 				return nil, false, common.ErrConflict
 			}
-			// Legacy explicit restart replay can report a later lifecycle fact.
+			// An explicit restart replay can observe a later lifecycle fact.
 			// It must never replace the immutable original response used by reads.
 			return current, true, nil
 		}

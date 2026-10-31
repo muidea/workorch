@@ -170,10 +170,12 @@ func TestFreshReservationInvalidatesCurrentPreparationWithoutRewritingHistory(t 
 	// This case exercises invalidation by an existing-Run Restart. A first
 	// execution must reject an unknown preparation, covered separately below.
 	w.ActiveRunID = "existing-run"
-	seedPreparationRecord(t, w, workspacemodel.WorkspacePreparationUnknown)
-	w.Revision++
 	repo := memoryrepo.NewWorkspaceRepository()
 	if err := repo.Create(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	seedPreparationRecord(t, w, workspacemodel.WorkspacePreparationAccepted)
+	if err := repo.CompareAndSwap(context.Background(), w, w.Revision); err != nil {
 		t.Fatal(err)
 	}
 	before, err := preparationStateFromPersistence(w, time.Now())
@@ -190,21 +192,25 @@ func TestFreshReservationInvalidatesCurrentPreparationWithoutRewritingHistory(t 
 		t.Fatalf("reserve: %v", err)
 	}
 	state, err := preparationStateFromPersistence(after, time.Now())
-	if err != nil || state.CurrentValidity != "stale" || state.State != "unknown" || !reflect.DeepEqual(state.Record, before.Record) {
+	if err != nil || state.CurrentValidity != "stale" || state.State != "accepted" || !reflect.DeepEqual(state.Record, before.Record) {
 		t.Fatalf("reservation rewrote preparation history or retained currentness: %+v %v", state, err)
 	}
 }
 
-func TestFirstExecutionRejectsUnknownPreparationWithoutWrites(t *testing.T) {
+func TestFirstExecutionRejectsUnresolvedPreparationWithoutWrites(t *testing.T) {
 	owners := openFileDefinitionAdmissionOwners(t, t.TempDir())
 	defer owners.close()
 	w := seedPreparationEligible(t, owners, "first-preparation-required")
 	w.PreparationFence = &workspacemodel.WorkspacePreparationFence{Version: workspacemodel.WorkspacePreparationFenceVersion, WorkspaceID: w.ID, CreationEpoch: strings.Repeat("a", 32)}
-	seedPreparationRecord(t, w, workspacemodel.WorkspacePreparationUnknown)
 	repo := memoryrepo.NewWorkspaceRepository()
 	if err := repo.Create(context.Background(), w); err != nil {
 		t.Fatal(err)
 	}
+	seedPreparationRecord(t, w, workspacemodel.WorkspacePreparationAccepted)
+	if err := repo.CompareAndSwap(context.Background(), w, w.Revision); err != nil {
+		t.Fatal(err)
+	}
+
 	fact := workspaceFreshIntentReserved{WorkspaceID: w.ID, ExpectedRevision: w.Revision,
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider-1", ModelID: "model-1"}},
 		Reservation:       workspacemodel.WorkspaceFreshIntentReservation{RequestID: "first", Kind: runtimecontract.RuntimeExecutionIntentRestart, StartupInputHash: w.StartupInput.StartupInputHash, PayloadHash: strings.Repeat("b", 64), RunPayloadHash: strings.Repeat("c", 64)}}

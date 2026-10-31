@@ -692,7 +692,7 @@ func reduceWorkspacePreparationBlocked(current *workspace.Workspace, fact worksp
 	}
 	// Compile only on the original non-stale settlement, after complete Skill
 	// selection has been compiled. Missing sources stay an explicit failure;
-	// neither recovery nor GET can backfill old registry-only history.
+	// neither recovery nor GET can compile an uncompleted selection.
 	if reason == "check_pipeline_incomplete" && fact.MCPRegistryEvidence != nil {
 		registry := &next.PreparationMCPRegistryEvidence[len(next.PreparationMCPRegistryEvidence)-1]
 		var skills *workspace.WorkspacePreparationSkillRegistryEvidence

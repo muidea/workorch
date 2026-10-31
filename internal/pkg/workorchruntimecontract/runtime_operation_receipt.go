@@ -583,7 +583,7 @@ func (r RuntimeOperationReceipt) Validate() error {
 		return fmt.Errorf("operation receipt dependency pair: %w", err)
 	}
 	if value := r.Evidence.ApplicabilityDependencies; value != nil {
-		if value.ProtocolRef == RuntimeEvidenceApplicabilityDependenciesV2 && (!RuntimeEffectIsDurable(r.ObservedEffectScope) || r.Evidence.Validation != nil) {
+		if value.PurposeRef == RuntimeHistoricalEffectProofV1 && (!RuntimeEffectIsDurable(r.ObservedEffectScope) || r.Evidence.Validation != nil) {
 			return fmt.Errorf("historical effect purpose requires durable non-validation receipt")
 		}
 	}

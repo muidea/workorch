@@ -6,8 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-// Persistence backstop for v2 only. v1 trace fixtures remain readable; they
-// cannot be upgraded into a production operation. All v2 mutations require
+// All preparation mutations require
 // CAS, immutable original identities and append-only completed history.
 func ValidatePreparationRecordTransition(current, next *Workspace, cas bool) error {
 	if err := validatePreparationCompletionTransition(current, next, cas); err != nil {
@@ -27,7 +26,7 @@ func ValidatePreparationRecordTransition(current, next *Workspace, cas bool) err
 		before = current.StartupPreparation
 	}
 	after := next.StartupPreparation
-	if (before == nil || before.Version != WorkspacePreparationWorkflowVersion) && (after == nil || after.Version != WorkspacePreparationWorkflowVersion) {
+	if before == nil && after == nil {
 		return nil
 	}
 	if current == nil || current.ID != next.ID || after == nil || after.Version != WorkspacePreparationWorkflowVersion || after.Validate(next.ID) != nil || before != nil && before.Validate(current.ID) != nil {

@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
@@ -18,6 +19,9 @@ type runtimeSemanticPrompt struct {
 }
 
 func buildRuntimeSemanticPrompt(request llmmodels.RuntimeCandidateRequest, prepared runtimeSemanticPreparedRequest) (runtimeSemanticPrompt, error) {
+	if request.ExpectedDocument != nil && request.ExpectedDocument.SemanticContextEncoding != runtimecontract.RuntimeSemanticContextEncoding {
+		return runtimeSemanticPrompt{}, fmt.Errorf("unsupported semantic context encoding")
+	}
 	definitionJSON, err := json.Marshal(runtimeCandidateDefinitionProjection{
 		Revision: prepared.context.Definition.Revision, GoalID: prepared.context.Definition.GoalID,
 		GoalDefinition: prepared.context.Definition.GoalDefinition, DoDID: prepared.context.Definition.DoDID,
@@ -51,27 +55,18 @@ func buildRuntimeSemanticPrompt(request llmmodels.RuntimeCandidateRequest, prepa
 		BatchSequence:     runtimeSemanticBatchSequence(prepared.context),
 		BatchCoverageIDs:  prepared.context.BatchCoverageWorkItemIDs,
 	}
-	shared := request.ExpectedDocument != nil && request.ExpectedDocument.SemanticRenderContractRef == runtimecontract.RuntimeSemanticRenderContractV5
-	if shared {
-		authority.ContextEncoding = runtimecontract.RuntimeSemanticRenderContractV5
-		authority.WorkContext = compactSemanticWorkContext(prepared.context.WorkContext, prepared.context.ExecutionHistory)
-		authority.OutputInstruction = runtimeSemanticSharedWorkOutputInstruction(prepared.context, prepared.manifest)
-	}
+	authority.ContextEncoding = runtimecontract.RuntimeSemanticContextEncoding
+	authority.WorkContext = compactSemanticWorkContext(prepared.context.WorkContext, prepared.context.ExecutionHistory)
+	authority.OutputInstruction = runtimeSemanticSharedWorkOutputInstruction(prepared.context, prepared.manifest)
 	authorityJSON, err := json.Marshal(authority)
 	if err != nil {
 		return runtimeSemanticPrompt{}, err
 	}
-	if request.ExpectedDocument != nil && (request.ExpectedDocument.SemanticRenderContractRef == runtimecontract.RuntimeSemanticRenderContractV4 || shared) {
-		authorityJSON, err = cacheLayoutJSON(authorityJSON, func() string {
-			if shared {
-				return "semantic-v5"
-			}
-			return "semantic"
-		}())
-		if err != nil {
-			return runtimeSemanticPrompt{}, err
-		}
+	authorityJSON, err = cacheLayoutJSON(authorityJSON, "semantic-shared")
+	if err != nil {
+		return runtimeSemanticPrompt{}, err
 	}
+
 	tail := runtimeSemanticTailProjection{
 		WorkContext:         prepared.context.WorkContext.Clone(),
 		CoverageProgress:    prepared.context.CoverageProgress,
@@ -83,9 +78,9 @@ func buildRuntimeSemanticPrompt(request llmmodels.RuntimeCandidateRequest, prepa
 		CorrectionDirective: cloneRuntimeSemanticCorrectionDirective(request.SemanticCorrectionDirective),
 		ExistingTarget:      runtimeSemanticExistingTargetForProvider(prepared.manifest, request.SemanticCorrectionObservation),
 	}
-	if shared && prepared.context.WorkContext != nil {
+	if prepared.context.WorkContext != nil {
 		tail.WorkContext = nil
-		tail.WorkContextRef = semanticWorkContextRefV5
+		tail.WorkContextRef = semanticWorkContextRef
 	}
 	tailJSON, err := json.Marshal(tail)
 	if err != nil {
@@ -118,10 +113,8 @@ func runtimeSemanticVisibleCoverageIDs(context runtimecontract.RuntimeSemanticPl
 func newRuntimeSemanticProviderRequest(request llmmodels.RuntimeCandidateRequest, prepared runtimeSemanticPreparedRequest, prompt runtimeSemanticPrompt) llmmodels.ProviderRequest {
 	context := prepared.context
 	ceiling := prepared.ceiling
-	renderContractRef := ""
-	if request.ExpectedDocument != nil {
-		renderContractRef = request.ExpectedDocument.SemanticRenderContractRef
-	}
+	renderContractRef := runtimecontract.RuntimeSemanticContextEncoding
+
 	return llmmodels.ProviderRequest{
 		WorkspaceID:     string(context.WorkspaceID),
 		RunID:           string(context.RunID),

@@ -11,7 +11,7 @@ import (
 
 func validationAssertionFeedbackFixture() EvidenceFact {
 	fact := validationFeedbackFixture()
-	fact.Validation.FailureDetailProtocolRef = RuntimeValidationFailureDetailProtocolV2
+	fact.Validation.FailureDetailProtocolRef = RuntimeValidationFailureDetailProtocol
 	fact.Validation.CheckFailures[0].ComparisonHash = strings.Repeat("c", 64)
 	fact.Validation.CheckFailures[0].ReportedAssertion = RuntimeValidationReportedAssertion{
 		Code: "shape_mismatch", ExpectedShape: "object", ObservedShape: "array",

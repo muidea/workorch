@@ -37,7 +37,7 @@ func TestAuthoringReceivingOwnerFencesRecheckCurrentAndHistoryBeforeMutation(t *
 			input.Revision++
 			input.GoalText = "下一份真实修订目标"
 			save := workspaceevents.SaveDefinitionAuthoringCommand{RequestID: "save-fence", Input: input, ExpectedInputHash: current.DefinitionAuthoring.InputHash, ExpectedWorkspaceRevision: current.Revision}
-			reserve := workspaceevents.ReserveDefinitionDerivationCommand{WorkspaceID: current.ID, InputHash: current.DefinitionAuthoring.InputHash, RequestID: "derive-fence", ProviderBindingHash: "provider", ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil)}
+			reserve := workspaceevents.ReserveDefinitionDerivationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "derive"), WorkspaceID: current.ID, InputHash: current.DefinitionAuthoring.InputHash, RequestID: "derive-fence", ProviderBindingHash: "provider", ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil)}
 			observation := definitionSpecificationObservation{workspace: current, template: &current.DefinitionAuthoring.TemplateSnapshot}
 			for _, event := range []definitionSpecificationInternalEvent{{WorkspaceID: current.ID, Authoring: &save}, {WorkspaceID: current.ID, DeriveReserve: &reserve}} {
 				transition, err := reduceDefinitionSpecificationInternalEvent(observation, event)

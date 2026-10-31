@@ -92,8 +92,6 @@ type RuntimeImplementationWorkRound struct {
 // consumer must seal it through the semantic proposal/owner feasibility private
 // transaction and copy its hash into the candidate manifest and dispatch.
 type RuntimeImplementationWorkingBinding struct {
-	// Empty retains the original single-receipt disposition for sealed history.
-	ReceiptProtocolRef   string                          `json:",omitempty"`
 	InputRevision        *RuntimeValidationInputRevision `json:",omitempty"`
 	SemanticGenerationID string
 	BindingGeneration    uint64
@@ -292,9 +290,6 @@ func (b RuntimeImplementationWorkingBinding) ValidateForRound(r RuntimeImplement
 }
 
 func (b RuntimeImplementationWorkingBinding) validateForRoundInSemanticSession(r RuntimeImplementationWorkRound, session *runtimeSemanticValidationSession) error {
-	if b.ReceiptProtocolRef != "" && b.ReceiptProtocolRef != RuntimeImplementationWorkReceiptChainV1 {
-		return fmt.Errorf("unknown implementation work receipt protocol")
-	}
 	for _, ref := range []string{b.SemanticGenerationID, b.SemanticManifestHash, b.LogicalRequestID} {
 		if !implementationWorkExactRef(ref) {
 			return fmt.Errorf("implementation working binding requires exact semantic request identity")
@@ -607,7 +602,7 @@ func validateImplementationWorkReceiptMembers(r RuntimeImplementationWorkRound, 
 		joined = append(joined, commitment{Target: target, DispatchID: effectDispatchID, OperationID: op.ID, ExecutionKey: execution.ExecutionKey, Fence: execution.Fence,
 			ReceiptRef: execution.OwnerReceiptRef, ReceiptHash: execution.OwnerReceiptHash, EvidenceHash: execution.EvidenceFactHash})
 	}
-	if b.ReceiptProtocolRef == RuntimeImplementationWorkReceiptChainV1 {
+	{
 		chain := newImplementationWorkResourceChain(b.CatalogObservation.Dependencies)
 		for _, member := range members {
 			if !chain.advance(member.Receipt) {

@@ -13,9 +13,9 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-const RuntimeCommitSnapshotQueryProtocol = "git/commit-object-snapshot-query/v1"
-const RuntimeCommitSnapshotInputQueryProtocol = "git/commit-object-snapshot-query/v2"
-const RuntimeCommitSnapshotTerminalQueryProtocol = "git/commit-object-snapshot-query/v3"
+const RuntimeCommitSnapshotQueryProtocol = "git/commit-object-graph-query"
+const RuntimeCommitSnapshotInputQueryProtocol = "git/commit-input-membership-query"
+const RuntimeCommitSnapshotTerminalQueryProtocol = "git/terminal-commit-snapshot-query"
 const RuntimeCommitSnapshotProtocol = "git/commit-object-snapshot/v1"
 
 // This is an original-receipt read, not another execution authorization. Directory
@@ -96,7 +96,7 @@ func (c QueryRuntimeCommitSnapshotCommand) Validate() error {
 			}
 		}
 	} else if c.ValidationDependencies != nil || c.OriginalSnapshot != nil {
-		return fmt.Errorf("legacy Git snapshot cannot carry terminal read set or snapshot identity")
+		return fmt.Errorf("graph-only Git snapshot cannot carry terminal read set or snapshot identity")
 	}
 	if c.ProtocolRef == RuntimeCommitSnapshotQueryProtocol {
 		if c.InputBinding != nil {
@@ -198,7 +198,7 @@ func (r QueryRuntimeCommitSnapshotResult) ValidateFor(c QueryRuntimeCommitSnapsh
 	}
 	if c.ValidationDependencies == nil {
 		if r.ValidationMemberships != nil {
-			return fmt.Errorf("legacy Git snapshot cannot claim validation membership")
+			return fmt.Errorf("graph-only Git snapshot cannot claim validation membership")
 		}
 	} else {
 		if len(r.ValidationMemberships) != len(c.ValidationDependencies.Entries) {

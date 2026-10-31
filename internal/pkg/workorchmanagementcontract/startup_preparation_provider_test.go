@@ -12,7 +12,7 @@ func TestPreparationProviderSelectionWireRequiresOriginalBoundBlockedEvidence(t 
 	for _, reason := range []string{"provider_selection_budget_observed_authorization_pending", "provider_selection_budget_unavailable", "provider_selection_budget_source_conflict", "provider_selection_authorization_pending", "provider_selection_source_binding_conflict", "provider_selection_configuration_source_unavailable", "provider_selection_invalid", "provider_selection_model_missing", "provider_selection_capability_incomplete", "provider_selection_operation_unsupported", "provider_selection_reasoning_unsupported"} {
 		fixture := func() StartupPreparationView {
 			v := preparationViewFixture()
-			v.Record.Version, v.OperationState = "workorch-preparation-record/v2", "blocked"
+			v.Record.Version, v.OperationState = "workorch-preparation-record", "blocked"
 			a := &v.Record.Attempts[0]
 			a.State, a.CreationEpoch, a.EvaluationVersion = "blocked", strings.Repeat("a", 32), "workorch-preparation-check-evaluation/v1"
 			a.ProviderCacheEvidenceRef = "provider-cache-observation:" + strings.Repeat("b", 32)
@@ -49,7 +49,7 @@ func TestPreparationProviderSelectionWireRequiresOriginalBoundBlockedEvidence(t 
 			case "scope":
 				a.Checks[0].ID = "exact_seal"
 			case "legacy":
-				v.Record.Version = "workorch-preparation-record/v1"
+				v.Record.Version = "unsupported-record-contract"
 			}
 			if v.ValidateFor("ws") == nil {
 				t.Fatal("unbound classification accepted", reason, change)
@@ -61,7 +61,7 @@ func TestPreparationProviderSelectionWireRequiresOriginalBoundBlockedEvidence(t 
 func TestPreparationProviderConfigurationWireRequiresOriginalEvidence(t *testing.T) {
 	fixture := func() StartupPreparationView {
 		v := preparationViewFixture()
-		v.Record.Version, v.OperationState = "workorch-preparation-record/v2", "blocked"
+		v.Record.Version, v.OperationState = "workorch-preparation-record", "blocked"
 		a := &v.Record.Attempts[0]
 		a.State, a.CreationEpoch, a.EvaluationVersion = "blocked", strings.Repeat("a", 32), "workorch-preparation-check-evaluation/v1"
 		a.ProviderCacheEvidenceRef = "provider-cache-observation:" + strings.Repeat("b", 32)
@@ -88,7 +88,7 @@ func TestPreparationProviderConfigurationWireRequiresOriginalEvidence(t *testing
 		case "blocked":
 			a.Checks[0].State = "blocked"
 		case "legacy":
-			v.Record.Version = "workorch-preparation-record/v1"
+			v.Record.Version = "unsupported-record-contract"
 		}
 		if v.ValidateFor("ws") == nil {
 			t.Fatal("unbound configuration observation accepted", change)

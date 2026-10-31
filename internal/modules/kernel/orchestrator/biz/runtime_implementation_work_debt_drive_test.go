@@ -207,6 +207,11 @@ func TestImplementationWorkProductionDriverDefersTerminalDebtWithoutFallback(t *
 		manifest := command.SemanticManifest
 		document := runtimecontract.RuntimeSemanticPlanDocument{SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: runtimecontract.RuntimeSemanticPlanStepCoverageOrder, CoverageOrder: []common.CoverageWorkItemID{manifest.CoverageItems[0].ID}, Proposals: []runtimecontract.RuntimeSemanticProofProposal{}, ImplementationPurpose: runtimecontract.RuntimeImplementationWorkPurposeTerminal}
 		document.ImplementationIntent = implementationWorkIntentForTest(manifest)
+		document.ImplementationIntent.SelectedRequirementRefs = nil
+		document.ImplementationIntent.RemainingWork = "No remaining implementation; ordinary validation must independently establish acceptance."
+		for i := range document.ImplementationIntent.RequirementReviews {
+			document.ImplementationIntent.RequirementReviews[i].WorkRequired = false
+		}
 		payload, marshalErr := runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(manifest, document)
 		if marshalErr != nil {
 			t.Error(marshalErr)

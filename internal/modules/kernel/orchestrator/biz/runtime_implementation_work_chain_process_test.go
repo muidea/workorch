@@ -39,8 +39,8 @@ func TestImplementationWorkFourTargetsFreshProcessMidBatchRecovery(t *testing.T)
 	if before.ActiveDispatch == nil || len(before.OperationReceipts) != 1 || len(before.CompletedDispatches) != 0 || before.ImplementationWork.Rounds[0].CompletedReceiptSetHash != "" {
 		t.Fatal("cut is not the original partially committed batch")
 	}
-	if before.ActiveDispatch.OperationExecutions[0].State != contract.OperationExecutionEvidenceCommitted || len(before.ActiveDispatch.CompletedOperationIDs) != 1 || before.ActiveDispatch.ImplementationWorkCommitment.WorkingBinding.ReceiptProtocolRef != contract.RuntimeImplementationWorkReceiptChainV1 {
-		t.Fatal("first receipt and exact chain protocol were not sealed in original CAS")
+	if before.ActiveDispatch.OperationExecutions[0].State != contract.OperationExecutionEvidenceCommitted || len(before.ActiveDispatch.CompletedOperationIDs) != 1 || before.ActiveDispatch.ImplementationWorkCommitment.WorkingBinding == nil {
+		t.Fatal("first receipt and original working binding were not sealed in original CAS")
 	}
 	assertImplementationWorkProcessBudget(t, *before, 1)
 	assertImplementationWorkProcessNoTerminalCredit(t, *before)

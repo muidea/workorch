@@ -20,7 +20,7 @@ func runtimeEvidencePurposeHasProfileFields(m RuntimeEvidencePurposeMapping) boo
 }
 
 func ValidateRuntimeProfileEvidencePurposeMappingDeclaration(m RuntimeEvidencePurposeMapping) error {
-	if m.ContractRef != RuntimeProfileDeliverableEvidencePurposeV2 ||
+	if m.ContractRef != RuntimeProfileDeliverableEvidencePurpose ||
 		!runtimeSourceIdentity(m.HistoricalProfileID, 128) || !runtimeSourceIdentity(m.HistoricalDeliverableID, 128) ||
 		!runtimeSourceIdentity(m.HistoricalProfileHash, 256) ||
 		m.HistoricalItemRef != RuntimeProfileDeliverablePurposeRef(m.HistoricalProfileID, m.HistoricalDeliverableID) ||
@@ -68,7 +68,7 @@ func runtimeProfileEvidencePurposeSource(m RuntimeEvidencePurposeMapping) Runtim
 func RuntimeEvidencePurposeSources(i RuntimeSourceObligationInventory) []RuntimeDefinitionSource {
 	ret := slices.Clone(i.Sources)
 	for _, m := range i.EvidencePurposeMappings {
-		if m.ContractRef == RuntimeProfileDeliverableEvidencePurposeV2 {
+		if m.ContractRef == RuntimeProfileDeliverableEvidencePurpose {
 			ret = append(ret, runtimeProfileEvidencePurposeSource(m))
 		}
 	}

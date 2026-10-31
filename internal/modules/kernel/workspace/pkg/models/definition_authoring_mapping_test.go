@@ -30,7 +30,7 @@ func fullSizeMappingFixture(t testing.TB) (DefinitionAuthoringRecord, Definition
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = record.CompleteDerivation(d.PermitID, &derived, "")
+	record, err = completeTestDerivation(record, d.PermitID, &derived, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,6 +69,17 @@ func mappingAuditFixture(t testing.TB, m DefinitionAuthoringMapping) DefinitionA
 	if err != nil {
 		t.Fatal(err)
 	}
+	var body map[string]map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &body); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash"} {
+		delete(body["mapping"], key)
+	}
+	payload, err = json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
 	sum := sha256.Sum256(payload)
 	document := DefinitionProviderObservation{Content: payload, ObservedBytes: uint64(len(payload)), SHA256: hex.EncodeToString(sum[:]), Observed: true, Complete: true, Saved: true}
 	return DefinitionAuthoringSuccessByteAudit{Document: document, Wire: document.Clone()}
@@ -76,7 +87,7 @@ func mappingAuditFixture(t testing.TB, m DefinitionAuthoringMapping) DefinitionA
 func TestSealedMappingCompilesFull37AndIndependentGoal(t *testing.T) {
 	r, m, audit := fullSizeMappingFixture(t)
 	d := r.DerivationRequests[0]
-	decoded, err := DecodeDefinitionAuthoringMapping(audit.Document.Content)
+	decoded, err := DecodeAuthoringMappingFor(d, audit.Document.Content)
 	if err != nil || !reflect.DeepEqual(decoded, m) {
 		t.Fatalf("strict mapping decode: %v", err)
 	}
@@ -195,12 +206,12 @@ func TestSealedMappingFull37RejectsMissingDuplicateMixedAndDangling(t *testing.T
 func TestSealedMappingClosedFramingAndShape(t *testing.T) {
 	_, _, a := fullSizeMappingFixture(t)
 	valid := string(a.Document.Content)
-	expected, err := DecodeDefinitionAuthoringMapping(a.Document.Content)
+	expected, err := decodeCurrentMappingFixture(a.Document.Content)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, suffix := range []string{"", " ", "\t\r\n "} {
-		decoded, err := DecodeDefinitionAuthoringMapping([]byte(valid + suffix))
+		decoded, err := decodeCurrentMappingFixture([]byte(valid + suffix))
 		if err != nil || !reflect.DeepEqual(decoded, expected) {
 			t.Fatalf("合法根对象和 JSON 空白未原样解码：%q %v", suffix, err)
 		}
@@ -208,11 +219,11 @@ func TestSealedMappingClosedFramingAndShape(t *testing.T) {
 	tests := map[string][]byte{
 		"trailing NUL": []byte(valid + "\x00"), "trailing vertical tab": []byte(valid + "\v"), "trailing form feed": []byte(valid + "\f"), "trailing unicode whitespace": []byte(valid + " "),
 		"old canonical shape": []byte(`{"specification":{}}`), "array root": []byte(`[]`), "scalar": []byte(`true`), "multiple root": []byte(valid + valid), "trailing": []byte(valid + " extra"), "fence": []byte("```json\n" + valid + "\n```"), "UTF8": append([]byte(valid), 0xff), "oversize": []byte(strings.Repeat(" ", DefinitionAuthoringDiagnosticDocumentLimit) + valid),
-		"missing": []byte(strings.Replace(valid, `"Protocol":"`+DefinitionAuthoringMappingProtocol+`",`, "", 1)), "case": []byte(strings.Replace(valid, `"Protocol"`, `"protocol"`, 1)), "unknown": []byte(strings.Replace(valid, `"mapping":{`, `"mapping":{"Resources":[],`, 1)), "duplicate": []byte(strings.Replace(valid, `"mapping":{`, `"mapping":{"Protocol":"duplicate",`, 1)), "null": []byte(strings.Replace(valid, `"Dimensions":[`, `"Dimensions":null,"duplicate": [`, 1)), "surrogate": []byte(strings.Replace(valid, `"whole"`, `"\ud800"`, 1)),
+		"missing": []byte(strings.Replace(valid, `"DimensionRef":"whole",`, "", 1)), "case": []byte(strings.Replace(valid, `"DimensionRef"`, `"dimensionref"`, 1)), "unknown": []byte(strings.Replace(valid, `"mapping":{`, `"mapping":{"Resources":[],`, 1)), "duplicate": []byte(strings.Replace(valid, `"mapping":{`, `"mapping":{"Protocol":"duplicate",`, 1)), "null": []byte(strings.Replace(valid, `"Dimensions":[`, `"Dimensions":null,"duplicate": [`, 1)), "surrogate": []byte(strings.Replace(valid, `"whole"`, `"\ud800"`, 1)),
 	}
 	for name, payload := range tests {
 		t.Run(name, func(t *testing.T) {
-			if _, err := DecodeDefinitionAuthoringMapping(payload); err == nil {
+			if _, err := decodeCurrentMappingFixture(payload); err == nil {
 				t.Fatal("invalid document accepted")
 			}
 		})
@@ -220,7 +231,7 @@ func TestSealedMappingClosedFramingAndShape(t *testing.T) {
 }
 func TestSealedMappingLedgerRawReparseAndAuditIdentity(t *testing.T) {
 	r, m, a := fullSizeMappingFixture(t)
-	req := DefinitionAuthoringSpecificationRequest{RequestID: "proposal/current", DerivationPermitID: r.DerivationRequests[0].PermitID, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "mock-provider"}
+	req := DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal/current", DerivationPermitID: r.DerivationRequests[0].PermitID, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "mock-provider"}
 	pending, req, _, err := r.ReserveSpecification(req)
 	if err != nil {
 		t.Fatal(err)
@@ -237,6 +248,9 @@ func TestSealedMappingLedgerRawReparseAndAuditIdentity(t *testing.T) {
 		t.Fatal("persisted ledger invalid")
 	}
 	view := complete.Clone()
+	for i := range view.DerivationRequests {
+		view.DerivationRequests[i] = view.DerivationRequests[i].Metadata()
+	}
 	view.SpecificationRequests[0] = view.SpecificationRequests[0].Metadata()
 	if view.ValidateView() != nil {
 		t.Fatal("metadata view rejected")
@@ -274,7 +288,7 @@ func TestSealedMappingLedgerRawReparseAndAuditIdentity(t *testing.T) {
 	if badAudit.Validate() == nil {
 		t.Fatal("unsaved document authorized canonical compilation")
 	}
-	if _, err := pending.CompleteSpecification(req.PermitID, complete.SpecificationRequests[0].Proposal, nil, ""); err == nil {
+	if _, err := completeTestSpecification(pending, req.PermitID, complete.SpecificationRequests[0].Proposal, nil, ""); err == nil {
 		t.Fatal("old direct canonical completion accepted")
 	}
 	if DefinitionAuthoringSpecificationRequestLimit != 112 || DefinitionAuthoringSpecificationAttemptLimit != 2 {

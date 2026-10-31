@@ -33,11 +33,15 @@ import (
 // independent input-review transaction is covered by the drive mainline tests.
 // Neither Orchestrator nor the provider interprets Go, test names, or stdout.
 func TestBuiltinSoftwareDevAllManagedCWIsCloseThroughTypedNativeProofPipeline(t *testing.T) {
-	t.Run("ready_inputs", func(t *testing.T) { runDefaultNativeProofPipeline(t, false) })
-	t.Run("create_only_conjunctive_input", func(t *testing.T) { runDefaultNativeProofPipeline(t, true) })
+	t.Run("ready_inputs", func(t *testing.T) {
+		for i := 0; i < len(builtinSoftwareDevDoDItems(t))+1; i++ {
+			t.Run(fmt.Sprintf("requirement-%02d", i+1), func(t *testing.T) { runDefaultNativeProofPipeline(t, false, i) })
+		}
+	})
+	t.Run("create_only_conjunctive_input", func(t *testing.T) { runDefaultNativeProofPipeline(t, true, len(builtinSoftwareDevDoDItems(t))) })
 }
 
-func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
+func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool, selected int) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go is not available")
 	}
@@ -89,6 +93,11 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 	if len(requirements) != len(builtinSoftwareDevDoDItems(t))+1 {
 		t.Fatalf("default managed proof set = %d, want DoD+validation_report=%d", len(requirements), len(builtinSoftwareDevDoDItems(t))+1)
 	}
+
+	// Calibrate every compiled CWI in its own real project. This does not
+	// claim a fullflow or large-corpus acceptance; the Shell output and input
+	// bounds are unchanged, and each fixture still runs all four stages.
+	requirements = requirements[selected : selected+1]
 
 	workspaceDirectory := t.TempDir()
 	workspaceInternalDirectory := t.TempDir()
@@ -165,7 +174,17 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 		preparation := preparations[requirement.Hash]
 		operation := defaultNativeProofFileOperation(requirement, preparation, index)
 		if supplementFirst && index == 0 {
-			weak := fmt.Sprintf("package workorch_validation\nimport (\"testing\"; \"strings\")\nfunc %s(t *testing.T) { if !strings.Contains(\"contract\", \"contract\") { t.Fatal(\"missing contract\") } }\n", preparation.CheckAttestations[0].NativeCheckRef)
+			weak := "package workorch_validation\nimport (\"testing\"; \"strings\")\n"
+			if len(preparation.CheckAttestations) > 1 {
+				weak = "package workorch_validation\nimport (\"testing\"; \"strings\"; subject \"example.com/workorch-default-native-proof\")\n"
+			}
+			for checkIndex, check := range preparation.CheckAttestations {
+				if checkIndex > 0 {
+					weak += fmt.Sprintf("func %s(t *testing.T) { if subject.DeliveredValue() != 4 { t.Fatal(\"delivery\") } }\n", check.NativeCheckRef)
+					continue
+				}
+				weak += fmt.Sprintf("func %s(t *testing.T) { if !strings.Contains(\"contract\", \"contract\") { t.Fatal(\"missing contract\") } }\n", check.NativeCheckRef)
+			}
 			operation.Parameters = []runtimecontract.OperationParameter{{Name: "content", String: &weak}}
 		}
 		dispatchID := fmt.Sprintf("dispatch-default-proof-file-%02d", index+1)
@@ -208,16 +227,19 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 		if !found {
 			t.Fatalf("reobserved catalog has no exact ready binding for %q: %+v", requirement.Hash, catalog.ValidationSurfaces)
 		}
-		if len(ownerBinding.CheckAttestations) != 1 || ownerBinding.CheckAttestations[0].ObservationProtocolRef != "shell/go-test-json/project-conjunction-behavior/v3" || ownerBinding.CheckAttestations[0].ExecutionStagesHash == "" || ownerBinding.CheckAttestations[0].SupplementalNativeCheckRef != "" || ownerBinding.InputReview == nil || ownerBinding.InputReview.ProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocolV3 || ownerBinding.InputReview.DiagnosticSourceContractRef != runtimecontract.RuntimeValidationDiagnosticSourceReviewV1 || ownerBinding.InputReview.ValidateAgainstBinding(ownerBinding) != nil {
+		if len(ownerBinding.CheckAttestations) != len(requirement.RequiredCheckRefs) || ownerBinding.CheckAttestations[0].ObservationProtocolRef != "shell/go-test-json/project-multi-failure-behavior" || ownerBinding.CheckAttestations[0].ExecutionStagesHash == "" || ownerBinding.CheckAttestations[0].SupplementalNativeCheckRef != "" || ownerBinding.InputReview == nil || ownerBinding.InputReview.ProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocol || ownerBinding.InputReview.DiagnosticSourceContractRef != runtimecontract.RuntimeValidationDiagnosticSourceReviewV1 || ownerBinding.InputReview.ValidateAgainstBinding(ownerBinding) != nil {
 			t.Fatalf("default adapter did not publish an exact conjunctive review subject: %+v", ownerBinding)
 		}
-		// V8 reviews the complete current test corpus, including neighboring
+		// The current adapter reviews the complete current test corpus, including neighboring
 		// requirement packages, rather than only this one package plus go.mod.
 		wantInputs := []string{"go.mod"}
 		for _, target := range preparedTargets {
 			wantInputs = append(wantInputs, target)
 		}
-		wantSourceCount := len(requirements)
+		wantSourceCount := 0
+		for _, preparation := range preparations {
+			wantSourceCount += len(preparation.CheckAttestations)
+		}
 		if additionalInputRef != "" {
 			wantInputs = append(wantInputs, additionalInputRef)
 			wantSourceCount++
@@ -275,16 +297,14 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 			diagnostic := response.Receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic
 			addition := diagnostic.InputAddition
 			if addition.ContentContractRef != "shell/go-test-input/project-conjunction/v1" {
-				t.Fatalf("default adapter did not publish the versioned entrypoint input contract: %+v", addition)
+				t.Fatalf("default adapter did not publish the current entrypoint input contract: %+v", addition)
 			}
-			convergence := focus.ValidationFailureRepairConvergence
-			if convergence == nil {
-				t.Fatal("default CWI lacks repair policy")
+			// This Shell/File owner calibration checks the create-only input contract,
+			// not a Runtime repair grant. The validation_report CWI has one exact check.
+			if !addition.MatchesBinding(coverageBinding) {
+				t.Fatalf("create-only addition changed the original binding: %+v", addition)
 			}
-			route, found := convergence.RouteForTrigger(runtimecontract.RuntimeModuleShell, operation.Kind, diagnostic.Class, diagnostic.RecommendedEvidenceTargetType, diagnostic.OwnerCode)
-			if !found || !route.RequireInputAddition || len(route.RepairOperationKinds) != 1 || route.RepairOperationKinds[0] != runtimecontract.StepKindFileWrite || !addition.MatchesBinding(coverageBinding) {
-				t.Fatalf("default Profile has no exact create-only input contract: diagnostic=%+v route=%+v", diagnostic, route)
-			}
+
 			originalBinding := ownerBinding.Clone()
 			content := fmt.Sprintf("package workorch_validation\nimport (\"testing\"; subject \"example.com/workorch-default-native-proof\")\nfunc %s(t *testing.T) { if subject.DeliveredValue() != 4 { t.Fatal(\"delivery entry returned wrong value\") } }\n", addition.NativeCheckRef)
 			created := executeFileWrite(runtimecontract.RuntimeOperation{ID: "supplement-input", Kind: runtimecontract.StepKindFileWrite, TargetRefs: []string{addition.TargetRef}, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &content}}}, "dispatch-create-supplement")
@@ -296,10 +316,10 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 			reobserved = acquireObservedShellValidationCatalog(t, ctx, hub, aggregate, shellPrerequisite, workspaceDirectory, observedManifest, observedManifest.Manifest.TargetRefs, requirements)
 			catalog = reobserved.Acquisition.Admissibility.Normalized()
 			_, ownerBinding, found = runtimecontract.RuntimeValidationSurfaceForProofRequirement(catalog.ValidationSurfaces, requirement)
-			if !found || len(ownerBinding.CheckAttestations) != 1 || ownerBinding.CheckAttestations[0].NativeCheckRef != originalBinding.CheckAttestations[0].NativeCheckRef || ownerBinding.CheckAttestations[0].SupplementalNativeCheckRef != addition.NativeCheckRef || ownerBinding.CheckAttestations[0].ObservationProtocolRef != originalBinding.CheckAttestations[0].ObservationProtocolRef {
+			if !found || len(ownerBinding.CheckAttestations) != len(originalBinding.CheckAttestations) || ownerBinding.CheckAttestations[0].NativeCheckRef != originalBinding.CheckAttestations[0].NativeCheckRef || ownerBinding.CheckAttestations[0].SupplementalNativeCheckRef != addition.NativeCheckRef || ownerBinding.CheckAttestations[0].ObservationProtocolRef != originalBinding.CheckAttestations[0].ObservationProtocolRef {
 				t.Fatalf("fresh owner binding replaced original instead of adding all-of: %+v", ownerBinding)
 			}
-			if ownerBinding.InputReview == nil || ownerBinding.InputReview.Hash == originalBinding.InputReview.Hash || len(ownerBinding.InputReview.Files) != len(wantInputs)+1 || len(ownerBinding.InputReview.DiagnosticSources) != len(requirements)+1 {
+			if ownerBinding.InputReview == nil || ownerBinding.InputReview.Hash == originalBinding.InputReview.Hash || len(ownerBinding.InputReview.Files) != len(wantInputs)+1 || len(ownerBinding.InputReview.DiagnosticSources) != wantSourceCount+1 {
 				t.Fatal("supplement did not require a fresh complete input review")
 			}
 			coverageBinding, semanticFocus = defaultNativeProofCoverageBinding(t, focus, requirement, ownerBinding, preparedTarget)
@@ -369,10 +389,61 @@ func builtinSoftwareDevNativeProofBootstrap(t *testing.T) runtimecontract.Runtim
 		if err != nil {
 			t.Fatal(err)
 		}
-		bootstrap, err := activationcore.RuntimeBootstrap(
+		// Fixed original-source inventory: this owner calibration does not ask
+		// a model to invent or choose the Profile's required purpose mapping.
+		inventory := runtimecontract.RuntimeSourceObligationInventory{
+			SchemaVersion: runtimecontract.RuntimeSourceObligationInventorySchemaCurrent,
+			CandidateHash: "native-proof-candidate", SpecificationHash: "native-proof-specification",
+			DefinitionRevision: "definition-default-native-proof", StartupInputHash: "startup-default-native-proof",
+			Sources: []runtimecontract.RuntimeDefinitionSource{{CandidateItemRef: "original-goal", ItemRef: "formal-goal", SourceScope: "goal", SourceID: "goal", Text: template.GoalText}},
+		}
+		for n, text := range template.DoDItems {
+			ref := fmt.Sprintf("original-dod-%03d", n+1)
+			sourceID := fmt.Sprintf("dod-%03d", n+1)
+			inventory.Sources = append(inventory.Sources, runtimecontract.RuntimeDefinitionSource{CandidateItemRef: ref, ItemRef: "formal-" + ref, SourceScope: "dodItem", SourceID: sourceID, Text: text})
+			requirementID, obligationID := fmt.Sprintf("requirement-%03d", n+1), fmt.Sprintf("obligation-%03d", n+1)
+			inventory.Requirements = append(inventory.Requirements, runtimecontract.RuntimeSourceRequirement{ID: requirementID, DimensionID: "native-proof", Required: true, SourceKind: "USER_EXPLICIT", SourceItemRefs: []string{ref}, Text: text})
+			inventory.Obligations = append(inventory.Obligations, runtimecontract.RuntimeSourceObligation{ID: obligationID, RequirementID: requirementID, DoDItemRefs: []string{ref}, Text: text})
+			for _, p := range activation.ExecutionContract.ProfileContracts {
+				for _, r := range p.EvidenceRequirements {
+					if runtimecontract.RuntimeEvidenceDeclarationMatchesSource(r, "dodItem", sourceID) {
+						inventory.Verifications = append(inventory.Verifications, runtimecontract.RuntimeSourceVerification{ID: fmt.Sprintf("verification-%03d-%d", n+1, len(inventory.Verifications)+1), ObligationID: obligationID, Declaration: text, ProfileID: p.ID, EvidenceRequirementID: r.ID, Scope: r.Scope})
+					}
+				}
+			}
+		}
+		purposes, err := runtimecontract.RequiredRuntimeEvidencePurposes(activation.ExecutionContract.ProfileContracts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, purpose := range purposes {
+			purpose.AcceptanceItemRef = "original-dod-001"
+			inventory.EvidencePurposeMappings = append(inventory.EvidencePurposeMappings, purpose)
+		}
+		for _, source := range inventory.Sources {
+			for _, p := range activation.ExecutionContract.ProfileContracts {
+				for _, r := range p.EvidenceRequirements {
+					if !runtimecontract.RuntimeEvidenceDeclarationMatchesSource(r, source.SourceScope, source.SourceID) {
+						continue
+					}
+					for _, rule := range r.LineageAssertions {
+						if rule.ExecutionSourceContractRef == "" {
+							continue
+						}
+						mapping := runtimecontract.RuntimeExecutionProofMapping{ContractRef: rule.ExecutionSourceContractRef, ConsumerItemRef: source.CandidateItemRef, RuleRef: rule.Ref, SourceItemRef: "original-dod-001"}
+						if source.SourceScope == "goal" {
+							mapping.ConsumerGoalText = source.Text
+						}
+						inventory.ExecutionProofMappings = append(inventory.ExecutionProofMappings, mapping)
+					}
+				}
+			}
+		}
+		inventory = inventory.WithHash()
+		bootstrap, err := activationcore.RuntimeBootstrapWithSourceObligations(
 			&workspacemodel.Goal{ID: "goal-default-native-proof", WorkspaceID: "workspace-default-native-proof", Text: template.GoalText},
 			&workspacemodel.DoD{ID: "dod-default-native-proof", WorkspaceID: "workspace-default-native-proof", Items: append([]string(nil), template.DoDItems...)},
-			"definition-default-native-proof", "startup-default-native-proof", nil, activation,
+			"definition-default-native-proof", "startup-default-native-proof", nil, activation, &inventory,
 		)
 		if err != nil {
 			t.Fatal(err)

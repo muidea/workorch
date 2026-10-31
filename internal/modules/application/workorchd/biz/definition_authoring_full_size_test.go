@@ -234,7 +234,7 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 	}
 	found := false
 	for _, recipe := range runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(first.Activation.EvidencePolicies) {
-		if recipe.AdapterRef != shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic || recipe.InputReviewProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocolV3 {
+		if recipe.AdapterRef != shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic || recipe.InputReviewProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocol {
 			t.Fatalf("未使用已审查 adapter/protocol: %+v", recipe)
 		}
 		found = true
@@ -260,7 +260,7 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 		expected[verification.ID] = true
 	}
 	for _, mapping := range first.DefinitionSeed.SourceObligations.EvidencePurposeMappings {
-		if mapping.ContractRef == runtimecontract.RuntimeProfileDeliverableEvidencePurposeV2 {
+		if mapping.ContractRef == runtimecontract.RuntimeProfileDeliverableEvidencePurpose {
 			digest := sha256.Sum256([]byte(mapping.HistoricalItemRef))
 			expected["profile-verification-"+hex.EncodeToString(digest[:])] = true
 		}
@@ -344,23 +344,11 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 					t.Fatalf("漂移 fixture 必须结构合法: %v", err)
 				}
 			}
-			// Template owner 仍返回真实当前模板；另外检查 detached source 漂移。
+			// A detached Workspace cannot substitute another template binding for the owner current template.
 			if mutation == "template" {
-				original, err := repositories.WorkspaceTemplates.Get(ctx, template.ID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				changed := original.Clone()
-				changed.Description += " changed"
-				if err := repositories.WorkspaceTemplates.Update(ctx, &changed); err != nil {
-					t.Fatal(err)
-				}
-				defer func() {
-					if err := repositories.WorkspaceTemplates.Update(ctx, original); err != nil {
-						t.Error(err)
-					}
-				}()
+				current.TemplateID = "unknown-template"
 			}
+
 			if _, err := activationports.EnsureWorkspaceDefinitionAdmission(ctx, hub, &current, &goal, &dod); err == nil {
 				t.Fatal("变更输入复用了原确认准入")
 			}

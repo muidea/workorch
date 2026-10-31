@@ -81,8 +81,6 @@ type governanceOperations struct {
 }
 
 type registryOperations struct {
-	listBuiltinDefaults     ListBuiltinDefaultsFunc
-	upgradeBuiltinDefault   UpgradeBuiltinDefaultFunc
 	createSoul              CreateSoulFunc
 	updateSoul              UpdateSoulFunc
 	deleteSoul              DeleteSoulFunc

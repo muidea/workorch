@@ -60,7 +60,7 @@ func TestCompileRuntimeSemanticValidationFailureRepairSealsOneFileProofAndFreshV
 		t.Fatalf("repair manifest was not narrowed to one File proof: %+v", manifest)
 	}
 	batchSequence := 0
-	expectedGap := RuntimeExpectedDocumentContract{
+	expectedGap := RuntimeExpectedDocumentContract{SemanticContextEncoding: RuntimeSemanticContextEncoding,
 		SchemaVersion: RuntimeExpectedDocumentSchemaCurrent, DocumentKind: RuntimeProviderDocumentSemanticPlan,
 		PlanStep: RuntimeSemanticPlanStepProofBatch, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
 		LogicalRequestID: "repair-gap-request", StablePrefixHash: "repair-gap-prefix", BatchID: "repair-batch", BatchSequence: batchSequence,

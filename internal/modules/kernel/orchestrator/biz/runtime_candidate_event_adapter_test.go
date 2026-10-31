@@ -197,8 +197,9 @@ func eventSemanticCandidateCommand(t *testing.T) llmevents.RequestRuntimeCandida
 		SemanticManifest: manifest, SemanticContext: context,
 	}
 	expected := runtimecontract.RuntimeExpectedDocumentContract{
-		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
-		DocumentKind:  command.DocumentKind, PlanStep: context.PlanStep,
+		SchemaVersion:           runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
+		SemanticContextEncoding: runtimecontract.RuntimeSemanticContextEncoding,
+		DocumentKind:            command.DocumentKind, PlanStep: context.PlanStep,
 		ManifestHash: manifest.Hash, DefinitionSeedHash: seed.Hash,
 		LogicalRequestID: command.RequestIdentity.LogicalRequestID, StablePrefixHash: command.StablePrefixHash,
 		BatchID: context.BatchID, BatchSequence: context.BatchSequence,
@@ -234,8 +235,9 @@ func withOperationsExpectedDocument(t *testing.T, command llmevents.RequestRunti
 		}
 	}
 	expected := runtimecontract.RuntimeExpectedDocumentContract{
-		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
-		DocumentKind:  command.DocumentKind, ManifestHash: command.CandidateManifest.Hash,
+		SchemaVersion:             runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
+		OperationsContextEncoding: runtimecontract.RuntimeOperationsContextEncoding,
+		DocumentKind:              command.DocumentKind, ManifestHash: command.CandidateManifest.Hash,
 		LogicalRequestID: command.RequestIdentity.LogicalRequestID, CorrectionAttempt: command.CandidateAttempt,
 		StablePrefixHash: command.StablePrefixHash, MaxOutputTokens: command.CandidateContext.Resources.ProviderCeiling.EffectiveMaxOutputTokens, MaxRecoveryAttempts: 2,
 	}

@@ -6,7 +6,7 @@ import type { DefinitionAuthoringView } from '../../src/types';
 const proposal = (acceptanceItemRef: string): NonNullable<DefinitionAuthoringView['proposal']> => ({
   goalText: '原目标', version: 2, goalItemRef: 'goal', goalTextHash: 'hash', dimensions: [], requirements: [], obligations: [], proposalHash: 'proposal', derivationPermitId: 'permit',
   items: [{ ref: 'original-dod', text: '原 DoD 全文\n不弱化', sourceKind: 'USER_EXPLICIT' }],
-  requiredEvidencePurposes: [{ contractRef: 'runtime/profile-deliverable-evidence-purpose/v2', historicalItemRef: 'profile/neutral/deliverable/initial', acceptanceItemRef, historicalProfileId: 'neutral', historicalDeliverableId: 'initial', historicalProfileHash: 'exact-profile-hash', historicalText: ' 完整交付原文\n含全部要求 ' }],
+  requiredEvidencePurposes: [{ contractRef: 'runtime/profile-deliverable-evidence-purpose', historicalItemRef: 'profile/neutral/deliverable/initial', acceptanceItemRef, historicalProfileId: 'neutral', historicalDeliverableId: 'initial', historicalProfileHash: 'exact-profile-hash', historicalText: ' 完整交付原文\n含全部要求 ' }],
 });
 it('显示必需关系缺项，不凭空选择原 DoD', () => {
   const value = proposal(''); const before = JSON.stringify(value);

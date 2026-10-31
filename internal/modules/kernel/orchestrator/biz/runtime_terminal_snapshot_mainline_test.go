@@ -34,7 +34,7 @@ func runtimeReviewedGitSnapshotBootstrap(bootstrap runtimecontract.RuntimeBootst
 			bootstrap.Requirements = append(bootstrap.Requirements, requirement)
 		}
 	}
-	rule := runtimecontract.RuntimeLineageAssertionRule{Ref: "original-final-owner-snapshot", Kind: runtimecontract.RuntimeLineageTerminalOwnerSnapshot, ConsumptionPoint: runtimecontract.RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: runtimecontract.RuntimeTerminalProofContractV2, OwnerModuleID: runtimecontract.RuntimeModuleGit, OperationKind: runtimecontract.StepKindGitWrite, OperationVariantID: "commit", RequiredEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, ReceiptSourceScope: "dodItem", ReceiptSourceID: "cwi-git", ValidationSourceScope: "dodItem", ValidationSourceID: "cwi-2"}
+	rule := runtimecontract.RuntimeLineageAssertionRule{Ref: "original-final-owner-snapshot", Kind: runtimecontract.RuntimeLineageTerminalOwnerSnapshot, ConsumptionPoint: runtimecontract.RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: runtimecontract.RuntimeTerminalSnapshotProofContract, OwnerModuleID: runtimecontract.RuntimeModuleGit, OperationKind: runtimecontract.StepKindGitWrite, OperationVariantID: "commit", RequiredEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, ReceiptSourceScope: "dodItem", ReceiptSourceID: "cwi-git", ValidationSourceScope: "dodItem", ValidationSourceID: "cwi-2"}
 	bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[1].LineageAssertions = []runtimecontract.RuntimeLineageAssertionRule{rule}
 	bootstrap.DefinitionFocuses[1].LineageAssertions = []runtimecontract.RuntimeLineageAssertionRule{rule}
 	if additionalConsumer {
@@ -102,7 +102,7 @@ func runtimeReviewedGitSnapshotSemanticDocument(document *runtimecontract.Runtim
 }
 
 func TestRuntimeReviewedGitTerminalSnapshotOwnerMainlineAndRestart(t *testing.T) {
-	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectConjunction, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV3, ValidationCount: 1, TerminalSnapshot: true, SnapshotInputSources: true}
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectConjunction, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, ValidationCount: 1, TerminalSnapshot: true, SnapshotInputSources: true}
 	baseline := runValidationInputReviewMainline(t, "consistent", "", options)
 	for _, cut := range []string{"before_material_seal", "after_material_seal", "after_result_persistence"} {
 		t.Run(cut, func(t *testing.T) {
@@ -114,7 +114,7 @@ func TestRuntimeReviewedGitTerminalSnapshotOwnerMainlineAndRestart(t *testing.T)
 }
 
 func TestRuntimeReviewedGitTerminalSnapshotMultipleConsumerMainlineAndRestart(t *testing.T) {
-	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectConjunction, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV3, ValidationCount: 1, TerminalSnapshot: true, SnapshotInputSources: true, AdditionalTerminalSnapshotConsumer: true}
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectConjunction, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, ValidationCount: 1, TerminalSnapshot: true, SnapshotInputSources: true, AdditionalTerminalSnapshotConsumer: true}
 	baseline := runValidationInputReviewMainline(t, "consistent", "", options)
 	for _, cut := range []string{"before_material_seal", "after_material_seal", "after_result_persistence"} {
 		t.Run(cut, func(t *testing.T) {

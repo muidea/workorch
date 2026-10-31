@@ -29,7 +29,7 @@ func reserveAuthoringProposalForCompletion(t *testing.T, owners *fileDefinitionA
 			break
 		}
 	}
-	reserve := workspaceevents.ReserveAuthoringSpecificationCommand{WorkspaceID: id, InputHash: confirmation.InputHash, DerivationPermitID: confirmation.DerivationPermitID, RequestID: "independent-completion", ProviderBindingHash: "provider"}
+	reserve := workspaceevents.ReserveAuthoringSpecificationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "proposal"), WorkspaceID: id, InputHash: confirmation.InputHash, DerivationPermitID: confirmation.DerivationPermitID, RequestID: "independent-completion", ProviderBindingHash: "provider"}
 	reserved, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecReserve: &reserve})
 	if err != nil || reserved.AuthoringSpecification == nil || reserved.AuthoringSpecification.FreshPermitID == "" {
 		t.Fatalf("reserve completion: %+v %v", reserved, err)
@@ -91,7 +91,7 @@ func TestAuthoringKnownFailureCASPreservesOriginalDiagnosticForExactReplay(t *te
 	before, command := reserveAuthoringProposalForCompletion(t, owners, "ws-known-failure-cas")
 	original := []byte("\xef\xbb\xbf  {\"invalid\":\"原文\\r\\nsynthetic_marker\"}\r\n")
 	parseErr := errors.New("placeholder")
-	if _, err := workspace.DecodeDefinitionAuthoringMapping(original); err != nil {
+	if _, err := workspace.DecodeAuthoringMappingFor(before.DefinitionAuthoring.DerivationRequests[0], original); err != nil {
 		parseErr = err
 	} else {
 		t.Fatal("synthetic malformed document decoded")

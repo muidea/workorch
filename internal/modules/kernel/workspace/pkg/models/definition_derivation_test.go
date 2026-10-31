@@ -86,14 +86,14 @@ func TestDerivationReserveReplayCompletionAndBudget(t *testing.T) {
 		t.Fatal("request provider changed")
 	}
 	proposal := &DefinitionDerivedAcceptance{AuthoringInputHash: input.InputHash(), TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"验收"}}
-	completed, err := next.CompleteDerivation(request.PermitID, proposal, "")
+	completed, err := completeTestDerivation(next, request.PermitID, proposal, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := completed.CompleteDerivation(request.PermitID, proposal, ""); err != nil {
+	if _, err := completeTestDerivation(completed, request.PermitID, proposal, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := completed.CompleteDerivation(request.PermitID, nil, "provider_failed"); err == nil {
+	if _, err := completeTestDerivation(completed, request.PermitID, nil, "provider_failed"); err == nil {
 		t.Fatal("completion overwritten")
 	}
 	proposal.AdditionalItems[0] = "篡改"

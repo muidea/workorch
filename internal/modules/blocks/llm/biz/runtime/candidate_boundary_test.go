@@ -229,7 +229,7 @@ func semanticBoundaryRequest(t *testing.T) llmmodels.RuntimeCandidateRequest {
 	}
 	expected := runtimecontract.RuntimeExpectedDocumentContract{
 		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
-		DocumentKind:  request.DocumentKind, PlanStep: context.PlanStep,
+		DocumentKind:  request.DocumentKind, SemanticContextEncoding: runtimecontract.RuntimeSemanticContextEncoding, PlanStep: context.PlanStep,
 		ManifestHash: manifest.Hash, DefinitionSeedHash: seed.Hash,
 		LogicalRequestID: request.RequestIdentity.LogicalRequestID, StablePrefixHash: request.StablePrefixHash,
 		BatchID: context.BatchID, BatchSequence: context.BatchSequence,
@@ -834,7 +834,7 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 	}
 	expected := runtimecontract.RuntimeExpectedDocumentContract{
 		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
-		DocumentKind:  request.DocumentKind, ManifestHash: manifest.Hash, WireContractHash: wire.Hash,
+		DocumentKind:  request.DocumentKind, OperationsContextEncoding: runtimecontract.RuntimeOperationsContextEncoding, ManifestHash: manifest.Hash, WireContractHash: wire.Hash,
 		LogicalRequestID: request.RequestIdentity.LogicalRequestID, StablePrefixHash: request.StablePrefixHash,
 		MaxOutputTokens: context.Resources.ProviderCeiling.EffectiveMaxOutputTokens, MaxRecoveryAttempts: 2,
 	}

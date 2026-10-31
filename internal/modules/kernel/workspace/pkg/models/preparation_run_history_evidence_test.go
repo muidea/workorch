@@ -130,7 +130,7 @@ func TestPreparationRunHistoryEvidenceRejectsRehashedForeignAndMissingMaterial(t
 			case "ref":
 				a.RunHistoryEvidenceRef = PreparationRunHistoryRefPrefix + strings.Repeat("c", 32)
 			case "legacy":
-				w.StartupPreparation.Version = WorkspacePreparationRecordVersion
+				w.StartupPreparation.Version = "workorch-preparation-record/v1"
 			case "hash":
 				e.ContentHash = "other"
 			}

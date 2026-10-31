@@ -29,8 +29,6 @@ func ParseDerivedAcceptance(payload []byte, input workspace.DefinitionAuthoringI
 }
 
 func ParseDerivedAcceptanceFor(payload []byte, d workspace.DefinitionDerivationRequest) (workspace.DefinitionDerivedAcceptance, error) {
-	if d.WireContractRef == "" {
-		return ParseDerivedAcceptance(payload, d.Input, &d.Template)
-	}
+
 	return workspace.DecodeOwnerBoundDerivation(d, payload)
 }

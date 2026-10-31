@@ -17,8 +17,8 @@ func TestRuntimeAuditRefreshTracksValidationFailureDetails(t *testing.T) {
 	}
 	for name, mutate := range map[string]func(*projectioncontract.RuntimeAudit){
 		"detail protocol": func(a *projectioncontract.RuntimeAudit) {
-			a.RejectedEvidence[0].FailureDetailProtocolRef = runtimecontract.RuntimeValidationFailureDetailProtocolV2
-			a.OperationReceipts[0].FailureDetailProtocolRef = runtimecontract.RuntimeValidationFailureDetailProtocolV2
+			a.RejectedEvidence[0].FailureDetailProtocolRef = runtimecontract.RuntimeValidationFailureDetailProtocol
+			a.OperationReceipts[0].FailureDetailProtocolRef = runtimecontract.RuntimeValidationFailureDetailProtocol
 		},
 		"reported assertion": func(a *projectioncontract.RuntimeAudit) {
 			report := runtimecontract.RuntimeValidationReportedAssertion{Code: "shape_mismatch", ExpectedShape: "object", ObservedShape: "array"}

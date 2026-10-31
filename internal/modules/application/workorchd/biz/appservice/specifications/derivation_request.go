@@ -3,7 +3,6 @@ package specifications
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
@@ -24,32 +23,18 @@ func DerivationCommand(derivation workspace.DefinitionDerivationRequest, target 
 		TemplateRequirements []string                                        `json:"templateRequirements"`
 		Resources            []workspace.DefinitionAuthoringResourceSnapshot `json:"resources"`
 		ResourceSnapshotHash string                                          `json:"resourceSnapshotHash"`
-		OutputShape          workspace.DefinitionDerivedAcceptance           `json:"outputShape"`
-	}{derivation.Input.GoalText, derivation.Input.AcceptanceRequirements, derivation.Template.DoDItems, derivation.Resources, derivation.ResourceSnapshotHash, workspace.DefinitionDerivedAcceptance{AuthoringInputHash: derivation.Input.InputHash(), TemplateSnapshotHash: workspace.WorkspaceTemplateSnapshotHash(&derivation.Template), AdditionalItems: []string{}}})
+		OutputShape          struct{ AdditionalItems []string }              `json:"outputShape"`
+	}{derivation.Input.GoalText, derivation.Input.AcceptanceRequirements, derivation.Template.DoDItems, derivation.Resources, derivation.ResourceSnapshotHash, struct{ AdditionalItems []string }{AdditionalItems: []string{}}})
 	if err != nil {
 		return llmevents.CompleteProviderCommand{}, err
 	}
-	contract := derivationOutputContract()
-	schema := derivationOutputSchema
-	promptVersion := "workorch.derivation_prompt.v1"
-	if derivation.WireContractRef != "" {
-		promptVersion = derivation.WireContractRef
-		var err error
-		schema, err = workspace.AuthoringWireSchema(derivation.WireContractRef, "derive")
-		if err != nil {
-			return llmevents.CompleteProviderCommand{}, err
-		}
-		var envelope map[string]json.RawMessage
-		if err = json.Unmarshal(payload, &envelope); err != nil {
-			return llmevents.CompleteProviderCommand{}, err
-		}
-		envelope["wireContractRef"], _ = json.Marshal(derivation.WireContractRef)
-		envelope["wireContractHash"], _ = json.Marshal(derivation.WireContractHash)
-		envelope["outputShape"] = json.RawMessage(`{"AdditionalItems":[]}`)
-		payload, _ = json.Marshal(envelope)
-		instructions := strings.Replace(derivationInstructions, "字段严格为 AuthoringInputHash、TemplateSnapshotHash、AdditionalItems；两个 hash 精确回显 OutputShape。", "唯一字段 AdditionalItems；禁止输出 AuthoringInputHash、TemplateSnapshotHash。机器身份由 owner 绑定。", 1)
-		contract = instructions + "\n输出合同 " + derivation.WireContractRef + "；禁止未知、重复、null字段。\nJSON Schema:\n" + schema
+	schema, err := workspace.AuthoringWireSchema(derivation.WireContractRef, "derive")
+	if err != nil {
+		return llmevents.CompleteProviderCommand{}, err
 	}
+	contract := derivationInstructions + "\n输出合同 " + derivation.WireContractRef + "；禁止未知、重复、null字段。\nJSON Schema:\n" + schema
+	promptVersion := derivation.WireContractRef
+
 	if len(payload)+len(contract) > maxDocumentBytes {
 		return llmevents.CompleteProviderCommand{}, fmt.Errorf("derivation input exceeds byte budget")
 	}
@@ -60,7 +45,7 @@ func DerivationCommand(derivation workspace.DefinitionDerivationRequest, target 
 }
 
 const derivationInstructions = `从目标及经过 File owner 校验的资源快照提取验收主项并提出可验证的补充验收条件，不拥有准入或最终验收权。
-只返回一个 JSON 对象，字段严格为 AuthoringInputHash、TemplateSnapshotHash、AdditionalItems；两个 hash 精确回显 OutputShape。
+只返回一个 JSON 对象，唯一字段 AdditionalItems；禁止输出 AuthoringInputHash、TemplateSnapshotHash。机器身份由 owner 绑定。
 用户及模板条件由系统原样保留，不得重写、删除或放宽。AdditionalItems 只补充缺失条件，不得把执行声明当作证明。
 goal 是完整目标原文，不等于其中每项验收已被展开到候选 DoD。先逐项核对 goal 和资源中的功能、约束、验收清单，再提出边界补充；未被 userRequirements 或 templateRequirements 具体承接的原始验收主项也属于缺失条件，必须逐项进入 AdditionalItems，不能只返回边界补充或用“目标已实现”“测试通过”等通用条目替代。
 对于原文明确列出的验收项，保留该项完整条件、例外、阈值与范围，优先逐字提取；不能把目标清单改成摘要、仅保留章节名，或要求用户再次手工输入已有原文。保留完整 goal 本身不证明逐项覆盖。派生项仍是待独立审查和用户确认的提案，不把提取结果伪装成用户直接输入。

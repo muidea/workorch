@@ -198,9 +198,9 @@ func (r DefinitionAuthoringSpecificationRequest) Clone() DefinitionAuthoringSpec
 func (r DefinitionAuthoringSpecificationRequest) ExpectedPermitID() string {
 	h := sha256.New()
 	writeDefinitionHash(h, "workspace-authoring-specification-permit-v1", r.RequestID, r.DerivationPermitID, string(r.Phase), r.ReviewKind, r.ProposalHash, r.ProviderBindingHash)
-	if r.WireContractRef != "" || r.WireContractHash != "" {
-		writeDefinitionHash(h, r.WireContractRef, r.WireContractHash)
-	}
+
+	writeDefinitionHash(h, r.WireContractRef, r.WireContractHash)
+
 	return "authoring-spec-permit-sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
@@ -216,7 +216,7 @@ func (r DefinitionAuthoringSpecificationRequest) validate(view bool) error {
 	if err := validateAuthoringWire(r.WireContractRef, r.WireContractHash, phase); err != nil {
 		return err
 	}
-	if r.Review != nil && r.WireContractRef != "" {
+	if r.Review != nil {
 		if r.ReviewAudit == nil {
 			return fmt.Errorf("owner-bound review lacks original document")
 		}

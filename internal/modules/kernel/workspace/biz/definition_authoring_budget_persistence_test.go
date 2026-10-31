@@ -31,7 +31,7 @@ func TestAuthoringFileBudgetExhaustionSurvivesRevisions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		reserve := workspaceevents.ReserveDefinitionDerivationCommand{WorkspaceID: input.WorkspaceID, InputHash: current.DefinitionAuthoring.InputHash, RequestID: fmt.Sprintf("derive-%d", n), ProviderBindingHash: "provider", ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil)}
+		reserve := workspaceevents.ReserveDefinitionDerivationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "derive"), WorkspaceID: input.WorkspaceID, InputHash: current.DefinitionAuthoring.InputHash, RequestID: fmt.Sprintf("derive-%d", n), ProviderBindingHash: "provider", ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil)}
 		result, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: input.WorkspaceID, DeriveReserve: &reserve})
 		if err != nil || result.Derivation.FreshPermitID == "" {
 			t.Fatalf("预算内 reserve: %v", err)
@@ -59,7 +59,7 @@ func TestAuthoringFileBudgetExhaustionSurvivesRevisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	revision := current.Revision
-	reserve := workspaceevents.ReserveDefinitionDerivationCommand{WorkspaceID: input.WorkspaceID, InputHash: current.DefinitionAuthoring.InputHash, RequestID: "new-request-after-restart", ProviderBindingHash: "provider", ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil)}
+	reserve := workspaceevents.ReserveDefinitionDerivationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "derive"), WorkspaceID: input.WorkspaceID, InputHash: current.DefinitionAuthoring.InputHash, RequestID: "new-request-after-restart", ProviderBindingHash: "provider", ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil)}
 	if transition, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: input.WorkspaceID, DeriveReserve: &reserve}); err == nil {
 		t.Fatal("新 revision/requestID 重置了累计预算")
 	} else {
@@ -95,21 +95,26 @@ func TestAuthoringFileSpecificationBudgetExhaustionSurvivesRevisions(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		reserve := workspaceevents.ReserveDefinitionDerivationCommand{WorkspaceID: id, InputHash: current.DefinitionAuthoring.InputHash, RequestID: fmt.Sprintf("derive-%d", revision), ProviderBindingHash: "provider", ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil)}
+		reserve := workspaceevents.ReserveDefinitionDerivationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "derive"), WorkspaceID: id, InputHash: current.DefinitionAuthoring.InputHash, RequestID: fmt.Sprintf("derive-%d", revision), ProviderBindingHash: "provider", ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil)}
 		result, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, DeriveReserve: &reserve})
 		if err != nil {
 			t.Fatal(err)
 		}
 		permit := result.Derivation.FreshPermitID
 		derived := workspace.DefinitionDerivedAcceptance{AuthoringInputHash: current.DefinitionAuthoring.InputHash, TemplateSnapshotHash: current.DefinitionAuthoring.TemplateSnapshotHash, AdditionalItems: []string{"补充验收"}}
-		complete := workspaceevents.CompleteDefinitionDerivationCommand{WorkspaceID: id, PermitID: permit, Proposal: &derived}
+		complete := workspaceevents.CompleteDefinitionDerivationCommand{SuccessAudit: derivationTestAudit(t, &derived), WorkspaceID: id, PermitID: permit, Proposal: &derived}
 		if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, DeriveComplete: &complete}); err != nil {
 			t.Fatal(err)
 		}
 		proposal := authoringOwnerProposal(t, current.DefinitionAuthoring.Input, template, derived)
 		for _, kind := range append([]string{""}, kinds...) {
 			for attempt := 0; attempt < workspace.DefinitionAuthoringSpecificationAttemptLimit; attempt++ {
-				cmd := workspaceevents.ReserveAuthoringSpecificationCommand{WorkspaceID: id, InputHash: current.DefinitionAuthoring.InputHash, RequestID: fmt.Sprintf("spec-%d-%s-%d", revision, kind, attempt), DerivationPermitID: permit, ReviewKind: kind, ProviderBindingHash: "provider"}
+				cmd := workspaceevents.ReserveAuthoringSpecificationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, func() string {
+					if kind == "" {
+						return "proposal"
+					}
+					return kind
+				}()), WorkspaceID: id, InputHash: current.DefinitionAuthoring.InputHash, RequestID: fmt.Sprintf("spec-%d-%s-%d", revision, kind, attempt), DerivationPermitID: permit, ReviewKind: kind, ProviderBindingHash: "provider"}
 				if kind != "" {
 					cmd.ProposalHash = proposal.ContentHash()
 				}
@@ -129,7 +134,12 @@ func TestAuthoringFileSpecificationBudgetExhaustionSurvivesRevisions(t *testing.
 					t.Fatal(err)
 				}
 			}
-			denied := workspaceevents.ReserveAuthoringSpecificationCommand{WorkspaceID: id, InputHash: current.DefinitionAuthoring.InputHash, RequestID: fmt.Sprintf("third-%d-%s", revision, kind), DerivationPermitID: permit, ReviewKind: kind, ProviderBindingHash: "provider"}
+			denied := workspaceevents.ReserveAuthoringSpecificationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, func() string {
+				if kind == "" {
+					return "proposal"
+				}
+				return kind
+			}()), WorkspaceID: id, InputHash: current.DefinitionAuthoring.InputHash, RequestID: fmt.Sprintf("third-%d-%s", revision, kind), DerivationPermitID: permit, ReviewKind: kind, ProviderBindingHash: "provider"}
 			if kind != "" {
 				denied.ProposalHash = proposal.ContentHash()
 			}
@@ -160,13 +170,13 @@ func TestAuthoringFileSpecificationBudgetExhaustionSurvivesRevisions(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	reserve := workspaceevents.ReserveDefinitionDerivationCommand{WorkspaceID: id, InputHash: current.DefinitionAuthoring.InputHash, RequestID: "derive-after-reopen", ProviderBindingHash: "provider", ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil)}
+	reserve := workspaceevents.ReserveDefinitionDerivationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "derive"), WorkspaceID: id, InputHash: current.DefinitionAuthoring.InputHash, RequestID: "derive-after-reopen", ProviderBindingHash: "provider", ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil)}
 	reserved, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, DeriveReserve: &reserve})
 	if err != nil {
 		t.Fatal(err)
 	}
 	derived := workspace.DefinitionDerivedAcceptance{AuthoringInputHash: current.DefinitionAuthoring.InputHash, TemplateSnapshotHash: current.DefinitionAuthoring.TemplateSnapshotHash, AdditionalItems: []string{"补充验收"}}
-	done := workspaceevents.CompleteDefinitionDerivationCommand{WorkspaceID: id, PermitID: reserved.Derivation.FreshPermitID, Proposal: &derived}
+	done := workspaceevents.CompleteDefinitionDerivationCommand{SuccessAudit: derivationTestAudit(t, &derived), WorkspaceID: id, PermitID: reserved.Derivation.FreshPermitID, Proposal: &derived}
 	if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, DeriveComplete: &done}); err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +185,7 @@ func TestAuthoringFileSpecificationBudgetExhaustionSurvivesRevisions(t *testing.
 		t.Fatal(err)
 	}
 	revision := current.Revision
-	overflow := workspaceevents.ReserveAuthoringSpecificationCommand{WorkspaceID: id, InputHash: current.DefinitionAuthoring.InputHash, RequestID: "new-request-after-reopen", DerivationPermitID: reserved.Derivation.FreshPermitID, ProviderBindingHash: "provider"}
+	overflow := workspaceevents.ReserveAuthoringSpecificationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "proposal"), WorkspaceID: id, InputHash: current.DefinitionAuthoring.InputHash, RequestID: "new-request-after-reopen", DerivationPermitID: reserved.Derivation.FreshPermitID, ProviderBindingHash: "provider"}
 	if transition, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecReserve: &overflow}); err == nil {
 		t.Fatal("新 revision/permit/requestID 重置规格累计预算")
 	} else {

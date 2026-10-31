@@ -267,16 +267,16 @@ func (s GoalSpecification) ContentHash() string {
 	}
 	// Empty opt-in extension preserves all existing specification hashes.
 	if len(s.ExecutionProofMappings) != 0 {
-		specHashFields(h, "runtime/cross-source-execution-proof/v1", fmt.Sprint(len(s.ExecutionProofMappings)))
+		specHashFields(h, "runtime/dod-source-execution-proof", fmt.Sprint(len(s.ExecutionProofMappings)))
 		for _, mapping := range s.ExecutionProofMappings {
 			specHashFields(h, mapping.ContractRef, mapping.ConsumerItemRef, mapping.RuleRef, mapping.SourceItemRef)
 			if mapping.ConsumerGoalText != "" {
-				specHashFields(h, "runtime/goal-source-execution-proof/v2", mapping.ConsumerGoalText)
+				specHashFields(h, "runtime/goal-source-execution-proof", mapping.ConsumerGoalText)
 			}
 		}
 	}
 	if len(s.EvidencePurposeMappings) != 0 {
-		specHashFields(h, "runtime/cross-cwi-evidence-purpose/v1", fmt.Sprint(len(s.EvidencePurposeMappings)))
+		specHashFields(h, "runtime/cross-cwi-evidence-purpose", fmt.Sprint(len(s.EvidencePurposeMappings)))
 		for _, mapping := range s.EvidencePurposeMappings {
 			specHashFields(h, mapping.ContractRef, mapping.HistoricalItemRef, mapping.AcceptanceItemRef)
 			if mapping.HistoricalProfileID != "" || mapping.HistoricalDeliverableID != "" || mapping.HistoricalProfileHash != "" || mapping.HistoricalText != "" {
@@ -327,13 +327,13 @@ func (s GoalSpecification) Validate(goal DefinitionCandidateItem, dod []Definiti
 	goalProofSource := ""
 	for _, mapping := range s.ExecutionProofMappings {
 		key := mapping.ConsumerItemRef + "\x00" + mapping.RuleRef
-		validConsumer := mapping.ContractRef == "runtime/cross-source-execution-proof/v1" && dodRefs[mapping.ConsumerItemRef] && mapping.ConsumerGoalText == ""
-		validConsumer = validConsumer || (mapping.ContractRef == "runtime/goal-source-execution-proof/v2" && mapping.ConsumerItemRef == goal.CandidateItemRef && mapping.ConsumerGoalText == goal.Text && strings.TrimSpace(goal.Text) != "" && len(goal.Text) <= 4096)
+		validConsumer := mapping.ContractRef == "runtime/dod-source-execution-proof" && dodRefs[mapping.ConsumerItemRef] && mapping.ConsumerGoalText == ""
+		validConsumer = validConsumer || (mapping.ContractRef == "runtime/goal-source-execution-proof" && mapping.ConsumerItemRef == goal.CandidateItemRef && mapping.ConsumerGoalText == goal.Text && strings.TrimSpace(goal.Text) != "" && len(goal.Text) <= 4096)
 		if !validConsumer || !dodRefs[mapping.SourceItemRef] || mapping.ConsumerItemRef == mapping.SourceItemRef || mapping.RuleRef == "" || strings.TrimSpace(mapping.RuleRef) != mapping.RuleRef || len(mapping.RuleRef) > 512 || strings.ContainsRune(mapping.RuleRef, 0) || proofKeys[key] {
 			return fmt.Errorf("execution proof mapping requires unique exact original consumer/rule/DoD source")
 		}
 		proofKeys[key] = true
-		if mapping.ContractRef == "runtime/goal-source-execution-proof/v2" {
+		if mapping.ContractRef == "runtime/goal-source-execution-proof" {
 			if goalProofSource != "" && goalProofSource != mapping.SourceItemRef {
 				return fmt.Errorf("Goal mappings have ambiguous original execution sources")
 			}

@@ -62,12 +62,12 @@ func TestRuntimeReceiptOwnerSnapshotIdentityHashRawCloneAndReload(t *testing.T) 
 }
 
 func TestRuntimeTerminalSnapshotRuleClosedVersionAndSourceUnion(t *testing.T) {
-	rule := RuntimeLineageAssertionRule{Ref: "final", Kind: RuntimeLineageTerminalOwnerSnapshot, ConsumptionPoint: RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: RuntimeTerminalProofContractV2, OwnerModuleID: RuntimeModuleGit, OperationKind: StepKindGitWrite, OperationVariantID: "commit", RequiredEffectScope: RuntimeEffectWorkspaceDurable, ReceiptSourceScope: "deliverable", ReceiptSourceID: "repository", ValidationSourceScope: "dodItem", ValidationSourceID: "behavior"}
+	rule := RuntimeLineageAssertionRule{Ref: "final", Kind: RuntimeLineageTerminalOwnerSnapshot, ConsumptionPoint: RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: RuntimeTerminalSnapshotProofContract, OwnerModuleID: RuntimeModuleGit, OperationKind: StepKindGitWrite, OperationVariantID: "commit", RequiredEffectScope: RuntimeEffectWorkspaceDurable, ReceiptSourceScope: "deliverable", ReceiptSourceID: "repository", ValidationSourceScope: "dodItem", ValidationSourceID: "behavior"}
 	if err := rule.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	for _, mutate := range []func(*RuntimeLineageAssertionRule){
-		func(r *RuntimeLineageAssertionRule) { r.TerminalContractRef = RuntimeTerminalProofContractV1 },
+		func(r *RuntimeLineageAssertionRule) { r.TerminalContractRef = RuntimeTerminalReceiptProofContract },
 		func(r *RuntimeLineageAssertionRule) { r.ValidationSourceID = "" },
 		func(r *RuntimeLineageAssertionRule) { r.ValidationSourceScope = "*" },
 		func(r *RuntimeLineageAssertionRule) {
@@ -77,7 +77,7 @@ func TestRuntimeTerminalSnapshotRuleClosedVersionAndSourceUnion(t *testing.T) {
 		},
 		func(r *RuntimeLineageAssertionRule) {
 			r.Kind = RuntimeLineageTerminalOwnerReceipt
-			r.TerminalContractRef = RuntimeTerminalProofContractV1
+			r.TerminalContractRef = RuntimeTerminalReceiptProofContract
 		},
 		func(r *RuntimeLineageAssertionRule) { r.ConsumptionPoint = RuntimeProofPhaseExecution },
 	} {

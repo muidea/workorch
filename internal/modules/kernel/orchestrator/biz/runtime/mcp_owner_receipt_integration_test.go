@@ -358,7 +358,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 		t.Fatal(err)
 	}
 	requestIdentity := runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-observed", Sequence: 1, PhysicalCallID: "candidate-call-observed"}
-	expectedDocument := runtimecontract.RuntimeExpectedDocumentContract{
+	expectedDocument := runtimecontract.RuntimeExpectedDocumentContract{OperationsContextEncoding: runtimecontract.RuntimeOperationsContextEncoding,
 		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:  runtimecontract.RuntimeProviderDocumentOperations, ManifestHash: manifest.Hash,
 		LogicalRequestID: requestIdentity.LogicalRequestID, StablePrefixHash: stablePrefix,
@@ -1649,7 +1649,7 @@ func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magi
 		Sequence:         1,
 		PhysicalCallID:   runtimecontract.StableRuntimeCandidatePhysicalCallID(logicalRequestID, 1),
 	}
-	expectedDocument := runtimecontract.RuntimeExpectedDocumentContract{
+	expectedDocument := runtimecontract.RuntimeExpectedDocumentContract{OperationsContextEncoding: runtimecontract.RuntimeOperationsContextEncoding,
 		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:  runtimecontract.RuntimeProviderDocumentOperations, ManifestHash: manifest.Hash,
 		LogicalRequestID: requestIdentity.LogicalRequestID, StablePrefixHash: prefix,

@@ -51,7 +51,6 @@ func TestDecisionOwnerCommandInventoryCoversAllEighteenTypedTopics(t *testing.T)
 		decisionevents.TopicOpenWorkspaceDefinitionClarification: {}, decisionevents.TopicReconcileWorkspaceDefinitionClarificationCandidate: {},
 		decisionevents.TopicResolveWorkspaceDefinitionClarificationByAdmission: {}, decisionevents.TopicQueryWorkspaceDefinitionClarificationFact: {},
 		decisionevents.TopicOpenRuntimeDefinitionClarification: {}, decisionevents.TopicResolveRuntimeDefinitionClarificationByReplacement: {},
-		decisionevents.TopicRepairRuntimeDefinitionClarificationRequestContract: {},
 	}
 	topics := append([]string(nil), decisionCommandTopics()...)
 	topics = append(topics, decisionevents.TopicOpenRuntimeGovernanceRequest, decisionevents.TopicRegisterContractChangeProposal)

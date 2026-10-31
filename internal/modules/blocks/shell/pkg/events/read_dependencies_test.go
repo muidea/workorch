@@ -12,7 +12,7 @@ func TestShellCopiedInputQueryResultRequiresExactCompleteSource(t *testing.T) {
 	context.Transaction = runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority", DefinitionRevision: "definition"}
 	context.EvidenceKind = runtimecontract.EvidenceKindValidation
 	set := (runtimecontract.RuntimeOwnerRevisionSet{DefinitionRevision: context.Transaction.DefinitionRevision, Entries: []runtimecontract.RuntimeOwnerRevisionRef{{OwnerKind: "capability", OwnerInstanceID: runtimecontract.RuntimeModuleShell + "/" + string(context.WorkspaceID), ResourceKind: string(runtimecontract.RuntimeResourceWorkspaceTarget), ResourceID: "input.go", Revision: "actual-bytes", DependencyHash: "actual-selector"}}}).WithHash()
-	command := QueryRuntimeValidationReadDependenciesCommand{RuntimeOperationExecutionContext: context, Operation: op, RequestID: "query", IssuedAtStateRevision: 7, SourceReceiptHash: "original-receipt", OriginalDependencies: set, ApplicabilitySource: &runtimecontract.RuntimeEvidenceApplicabilityDependencies{ProtocolRef: runtimecontract.RuntimeEvidenceApplicabilityDependenciesV1, OwnerRevisionSet: set}}
+	command := QueryRuntimeValidationReadDependenciesCommand{RuntimeOperationExecutionContext: context, Operation: op, RequestID: "query", IssuedAtStateRevision: 7, SourceReceiptHash: "original-receipt", OriginalDependencies: set, ApplicabilitySource: &runtimecontract.RuntimeEvidenceApplicabilityDependencies{ProtocolRef: runtimecontract.RuntimeEvidenceApplicabilityDependenciesProtocol, OwnerRevisionSet: set}}
 	if err := command.Validate(); err != nil {
 		t.Fatal(err)
 	}

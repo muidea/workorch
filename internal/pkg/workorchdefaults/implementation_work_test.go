@@ -24,9 +24,6 @@ func TestDefaultImplementationWorkIsProfileScopedAndDoesNotRequireArtificialRoun
 					continue
 				}
 				declarations++
-				if requirement.ImplementationWorkPolicy.ProgressProtocolRef != runtimecontract.RuntimeImplementationWorkProgressV1 {
-					t.Fatal("default work must review complete original requirements")
-				}
 				if template.ID != "software-dev" || requirement.ID != "*" || requirement.Scope != "dodItem" {
 					t.Fatal("software implementation authority leaked to another task or proof purpose")
 				}

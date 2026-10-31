@@ -8,8 +8,8 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-const RuntimeCrossCWIEvidencePurposeV1 = "runtime/cross-cwi-evidence-purpose/v1"
-const RuntimeProfileDeliverableEvidencePurposeV2 = "runtime/profile-deliverable-evidence-purpose/v2"
+const RuntimeCrossCWIEvidencePurpose = "runtime/cross-cwi-evidence-purpose"
+const RuntimeProfileDeliverableEvidencePurpose = "runtime/profile-deliverable-evidence-purpose"
 
 // Candidate refs are sealed before activation. This is not an execution-source
 // guard, a receipt, a current binding, or a grant of terminal credit.
@@ -109,8 +109,8 @@ func validateRuntimeEvidencePurposeMappingSources(inventory RuntimeSourceObligat
 	seen := map[string]bool{}
 	for _, mapping := range inventory.EvidencePurposeMappings {
 		history, acceptance := sources[mapping.HistoricalItemRef], sources[mapping.AcceptanceItemRef]
-		validHistory := mapping.ContractRef == RuntimeCrossCWIEvidencePurposeV1 && history.SourceScope == "dodItem" && !runtimeEvidencePurposeHasProfileFields(mapping)
-		if mapping.ContractRef == RuntimeProfileDeliverableEvidencePurposeV2 {
+		validHistory := mapping.ContractRef == RuntimeCrossCWIEvidencePurpose && history.SourceScope == "dodItem" && !runtimeEvidencePurposeHasProfileFields(mapping)
+		if mapping.ContractRef == RuntimeProfileDeliverableEvidencePurpose {
 			validHistory = ValidateRuntimeProfileEvidencePurposeMappingDeclaration(mapping) == nil && history.CandidateItemRef == ""
 		}
 		if !validHistory || acceptance.SourceScope != "dodItem" ||
@@ -149,7 +149,7 @@ func ValidateRuntimeEvidencePurposeMappings(inventory RuntimeSourceObligationInv
 	}
 	for _, mapping := range inventory.EvidencePurposeMappings {
 		history, acceptance := sources[mapping.HistoricalItemRef], sources[mapping.AcceptanceItemRef]
-		if mapping.ContractRef == RuntimeProfileDeliverableEvidencePurposeV2 {
+		if mapping.ContractRef == RuntimeProfileDeliverableEvidencePurpose {
 			if err := validateRuntimeProfileEvidencePurposeSource(mapping, profiles); err != nil {
 				return err
 			}
@@ -296,9 +296,8 @@ func validateRuntimeHistoricalAcceptanceDependencyClosure(items []RuntimeCoverag
 }
 
 func ValidateRuntimeEvidencePurposeMappingCoverage(inventory RuntimeSourceObligationInventory, items []RuntimeCoverageItem) error {
-	// Retain the legacy empty-mapping branch: it checks only that no coverage
-	// declares an unconfirmed historical source. Nonempty mapping validates
-	// the entire inventory before any compilation.
+	// A profile without historical-purpose declarations must not carry historical
+	// coverage. A declared purpose requires its complete confirmed inventory.
 	if len(inventory.EvidencePurposeMappings) != 0 {
 		inventory = inventory.Clone()
 		if err := inventory.Validate(); err != nil {
@@ -352,7 +351,7 @@ func validateRuntimeEvidencePurposePolicies(mapping RuntimeEvidencePurposeMappin
 			return fmt.Errorf("evidence purpose historical source lacks published owner purpose contract")
 		}
 	}
-	if !slices.Contains(current.RequiredEvidenceKinds, EvidenceKindValidation) || (current.ImplementationWorkPolicy != nil && mapping.ContractRef != RuntimeProfileDeliverableEvidencePurposeV2) ||
+	if !slices.Contains(current.RequiredEvidenceKinds, EvidenceKindValidation) || (current.ImplementationWorkPolicy != nil && mapping.ContractRef != RuntimeProfileDeliverableEvidencePurpose) ||
 		!slices.Contains(current.AcceptedStepKinds, RuntimeBlockKindManagedValidationSession) {
 		return fmt.Errorf("evidence purpose acceptance source requires independent ordinary owner-attested validation")
 	}
@@ -362,7 +361,7 @@ func validateRuntimeEvidencePurposePolicies(mapping RuntimeEvidencePurposeMappin
 // RuntimeEvidencePurposeAcceptanceEligible qualifies a single proposed edge's
 // declarations only. Required-set completeness and full graph are separate gates.
 func RuntimeEvidencePurposeAcceptanceEligible(m RuntimeEvidencePurposeMapping, profiles []RuntimeProfileContract, sourceID string) bool {
-	if m.ContractRef != RuntimeProfileDeliverableEvidencePurposeV2 || validateRuntimeProfileEvidencePurposeSource(m, profiles) != nil || sourceID == "" {
+	if m.ContractRef != RuntimeProfileDeliverableEvidencePurpose || validateRuntimeProfileEvidencePurposeSource(m, profiles) != nil || sourceID == "" {
 		return false
 	}
 	return validateRuntimeEvidencePurposePolicies(m, runtimeProfileEvidencePurposeSource(m), RuntimeDefinitionSource{SourceScope: "dodItem", SourceID: sourceID}, profiles) == nil

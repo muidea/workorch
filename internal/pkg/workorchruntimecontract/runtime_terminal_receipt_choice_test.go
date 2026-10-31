@@ -6,7 +6,7 @@ import (
 )
 
 func TestRuntimeTerminalReceiptChoiceClosedOwnerInventoryAndHash(t *testing.T) {
-	rule := RuntimeLineageAssertionRule{Ref: "receipt-choice", Kind: RuntimeLineageTerminalOwnerReceipt, ConsumptionPoint: RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: RuntimeTerminalProofContractV1, ReceiptSourceScope: "deliverable", ReceiptSourceID: "source_change", OwnerModuleID: RuntimeModuleFile, RequiredEffectScope: RuntimeEffectWorkspaceDurable, ReceiptChoiceContractRef: RuntimeTerminalReceiptChoiceV1, ReceiptOperationChoices: [4]RuntimeOperationVariantRef{{Kind: StepKindFileWrite}, {Kind: RuntimeBlockKindPatchApply, VariantID: "file_write"}, {Kind: RuntimeBlockKindPatchApply, VariantID: "text_replace"}, {Kind: RuntimeBlockKindPatchApply, VariantID: "unified_diff"}}}
+	rule := RuntimeLineageAssertionRule{Ref: "receipt-choice", Kind: RuntimeLineageTerminalOwnerReceipt, ConsumptionPoint: RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: RuntimeTerminalReceiptProofContract, ReceiptSourceScope: "deliverable", ReceiptSourceID: "source_change", OwnerModuleID: RuntimeModuleFile, RequiredEffectScope: RuntimeEffectWorkspaceDurable, ReceiptChoiceContractRef: RuntimeTerminalReceiptChoiceV1, ReceiptOperationChoices: [4]RuntimeOperationVariantRef{{Kind: StepKindFileWrite}, {Kind: RuntimeBlockKindPatchApply, VariantID: "file_write"}, {Kind: RuntimeBlockKindPatchApply, VariantID: "text_replace"}, {Kind: RuntimeBlockKindPatchApply, VariantID: "unified_diff"}}}
 	if err := rule.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestRuntimeTerminalReceiptChoicesPersistedJSONCannotDropAlternatives(t *tes
 		}
 	}
 	// Existing exact-selector rule encoding remains byte-for-byte unchanged.
-	legacy := []byte(`{"Ref":"legacy","Kind":"terminal_owner_operation_receipt","ConsumptionPoint":"post_terminal_delivery","OwnerModuleID":"file","OperationKind":"file/write","RequiredEffectScope":"workspace_durable","TerminalContractRef":"runtime/terminal-material-proof/v1","ReceiptSourceScope":"deliverable","ReceiptSourceID":"source_change"}`)
+	legacy := []byte(`{"Ref":"legacy","Kind":"terminal_owner_operation_receipt","ConsumptionPoint":"post_terminal_delivery","OwnerModuleID":"file","OperationKind":"file/write","RequiredEffectScope":"workspace_durable","TerminalContractRef":"runtime/terminal-receipt-proof","ReceiptSourceScope":"deliverable","ReceiptSourceID":"source_change"}`)
 	var rule RuntimeLineageAssertionRule
 	if err := json.Unmarshal(legacy, &rule); err != nil {
 		t.Fatal(err)

@@ -36,7 +36,7 @@ func sameRuntimeHistoricalAcceptanceSource(left, right *RuntimeHistoricalAccepta
 }
 
 func (value RuntimeHistoricalAcceptanceSource) Validate(coverageID common.CoverageWorkItemID) error {
-	if (value.ContractRef != RuntimeCrossCWIEvidencePurposeV1 && value.ContractRef != RuntimeProfileDeliverableEvidencePurposeV2) || value.HistoricalCoverageWorkItemID != coverageID ||
+	if (value.ContractRef != RuntimeCrossCWIEvidencePurpose && value.ContractRef != RuntimeProfileDeliverableEvidencePurpose) || value.HistoricalCoverageWorkItemID != coverageID ||
 		value.HistoricalCoverageWorkItemID == value.AcceptanceCoverageWorkItemID || value.HistoricalItemRef == value.AcceptanceItemRef ||
 		!runtimeSourceIdentity(value.InventoryHash, 256) || !runtimeSourceIdentity(value.HistoricalItemRef, 1024) ||
 		!runtimeSourceIdentity(value.AcceptanceItemRef, 1024) || !runtimeSourceIdentity(string(value.HistoricalCoverageWorkItemID), 1024) ||
@@ -65,7 +65,7 @@ func runtimeHistoricalAcceptanceChecksHash(checks []RuntimeSourceObligationCheck
 
 func writeRuntimeHistoricalAcceptanceSourceHash(h hashStringWriter, value *RuntimeHistoricalAcceptanceSource) {
 	if value == nil {
-		return // Preserve the exact legacy empty-extension hash.
+		return // This coverage item declares no historical acceptance source.
 	}
 	writeHashString(h, "historical-acceptance-source")
 	writeHashString(h, value.ContractRef)

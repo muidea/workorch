@@ -174,9 +174,6 @@ func validateRuntimeAggregateSM2AfterSemanticInGate(a RuntimeAggregate, gate *ru
 	if err := gate.ValidateDefinitionSources(a.SemanticPlanning, a.Facts.DefinitionSeed, a.Facts.DefinitionFocuses); err != nil {
 		return err
 	}
-	if a.SemanticPlanning.SchemaVersion == runtimecontract.RuntimeSemanticPlanningLedgerSchemaSegmented && a.SemanticPlanning.HistoryArchive == nil {
-		return fmt.Errorf("segmented runtime semantic root ledger is missing its archive")
-	}
 	for idx, history := range a.SemanticPlanning.AllHistory() {
 		if history.Snapshot.Manifest == nil {
 			// The typed ledger validator already rejects this shape; retain an
@@ -464,9 +461,7 @@ func validateRuntimeAggregateSM3CandidateTransactionInGate(a RuntimeAggregate, a
 	if err := runtimecontract.ValidateRuntimeInputRevisionRequestSources(a.SemanticPlanning, a.CandidateRequestSessions); err != nil {
 		return err
 	}
-	if err := runtimecontract.ValidateRuntimeSemanticRequestRepairSources(a.SemanticPlanning, a.CandidateRequestSessions, a.ImplementationWork, a.Definition, a.StateRevision, a.DefinitionClarification); err != nil {
-		return err
-	}
+
 	if err := validateRuntimeDefinitionClarificationAggregate(a); err != nil {
 		return err
 	}

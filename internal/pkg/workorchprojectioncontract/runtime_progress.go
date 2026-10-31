@@ -7,9 +7,9 @@ import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimec
 type RuntimeProgress struct {
 	ImplementationWork         *RuntimeImplementationProgress `json:"implementationWork,omitempty"`
 	TerminalAcknowledgedOwners []string                       `json:"terminalAcknowledgedOwners,omitempty"`
-	// RunEvidence is whole-Run accounting. The legacy flat evidence counters
-	// below remain current-focus diagnostic-lineage counters for compatibility.
-	// nil means an older producer did not supply totals, not zero progress.
+	// RunEvidence is whole-Run accounting. The flat evidence counters below
+	// count current-focus diagnostic lineage. Missing whole-Run accounting
+	// is unavailable information, not zero progress.
 	RunEvidence                     *RuntimeEvidenceCounts                      `json:"runEvidence,omitempty"`
 	OriginalDiagnostic              *runtimecontract.RuntimeOriginalDiagnostic  `json:"originalDiagnostic,omitempty"`
 	LatestAcceptedEvidenceAt        string                                      `json:"latestAcceptedEvidenceAt,omitempty"`

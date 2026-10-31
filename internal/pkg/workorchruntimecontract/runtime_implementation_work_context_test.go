@@ -29,6 +29,9 @@ func TestImplementationWorkContentAndIntentAreExactOriginalInputs(t *testing.T) 
 		d.CoverageOrder = append(d.CoverageOrder, item.ID)
 	}
 	d.ImplementationIntent = &RuntimeImplementationIntent{DeclarationRef: m.ProofObligations[0].DeclarationRef, ContentHash: w.Scope.Content.Hash(), RemainingWork: "请求独立核验剩余原义务", Reason: "实际内容已可被原验收检查"}
+	for _, ref := range RuntimeImplementationRequirementRefs(m, *w, d.ImplementationIntent.DeclarationRef) {
+		d.ImplementationIntent.RequirementReviews = append(d.ImplementationIntent.RequirementReviews, RuntimeImplementationRequirementReview{RequirementRef: ref})
+	}
 	wire, err := EncodeRuntimeSemanticPlanPayloadWithManifest(m, d)
 	if err != nil {
 		t.Fatal(err)

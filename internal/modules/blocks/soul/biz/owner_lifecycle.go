@@ -34,7 +34,7 @@ func (m *Biz) enterOwner(drain bool) (func(), error) {
 func (m *Biz) subscribeOwner(topic string, handler magicevent.ObserverFunc) error {
 	drain := false
 	switch topic {
-	case soulevents.TopicSoulCommandGet, soulevents.TopicSoulCommandList, soulevents.TopicSoulCommandValidateCapability, soulevents.TopicSoulCommandQueryBuiltinDefaults:
+	case soulevents.TopicSoulCommandGet, soulevents.TopicSoulCommandList, soulevents.TopicSoulCommandValidateCapability:
 		drain = true
 	}
 	err := m.SubscribeFuncChecked(topic, func(ev magicevent.Event, result magicevent.Result) {

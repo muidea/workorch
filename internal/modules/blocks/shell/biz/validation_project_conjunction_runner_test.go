@@ -51,10 +51,10 @@ func TestProjectConjunctionOwnerRunnerKeepsProjectAndCWIAllOf(t *testing.T) {
 				target:                   fmt.Sprintf("package checks\nimport (%s)\nfunc %s(t *testing.T){%s}\n", imports, checks[0].NativeCheckRef, body),
 			}
 			if scenario == "old-failure" {
-				files["workorch_validation/v3/old_test.go"] = "package old\nimport \"testing\"\nfunc TestOld(t *testing.T){t.Fatal(\"original failure\")}\n"
+				files["workorch_validation/entrypoint/old_test.go"] = "package old\nimport \"testing\"\nfunc TestOld(t *testing.T){t.Fatal(\"original failure\")}\n"
 			}
 			if scenario == "neighbor-compile" {
-				files["workorch_validation/v4/neighbor/input_test.go"] = "package neighbor\nfunc broken(\n"
+				files["workorch_validation/isolated/neighbor/input_test.go"] = "package neighbor\nfunc broken(\n"
 			}
 			if scenario == "race" {
 				files["delivery/value_test.go"] = "package delivery\nimport (\"testing\";\"sync\")\nfunc TestRace(t *testing.T){var n int;var wg sync.WaitGroup;wg.Add(2);for range 2 {go func(){defer wg.Done();for range 10000 {n++}}()};wg.Wait();_=n}\n"

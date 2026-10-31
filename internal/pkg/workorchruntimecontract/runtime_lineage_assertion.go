@@ -26,10 +26,10 @@ const (
 	RuntimeLineageTerminalOwnerReceipt      RuntimeLineageAssertionKind = "terminal_owner_operation_receipt"
 	RuntimeLineageTerminalResultIndex       RuntimeLineageAssertionKind = "terminal_result_evidence_index"
 	RuntimeLineageTerminalOwnerSnapshot     RuntimeLineageAssertionKind = "terminal_owner_snapshot"
-	RuntimeTerminalProofContractV1                                      = "runtime/terminal-material-proof/v1"
-	RuntimeTerminalProofContractV2                                      = "runtime/terminal-material-proof/v2"
-	RuntimeCrossSourceExecutionProofV1                                  = "runtime/cross-source-execution-proof/v1"
-	RuntimeGoalSourceExecutionProofV2                                   = "runtime/goal-source-execution-proof/v2"
+	RuntimeTerminalReceiptProofContract                                 = "runtime/terminal-receipt-proof"
+	RuntimeTerminalSnapshotProofContract                                = "runtime/terminal-snapshot-proof"
+	RuntimeDoDSourceExecutionProof                                      = "runtime/dod-source-execution-proof"
+	RuntimeGoalSourceExecutionProof                                     = "runtime/goal-source-execution-proof"
 	RuntimeConfirmedBindingRepairProofV1                                = "runtime/confirmed-binding-repair-proof/v1"
 	RuntimeProofPhaseExecution              RuntimeProofPhase           = "execution"
 	RuntimeProofPhasePostTerminalDelivery   RuntimeProofPhase           = "post_terminal_delivery"
@@ -112,8 +112,8 @@ func (r RuntimeLineageAssertionRule) Validate() error {
 	if r.RepairHistoryContractRef != "" && (r.RepairHistoryContractRef != RuntimeConfirmedBindingRepairProofV1 || r.Kind != RuntimeLineageRepairThenFreshValidation || r.ConsumptionPoint != RuntimeProofPhaseExecution) {
 		return fmt.Errorf("confirmed-binding repair assertion requires supported execution repair consumer")
 	}
-	if r.ExecutionSourceContractRef != "" && ((r.ExecutionSourceContractRef != RuntimeCrossSourceExecutionProofV1 && r.ExecutionSourceContractRef != RuntimeGoalSourceExecutionProofV2) || r.ConsumptionPoint != RuntimeProofPhaseExecution || (r.Kind != RuntimeLineageCompletedWorkRounds && r.Kind != RuntimeLineageRepairThenFreshValidation)) {
-		return fmt.Errorf("cross-source execution assertion requires supported version and work/repair consumer")
+	if r.ExecutionSourceContractRef != "" && ((r.ExecutionSourceContractRef != RuntimeDoDSourceExecutionProof && r.ExecutionSourceContractRef != RuntimeGoalSourceExecutionProof) || r.ConsumptionPoint != RuntimeProofPhaseExecution || (r.Kind != RuntimeLineageCompletedWorkRounds && r.Kind != RuntimeLineageRepairThenFreshValidation)) {
+		return fmt.Errorf("cross-source execution assertion requires supported source kind and work/repair consumer")
 	}
 	if r.Ref == "" || strings.TrimSpace(r.Ref) != r.Ref || len(r.Ref) > 512 {
 		return fmt.Errorf("lineage assertion requires exact bounded rule ref")
@@ -123,12 +123,12 @@ func (r RuntimeLineageAssertionRule) Validate() error {
 	}
 	terminalMaterial := r.Kind == RuntimeLineageTerminalOwnerReceipt || r.Kind == RuntimeLineageTerminalResultIndex || r.Kind == RuntimeLineageTerminalOwnerSnapshot
 	if terminalMaterial {
-		version := RuntimeTerminalProofContractV1
+		contract := RuntimeTerminalReceiptProofContract
 		if r.Kind == RuntimeLineageTerminalOwnerSnapshot {
-			version = RuntimeTerminalProofContractV2
+			contract = RuntimeTerminalSnapshotProofContract
 		}
-		if r.TerminalContractRef != version || r.ConsumptionPoint != RuntimeProofPhasePostTerminalDelivery {
-			return fmt.Errorf("terminal material assertion requires exact versioned contract and post-terminal consumption")
+		if r.TerminalContractRef != contract || r.ConsumptionPoint != RuntimeProofPhasePostTerminalDelivery {
+			return fmt.Errorf("terminal material assertion requires exact proof-kind contract and post-terminal consumption")
 		}
 	} else if r.TerminalContractRef != "" || r.ReceiptSourceScope != "" || r.ReceiptSourceID != "" {
 		return fmt.Errorf("non-terminal-material assertion cannot carry terminal extensions")

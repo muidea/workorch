@@ -23,7 +23,7 @@ func TestDefinitionAuthoringViewSelectsCompletedRequestAfterFailedAttempt(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = record.CompleteDerivation(first.PermitID, nil, "provider_failed")
+	record, err = completeTestDerivation(record, first.PermitID, nil, "provider_failed")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestDefinitionAuthoringViewSelectsCompletedRequestAfterFailedAttempt(t *tes
 		t.Fatal(err)
 	}
 	acceptance := workspace.DefinitionDerivedAcceptance{AuthoringInputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"明确验收"}}
-	record, err = record.CompleteDerivation(second.PermitID, &acceptance, "")
+	record, err = completeTestDerivation(record, second.PermitID, &acceptance, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestDefinitionAuthoringViewKeepsFailureAndConfirmationVisible(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = record.CompleteDerivation(failed.PermitID, nil, "provider_failed")
+	record, err = completeTestDerivation(record, failed.PermitID, nil, "provider_failed")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,16 +84,16 @@ func TestDefinitionAuthoringViewExposesProposalFailureAndUnresolvedOutcome(t *te
 				t.Fatal(err)
 			}
 			acceptance := workspace.DefinitionDerivedAcceptance{AuthoringInputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"明确验收"}}
-			record, err = record.CompleteDerivation(derivation.PermitID, &acceptance, "")
+			record, err = completeTestDerivation(record, derivation.PermitID, &acceptance, "")
 			if err != nil {
 				t.Fatal(err)
 			}
-			record, proposal, _, err := record.ReserveSpecification(workspace.DefinitionAuthoringSpecificationRequest{RequestID: "proposal", DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
+			record, proposal, _, err := record.ReserveSpecification(workspace.DefinitionAuthoringSpecificationRequest{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal", DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
 			if err != nil {
 				t.Fatal(err)
 			}
 			if failure != "" {
-				record, err = record.CompleteSpecification(proposal.PermitID, nil, nil, failure)
+				record, err = completeTestSpecification(record, proposal.PermitID, nil, nil, failure)
 				if err != nil {
 					t.Fatal(err)
 				}

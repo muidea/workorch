@@ -53,40 +53,20 @@ func SemanticExpectedDocument(aggregate RuntimeAggregate) (runtimecontract.Runti
 			return runtimecontract.RuntimeExpectedDocumentContract{}, fmt.Errorf("%w: semantic expected document has no persisted active batch", common.ErrConflict)
 		}
 	}
-	expected.SemanticRenderContractRef = runtimecontract.RuntimeSemanticRenderContractV5
-
-	// Recovery and same-contract correction inherit the exact source request's
-	// renderer. A generation retirement has a different request key, so it may
-	// select the new version without changing any already-sealed session.
-	sourceRequestID := ""
-	if expected.CorrectionAttempt == 1 {
-		sourceLedger := ledger
-		sourceLedger.CorrectionDirective = nil
-		key, err := SemanticRequestIdentityHash(sourceLedger)
-		if err != nil {
-			return runtimecontract.RuntimeExpectedDocumentContract{}, err
-		}
-		sourceRequestID = runtimecontract.StableRuntimeCandidateRequestSessionID(runtimecontract.RuntimeProviderDocumentSemanticPlan, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.AuthorityTransaction(), ledger.StablePrefixHash, ledger.Manifest.Hash, key)
-	}
-	foundRenderer := false
-	for _, session := range aggregate.CandidateRequestSessions {
-		if session.LogicalRequestID != expected.LogicalRequestID && session.LogicalRequestID != sourceRequestID {
-			continue
-		}
-		if session.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan || session.Transaction != aggregate.Decision.AuthorityTransaction() || session.ManifestHash != ledger.Manifest.Hash {
-			return runtimecontract.RuntimeExpectedDocumentContract{}, fmt.Errorf("%w: semantic renderer lineage scope mismatch", common.ErrConflict)
-		}
-		ref := ""
-		if session.ExpectedDocument != nil {
-			ref = session.ExpectedDocument.SemanticRenderContractRef
-		}
-		if foundRenderer && ref != expected.SemanticRenderContractRef {
-			return runtimecontract.RuntimeExpectedDocumentContract{}, fmt.Errorf("%w: inconsistent semantic renderer lineage", common.ErrConflict)
-		}
-		expected.SemanticRenderContractRef, foundRenderer = ref, true
-	}
+	expected.SemanticContextEncoding = runtimecontract.RuntimeSemanticContextEncoding
 
 	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
+	for _, session := range aggregate.CandidateRequestSessions {
+		if session.LogicalRequestID != expected.LogicalRequestID {
+			continue
+		}
+		if session.DocumentKind != expected.DocumentKind ||
+			!runtimecontract.SameAuthorityContract(session.Transaction, aggregate.Decision.AuthorityTransaction()) ||
+			session.ManifestHash != expected.ManifestHash ||
+			!sameRuntimeExpectedDocument(session.ExpectedDocument, &expected) {
+			return runtimecontract.RuntimeExpectedDocumentContract{}, fmt.Errorf("%w: persisted semantic request differs from current intent", common.ErrConflict)
+		}
+	}
 	return expected, nil
 }
 

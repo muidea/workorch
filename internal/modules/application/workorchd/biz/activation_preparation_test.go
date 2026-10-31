@@ -23,8 +23,8 @@ func TestStartupPreparationApplicationExactReadAndDetachedProjection(t *testing.
 			reply := workspaceevents.QueryWorkspacePreparationStateResult{WorkspaceID: "ws", WorkspaceRevision: 2, ActiveRunID: "actual-run", State: "not_checked", CurrentValidity: "not_checked"}
 			if scenario == "unknown" || scenario == "unregistered" || scenario == "unbound_diagnostic" {
 				reply.State, reply.CurrentValidity = "unknown", "stale"
-				reply.Record = &workspace.WorkspacePreparationRecord{Version: workspace.WorkspacePreparationRecordVersion, WorkspaceID: "ws", Attempts: []workspace.WorkspacePreparationAttempt{{
-					RequestID: "original-request", PayloadHash: "payload", ExpectedWorkspaceRevision: 1, CommittedWorkspaceRevision: 2, State: workspace.WorkspacePreparationUnknown, StartedAt: time.Now().UTC(),
+				reply.Record = &workspace.WorkspacePreparationRecord{Version: workspace.WorkspacePreparationWorkflowVersion, WorkspaceID: "ws", Attempts: []workspace.WorkspacePreparationAttempt{{
+					CreationEpoch: strings.Repeat("a", 32), Checks: []workspace.WorkspacePreparationCheckResult{{ID: "exact_seal", Owner: "workspace", Required: true, State: "pending", Reason: "not_observed"}}, RequestID: "original-request", PayloadHash: "payload", ExpectedWorkspaceRevision: 1, CommittedWorkspaceRevision: 2, State: workspace.WorkspacePreparationUnknown, StartedAt: time.Now().UTC(),
 					Binding: workspace.WorkspacePreparationBinding{AuthoringRef: workspace.DefinitionAuthoringAdmissionRef{InputHash: "input", DerivationPermitID: "permit", ProposalHash: "proposal", SpecificationHash: "spec"}, CandidateID: "candidate", CandidateRevision: 1, CandidateHash: "candidate-hash", DefinitionRevision: "definition", StartupInputHash: "startup", AuthoringConfigurationHash: "config", SnapshotHash: "snapshot", ManifestHash: "manifest", CheckPolicyVersion: "policy", CompilerVersion: "compiler"},
 				}}}
 			}

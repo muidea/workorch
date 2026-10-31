@@ -188,7 +188,7 @@ func TestRuntimeCandidateReasoningOnlyOutputLimitPublishesSingleIncompleteDocume
 
 	request := runtimeSemanticProviderTestRequest(t)
 	request.SemanticContext.ProviderCeiling.ConfigurationRevision = TargetConfigurationRevision(configured, request.SemanticContext.ProviderCeiling.Selection.Target)
-	expected := runtimecontract.RuntimeExpectedDocumentContract{
+	expected := runtimecontract.RuntimeExpectedDocumentContract{SemanticContextEncoding: runtimecontract.RuntimeSemanticContextEncoding,
 		SchemaVersion:            runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:             request.DocumentKind,
 		PlanStep:                 request.SemanticContext.PlanStep,
@@ -308,7 +308,7 @@ func TestRuntimeCandidateReasoningOnlyCompletedPublishesSingleEmptyDocumentFact(
 
 	request := runtimeSemanticProviderTestRequest(t)
 	request.SemanticContext.ProviderCeiling.ConfigurationRevision = TargetConfigurationRevision(configured, request.SemanticContext.ProviderCeiling.Selection.Target)
-	expected := runtimecontract.RuntimeExpectedDocumentContract{
+	expected := runtimecontract.RuntimeExpectedDocumentContract{SemanticContextEncoding: runtimecontract.RuntimeSemanticContextEncoding,
 		SchemaVersion:            runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:             request.DocumentKind,
 		PlanStep:                 request.SemanticContext.PlanStep,

@@ -79,9 +79,9 @@ Web 只在页面内存保留原 payload 和恢复提示；未收到完整创建�
 `mergedRequiredConsumers` 独立列出完整合取约束及 consumer refs／合同版本／消费时点，不能因选择通配或精确引用
 而丢失另一适用声明的贡献。空选项不自动填充，编译冲突在 provider 调用前拒绝；proposal 与六审使用同一投影和
 解释合同，不产生 `DECLARED`、语义可验结论或运行 credit，保留完整 Profile 供语义核对。
-新事务封存 `workorch.authoring.owner-bound/v2` 与阶段 schema hash；模型仅返回闭合语义结果，owner 从原 permit
-绑定 input/template/resource 及 critic kind/proposal 身份。原始 document/wire 独立保留，不补写 hash。旧 v1 账本
-仍精确核对身份回显；版本、阶段或 scope 漂移拒绝，不 fallback、不重发原 permit。
+事务仅使用 `workorch.authoring.owner-bound` 与当前阶段 schema hash；模型仅返回闭合语义结果，owner 从原 permit
+绑定 input/template/resource 及 critic kind/proposal 身份。成功阶段必须保全原始 document/wire，不补写 hash。
+不接受旧回显格式或缺失审计的账本；合同、阶段或 scope 漂移拒绝，不迁移、不重发原 permit。
 
 系统配置读模型保留 persisted 默认选择，并通过既有 LLM typed active-configuration query 单独投影当前进程
 `llm.active` 目标。owner 观察不可用时留空并保持 restart-pending，不以 persisted 值冒充生效模型，不输出密钥。
@@ -149,9 +149,8 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
   inventory prerequisite 和 operation-admissibility prerequisite；不从未匹配策略或最终验证权限推导。
   Runtime 独立校验该投影的完整性；能力清单不是 CWI 工作 binding，也不扩大最终 proof。
 
-- builtin-defaults query 只汇总 Soul/Workspace 的 detached concrete result；单资源 upgrade 只向对应 owner 发出带
-  expected/target content hash 的 typed command。Application 不维护升级状态、不得用 query 结果代替 owner 写入时校验，
-  也不隐式刷新 Workspace binding/admission 或重启 Run。
+- 内置模板直接读取程序声明，Soul 由所属 owner 同步；无 catalog 历史版本查询、升级 API 或指纹登记表。
+  Application 不重写 Workspace admission、Run 封存输入或既有请求，不自动启动执行。
 - bootstrap compiler 无损封存 definition/profile、provider、Soul、Skill、MCP、Memory、evidence policy、budget 与 directory
   snapshot；Goal-only authoring 在 owner 创建／修订事务中物化完整 Template binding。其显式 Restart 通过 typed
   authoring 查询核对原确认、当前 Workspace revision、正式 Goal／DoD 和模板／Definition policy，复用 exact eligible candidate，
@@ -189,15 +188,14 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
   activity；effective progress 仅使用当前 Run 已被 Orchestrator 接受的 exact committed receipt（CWI proof 或 durable changed
   repair）及当前 Run accepted Result。activity age 用于心跳指标；局部有效进展不能覆盖 failed terminal。重复失败只来自
   当前 failure signature 的 owner count > 1 或正式 exhausted fact，不继承旧 projection 的 retry 标记。
-- 版本展示分为 builtin-defaults catalog current/target、Workspace admission 的 template revision/snapshot/input hash，以及
-  Run audit 的 sealed startup/profile hash 与 Soul stage/id/revision/content hash/provenance。展示不实时读取 catalog 替换
-  Run snapshot，不泄漏 sealed guidance；这些 detached metadata 不能反向构造 Workspace admission 或 Runtime authority。
+- Workspace admission 保留精确 template snapshot/input hash，Run audit 保留原 startup/profile hash 与
+  Soul 内容身份。此类一致性及来源证据不选择历史软件版本，不反向构造准入或 Runtime authority。
 - Artifact、Step、ToolCall 和 RuntimeCheckpoint 内容只经其 owner 的 bounded typed read；禁止以 `dataRoot/backend`、
   `os.ReadFile` 或 raw-file fallback 绕过 owner。
 
 ### 前置准备诊断与正式进度
 
-创建期 proposal／review 分别使用完整、版本化的 closed JSON Schema，稳定合同与准确字段说明位于 C0，当前身份、资源及候选项位于动态输入。Application 显式标记 schema 正文，通过既有 typed provider command 传递；schema ID 不能冒充可执行输出合同。结构约束不能替代 strict decoder、资源／来源／Profile 反证、六审查或用户确认，非法 provider 字段不做容错映射。
+创建期 proposal／review 分别使用唯一当前 closed JSON Schema，稳定合同与准确字段说明位于 C0，当前身份、资源及候选项位于动态输入。Application 显式标记 schema 正文，通过既有 typed provider command 传递；schema ID 不能冒充可执行输出合同。结构约束不能替代 strict decoder、资源／来源／Profile 反证、六审查或用户确认，非法 provider 字段不做容错映射。
 
 已持久失败的同输入 compile 只返回原失败；部署新 renderer 不授予新 permit，也不迁移旧 ledger。真实修订仍受 owner CAS、累计预算和原诊断保留约束；只修代码后的新验证须由用户显式创建新事务。
 

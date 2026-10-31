@@ -215,7 +215,7 @@ func TestDefinitionChangePreparationRejectsUnsettledOriginalPermit(t *testing.T)
 	if !reflect.DeepEqual(w.DefinitionAuthoring, &record) {
 		t.Fatal("拒绝准备改写原 unknown 或预算")
 	}
-	settled, err := record.CompleteDerivation(request.PermitID, nil, "provider_failed", nil)
+	settled, err := completeTestDerivation(record, request.PermitID, nil, "provider_failed", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

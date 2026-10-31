@@ -619,7 +619,7 @@
             {
               "id": "source_change",
               "required": true,
-              "requiredEvidencePurposeContractRef": "runtime/profile-deliverable-evidence-purpose/v2",
+              "requiredEvidencePurposeContractRef": "runtime/profile-deliverable-evidence-purpose",
               "evidenceRole": "primary_state_change",
               "description": "Source, configuration, documentation, or workspace state change directly related to Goal"
             },
@@ -1018,7 +1018,6 @@
                 ],
                 "maxRoundsPerCWI": 8,
                 "inputRevisionProtocolRef": "validation/input-revision/v1",
-                "progressProtocolRef": "implementation-work-progress/v1",
                 "maxTargetsPerRound": 4,
                 "requireFreshObservation": true,
                 "requireFreshValidation": true,
@@ -1272,7 +1271,7 @@
                 "ref": "template-minimal-change-owner-receipt",
                 "kind": "terminal_owner_operation_receipt",
                 "consumptionPoint": "post_terminal_delivery",
-                "terminalContractRef": "runtime/terminal-material-proof/v1",
+                "terminalContractRef": "runtime/terminal-receipt-proof",
                 "receiptSourceScope": "deliverable",
                 "receiptSourceId": "source_change",
                 "ownerModuleId": "blocks/file",
@@ -1308,7 +1307,7 @@
                 "ref": "template-final-git-snapshot",
                 "kind": "terminal_owner_snapshot",
                 "consumptionPoint": "post_terminal_delivery",
-                "terminalContractRef": "runtime/terminal-material-proof/v2",
+                "terminalContractRef": "runtime/terminal-snapshot-proof",
                 "receiptSourceScope": "deliverable",
                 "receiptSourceId": "version_control_snapshot",
                 "validationSourceScope": "deliverable",
@@ -1329,7 +1328,7 @@
                 "ref": "template-final-result-evidence-index",
                 "kind": "terminal_result_evidence_index",
                 "consumptionPoint": "post_terminal_delivery",
-                "terminalContractRef": "runtime/terminal-material-proof/v1"
+                "terminalContractRef": "runtime/terminal-receipt-proof"
               }
             ]
           }
@@ -1342,8 +1341,8 @@
         "profile": "software-dev",
         "rule": "software_dev_test_zero_work_is_inconclusive",
         "appliesTo": "shell/command",
-        "recipeAdapterRef": "shell/project-native-validation/v8",
-        "recipeInputReviewProtocolRef": "validation/input-consistency/v3",
+        "recipeAdapterRef": "shell/project-multi-failure-validation",
+        "recipeInputReviewProtocolRef": "validation/input-consistency",
         "recipeDeclared": true,
         "recipeTimeoutMillis": 60000,
         "zeroWorkMarkers": [

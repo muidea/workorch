@@ -29,7 +29,6 @@ type lifecycleInternalEvent struct {
 // needed to resolve a clarification binding. It carries no target ticket
 // state; binding progress and open->resolved are committed together below.
 type definitionClarificationResolutionFact struct {
-	RequestContractRepairHash   string
 	ResolutionID                common.ResolutionID
 	ResolutionBindingHash       string
 	ResolutionCandidateID       string
@@ -246,7 +245,7 @@ func reduceDecisionLifecycle(current *decisionModel.Ticket, event lifecycleInter
 }
 
 func definitionClarificationBindingHasResolution(binding *decisionModel.DefinitionClarificationBinding) bool {
-	return binding != nil && (binding.RequestContractRepairHash != "" || binding.ResolutionID != "" || strings.TrimSpace(binding.ResolutionBindingHash) != "" ||
+	return binding != nil && (binding.ResolutionID != "" || strings.TrimSpace(binding.ResolutionBindingHash) != "" ||
 		strings.TrimSpace(binding.ResolutionCandidateID) != "" || binding.ResolutionCandidateRevision != 0 ||
 		strings.TrimSpace(binding.ResolutionCandidateHash) != "" || strings.TrimSpace(binding.AdmissionResultHash) != "" ||
 		strings.TrimSpace(binding.ReplacementIntentID) != "" || strings.TrimSpace(binding.ReplacementIntentHash) != "" ||
@@ -262,9 +261,7 @@ func reduceDefinitionClarificationResolution(current *decisionModel.DefinitionCl
 	next.ResolutionBindingHash = strings.TrimSpace(fact.ResolutionBindingHash)
 	switch current.Class {
 	case decisionModel.DefinitionClarificationWorkspacePreSeal:
-		if fact.RequestContractRepairHash != "" {
-			return nil, common.ErrInvalidArgument
-		}
+
 		if fact.ReplacementIntentID != "" || fact.ReplacementIntentHash != "" || fact.SuccessorDefinitionRevision != "" || fact.SuccessorStartupInputHash != "" ||
 			((fact.DefinitionRevision == "") != (fact.StartupInputHash == "")) {
 			return nil, common.ErrInvalidArgument
@@ -287,13 +284,7 @@ func reduceDefinitionClarificationResolution(current *decisionModel.DefinitionCl
 		next.DefinitionRevision = strings.TrimSpace(fact.DefinitionRevision)
 		next.StartupInputHash = strings.TrimSpace(fact.StartupInputHash)
 	case decisionModel.DefinitionClarificationRuntime:
-		if fact.RequestContractRepairHash != "" {
-			if fact.ReplacementIntentID != "" || fact.ReplacementIntentHash != "" || fact.SuccessorDefinitionRevision != "" || fact.SuccessorStartupInputHash != "" || fact.DefinitionRevision != "" || fact.StartupInputHash != "" || fact.ResolutionCandidateID != "" || fact.ResolutionCandidateRevision != 0 || fact.ResolutionCandidateHash != "" || fact.AdmissionResultHash != "" {
-				return nil, common.ErrInvalidArgument
-			}
-			next.RequestContractRepairHash = fact.RequestContractRepairHash
-			return next, nil
-		}
+
 		if strings.TrimSpace(fact.ReplacementIntentID) == "" || strings.TrimSpace(fact.ReplacementIntentHash) == "" || strings.TrimSpace(fact.SuccessorDefinitionRevision) == "" || strings.TrimSpace(fact.SuccessorStartupInputHash) == "" || fact.DefinitionRevision != "" || fact.StartupInputHash != "" {
 			return nil, common.ErrInvalidArgument
 		}

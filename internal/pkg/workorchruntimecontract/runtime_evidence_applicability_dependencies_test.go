@@ -11,7 +11,7 @@ func TestRuntimeEvidenceDependencyPairPreservesIndependentSnapshotsAndIdentity(t
 	current := *CloneRuntimeOwnerRevisionSet(&reads)
 	current.Entries[0].Revision = "actually-observed-postcondition"
 	current = current.WithHash()
-	proof := &RuntimeEvidenceApplicabilityDependencies{ProtocolRef: RuntimeEvidenceApplicabilityDependenciesV1, OwnerRevisionSet: current}
+	proof := &RuntimeEvidenceApplicabilityDependencies{ProtocolRef: RuntimeEvidenceApplicabilityDependenciesProtocol, OwnerRevisionSet: current}
 	receipt := runtimeOperationReceiptLineageFixture("exec/ws/run/dispatch/op-1", 1, "op-1")
 	receipt.Evidence.OwnerRevisionSet = CloneRuntimeOwnerRevisionSet(&reads)
 	legacyHash := StableRuntimeOperationReceiptHash(receipt)

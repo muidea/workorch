@@ -56,21 +56,7 @@ def prompt_payload(text):
     value, section = authoring_prompt_payloads(text)
     if section is not None:
         return value
-    # Keep historical scalar fixtures readable without accepting ambiguous JSON.
-    text = responses_prompt_text(text)
-    matches = []
-    decoder = json.JSONDecoder()
-    for index, char in enumerate(text):
-        if char != '{':
-            continue
-        try:
-            candidate, _ = decoder.raw_decode(text[index:])
-        except ValueError:
-            continue
-        if isinstance(candidate, dict) and ('outputShape' in candidate or 'candidateAcceptance' in candidate):
-            matches.append(candidate)
-    require(len(matches) == 1, "fixture requires exactly one complete prompt payload")
-    return matches[0]
+    raise RuntimeError("fixture requires current sectioned authoring payload")
 
 
 class Fixture:
@@ -124,15 +110,14 @@ class Fixture:
                         previous = fixture.reviews.setdefault(payload["proposalHash"], proposal)
                         require(proposal == previous, "critics received different proposals")
                         result = {"review": {"Kind": payload["kind"], "Status": "PASS", "SpecificationHash": payload["proposalHash"], "Reason": "逐条对照固定源承诺，exact Goal、required 与 all_of 原文及声明绑定保留；这是确定性 fixture，不代替人工语义评审。", "EvidenceRefs": [payload["goal"]["CandidateItemRef"]], "RequirementIDs": payload["requiredRequirementIDs"]}}
-                    if payload.get("wireContractRef") == "workorch.authoring.owner-bound/v2":
-                        if kind == "derive":
-                            result = {"AdditionalItems": result["AdditionalItems"]}
-                        elif kind == "proposal":
-                            for field in ("Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash"):
-                                del result["mapping"][field]
-                        else:
-                            del result["review"]["Kind"]
-                            del result["review"]["SpecificationHash"]
+                    if kind == "derive":
+                        result = {"AdditionalItems": result["AdditionalItems"]}
+                    elif kind == "proposal":
+                        for field in ("Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash"):
+                            del result["mapping"][field]
+                    else:
+                        del result["review"]["Kind"]
+                        del result["review"]["SpecificationHash"]
                     fixture.calls.append(kind)
                     wire = ("data: " + json.dumps({"type": "response.completed", "response": {"status": "completed", "output_text": json.dumps(result, ensure_ascii=False), "usage": {"input_tokens": 128, "output_tokens": 128, "total_tokens": 256}}}, ensure_ascii=False) + "\n\n").encode()
                     (fixture.root / f"provider-{number:02d}-response.bin").write_bytes(wire)
@@ -201,7 +186,7 @@ def validate_owner_bound_ledger(record):
     derives, requests = ledger['DerivationRequests'], ledger['SpecificationRequests']
     require(len(derives) == 1 and len(requests) == 7, 'unexpected provider ledger cardinality')
     for request in [*derives, *requests]:
-        require(request['WireContractRef'] == 'workorch.authoring.owner-bound/v2' and
+        require(request['WireContractRef'] == 'workorch.authoring.owner-bound' and
                 request['WireContractHash'].startswith('authoring-wire-sha256:'), 'wire identity not sealed')
         audit = request.get('ReviewAudit') or request.get('SuccessAudit')
         require(audit is not None, 'successful transaction lost original document')

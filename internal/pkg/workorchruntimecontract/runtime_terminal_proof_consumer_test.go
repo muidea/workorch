@@ -22,7 +22,7 @@ func terminalIndexProofFixture(t *testing.T) (RuntimeStateRecord, RuntimeTermina
 	coverage.SourceScope, coverage.SourceID, coverage.TargetText = "dodItem", "original-dod", "完整原验收判据"
 	item := RuntimeCoverageItem{ID: coverage.ID, SourceScope: coverage.SourceScope, SourceID: coverage.SourceID, TargetText: coverage.TargetText}
 	source.Facts.DefinitionSeed.CoverageItems = []RuntimeCoverageItem{item}
-	rule := RuntimeLineageAssertionRule{Ref: "formal-index", Kind: RuntimeLineageTerminalResultIndex, ConsumptionPoint: RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: RuntimeTerminalProofContractV1}
+	rule := RuntimeLineageAssertionRule{Ref: "formal-index", Kind: RuntimeLineageTerminalResultIndex, ConsumptionPoint: RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: RuntimeTerminalReceiptProofContract}
 	source.Facts.Activation.ExecutionContract.ProfileContracts = []RuntimeProfileContract{{ID: "original-profile", EvidenceRequirements: []RuntimeProfileEvidenceRequirement{{ID: item.SourceID, Scope: item.SourceScope, RequiredEvidenceKinds: []string{EvidenceKindValidation}, LineageAssertions: []RuntimeLineageAssertionRule{rule}}}}}
 	source.Decision.State = ConvergenceStateComplete
 	material, err := DeriveRuntimeTerminalResultMaterialFromState(source)
@@ -36,8 +36,8 @@ func terminalIndexProofFixture(t *testing.T) (RuntimeStateRecord, RuntimeTermina
 }
 
 func TestRuntimeTerminalProofRuleVersionedClosedUnionAndIdentity(t *testing.T) {
-	index := RuntimeLineageAssertionRule{Ref: "index", Kind: RuntimeLineageTerminalResultIndex, ConsumptionPoint: RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: RuntimeTerminalProofContractV1}
-	receipt := RuntimeLineageAssertionRule{Ref: "receipt", Kind: RuntimeLineageTerminalOwnerReceipt, ConsumptionPoint: RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: RuntimeTerminalProofContractV1, ReceiptSourceScope: "deliverable", ReceiptSourceID: "final-material", OwnerModuleID: RuntimeModuleFile, OperationKind: RuntimeBlockKindPatchApply, OperationVariantID: "file_write", RequiredEffectScope: RuntimeEffectWorkspaceDurable}
+	index := RuntimeLineageAssertionRule{Ref: "index", Kind: RuntimeLineageTerminalResultIndex, ConsumptionPoint: RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: RuntimeTerminalReceiptProofContract}
+	receipt := RuntimeLineageAssertionRule{Ref: "receipt", Kind: RuntimeLineageTerminalOwnerReceipt, ConsumptionPoint: RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: RuntimeTerminalReceiptProofContract, ReceiptSourceScope: "deliverable", ReceiptSourceID: "final-material", OwnerModuleID: RuntimeModuleFile, OperationKind: RuntimeBlockKindPatchApply, OperationVariantID: "file_write", RequiredEffectScope: RuntimeEffectWorkspaceDurable}
 	for _, rule := range []RuntimeLineageAssertionRule{index, receipt} {
 		if err := rule.Validate(); err != nil {
 			t.Fatal(err)
@@ -81,7 +81,7 @@ func TestRuntimeTerminalProofRuleVersionedClosedUnionAndIdentity(t *testing.T) {
 	if string(body) != `{"Ref":"delivery","Kind":"delivery_acknowledgements","ConsumptionPoint":"post_terminal_delivery"}` {
 		t.Fatal("absent terminal extension changed old rule encoding")
 	}
-	legacy.TerminalContractRef = RuntimeTerminalProofContractV1
+	legacy.TerminalContractRef = RuntimeTerminalReceiptProofContract
 	if legacy.Validate() == nil {
 		t.Fatal("legacy ACK rule accepted material-extension laundering")
 	}
@@ -172,7 +172,7 @@ func TestRuntimeTerminalResultIndexOriginalProofAndDetachedReload(t *testing.T) 
 }
 
 func TestRuntimeTerminalProofSelectorsRequireOriginalInventoryBeforeExecution(t *testing.T) {
-	_, binding := lineageSourceFixture(t, RuntimeLineageAssertionRule{Ref: "receipt", Kind: RuntimeLineageTerminalOwnerReceipt, ConsumptionPoint: RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: RuntimeTerminalProofContractV1, ReceiptSourceScope: "deliverable", ReceiptSourceID: "snapshot", OwnerModuleID: RuntimeModuleFile, OperationKind: RuntimeBlockKindPatchApply, OperationVariantID: "file_write", RequiredEffectScope: RuntimeEffectWorkspaceDurable})
+	_, binding := lineageSourceFixture(t, RuntimeLineageAssertionRule{Ref: "receipt", Kind: RuntimeLineageTerminalOwnerReceipt, ConsumptionPoint: RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: RuntimeTerminalReceiptProofContract, ReceiptSourceScope: "deliverable", ReceiptSourceID: "snapshot", OwnerModuleID: RuntimeModuleFile, OperationKind: RuntimeBlockKindPatchApply, OperationVariantID: "file_write", RequiredEffectScope: RuntimeEffectWorkspaceDurable})
 	profiles := []RuntimeProfileContract{{ID: "profile", EvidenceRequirements: []RuntimeProfileEvidenceRequirement{{LineageAssertions: []RuntimeLineageAssertionRule{binding.LineageAssertions[0].Rule}}}}}
 	item := RuntimeCoverageItem{ID: common.CoverageWorkItemID("snapshot-cwi"), SourceScope: "deliverable", SourceID: "snapshot", TargetText: "完整原交付准则"}
 	if err := ValidateRuntimeTerminalProofDeclarationSources([]RuntimeCoverageItem{item}, profiles); err != nil {

@@ -54,7 +54,7 @@ func historicalAuditCandidateFixture(t *testing.T, window string) (RuntimeAggreg
 	post.Entries[0].ResourceKind, post.Entries[0].Revision, post.Entries[0].DependencyHash = "workspace_target_content", receipt.AfterHash, "original-postimage"
 	post = post.WithHash()
 	receipt.Evidence.OwnerRevisionSet = &reads
-	receipt.Evidence.ApplicabilityDependencies = &runtimecontract.RuntimeEvidenceApplicabilityDependencies{ProtocolRef: runtimecontract.RuntimeEvidenceApplicabilityDependenciesV2, OwnerRevisionSet: post,
+	receipt.Evidence.ApplicabilityDependencies = &runtimecontract.RuntimeEvidenceApplicabilityDependencies{ProtocolRef: runtimecontract.RuntimeEvidenceApplicabilityDependenciesProtocol, OwnerRevisionSet: post,
 		PurposeRef: runtimecontract.RuntimeHistoricalEffectProofV1, OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileWrite, OwnerContractRef: runtimecontract.RuntimeFileHistoricalEffectProofV1}
 	committed := lineageReceiptObserve(t, controller, claimed, receipt)
 	evidence := lineageReceiptEvidence(t, committed, receipt)

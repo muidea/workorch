@@ -24,7 +24,7 @@ func TestInputReviewTerminalEncodingPreservesOriginalControlBytes(t *testing.T) 
 
 func TestInspectAcceptancePreservesCompleteInputReviewAndDoesNotChooseActions(t *testing.T) {
 	diagnostic := &runtimecontract.RuntimeOriginalDiagnostic{OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator, OriginalCode: "validation_input_review_coverage_incomplete", ValidationInputReviews: []runtimecontract.RuntimeValidationInputReviewFeedback{{
-		ReviewRef: "review-1", ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV2, CoverageWorkItemID: "cwi-1", RequirementHash: "original-requirement", ReportHash: "original-report", Redacted: true,
+		ReviewRef: "review-1", ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, CoverageWorkItemID: "cwi-1", RequirementHash: "original-requirement", ReportHash: "original-report", Redacted: true,
 		Report: runtimecontract.RuntimeValidationInputReview{SubjectHash: "exact-input", Checks: []runtimecontract.RuntimeValidationInputCheckReview{{
 			RequiredCheckRef: "original-check", Conclusion: runtimecontract.RuntimeValidationInputConflict, Reason: strings.Repeat("complete diagnostic ", 20) + "final detail", InputTargetRefs: []string{"checks/input"},
 			Obligations: []runtimecontract.RuntimeValidationInputObligationReview{{CriterionText: "document tools", Finding: runtimecontract.RuntimeValidationInputMissing, Reason: "no documentation assertion", InputTargetRefs: []string{"checks/input"}}},

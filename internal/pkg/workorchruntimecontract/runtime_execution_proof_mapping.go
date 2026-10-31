@@ -44,7 +44,7 @@ func ValidateRuntimeExecutionProofMappings(inventory RuntimeSourceObligationInve
 			return fmt.Errorf("execution proof mapping has invalid/ambiguous original source identity")
 		}
 		seen[key] = true
-		if mapping.ContractRef == RuntimeGoalSourceExecutionProofV2 {
+		if mapping.ContractRef == RuntimeGoalSourceExecutionProof {
 			if prior := goalSources[mapping.ConsumerItemRef]; prior != "" && prior != mapping.SourceItemRef {
 				return fmt.Errorf("Goal rules require one unique original execution source")
 			}
@@ -74,7 +74,7 @@ func ValidateRuntimeExecutionProofMappings(inventory RuntimeSourceObligationInve
 			matches := 0
 			for index, mapping := range inventory.ExecutionProofMappings {
 				if mapping.ConsumerItemRef == consumer.CandidateItemRef && mapping.RuleRef == rule.Ref && mapping.ContractRef == rule.ExecutionSourceContractRef {
-					if mapping.ContractRef == RuntimeGoalSourceExecutionProofV2 {
+					if mapping.ContractRef == RuntimeGoalSourceExecutionProof {
 						var source RuntimeDefinitionSource
 						for _, value := range inventory.Sources {
 							if value.CandidateItemRef == mapping.SourceItemRef {
@@ -134,7 +134,7 @@ func CompileRuntimeExecutionProofMappingCoverage(inventory RuntimeSourceObligati
 			return index, nil
 		}
 		consumer, err := resolve(mapping.ConsumerItemRef)
-		if mapping.ContractRef == RuntimeGoalSourceExecutionProofV2 {
+		if mapping.ContractRef == RuntimeGoalSourceExecutionProof {
 			// Goal has no independent work CWI. Its guard is consumed with the
 			// mapped source's ordinary acceptance, not a fabricated predecessor.
 			if _, err := resolve(mapping.SourceItemRef); err != nil {
@@ -192,7 +192,7 @@ func runtimeExecutionProofSourceBindingInSession(assertion RuntimeLineageAsserti
 		return CoverageEvidenceBinding{}, fmt.Errorf("execution proof lacks unique confirmed original source binding")
 	}
 	inventory := sources.Definition.SourceObligations
-	if (assertion.Rule.ExecutionSourceContractRef != RuntimeCrossSourceExecutionProofV1 && assertion.Rule.ExecutionSourceContractRef != RuntimeGoalSourceExecutionProofV2) || inventory == nil || inventory.Validate() != nil ||
+	if (assertion.Rule.ExecutionSourceContractRef != RuntimeDoDSourceExecutionProof && assertion.Rule.ExecutionSourceContractRef != RuntimeGoalSourceExecutionProof) || inventory == nil || inventory.Validate() != nil ||
 		inventory.StartupInputHash != sources.Definition.StartupInputHash || inventory.DefinitionRevision != sources.Definition.Revision ||
 		!SameRuntimeSourceObligationInventory(inventory, sources.Facts.DefinitionSeed.SourceObligations) ||
 		ValidateRuntimeExecutionProofMappings(*inventory, sources.Facts.Activation.ExecutionContract.ProfileContracts) != nil {
@@ -201,7 +201,7 @@ func runtimeExecutionProofSourceBindingInSession(assertion RuntimeLineageAsserti
 	consumerRef, consumers := "", 0
 	for _, source := range inventory.Sources {
 		text := strings.TrimSpace(source.Text)
-		if assertion.Rule.ExecutionSourceContractRef == RuntimeGoalSourceExecutionProofV2 {
+		if assertion.Rule.ExecutionSourceContractRef == RuntimeGoalSourceExecutionProof {
 			text = source.Text
 		}
 		if source.SourceScope == assertion.SourceScope && source.SourceID == assertion.SourceID && RuntimeLineageSourceTextHash(text) == assertion.SourceTextHash {
@@ -237,7 +237,7 @@ func runtimeExecutionProofSourceBindingInSession(assertion RuntimeLineageAsserti
 			item, items = candidate, items+1
 		}
 	}
-	goalConsumer := assertion.Rule.ExecutionSourceContractRef == RuntimeGoalSourceExecutionProofV2
+	goalConsumer := assertion.Rule.ExecutionSourceContractRef == RuntimeGoalSourceExecutionProof
 	if items != 1 || (!goalConsumer && item.ID == assertion.CoverageWorkItemID) || (goalConsumer && item.ID != assertion.CoverageWorkItemID) {
 		return invalid()
 	}

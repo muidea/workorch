@@ -21,7 +21,7 @@ func preparationOperationHTTPFixture(id string, request management.PreparationCh
 	}
 	return management.PreparationOperationView{RequestID: request.RequestID, Preparation: management.StartupPreparationView{
 		WorkspaceID: id, WorkspaceRevision: request.ExpectedWorkspaceRevision + 2, OperationState: state, CurrentValidity: "not_evaluated",
-		Record: &management.PreparationRecordView{Version: "workorch-preparation-record/v2", Attempts: []management.PreparationAttemptView{{
+		Record: &management.PreparationRecordView{Version: "workorch-preparation-record", Attempts: []management.PreparationAttemptView{{
 			RequestID: request.RequestID, PayloadHash: "payload", ExpectedWorkspaceRevision: request.ExpectedWorkspaceRevision, CommittedWorkspaceRevision: request.ExpectedWorkspaceRevision + 2,
 			StartedAt: at, CompletedAt: completed, State: state, CreationEpoch: strings.Repeat("a", 32),
 			Binding: management.PreparationBindingView{InputHash: "input", DerivationPermitID: "permit", ProposalHash: "proposal", SpecificationHash: "spec", CandidateID: "candidate", CandidateRevision: 1, CandidateHash: "candidate-hash", DefinitionRevision: "definition", StartupInputHash: "startup", AuthoringConfigurationHash: "config", SnapshotHash: "snapshot", ManifestHash: "manifest", CheckPolicyVersion: "policy", CompilerVersion: "compiler"},

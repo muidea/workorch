@@ -78,7 +78,7 @@ type RuntimeEvidenceApplicabilityRequest struct {
 	// receipt advanced EvidenceRevision. This is a read fence, not semantics.
 	ReconciliationRequestHash string `json:",omitempty"`
 	// Exact original receipt purpose, never a caller-selected sampling mode.
-	// Empty preserves all legacy current-resource request identities.
+	// Empty means this request concerns a current resource rather than a historical source.
 	PurposeRef string `json:",omitempty"`
 }
 
@@ -228,9 +228,9 @@ func RuntimeEvidenceHasStaleApplicability(fact EvidenceFact, observations []Runt
 	return false
 }
 
-// Versioned evidence cannot be consumed as current proof without an actual,
-// matching SM-2 owner observation. Legacy receipts retain their existing
-// semantics; nil never fabricates an observation for versioned receipts.
+// Evidence with resource dependencies requires an actual matching SM-2 owner
+// observation. Dependency-free evidence has no resource to reobserve; nil
+// never fabricates an observation for dependent evidence.
 func RuntimeEvidenceHasObservedCurrentApplicability(fact EvidenceFact, observations []RuntimeEvidenceApplicabilityObservation, cutoff string) bool {
 	if fact.ApplicabilityDependencies == nil {
 		return true

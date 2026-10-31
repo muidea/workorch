@@ -69,8 +69,6 @@ func applicationOperationsFromPorts(ports ApplicationPorts) applicationOperation
 			batchResolveApprovals: ports.Governance.BatchResolveApprovals,
 		},
 		registryOperations: registryOperations{
-			listBuiltinDefaults:     ports.Registry.ListBuiltinDefaults,
-			upgradeBuiltinDefault:   ports.Registry.UpgradeBuiltinDefault,
 			createSoul:              ports.Registry.CreateSoul,
 			updateSoul:              ports.Registry.UpdateSoul,
 			deleteSoul:              ports.Registry.DeleteSoul,

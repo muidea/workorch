@@ -12,7 +12,7 @@ import (
 
 func TestRuntimeReviewedInputSnapshotSourcesOwnerMainlineAndRestart(t *testing.T) {
 	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterConjunctiveEntrypoint, ValidationCount: 1,
-		ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV2, SourceObligations: true, SnapshotInputSources: true}
+		ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, SourceObligations: true, SnapshotInputSources: true}
 	baseline := runValidationInputReviewMainline(t, "consistent", "", options)
 	for _, cut := range []string{"after_review_binding", "after_result_persistence"} {
 		t.Run(cut, func(t *testing.T) {

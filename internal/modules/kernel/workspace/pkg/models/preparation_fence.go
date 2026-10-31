@@ -76,7 +76,7 @@ func (r WorkspaceFreshIntentReservation) Validate() error {
 
 func (f *WorkspacePreparationFence) Validate(workspaceID common.WorkspaceID) error {
 	if f == nil {
-		return nil // explicitly legacy, never evidence for first M3
+		return nil // absent coordination is never evidence for first M3
 	}
 	if f.Version != WorkspacePreparationFenceVersion || workspaceID == "" || f.WorkspaceID != workspaceID || !preparationFenceHex(f.CreationEpoch, 16) {
 		return fmt.Errorf("%w: invalid preparation creation fence", common.ErrInvalidArgument)
@@ -137,7 +137,7 @@ func ValidatePreparationFenceTransition(current, next *Workspace) error {
 		}
 	}
 	if before == nil {
-		if after != nil { // cannot silently migrate legacy to first-M3 eligible
+		if after != nil { // updates cannot invent a creation epoch
 			return common.ErrConflict
 		}
 		return nil

@@ -51,8 +51,7 @@ func runtimeInternalFactPayloadClass(kind RuntimeInternalEventKind) (runtimeInte
 		RuntimeInternalEventGovernanceRequestObserved,
 		RuntimeInternalEventValidationFailureObserved,
 		RuntimeInternalEventRepairSurfaceConfirmationObserved,
-		RuntimeInternalEventSemanticRequestRepairPrepared,
-		RuntimeInternalEventSemanticRequestRepairResolved,
+
 		RuntimeInternalEventDefinitionGapObserved:
 		return runtimeInternalEventPayloadAuthority, true
 
@@ -148,9 +147,7 @@ func (event RuntimeInternalEvent) validateEnvelope() error {
 	if !matched {
 		return fmt.Errorf("%w: runtime internal event %q requires %s payload", common.ErrInvalidArgument, event.Kind, expected)
 	}
-	if err := event.validateSemanticRequestRepairEnvelope(); err != nil {
-		return err
-	}
+
 	if err := event.validateTerminalMaterialSealEnvelope(); err != nil {
 		return err
 	}
@@ -423,8 +420,7 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		RuntimeInternalEventOperationEvidenceObserved,
 		RuntimeInternalEventOperationPrerequisiteStaleObserved,
 		RuntimeInternalEventOperationGovernanceRequiredObserved,
-		RuntimeInternalEventSemanticRequestRepairPrepared,
-		RuntimeInternalEventSemanticRequestRepairResolved,
+
 		RuntimeInternalEventDefinitionGapObserved:
 		metadata.StateMachine = eventcontract.StateMachineSM2
 
@@ -523,8 +519,7 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		RuntimeInternalEventRepairSurfaceConfirmationObserved,
 		RuntimeInternalEventTerminalDeliveryAcknowledged,
 		RuntimeInternalEventDefinitionGapObserved,
-		RuntimeInternalEventDefinitionClarificationRequestObserved,
-		RuntimeInternalEventSemanticRequestRepairResolved:
+		RuntimeInternalEventDefinitionClarificationRequestObserved:
 		metadata.SourcePolicy = eventcontract.SourcePolicyOwnerFact
 		metadata.CanonicalFeedback = true
 	}
@@ -549,36 +544,4 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 	}
 
 	return metadata, true
-}
-
-func (e RuntimeInternalEvent) validateSemanticRequestRepairEnvelope() error {
-	if e.Authority == nil {
-		return nil
-	}
-	p := *e.Authority
-	proof, resolution, lease := p.RequestContractRepairProof, p.RequestContractRepairResolution, p.RequestContractRepairDriveLease
-	p.RequestContractRepairProof, p.RequestContractRepairResolution, p.RequestContractRepairDriveLease = nil, nil, nil
-	switch e.Kind {
-	case RuntimeInternalEventSemanticRequestRepairPrepared, RuntimeInternalEventSemanticRequestRepairResolved:
-		if !reflect.DeepEqual(p, RuntimeInternalAuthorityPayload{}) || proof == nil || (e.Kind == RuntimeInternalEventSemanticRequestRepairResolved) != (resolution != nil) || (resolution != nil) != (lease != nil) {
-			return common.ErrInvalidArgument
-		}
-		if err := proof.Validate(); err != nil {
-			return err
-		}
-		if proof.Manifest.WorkspaceID != e.Scope.WorkspaceID || proof.Manifest.RunID != e.Scope.RunID {
-			return common.ErrConflict
-		}
-		if resolution != nil {
-			if err := resolution.ValidateFor(*proof); err != nil {
-				return err
-			}
-			return validateSemanticRequestRepairLease(*proof, *resolution, lease)
-		}
-	default:
-		if proof != nil || resolution != nil || lease != nil {
-			return common.ErrInvalidArgument
-		}
-	}
-	return nil
 }

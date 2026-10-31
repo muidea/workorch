@@ -113,8 +113,7 @@ func (m *Biz) Start() error {
 			handler = m.handleQueryWorkspaceDefinitionClarificationFact
 		case decisionevents.TopicOpenRuntimeDefinitionClarification:
 			handler = m.handleOpenRuntimeDefinitionClarification
-		case decisionevents.TopicRepairRuntimeDefinitionClarificationRequestContract:
-			handler = m.handleRepairRuntimeDefinitionClarificationRequestContract
+
 		case decisionevents.TopicResolveRuntimeDefinitionClarificationByReplacement:
 			handler = m.handleResolveRuntimeDefinitionClarification
 		}
@@ -163,8 +162,7 @@ func decisionDrainTopic(topic string) bool {
 	switch topic {
 	case decisionevents.TopicQueryWorkspaceDefinitionClarificationFact,
 		decisionevents.TopicResolveWorkspaceDefinitionClarificationByAdmission,
-		decisionevents.TopicResolveRuntimeDefinitionClarificationByReplacement,
-		decisionevents.TopicRepairRuntimeDefinitionClarificationRequestContract:
+		decisionevents.TopicResolveRuntimeDefinitionClarificationByReplacement:
 		return true
 	default:
 		return false

@@ -8,8 +8,8 @@ import (
 )
 
 func preparationRecordFixture() WorkspacePreparationRecord {
-	return WorkspacePreparationRecord{Version: WorkspacePreparationRecordVersion, WorkspaceID: "ws", Attempts: []WorkspacePreparationAttempt{{
-		RequestID: "request", PayloadHash: "payload", ExpectedWorkspaceRevision: 1, CommittedWorkspaceRevision: 2,
+	return WorkspacePreparationRecord{Version: WorkspacePreparationWorkflowVersion, WorkspaceID: "ws", Attempts: []WorkspacePreparationAttempt{{
+		CreationEpoch: strings.Repeat("a", 32), Checks: []WorkspacePreparationCheckResult{{ID: "seal", Owner: "workspace", Required: true, State: "pending", Reason: "not_observed"}}, RequestID: "request", PayloadHash: "payload", ExpectedWorkspaceRevision: 1, CommittedWorkspaceRevision: 2,
 		Binding: WorkspacePreparationBinding{
 			AuthoringRef: DefinitionAuthoringAdmissionRef{InputHash: "input", DerivationPermitID: "permit", ProposalHash: "proposal", SpecificationHash: "spec"},
 			CandidateID:  "candidate", CandidateRevision: 1, CandidateHash: "candidate-hash", DefinitionRevision: "definition", StartupInputHash: "startup",
@@ -24,6 +24,8 @@ func TestPreparationRecordBoundedIdentityAndStates(t *testing.T) {
 		record := preparationRecordFixture()
 		record.Attempts[0].State = state
 		if state == WorkspacePreparationBlocked || state == WorkspacePreparationFailed {
+			record.Attempts[0].Checks[0].State = "blocked"
+			record.Attempts[0].Checks[0].Reason = "check_pipeline_incomplete"
 			record.Attempts[0].CompletedAt = record.Attempts[0].StartedAt.Add(time.Second)
 			record.Attempts[0].ExpiresAt = record.Attempts[0].CompletedAt.Add(time.Minute)
 		}

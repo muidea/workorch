@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/testkit"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -36,7 +37,7 @@ func TestAuthoringChecklistPreserves42ExtractedItemsAndReviewsEntireGoal(t *test
 		t.Fatalf("original checklist changed before extraction: %v", err)
 	}
 	derived := workspace.DefinitionDerivedAcceptance{AuthoringInputHash: input.InputHash(), TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: checks}
-	record, err = record.CompleteDerivation(pending.PermitID, &derived, "")
+	record, err = completeTestDerivation(record, pending.PermitID, &derived, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,6 +58,7 @@ func TestAuthoringChecklistPreserves42ExtractedItemsAndReviewsEntireGoal(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
+	payload = testkit.OwnerBoundFixtureDocument(payload)
 	spec, err := ParseAuthoringProposal(payload, d)
 	if err != nil {
 		t.Fatal(err)

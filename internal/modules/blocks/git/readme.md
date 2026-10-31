@@ -73,7 +73,7 @@ Owner topic、Command/Result 与 seal 类型的定义源是 `blocks/git/pkg/even
 
 ### 原 commit 快照的有界当前观察
 
-`QueryRuntimeCommitSnapshot` 使用 closed `git/commit-object-snapshot-query/v1` concrete Command/Result，
+`QueryRuntimeCommitSnapshot` 使用 closed `git/commit-object-graph-query` concrete Command/Result，
 是 SM-4 的 read-only participant，不是 Git 的 Runtime transition 或新的执行入口。
 command 必须绑定原 transaction、sealed durable commit、execution key/fence/authority、receipt hash、
 archive address、完整原 object dependencies，以及 request/state revision；不接受 caller directory。
@@ -86,9 +86,9 @@ Git 先完整验证受限归档的 scope、address、原 bytes 与对象图，�
 和 nil current set，不冒原快照仍当前。观察期间 HEAD 漂移、缺失/损坏对象、超限或取消均返回错误，不能把失败当 absence。
 raw object bodies 不跨 owner；bounded reply 只包含身份、计数与 verified dependencies，返回集合 detached。
 
-v2 `git/commit-object-snapshot-query/v2` 在同一 read-only topic 显式增加有界 input-byte membership。
+`git/commit-input-membership-query` 在同一 read-only topic 显式增加有界 input-byte membership。
 command 必须携带完整 canonical input binding/subject（最多 16 files、64KiB input bytes、512 native mappings）；
-v1 禁止此扩展，v2 缺失完整 subject 拒绝。Git 不认定 caller subject 已通过 LLM 评审、不授 review/credit authority：
+普通 snapshot query 不携带此扩展，membership query 缺失完整 subject 拒绝。Git 不认定 caller subject 已通过 LLM 评审、不授 review/credit authority：
 Orchestrator 必须先从完整合法 aggregate 的原 evidence-committed validation、exact current binding 与唯一 accepted
 semantic batch 反查真实输入；不能扫描任意 consistent 历史报告或自动升级无评审归档。
 
@@ -105,18 +105,18 @@ blob，比较完整原 bytes 和 SHA256。缺文件、仅别处有相同 blob、
 `TestGitCommitSnapshotQueryReadsOriginalArchiveAndFreshObjects` 固定 binary archive、wrong source/scope/address/dependencies、
 完整 response fence、HEAD 变化、归档篡改、duplicate、owner 重建及真实 nested-source-read quiescence。
 Orchestrator `TestDriveRuntimeFileBackedFreshFileShellGitAcceptance` 通过 production query sender → Git → 原 receipt handler →
-file-backed Run aggregate 反查原 execution 与完整图，校准 v2 技术 byte-membership sender（不是评审来源），
+file-backed Run aggregate 反查原 execution 与完整图，校准技术 byte-membership sender（不是评审来源），
 无评审的原 validation 不得升级；后续真实 HEAD 变化不得被三 ACK 或旧 evidence 隐藏；query 零 aggregate 写入。
 `TestRuntimeReviewedInputSnapshotSourcesOwnerMainlineAndRestart` 另以真实 File/Shell/Run 的 accepted review、实际 validation
 和 file-backed reload 验证 reviewed-source compiler。上述配对不等于终态材料消费者或公开 fullflow 已闭合。
 
 ### 生命周期与排空合同
 
-v3 `git/commit-object-snapshot-query/v3` 复用原 read topic，要求原 receipt 的 exact commit/root identity 和完整原 validation workspace-byte read set，并将其逐项
+`git/terminal-commit-snapshot-query` 复用原 read topic，要求原 receipt 的 exact commit/root identity 和完整原 validation workspace-byte read set，并将其逐项
 联结到原完整 tree/blob 图；不支持的 resource kind 明确拒绝。它另外前后读取完整 bounded porcelain status（tracked、
 index、untracked、submodule），拒绝截断或观察中变动，返回 clean fact。原 accepted commit receipt 自身封存
 owner-neutral snapshot/root identity；query 在 Workspace/文件系统读取前反查原 receipt，并在归档读取及 response 边界精确比较，
-不能把同 graph 的 blob/tree 换作 HEAD/root。SM-4 V2 consumer 在首次不可变材料 CAS 独立反证并消费这些事实；V1/V2 拒绝该扩展，仍不宣称 clean。
+不能把同 graph 的 blob/tree 换作 HEAD/root。SM-4 terminal snapshot consumer 在首次不可变材料 CAS 独立反证并消费这些事实；普通 snapshot/membership query 不返回该扩展，也不宣称 clean。
 sealed 后交付重试不依赖新的 Git query。该时点证明不代表 subprocess 全部读取或所有 owner 持续当前性。
 
 - `Start` 通过 Base checked SimpleObserver API 逐成功 topic 记账；第 N 个失败保留同一 owner 与成功订阅。Start 关闭后不可重新打开代次。

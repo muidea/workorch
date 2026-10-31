@@ -27,7 +27,7 @@ func TestRuntimeProviderValidationRejectsMalformedDiagnosticExtension(t *testing
 	} {
 		t.Run(name, func(t *testing.T) {
 			o := runtimecontract.RuntimeValidationObservation{RecipeID: "recipe", ObservationProtocolRef: "owner/checks/v1", FailedChecks: []string{"check"},
-				FailureDetailProtocolRef: runtimecontract.RuntimeValidationFailureDetailProtocolV2,
+				FailureDetailProtocolRef: runtimecontract.RuntimeValidationFailureDetailProtocol,
 				CheckFailures: []runtimecontract.RuntimeValidationCheckFailure{{CheckRef: "check", DiagnosticHash: strings.Repeat("a", 64), ComparisonHash: strings.Repeat("c", 64),
 					ReportedAssertion: runtimecontract.RuntimeValidationReportedAssertion{Code: "shape_mismatch", ExpectedShape: "object", ObservedShape: "array"}}}}
 			mutate(&o)

@@ -25,7 +25,7 @@ func TestAuthoringBuilderMappingHTTPOutputContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	derived := workspace.DefinitionDerivedAcceptance{AuthoringInputHash: input.InputHash(), TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"派生验收"}}
-	record, err = record.CompleteDerivation(derive.PermitID, &derived, "")
+	record, err = completeTestDerivation(record, derive.PermitID, &derived, "")
 	if err != nil {
 		t.Fatal(err)
 	}

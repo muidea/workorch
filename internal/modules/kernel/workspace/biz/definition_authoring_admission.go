@@ -13,7 +13,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
 )
 
-// The legacy candidate ingress cannot treat a self-consistent but unpersisted
+// The independent candidate ingress cannot treat a self-consistent but unpersisted
 // set of PASS reviews as authority. Admission enters the shared owner-private
 // dispatcher; its source check runs under the definition and Template locks.
 func (m *Biz) submitDefinitionAuthoringAdmission(ctx context.Context, command workspaceevents.AdmitDefinitionAuthoringCommand) (workspaceevents.AdmitDefinitionAuthoringResult, error) {

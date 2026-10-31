@@ -15,13 +15,13 @@ import (
 // v3 input namespace, or the v4 check's exact package, and module definitions;
 // exceeding the bounded review envelope is explicit unavailability, not a
 // truncated or inferred review. Delivery code is still proved by execution.
-func shellVersionedInputReview(directory string, targets []string, binding runtimecontract.RuntimeValidationProofRequirementBinding) (*runtimecontract.RuntimeValidationInputReviewSubject, string) {
+func shellInputReview(directory string, targets []string, binding runtimecontract.RuntimeValidationProofRequirementBinding) (*runtimecontract.RuntimeValidationInputReviewSubject, string) {
 	root, err := os.OpenRoot(directory)
 	if err != nil {
 		return nil, "validation_input_review_source_unavailable"
 	}
 	defer root.Close()
-	prefix := "workorch_validation/v3/"
+	prefix := "workorch_validation/entrypoint/"
 	pkg, scopeErr := shellIsolatedValidationPackage(binding.CheckAttestations)
 	if scopeErr != nil {
 		return nil, "validation_input_review_mapping_unsupported"
@@ -85,7 +85,7 @@ func shellVersionedInputReview(directory string, targets []string, binding runti
 		subject.Files = append(subject.Files, runtimecontract.RuntimeValidationInputReviewFile{TargetRef: ref, Content: string(content), ContentHash: runtimecontract.RuntimeValidationInputContentHash(string(content))})
 	}
 	for _, check := range binding.CheckAttestations {
-		if !slices.Contains(refs, shellVersionedNativeCheckTarget(check.NativeCheckRef)) {
+		if !slices.Contains(refs, shellReviewedNativeCheckTarget(check.NativeCheckRef)) {
 			return nil, "validation_input_review_source_unavailable"
 		}
 		if pkg != "" && check.SupplementalNativeCheckRef != "" && !slices.Contains(refs, shellSupplementTargetRef(check.NativeCheckRef)) {
@@ -93,7 +93,7 @@ func shellVersionedInputReview(directory string, targets []string, binding runti
 		}
 	}
 	if binding.CheckAttestations[0].ObservationProtocolRef == shellProjectMultiFailureDiagnosticProtocolRef {
-		subject.ProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV3
+		subject.ProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 		subject.ScopeContractRef, subject.ScopeRequirements = shellProjectMultiFailureReviewScopeRef, shellProjectMultiFailureRequirements
 		subject.DiagnosticSourceContractRef = runtimecontract.RuntimeValidationDiagnosticSourceReviewV1
 		var code string

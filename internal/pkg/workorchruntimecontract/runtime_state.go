@@ -478,9 +478,7 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 	if err := ValidateRuntimeCandidateRequestSessions(r.CandidateRequestSessions); err != nil {
 		return err
 	}
-	if err := ValidateRuntimeSemanticRequestRepairSources(r.SemanticPlanning, r.CandidateRequestSessions, r.ImplementationWork, r.Definition, r.StateRevision, r.DefinitionClarification); err != nil {
-		return err
-	}
+
 	if err := ValidateRuntimeInputRevisionRequestSources(r.SemanticPlanning, r.CandidateRequestSessions); err != nil {
 		return err
 	}

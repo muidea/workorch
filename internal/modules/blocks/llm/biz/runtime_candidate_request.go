@@ -46,37 +46,22 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 	if request.ExpectedDocument != nil && request.ExpectedDocument.Normalized().WireContractHash != wire.Hash {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate expected document wire contract mismatch")
 	}
-	renderer := ""
-	if request.ExpectedDocument != nil {
-		renderer = request.ExpectedDocument.Normalized().OperationsRenderContractRef
+	if request.ExpectedDocument != nil && request.ExpectedDocument.OperationsContextEncoding != runtimecontract.RuntimeOperationsContextEncoding {
+		return llmmodels.ProviderRequest{}, fmt.Errorf("unsupported operations context encoding")
 	}
-	if renderer != "" && renderer != runtimecontract.RuntimeOperationsRenderContractV2 && renderer != runtimecontract.RuntimeOperationsRenderContractV3 && renderer != runtimecontract.RuntimeOperationsRenderContractV4 {
-		return llmmodels.ProviderRequest{}, fmt.Errorf("unsupported runtime operations renderer")
-	}
-	catalog := runtimeCandidateContractCatalog()
+	renderer := runtimecontract.RuntimeOperationsContextEncoding
+	catalog := runtimeCandidateContractCatalogCurrent()
 	promptVersion := "workorch.runtime_candidate_prompt"
-	outputContract := runtimeCandidateOutputContractForManifest(manifest, wire)
-	if renderer == runtimecontract.RuntimeOperationsRenderContractV2 {
-		catalog = runtimeCandidateContractCatalogV2()
-		promptVersion = "workorch.runtime_candidate_prompt/v2"
-		outputContract = runtimeCandidateCompactOutputContract(manifest, wire)
-	}
-	if renderer == runtimecontract.RuntimeOperationsRenderContractV3 || renderer == runtimecontract.RuntimeOperationsRenderContractV4 {
-		catalog = runtimeCandidateContractCatalogV3()
-		promptVersion = "workorch.runtime_candidate_prompt/v3"
-		outputContract = runtimeCandidateCompactOutputContract(manifest, wire)
-		outputContract.StructuredOutputInstruction = "Apply operations-render/parameter-cardinality/v3 in C0 to this exact outputContract; all request-specific values remain mandatory."
-		outputContract.Schema = json.RawMessage(runtimeCandidateCardinalitySchema(manifest, wire))
-	}
-	// v4 retains the v3 C0/cache family and full strict transport schema.
+	outputContract := runtimeCandidateCompactOutputContract(manifest, wire)
+	outputContract.StructuredOutputInstruction = "Apply the operation parameter cardinality contract in C0 to this exact outputContract; all request-specific values remain mandatory."
+	outputContract.Schema = json.RawMessage(runtimeCandidateCardinalitySchema(manifest, wire))
 	strictSchema := string(outputContract.Schema)
-	if renderer == runtimecontract.RuntimeOperationsRenderContractV4 {
-		compact, err := compactRuntimeParameterSchema(outputContract.Schema)
-		if err != nil {
-			return llmmodels.ProviderRequest{}, err
-		}
-		outputContract.Schema = compact
+	compact, err := compactRuntimeParameterSchema(outputContract.Schema)
+	if err != nil {
+		return llmmodels.ProviderRequest{}, err
 	}
+	outputContract.Schema = compact
+
 	if err := validateRuntimeCandidateManifestSupportingFacts(manifest, candidateContext.Resources); err != nil {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate manifest supporting facts: %w", err)
 	}
@@ -136,7 +121,7 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}
-	if renderer == runtimecontract.RuntimeOperationsRenderContractV4 {
+	{
 		authorityJSON, err = compactRuntimeDecisionFocus(authorityJSON)
 		if err == nil {
 			authorityJSON, err = cacheLayoutJSON(authorityJSON, "operations")
@@ -316,7 +301,7 @@ func validateRuntimeCandidateContextIntegrity(
 			missing = append(missing, "P4.validation_preparation_context")
 		}
 	}
-	if budget.RenderContractRef == runtimecontract.RuntimeOperationsRenderContractV4 {
+	{
 		var actual struct {
 			Context struct {
 				Focus runtimecontract.CoverageFocus `json:"focus"`
@@ -326,17 +311,10 @@ func validateRuntimeCandidateContextIntegrity(
 				Focus    json.RawMessage
 			} `json:"decision"`
 		}
-		if json.Unmarshal([]byte(contents["C3"]), &actual) != nil || !reflect.DeepEqual(actual.Context.Focus, context.Focus) ||
-			(actual.Decision.FocusRef != "context.focus" && actual.Decision.FocusRef != "") ||
-			(actual.Decision.FocusRef == "context.focus" && len(actual.Decision.Focus) != 0) ||
-			(actual.Decision.FocusRef == "" && len(actual.Decision.Focus) == 0) {
+		if json.Unmarshal([]byte(contents["C3"]), &actual) != nil || !reflect.DeepEqual(actual.Context.Focus, context.Focus) || actual.Decision.FocusRef != "context.focus" || len(actual.Decision.Focus) != 0 {
 			missing = append(missing, "P2.current_focus_reference")
-		} else if actual.Decision.FocusRef == "" {
-			var focus runtimecontract.CoverageFocus
-			if json.Unmarshal(actual.Decision.Focus, &focus) != nil || !reflect.DeepEqual(focus.Normalized(), context.Focus.Normalized()) {
-				missing = append(missing, "P2.current_focus_reference")
-			}
 		}
+
 	}
 	if definition.GoalDefinition == "" || definition.DoDDefinition == "" || context.RequiredState == "" {
 		missing = append(missing, "P0.contract")

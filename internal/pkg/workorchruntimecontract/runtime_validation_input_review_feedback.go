@@ -53,10 +53,10 @@ func (f RuntimeValidationInputReviewFeedback) Validate() error {
 		f.Report.SubjectHash == "" || len(f.Report.Checks) == 0 {
 		return fmt.Errorf("input review feedback requires exact admitted report and requirement identity")
 	}
-	if !f.Redacted && f.ReportHash != StableRuntimeValidationInputReviewHash(f.Report) {
+	if f.ReportHash != StableRuntimeValidationInputReviewHash(f.Report) {
 		return fmt.Errorf("input review feedback lost exact original report content")
 	}
-	if len(f.Report.DiagnosticSources) > RuntimeValidationDiagnosticSourceLimit || f.ProtocolRef != RuntimeValidationInputReviewProtocolV3 && f.Report.DiagnosticSources != nil {
+	if len(f.Report.DiagnosticSources) > RuntimeValidationDiagnosticSourceLimit {
 		return fmt.Errorf("invalid diagnostic source feedback extension")
 	}
 	seenSources := map[string]bool{}
@@ -77,9 +77,7 @@ func (f RuntimeValidationInputReviewFeedback) Validate() error {
 		}
 	}
 	for _, check := range f.Report.Checks {
-		if f.ProtocolRef == RuntimeValidationInputReviewProtocol && check.Obligations != nil {
-			return fmt.Errorf("legacy input review feedback cannot introduce v2 observations")
-		}
+
 		if check.RequiredCheckRef == "" || check.Reason == "" || len(check.InputTargetRefs) == 0 {
 			return fmt.Errorf("input review feedback lost a per-check observation")
 		}
@@ -93,23 +91,18 @@ func (f RuntimeValidationInputReviewFeedback) Validate() error {
 			texts = append(texts, obligation.CriterionText, obligation.Reason)
 			texts = append(texts, obligation.InputTargetRefs...)
 			texts = append(texts, obligation.ProofConsumerRefs...)
-			if f.ProtocolRef != RuntimeValidationInputReviewProtocolV3 && obligation.ProofConsumerRefs != nil {
-				return fmt.Errorf("legacy feedback cannot introduce composite proof mappings")
-			}
-			if f.ProtocolRef == RuntimeValidationInputReviewProtocolV3 && len(obligation.ProofConsumerRefs) == 0 {
-				return fmt.Errorf("composite feedback lost proof consumer mapping")
-			}
+
 		}
 		for _, value := range texts {
 			if value == "" || !utf8.ValidString(value) || len(value) > RuntimeValidationInputReviewMaxScopeBytes {
 				return fmt.Errorf("input review feedback requires bounded complete text")
 			}
 		}
-		if f.ProtocolRef != RuntimeValidationInputReviewProtocol {
-			if err := validateRuntimeValidationInputObligationShape(check, !f.Redacted); err != nil {
-				return err
-			}
+
+		if err := validateRuntimeValidationInputObligations(check); err != nil {
+			return err
 		}
+
 	}
 	return nil
 }
@@ -126,6 +119,5 @@ func writeRuntimeValidationInputReviewFeedbackHash(h interface{ Write([]byte) (i
 		writeHashString(h, value.RequirementHash)
 		writeHashString(h, value.ReportHash)
 		writeRuntimeValidationInputReviewHash(h, &value.Report)
-		writeHashString(h, fmt.Sprint(value.Redacted))
 	}
 }

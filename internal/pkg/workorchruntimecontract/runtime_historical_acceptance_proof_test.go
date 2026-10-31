@@ -120,7 +120,7 @@ func historicalAcceptanceProofFixture(t *testing.T) RuntimeLineageAssertionSourc
 	receipt.Evidence.Validation, receipt.Evidence.Quality = &validation, common.EvidenceQualityValid
 	dependencies := (RuntimeOwnerRevisionSet{DefinitionRevision: sources.Definition.Revision, Entries: []RuntimeOwnerRevisionRef{{OwnerKind: "capability", OwnerInstanceID: "shell/ws", ResourceKind: "validation_input", ResourceID: "main.go", Revision: "actually-read-current-bytes", DependencyHash: "original-selector"}}}).WithHash()
 	receipt.Evidence.OwnerRevisionSet = &dependencies
-	receipt.Evidence.ApplicabilityDependencies = &RuntimeEvidenceApplicabilityDependencies{ProtocolRef: RuntimeEvidenceApplicabilityDependenciesV1, OwnerRevisionSet: dependencies}
+	receipt.Evidence.ApplicabilityDependencies = &RuntimeEvidenceApplicabilityDependencies{ProtocolRef: RuntimeEvidenceApplicabilityDependenciesProtocol, OwnerRevisionSet: dependencies}
 	execution := runtimeOperationReceiptLineageExecution(receipt, OperationExecutionEvidenceCommitted)
 	execution.ExpectedEffectScope, execution.OperationHash = RuntimeEffectEphemeralSession, StableRuntimeOperationHash(operation)
 	fact := EvidenceFact{ID: common.EvidenceRecordID("runtime-receipt|" + execution.OwnerReceiptHash), Kind: EvidenceKindValidation, FocusID: ordinary.ID, Revision: runtimeEvidenceRevisionForSequence(2),

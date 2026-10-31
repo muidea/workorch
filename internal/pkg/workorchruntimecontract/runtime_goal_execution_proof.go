@@ -12,11 +12,11 @@ func validateRuntimeExecutionProofMappingSource(mapping RuntimeExecutionProofMap
 		return fmt.Errorf("execution proof mapping lacks exact original source identities")
 	}
 	switch mapping.ContractRef {
-	case RuntimeCrossSourceExecutionProofV1:
+	case RuntimeDoDSourceExecutionProof:
 		if consumer.SourceScope != "dodItem" || mapping.ConsumerGoalText != "" {
 			return fmt.Errorf("v1 only accepts original DoD endpoints without Goal extensions")
 		}
-	case RuntimeGoalSourceExecutionProofV2:
+	case RuntimeGoalSourceExecutionProof:
 		if consumer.SourceScope != "goal" || strings.TrimSpace(consumer.Text) == "" || len(consumer.Text) > 4096 || mapping.ConsumerGoalText != consumer.Text {
 			return fmt.Errorf("Goal execution mapping requires bounded complete original Goal bytes")
 		}
@@ -39,7 +39,7 @@ func runtimeGoalExecutionRules(goal RuntimeDefinitionSource, profiles []RuntimeP
 			if rule.ExecutionSourceContractRef == "" {
 				continue
 			}
-			if rule.ExecutionSourceContractRef != RuntimeGoalSourceExecutionProofV2 {
+			if rule.ExecutionSourceContractRef != RuntimeGoalSourceExecutionProof {
 				return nil, fmt.Errorf("Goal/root execution source requires explicit v2")
 			}
 			rules, err = mergeRuntimeLineageAssertionRules(rules, []RuntimeLineageAssertionRule{rule})
@@ -73,7 +73,7 @@ func compileRuntimeGoalExecutionAssertionsFromValidatedMappings(inventory *Runti
 	}
 	var ret []RuntimeLineageAssertion
 	for _, mapping := range inventory.ExecutionProofMappings {
-		if mapping.ContractRef != RuntimeGoalSourceExecutionProofV2 {
+		if mapping.ContractRef != RuntimeGoalSourceExecutionProof {
 			continue
 		}
 		var goal, source RuntimeDefinitionSource
@@ -138,12 +138,12 @@ func validateRuntimeGoalExecutionProjection(inventory RuntimeSourceObligationInv
 			return err
 		}
 		for _, assertion := range item.GoalExecutionAssertions {
-			if assertion.Rule.ExecutionSourceContractRef != RuntimeGoalSourceExecutionProofV2 || assertion.SourceScope != "goal" {
+			if assertion.Rule.ExecutionSourceContractRef != RuntimeGoalSourceExecutionProof || assertion.SourceScope != "goal" {
 				return fmt.Errorf("invalid Goal consumer projection")
 			}
 			matches := 0
 			for _, mapping := range inventory.ExecutionProofMappings {
-				if mapping.ContractRef != RuntimeGoalSourceExecutionProofV2 || mapping.RuleRef != assertion.Rule.Ref {
+				if mapping.ContractRef != RuntimeGoalSourceExecutionProof || mapping.RuleRef != assertion.Rule.Ref {
 					continue
 				}
 				var goal, source RuntimeDefinitionSource
@@ -166,7 +166,7 @@ func validateRuntimeGoalExecutionProjection(inventory RuntimeSourceObligationInv
 		}
 	}
 	for _, mapping := range inventory.ExecutionProofMappings {
-		if mapping.ContractRef == RuntimeGoalSourceExecutionProofV2 && seen[mapping.ConsumerItemRef+"\x00"+mapping.RuleRef] != 1 {
+		if mapping.ContractRef == RuntimeGoalSourceExecutionProof && seen[mapping.ConsumerItemRef+"\x00"+mapping.RuleRef] != 1 {
 			return fmt.Errorf("Goal execution mapping omitted/duplicated consumer")
 		}
 	}
@@ -181,7 +181,7 @@ func runtimeGoalExecutionCheck(inventory RuntimeSourceObligationInventory, item 
 		}
 	}
 	for _, mapping := range inventory.ExecutionProofMappings {
-		if mapping.ContractRef != RuntimeGoalSourceExecutionProofV2 {
+		if mapping.ContractRef != RuntimeGoalSourceExecutionProof {
 			continue
 		}
 		for _, source := range inventory.Sources {

@@ -17,7 +17,7 @@ func TestBootstrapGoalExecutionMappingRetainsFullGoalWithoutWorkCWI(t *testing.T
 			inventory.Sources[n].Text = goal.Text
 		}
 	}
-	rule := runtimecontract.RuntimeLineageAssertionRule{Ref: "goal-original-work", Kind: runtimecontract.RuntimeLineageCompletedWorkRounds, ConsumptionPoint: runtimecontract.RuntimeProofPhaseExecution, MinCompletedRounds: 2, ExecutionSourceContractRef: runtimecontract.RuntimeGoalSourceExecutionProofV2}
+	rule := runtimecontract.RuntimeLineageAssertionRule{Ref: "goal-original-work", Kind: runtimecontract.RuntimeLineageCompletedWorkRounds, ConsumptionPoint: runtimecontract.RuntimeProofPhaseExecution, MinCompletedRounds: 2, ExecutionSourceContractRef: runtimecontract.RuntimeGoalSourceExecutionProof}
 	inventory.ExecutionProofMappings = []runtimecontract.RuntimeExecutionProofMapping{{ContractRef: rule.ExecutionSourceContractRef, ConsumerItemRef: "goal", RuleRef: rule.Ref, SourceItemRef: "dod", ConsumerGoalText: goal.Text}}
 	inventory = inventory.WithHash()
 	activation := base.Activation.Clone()

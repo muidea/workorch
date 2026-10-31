@@ -35,7 +35,7 @@ func ProjectRuntimeValidationExecutionFeedback(value *RuntimeValidationObservati
 	}
 	// The explicit diagnostic extension distinguishes traceable locations from
 	// actionable reported shapes; neither a line nor a hash supplies an assertion.
-	if o.FailureDetailProtocolRef == RuntimeValidationFailureDetailProtocolV2 {
+	if o.FailureDetailProtocolRef == RuntimeValidationFailureDetailProtocol {
 		for _, detail := range ret.CheckFailures {
 			if detail.ReportedAssertion == (RuntimeValidationReportedAssertion{}) {
 				ret.FailureDetailsIncomplete = true

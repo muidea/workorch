@@ -71,7 +71,7 @@ func TestRuntimeTerminalOwnerReadUnionUsesObservedApplicabilityNotHistoricalMuta
 	current.Entries[0].ResourceKind = "workspace_target_content"
 	current.Entries[0].Revision, current.Entries[0].DependencyHash = "actual-postcondition", "content-selector"
 	*current = current.WithHash()
-	fact.ApplicabilityDependencies = &RuntimeEvidenceApplicabilityDependencies{ProtocolRef: RuntimeEvidenceApplicabilityDependenciesV1, OwnerRevisionSet: *current}
+	fact.ApplicabilityDependencies = &RuntimeEvidenceApplicabilityDependencies{ProtocolRef: RuntimeEvidenceApplicabilityDependenciesProtocol, OwnerRevisionSet: *current}
 	got, err := CompileRuntimeTerminalOwnerReadDependencies(source)
 	if err != nil || len(got.Entries) != 0 {
 		t.Fatal("unobserved mutation postcondition was promoted to current union")
@@ -123,7 +123,7 @@ func TestRuntimeTerminalApplicabilityRequiresExactRevisionAndResumeGeneration(t 
 			fact := &source.Facts.Evidence.Accepted[0]
 			source.Facts.EvidenceRevision = fact.Revision
 			source.Reconciliation.RequestHash = "current-resume-generation"
-			fact.ApplicabilityDependencies = &RuntimeEvidenceApplicabilityDependencies{ProtocolRef: RuntimeEvidenceApplicabilityDependenciesV1, OwnerRevisionSet: *CloneRuntimeOwnerRevisionSet(fact.OwnerRevisionSet)}
+			fact.ApplicabilityDependencies = &RuntimeEvidenceApplicabilityDependencies{ProtocolRef: RuntimeEvidenceApplicabilityDependenciesProtocol, OwnerRevisionSet: *CloneRuntimeOwnerRevisionSet(fact.OwnerRevisionSet)}
 			observation := RuntimeEvidenceApplicabilityObservation{Request: RuntimeEvidenceApplicabilityRequest{SourceEvidenceID: fact.ID, SourceEvidenceHash: StableRuntimeEvidenceFactHash(*fact), EvidenceRevision: fact.Revision, ReconciliationRequestHash: source.Reconciliation.RequestHash}, CurrentDependencies: CloneRuntimeOwnerRevisionSet(fact.OwnerRevisionSet)}
 			switch name {
 			case "old_revision":

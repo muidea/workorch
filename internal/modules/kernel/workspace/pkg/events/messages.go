@@ -469,7 +469,6 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[ConfirmDefinitionAuthoringCommand, ConfirmDefinitionAuthoringResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceAuthoringConfirm).MessageContract(),
 		eventcontract.CommandTopic[AdmitDefinitionAuthoringCommand, AdmitDefinitionAuthoringResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceAuthoringAdmit).MessageContract(),
 	}
-	ret = append(ret, builtinDefaultMessageContracts()...)
 	for _, topic := range []string{
 		TopicWorkspaceCreated,
 		TopicWorkspaceStateChanged,

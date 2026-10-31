@@ -15,8 +15,8 @@ func TestRuntimeProofCompositionV3IsExactProtectedC3Only(t *testing.T) {
 	item := request.SemanticManifest.CoverageItems[0]
 	obligation.LineageAssertions = []runtimecontract.RuntimeLineageAssertionRule{
 		{Ref: "delivery", Kind: runtimecontract.RuntimeLineageDeliveryAcknowledgements, ConsumptionPoint: runtimecontract.RuntimeProofPhasePostTerminalDelivery},
-		{Ref: "formal-index", Kind: runtimecontract.RuntimeLineageTerminalResultIndex, ConsumptionPoint: runtimecontract.RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: runtimecontract.RuntimeTerminalProofContractV1},
-		{Ref: "snapshot", Kind: runtimecontract.RuntimeLineageTerminalOwnerSnapshot, ConsumptionPoint: runtimecontract.RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: runtimecontract.RuntimeTerminalProofContractV2, OwnerModuleID: runtimecontract.RuntimeModuleGit, OperationKind: runtimecontract.StepKindGitWrite, OperationVariantID: "commit", RequiredEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, ReceiptSourceScope: "deliverable", ReceiptSourceID: "original-repository", ValidationSourceScope: "dodItem", ValidationSourceID: "original-behavior"},
+		{Ref: "formal-index", Kind: runtimecontract.RuntimeLineageTerminalResultIndex, ConsumptionPoint: runtimecontract.RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: runtimecontract.RuntimeTerminalReceiptProofContract},
+		{Ref: "snapshot", Kind: runtimecontract.RuntimeLineageTerminalOwnerSnapshot, ConsumptionPoint: runtimecontract.RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: runtimecontract.RuntimeTerminalSnapshotProofContract, OwnerModuleID: runtimecontract.RuntimeModuleGit, OperationKind: runtimecontract.StepKindGitWrite, OperationVariantID: "commit", RequiredEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, ReceiptSourceScope: "deliverable", ReceiptSourceID: "original-repository", ValidationSourceScope: "dodItem", ValidationSourceID: "original-behavior"},
 	}
 	assertions, err := runtimecontract.CompileRuntimeLineageAssertions(obligation.LineageAssertions, obligation.DeclarationRef, item)
 	if err != nil {
@@ -28,10 +28,10 @@ func TestRuntimeProofCompositionV3IsExactProtectedC3Only(t *testing.T) {
 	catalog := &request.SemanticManifest.OwnerCatalogs[0]
 	binding := &catalog.ValidationSurfaces[0].ProofRequirementBindings[0]
 	binding.RequirementHash = requirement.Hash
-	binding.InputReview.ProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV3
+	binding.InputReview.ProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 	binding.InputReview.LineageAssertions = append([]runtimecontract.RuntimeLineageAssertion(nil), assertions...)
 	binding.InputReview.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, *binding)
-	catalog.ValidationRecipes = []runtimecontract.RuntimeValidationRecipe{{ID: binding.ValidationRecipeID, AdapterRef: "owner/composite-review", Command: "check", InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV3}}
+	catalog.ValidationRecipes = []runtimecontract.RuntimeValidationRecipe{{ID: binding.ValidationRecipeID, AdapterRef: "owner/composite-review", Command: "check", InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol}}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
 	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
 	refreshSemanticProgressForTest(t, &request)
@@ -50,7 +50,7 @@ func TestRuntimeProofCompositionV3IsExactProtectedC3Only(t *testing.T) {
 	if len(reviews) != 1 || !reflect.DeepEqual(reviews[0].LineageAssertions, assertions) || !strings.Contains(projection.OutputInstruction, "NOT existing ACKs") {
 		t.Fatal("v3 scope/rules/observation-only boundary lost")
 	}
-	if !strings.Contains(projection.OutputInstruction, "does NOT prove final repository HEAD/tree/blob bytes") || reviews[0].LineageAssertions[1].Rule.TerminalContractRef != runtimecontract.RuntimeTerminalProofContractV1 {
+	if !strings.Contains(projection.OutputInstruction, "does NOT prove final repository HEAD/tree/blob bytes") || reviews[0].LineageAssertions[1].Rule.TerminalContractRef != runtimecontract.RuntimeTerminalReceiptProofContract {
 		t.Fatal("terminal proof version or original-receipt-only boundary lost")
 	}
 	if !strings.Contains(projection.OutputInstruction, "validationSourceScope/validationSourceId") || !strings.Contains(projection.OutputInstruction, "not existing receipts, snapshots or Results") || reviews[0].LineageAssertions[2].Rule != obligation.LineageAssertions[2] {
@@ -100,9 +100,9 @@ func TestRuntimeProofCompositionRejectsChangedConsumerProjectionAndInstructions(
 	request := runtimeInputReviewProviderFixture(t)
 	catalog := &request.SemanticManifest.OwnerCatalogs[0]
 	binding := &catalog.ValidationSurfaces[0].ProofRequirementBindings[0]
-	binding.InputReview.ProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV3
+	binding.InputReview.ProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 	binding.InputReview.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, *binding)
-	catalog.ValidationRecipes = []runtimecontract.RuntimeValidationRecipe{{ID: binding.ValidationRecipeID, AdapterRef: "owner/review/v1", Command: "check", InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV3}}
+	catalog.ValidationRecipes = []runtimecontract.RuntimeValidationRecipe{{ID: binding.ValidationRecipeID, AdapterRef: "owner/review/v1", Command: "check", InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol}}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
 	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
 	refreshSemanticProgressForTest(t, &request)

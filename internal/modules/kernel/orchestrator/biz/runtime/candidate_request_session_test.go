@@ -513,7 +513,7 @@ func TestRuntimeCandidateRequestSessionDocumentRecoveryExhaustedTerminalIsAttemp
 func ptrRuntimeAggregate(value RuntimeAggregate) *RuntimeAggregate { return &value }
 
 func TestOperationsRequestWriterRejectsRendererDriftBeforeCAS(t *testing.T) {
-	for _, renderer := range []string{"", runtimecontract.RuntimeOperationsRenderContractV2} {
+	for _, invalid := range []string{"", "unknown-encoding"} {
 		ctx := context.Background()
 		repo := &controllerRepository{aggregate: ptrRuntimeAggregate(stateChangeAggregate(t))}
 		controller, err := NewRuntimeController(repo)
@@ -521,7 +521,7 @@ func TestOperationsRequestWriterRejectsRendererDriftBeforeCAS(t *testing.T) {
 			t.Fatal(err)
 		}
 		expected := runtimeTestOperationsExpectedDocument(*repo.aggregate, "manifest", 0)
-		expected.OperationsRenderContractRef = renderer
+		expected.OperationsContextEncoding = runtimecontract.RuntimeOperationsContextEncoding
 		_, session, err := controller.ensureCandidateRequestSessionWithExpected(ctx, "ws-1", "run-1", runtimecontract.RuntimeProviderDocumentOperations, "prefix", "manifest", "", &expected)
 		if err != nil {
 			t.Fatal(err)
@@ -532,11 +532,7 @@ func TestOperationsRequestWriterRejectsRendererDriftBeforeCAS(t *testing.T) {
 			t.Fatal(err)
 		}
 		expected = *session.ExpectedDocument
-		if renderer == "" {
-			expected.OperationsRenderContractRef = runtimecontract.RuntimeOperationsRenderContractV2
-		} else {
-			expected.OperationsRenderContractRef = ""
-		}
+		expected.OperationsContextEncoding = invalid
 		if _, _, err := restarted.ensureCandidateRequestSessionWithExpected(ctx, "ws-1", "run-1", runtimecontract.RuntimeProviderDocumentOperations, "prefix", "manifest", "correction", &expected); err == nil {
 			t.Fatal("correction upgraded/downgraded sealed renderer")
 		}

@@ -10,12 +10,7 @@ import (
 // Segments are complete immutable generation bodies in the SAME opaque Run
 // record as the active ledger. Rollover and receipt settlement use one CAS;
 // there are no independently committed files or hash-only acceptance proofs.
-const RuntimeSemanticHistorySegmentsV1 = "runtime-semantic-history-segments/v1"
-
-// Older readers must reject a segmented record instead of ignoring the new
-// archive field and accepting only its tail. Snapshot bodies may use this
-// schema with no history because retirement explicitly strips both tiers.
-const RuntimeSemanticPlanningLedgerSchemaSegmented = "workorch.runtime_semantic_planning_ledger/v2"
+const RuntimeSemanticHistorySegments = "runtime-semantic-history-segments"
 
 type RuntimeSemanticHistoryArchive struct {
 	ProtocolRef     string
@@ -73,15 +68,10 @@ func (l RuntimeSemanticPlanningLedger) ValidateHistoryStorage() error {
 		return fmt.Errorf("runtime semantic planning history tail exceeds segment size %d", RuntimeSemanticPlanningHistoryLimit)
 	}
 	if l.HistoryArchive == nil {
-		if l.SchemaVersion == RuntimeSemanticPlanningLedgerSchemaSegmented && len(l.History) != 0 {
-			return fmt.Errorf("segmented runtime semantic history is missing its archive")
-		}
-		return nil // Exact legacy representation remains valid and unchanged.
+		return nil
 	}
-	if l.SchemaVersion != RuntimeSemanticPlanningLedgerSchemaSegmented {
-		return fmt.Errorf("runtime semantic history archive requires the segmented ledger schema")
-	}
-	if l.HistoryArchive.ProtocolRef != RuntimeSemanticHistorySegmentsV1 || len(l.HistoryArchive.Segments) == 0 || len(l.History) == 0 {
+
+	if l.HistoryArchive.ProtocolRef != RuntimeSemanticHistorySegments || len(l.HistoryArchive.Segments) == 0 || len(l.History) == 0 {
 		return fmt.Errorf("runtime semantic history archive requires current protocol, full segments and nonempty tail")
 	}
 	for i, segment := range l.HistoryArchive.Segments {
@@ -98,9 +88,7 @@ func (l RuntimeSemanticPlanningLedger) ValidateHistoryStorage() error {
 // Opaque Run-state validation and Orchestrator admission both retain the
 // original owner scope gate for archived bodies, independently of hashes.
 func ValidateRuntimeSemanticHistoryScope(l RuntimeSemanticPlanningLedger, workspace common.WorkspaceID, run common.RunID) error {
-	if l.SchemaVersion == RuntimeSemanticPlanningLedgerSchemaSegmented && l.HistoryArchive == nil {
-		return fmt.Errorf("segmented runtime semantic root ledger is missing its archive")
-	}
+
 	for i, generation := range l.AllHistory() {
 		manifest := generation.Snapshot.Manifest
 		if manifest == nil || manifest.WorkspaceID != workspace || manifest.RunID != run {
@@ -121,14 +109,13 @@ func (l RuntimeSemanticPlanningLedger) AppendHistory(g RuntimeSemanticPlanningGe
 		return RuntimeSemanticPlanningLedger{}, err
 	}
 	if len(l.History) == RuntimeSemanticPlanningHistoryLimit {
-		archive := RuntimeSemanticHistoryArchive{ProtocolRef: RuntimeSemanticHistorySegmentsV1}
+		archive := RuntimeSemanticHistoryArchive{ProtocolRef: RuntimeSemanticHistorySegments}
 		if l.HistoryArchive != nil {
 			archive.Segments = append(archive.Segments, l.HistoryArchive.Segments...)
 		}
 		archive.Segments = append(archive.Segments, append([]RuntimeSemanticPlanningGeneration(nil), l.History...))
 		archive.GenerationCount = len(archive.Segments) * RuntimeSemanticPlanningHistoryLimit
 		l.HistoryArchive, l.History = &archive, nil
-		l.SchemaVersion = RuntimeSemanticPlanningLedgerSchemaSegmented
 	}
 	l.History = append(append([]RuntimeSemanticPlanningGeneration(nil), l.History...), g.Clone())
 	return l, nil

@@ -38,7 +38,7 @@ func reduceDefinitionDerivation(o definitionSpecificationObservation, e definiti
 		if cmd.Validate() != nil || cmd.InputHash != record.InputHash || cmd.WorkspaceID != w.ID || o.template == nil || workspace.WorkspaceTemplateSnapshotHash(o.template) != record.TemplateSnapshotHash || workspace.ValidateDefinitionAuthoringResources(record.Input, cmd.Resources) != nil || (len(cmd.Resources) > 0 && (!e.VerifiedResources || cmd.WorkspaceRevision != w.Revision)) {
 			return definitionSpecificationTransition{}, common.ErrConflict
 		}
-		next, request, fresh, err = record.ReserveDerivation(cmd.RequestID, cmd.ProviderBindingHash, cmd.Resources, cmd.WireContractRef)
+		next, request, fresh, err = record.ReserveDerivation(cmd.RequestID, cmd.ProviderBindingHash, cmd.Resources)
 	} else if cmd := e.DeriveComplete; cmd != nil {
 		if cmd.Validate() != nil || cmd.WorkspaceID != w.ID {
 			return definitionSpecificationTransition{}, common.ErrInvalidArgument

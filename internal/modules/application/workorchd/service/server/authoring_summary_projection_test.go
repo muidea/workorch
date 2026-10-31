@@ -61,7 +61,7 @@ func TestAuthoringSummaryEventRecordRefreshesHTTPListAndDetail(t *testing.T) {
 	if initial == nil || initial.State != "draft" {
 		t.Fatalf("initial summary = %+v", initial)
 	}
-	reserve := workspaceevents.ReserveDefinitionDerivationCommand{
+	reserve := workspaceevents.ReserveDefinitionDerivationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "derive"),
 		WorkspaceID: query.WorkspaceID, WorkspaceRevision: view.WorkspaceRevision,
 		InputHash: view.Record.InputHash, RequestID: "derive/" + view.Record.InputHash,
 		ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil), ProviderBindingHash: "fixture-provider",

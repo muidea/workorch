@@ -50,7 +50,7 @@ func TestIsolatedInputReviewScalesAcrossTwentyFiveCWIs(t *testing.T) {
 		}
 	}
 	first := proofs[0]
-	target := shellVersionedNativeCheckTarget(first.CheckAttestations[0].NativeCheckRef)
+	target := shellReviewedNativeCheckTarget(first.CheckAttestations[0].NativeCheckRef)
 	helper := filepath.ToSlash(filepath.Join(filepath.Dir(target), "helper.go"))
 	writeNativeStructureSource(t, root, helper, "package checks\nconst expected = 1\n")
 	updated := acquire(append(refs, helper))
@@ -137,7 +137,7 @@ func TestIsolatedInputScopeFailsClosedWithoutChangingLegacy(t *testing.T) {
 				if got := inspectShellNativeValidationChecks(root, refs, checks); got.Code != want {
 					t.Fatalf("unsupported check accepted: %+v", got)
 				}
-			} else if _, code := shellVersionedInputReview(root, refs, binding); code != want {
+			} else if _, code := shellInputReview(root, refs, binding); code != want {
 				t.Fatalf("incomplete review accepted: %s != %s", code, want)
 			}
 		})
@@ -148,10 +148,10 @@ func TestIsolatedInputScopeFailsClosedWithoutChangingLegacy(t *testing.T) {
 		t.Fatalf("create-only input contract unavailable: %+v", prep)
 	}
 	legacy := recipe
-	legacy.AdapterRef = modulecommon.ValidationRecipeAdapterVersionedEntrypoint
+	legacy.AdapterRef = modulecommon.ValidationRecipeAdapterReviewedEntrypoint
 	oldChecks, _ := shellValidationCheckAttestations(legacy, requirement)
 	oldPrep, _, _ := shellValidationProofPreparation(missingRoot, runtimecontract.WorkspaceManifest{Revision: "empty"}, "catalog", false, legacy, requirement, oldChecks)
-	if oldPrep.ContentContractRef != "" || oldChecks[0].ObservationProtocolRef != shellGoEntrypointObservationProtocolRef || !strings.HasSuffix(oldChecks[0].NativeCheckRef, "_InputV3") {
+	if oldPrep.ContentContractRef != "" || oldChecks[0].ObservationProtocolRef != shellGoEntrypointObservationProtocolRef || !strings.HasSuffix(oldChecks[0].NativeCheckRef, "_EntrypointInput") {
 		t.Fatal("legacy sealed contract silently upgraded")
 	}
 }
@@ -167,7 +167,7 @@ func TestIsolatedInputSourceMembershipCannotOmitOnDiskInputs(t *testing.T) {
 			writeNativeStructureSource(t, root, target, fmt.Sprintf("package checks\nimport \"testing\"\nfunc %s(t *testing.T){ if false {t.Fatal(\"assert\")} }", checks[0].NativeCheckRef))
 			refs, want := []string{"go.mod", target}, "validation_input_review_source_set_changed"
 			binding, _ := runtimecontract.RuntimeValidationProofRequirementBindingForRecipe(requirement, recipe.ID, checks...)
-			if _, code := shellVersionedInputReview(root, refs, binding); code != "" {
+			if _, code := shellInputReview(root, refs, binding); code != "" {
 				t.Fatal(code)
 			}
 			pkg := filepath.ToSlash(filepath.Dir(target))
@@ -191,7 +191,7 @@ func TestIsolatedInputSourceMembershipCannotOmitOnDiskInputs(t *testing.T) {
 				writeNativeStructureSource(t, root, "workorch_validation/go.mod", "module ancestor\n")
 				want = "validation_input_review_scope_unsupported"
 			}
-			if _, code := shellVersionedInputReview(root, refs, binding); code != want {
+			if _, code := shellInputReview(root, refs, binding); code != want {
 				t.Fatalf("review accepted mismatched manifest: %s != %s", code, want)
 			}
 			if inspection := inspectShellNativeValidationChecks(root, refs, checks); inspection.Code != want {
@@ -224,8 +224,8 @@ out,e:=exec.Command(bin).Output(); if e!=nil || string(out)!="4" { t.Fatal("wron
 			input := fmt.Sprintf("package checks\nimport (\"testing\";\"os/exec\";\"path/filepath\")\nfunc %s(t *testing.T){ _=filepath.Join; %s }\n", checks[0].NativeCheckRef, body)
 			files := map[string]string{
 				"go.mod": "module fixture\ngo 1.26\n", target: input, "cmd/delivery/main.go": delivery,
-				"workorch_validation/v3/broken_test.go":        "package old\nfunc init(){panic(\"unrelated old input\")}\nfunc broken(\n",
-				"workorch_validation/v4/another/input_test.go": "package another\nfunc init(){panic(\"another CWI\")}\n",
+				"workorch_validation/entrypoint/broken_test.go":      "package old\nfunc init(){panic(\"unrelated old input\")}\nfunc broken(\n",
+				"workorch_validation/isolated/another/input_test.go": "package another\nfunc init(){panic(\"another CWI\")}\n",
 			}
 			if scenario == "helper-override" {
 				files[filepath.ToSlash(filepath.Join(filepath.Dir(target), "helper.go"))] = "package checks\nfunc init(){}\n"

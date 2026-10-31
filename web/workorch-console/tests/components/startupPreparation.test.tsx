@@ -11,7 +11,7 @@ vi.mock('../../src/api', () => ({ workorchApi: { readStartupPreparation: vi.fn()
 const empty = (id = 'ws'): StartupPreparationView => ({ workspaceId: id, workspaceRevision: 10, operationState: 'not_checked', currentValidity: 'not_checked' });
 const observed = (request: PreparationCheckRequest, state: 'accepted' | 'blocked' | 'unknown' = 'blocked', id = 'ws'): StartupPreparationView => ({
   workspaceId: id, workspaceRevision: request.expectedWorkspaceRevision + (state === 'blocked' ? 2 : 1), operationState: state, currentValidity: 'not_evaluated',
-  record: { version: 'workorch-preparation-record/v2', attempts: [{ requestId: request.requestId, payloadHash: 'a'.repeat(64), expectedWorkspaceRevision: request.expectedWorkspaceRevision, committedWorkspaceRevision: request.expectedWorkspaceRevision + (state === 'blocked' ? 2 : 1), state, startedAt: '2026-10-22T00:00:00Z', creationEpoch: 'a'.repeat(32), preparationEpoch: 0,
+  record: { version: 'workorch-preparation-record', attempts: [{ requestId: request.requestId, payloadHash: 'a'.repeat(64), expectedWorkspaceRevision: request.expectedWorkspaceRevision, committedWorkspaceRevision: request.expectedWorkspaceRevision + (state === 'blocked' ? 2 : 1), state, startedAt: '2026-10-22T00:00:00Z', creationEpoch: 'a'.repeat(32), preparationEpoch: 0,
     binding: { startupInputHash: 'startup', snapshotHash: 'snapshot', manifestHash: 'manifest' }, checks: [{ id: 'exact_seal', owner: 'workspace', required: true, state: state === 'blocked' ? 'blocked' : 'pending', reason: state === 'blocked' ? 'check_pipeline_incomplete' : 'not_observed' }] }] },
 });
 const wrap = (id = 'ws') => <ConfigProvider theme={{ token: { motion: false } }}><WorkspacePreparation workspaceId={id} onClose={vi.fn()} /></ConfigProvider>;
@@ -180,7 +180,7 @@ describe('STEP04 准备主体流程', () => {
       (v: StartupPreparationView) => { v.record!.attempts[0].assessment!.passedRequiredCount = 1; },
       (v: StartupPreparationView) => { v.record!.attempts[0].assessment!.outstanding[0].owner = 'caller'; },
       (v: StartupPreparationView) => { v.record!.attempts[0].state = 'accepted'; v.operationState = 'accepted'; },
-      (v: StartupPreparationView) => { v.record!.version = 'workorch-preparation-record/v1'; },
+      (v: StartupPreparationView) => { v.record!.version = 'unsupported-record-contract'; },
     ]) { const bad = structuredClone(view); mutate(bad); expect(() => validatePreparationView(bad, 'ws')).toThrow(); }
   });
   it('空选择通过与整体 blocked、当前 stale、实际 Run 分轴展示，不伪造 M3', async () => {
@@ -247,7 +247,7 @@ describe('STEP04 准备主体流程', () => {
       (v: StartupPreparationView) => { v.record!.attempts[0].checks![1].state = 'blocked'; },
       (v: StartupPreparationView) => { v.record!.attempts[0].checks![0].state = 'blocked'; v.record!.attempts[0].checks![0].reason = 'binding_changed'; },
       (v: StartupPreparationView) => { v.record!.attempts[0].committedWorkspaceRevision++; },
-      (v: StartupPreparationView) => { v.record!.version = 'workorch-preparation-record/v1'; },
+      (v: StartupPreparationView) => { v.record!.version = 'unsupported-record-contract'; },
       (v: StartupPreparationView) => { v.record!.attempts[0].state = 'accepted'; v.operationState = 'accepted'; },
       (v: StartupPreparationView) => { v.record!.attempts[0].checks = []; },
     ]) { const bad = structuredClone(view); mutate(bad); expect(() => validatePreparationView(bad, 'ws')).toThrow(); }
@@ -276,7 +276,7 @@ describe('STEP04 准备主体流程', () => {
       (v: StartupPreparationView) => { v.record!.attempts[0].skillStatusState = 'ready' as typeof state; },
       (v: StartupPreparationView) => { delete v.record!.attempts[0].skillSelectionState; },
       (v: StartupPreparationView) => { v.record!.attempts[0].state = 'accepted'; v.operationState = 'accepted'; },
-      (v: StartupPreparationView) => { v.record!.version = 'workorch-preparation-record/v1'; },
+      (v: StartupPreparationView) => { v.record!.version = 'unsupported-record-contract'; },
     ]) { const bad = structuredClone(view); mutate(bad); expect(() => validatePreparationView(bad, 'ws')).toThrow(); }
   });
   it.each([
@@ -304,7 +304,7 @@ describe('STEP04 准备主体流程', () => {
       (v: StartupPreparationView) => { delete v.record!.attempts[0].skillSelectionState; },
       (v: StartupPreparationView) => { delete v.record!.attempts[0].skillRegistryEvidenceRef; },
       (v: StartupPreparationView) => { v.record!.attempts[0].state = 'accepted'; },
-      (v: StartupPreparationView) => { v.record!.version = 'workorch-preparation-record/v1'; },
+      (v: StartupPreparationView) => { v.record!.version = 'unsupported-record-contract'; },
     ]) { const bad = structuredClone(view); mutate(bad); expect(() => validatePreparationView(bad, 'ws')).toThrow(); }
   });
   it.each(['run_history_empty_fence_not_final', 'run_history_present', 'run_history_retired', 'binding_changed'])('展示 Run 历史 %s 原引用但不证明无 Run 或触发新操作', async reason => {
@@ -328,7 +328,7 @@ describe('STEP04 准备主体流程', () => {
       (v: StartupPreparationView) => { v.record!.attempts[0].checks![0].state = 'passed'; },
       (v: StartupPreparationView) => { v.record!.attempts[0].checks![0].reason = 'run_history_unavailable'; },
       (v: StartupPreparationView) => { v.record!.attempts[0].state = 'unknown'; v.operationState = 'unknown'; },
-      (v: StartupPreparationView) => { v.record!.version = 'workorch-preparation-record/v1'; },
+      (v: StartupPreparationView) => { v.record!.version = 'unsupported-record-contract'; },
     ]) { const bad = structuredClone(view); mutate(bad); expect(() => validatePreparationView(bad, 'ws')).toThrow(); }
   });
   it.each(['exact_seal', 'persistence_integrity'])('展示 %s 原时点结论和引用，不自动重取或启动', async id => {
@@ -352,7 +352,7 @@ describe('STEP04 准备主体流程', () => {
       (v: StartupPreparationView) => { v.record!.attempts[0].checks![0].owner = 'caller'; },
       (v: StartupPreparationView) => { v.record!.attempts[0].checks![0].required = false; },
       (v: StartupPreparationView) => { v.record!.attempts[0].checks![0].reason = 'ready'; },
-      (v: StartupPreparationView) => { v.record!.version = 'workorch-preparation-record/v1'; },
+      (v: StartupPreparationView) => { v.record!.version = 'unsupported-record-contract'; },
     ]) { const bad = structuredClone(view); mutate(bad); expect(() => validatePreparationView(bad, 'ws')).toThrow(); }
   });
   it('LLM 配置检查通过不要求热缓存或独立授权，且不自动启动执行', async () => {
@@ -413,7 +413,7 @@ describe('STEP04 准备主体流程', () => {
       (v: StartupPreparationView) => { v.record!.attempts[0].checks![0].reason = 'provider_selection_ready'; },
       (v: StartupPreparationView) => { v.record!.attempts[0].checks![0].reason = 'provider_selection_model_missing:raw-config'; },
       (v: StartupPreparationView) => { v.record!.attempts[0].checks![0].reason = 'toString'; },
-      (v: StartupPreparationView) => { v.record!.version = 'workorch-preparation-record/v1'; },
+      (v: StartupPreparationView) => { v.record!.version = 'unsupported-record-contract'; },
     ]) { const bad = structuredClone(view); mutate(bad); expect(() => validatePreparationView(bad, 'ws')).toThrow(); }
   });
   it.each([
@@ -456,7 +456,7 @@ describe('STEP04 准备主体流程', () => {
       (v: StartupPreparationView) => { v.record!.attempts[0].checks![0].reason = 'mcp_selection_server_missing:raw-config'; },
       (v: StartupPreparationView) => { v.record!.attempts[0].checks![0].reason = 'toString'; },
       (v: StartupPreparationView) => { v.record!.attempts[0].checks![0].id = 'exact_seal'; },
-      (v: StartupPreparationView) => { v.record!.version = 'workorch-preparation-record/v1'; },
+      (v: StartupPreparationView) => { v.record!.version = 'unsupported-record-contract'; },
     ]) { const bad = structuredClone(view); mutate(bad); expect(() => validatePreparationView(bad, 'ws')).toThrow(); }
     const stale = structuredClone(view); stale.currentValidity = 'stale';
     expect(() => validatePreparationView(stale, 'ws')).not.toThrow();
@@ -477,7 +477,7 @@ describe('STEP04 准备主体流程', () => {
     for (const mutate of [
       (v: StartupPreparationView) => { delete v.record!.attempts[0].mcpRegistryEvidenceRef; },
       (v: StartupPreparationView) => { v.record!.attempts[0].mcpRegistryEvidenceRef = 'mcp-registry-observation:ready'; },
-      (v: StartupPreparationView) => { v.record!.version = 'workorch-preparation-record/v1'; },
+      (v: StartupPreparationView) => { v.record!.version = 'unsupported-record-contract'; },
       (v: StartupPreparationView) => { v.record!.attempts[0].state = 'accepted'; },
       (v: StartupPreparationView) => { v.record!.attempts[0].checks![0].state = 'passed'; },
       (v: StartupPreparationView) => { v.record!.attempts[0].checks![0].state = 'failed'; },
@@ -587,7 +587,7 @@ describe('STEP04 准备主体流程', () => {
 	  for (const mutate of [
 	    (v: StartupPreparationView) => { delete v.record!.attempts[0].memoryInventoryEvidenceRef; },
 	    (v: StartupPreparationView) => { v.record!.attempts[0].memoryInventoryEvidenceRef = 'ready'; },
-	    (v: StartupPreparationView) => { v.record!.version = 'workorch-preparation-record/v1'; },
+	    (v: StartupPreparationView) => { v.record!.version = 'unsupported-record-contract'; },
 	    (v: StartupPreparationView) => { v.record!.attempts[0].checks![0].reason = 'memory_inventory_unavailable_not_saved'; },
 	    (v: StartupPreparationView) => { v.record!.attempts[0].checks![0].owner = 'caller'; },
 	    (v: StartupPreparationView) => { v.record!.attempts[0].state = 'accepted'; },
@@ -609,7 +609,7 @@ describe('STEP04 准备主体流程', () => {
     for (const mutate of [
       (v: StartupPreparationView) => { v.record!.attempts[0].providerCacheEvidenceRef = 'provider-cache-observation:ready'; },
       (v: StartupPreparationView) => { v.record!.attempts[0].state = 'accepted'; },
-      (v: StartupPreparationView) => { v.record!.version = 'workorch-preparation-record/v1'; },
+      (v: StartupPreparationView) => { v.record!.version = 'unsupported-record-contract'; },
       (v: StartupPreparationView) => { v.record!.attempts[0].checks = []; },
       (v: StartupPreparationView) => { v.record!.attempts[0].checks![0].owner = 'caller'; },
     ]) { const bad = structuredClone(view); mutate(bad); expect(() => validatePreparationView(bad, 'ws')).toThrow(); }
@@ -642,7 +642,7 @@ describe('STEP04 准备主体流程', () => {
       (v: StartupPreparationView) => { delete v.record!.attempts[0].skillSelectionState; },
       (v: StartupPreparationView) => { v.record!.attempts[0].skillSelectionState = 'sources_incomplete'; v.record!.attempts[0].checks![0].reason = 'skill_selection_sources_incomplete'; },
       (v: StartupPreparationView) => { v.record!.attempts[0].state = 'accepted'; },
-      (v: StartupPreparationView) => { v.record!.version = 'workorch-preparation-record/v1'; },
+      (v: StartupPreparationView) => { v.record!.version = 'unsupported-record-contract'; },
     ]) { const bad = structuredClone(view); mutate(bad); expect(() => validatePreparationView(bad, 'ws')).toThrow(); }
   });
   it('组合选择已编译仍不代表就绪；拒绝缺来源或伪造成功', async () => {
@@ -691,7 +691,7 @@ describe('STEP04 准备主体流程', () => {
       (v: StartupPreparationView) => { v.record!.attempts[0].skillHubInstalledState = 'ready' as typeof a.skillHubInstalledState; },
       (v: StartupPreparationView) => { delete v.record!.attempts[0].skillHubEffectRef; },
       (v: StartupPreparationView) => { v.record!.attempts[0].state = 'accepted'; },
-      (v: StartupPreparationView) => { v.record!.version = 'workorch-preparation-record/v1'; },
+      (v: StartupPreparationView) => { v.record!.version = 'unsupported-record-contract'; },
     ]) { const bad = structuredClone(view); mutate(bad); expect(() => validatePreparationView(bad, 'ws')).toThrow(); }
   });
   it('SkillHub 未决效果独立展示并禁止换请求；GET 不执行 status', async () => {

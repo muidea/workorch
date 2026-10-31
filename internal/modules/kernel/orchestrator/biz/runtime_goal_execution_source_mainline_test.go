@@ -46,7 +46,7 @@ func runtimeGoalReviewedRepairSemanticResultForScope(command llmevents.RequestRu
 		if !found {
 			continue
 		}
-		if binding.InputReview == nil || binding.InputReview.ProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocolV2 {
+		if binding.InputReview == nil || binding.InputReview.ProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocol {
 			return llmevents.RequestRuntimeCandidateResult{}, fmt.Errorf("Goal repair requires exact v2 input review")
 		}
 		var inputs []string
@@ -76,7 +76,7 @@ func runtimeGoalReviewedRepairSemanticResultForScope(command llmevents.RequestRu
 				return llmevents.RequestRuntimeCandidateResult{}, fmt.Errorf("review lost original criterion %q", check)
 			}
 			reason := "The original input builds and invokes the delivered CLI and compares its output with 4; the owner executes the declared v5 conjunctive recipe. Repair history remains the declared Runtime consumer's responsibility; this isolated proof does not claim project-wide test/race coverage."
-			review.Checks = append(review.Checks, runtimecontract.RuntimeValidationInputCheckReview{RequiredCheckRef: check, Conclusion: runtimecontract.RuntimeValidationInputConsistent, Reason: reason, InputTargetRefs: inputs, Obligations: []runtimecontract.RuntimeValidationInputObligationReview{{CriterionText: criterion, Finding: runtimecontract.RuntimeValidationInputCovered, Reason: reason, InputTargetRefs: inputs}}})
+			review.Checks = append(review.Checks, runtimecontract.RuntimeValidationInputCheckReview{RequiredCheckRef: check, Conclusion: runtimecontract.RuntimeValidationInputConsistent, Reason: reason, InputTargetRefs: inputs, Obligations: []runtimecontract.RuntimeValidationInputObligationReview{{CriterionText: criterion, Finding: runtimecontract.RuntimeValidationInputCovered, Reason: reason, InputTargetRefs: inputs, ProofConsumerRefs: runtimecontract.RuntimeValidationProofConsumerRefs(*binding.InputReview)}}})
 		}
 		if err := review.ValidateAgainstBinding(binding); err != nil {
 			return llmevents.RequestRuntimeCandidateResult{}, err
@@ -107,7 +107,7 @@ func TestDriveRuntimeConfirmedRepairFiniteValidationScopeAcrossRestart(t *testin
 func runtimeTestWithGoalRepairSource(t *testing.T, bootstrap runtimecontract.RuntimeBootstrap) runtimecontract.RuntimeBootstrap {
 	t.Helper()
 	i := bootstrap.Definition.SourceObligations.Clone()
-	rule := runtimecontract.RuntimeLineageAssertionRule{Ref: "goal-original-repair", Kind: runtimecontract.RuntimeLineageRepairThenFreshValidation, ConsumptionPoint: runtimecontract.RuntimeProofPhaseExecution, ExecutionSourceContractRef: runtimecontract.RuntimeGoalSourceExecutionProofV2, RepairHistoryContractRef: runtimecontract.RuntimeConfirmedBindingRepairProofV1}
+	rule := runtimecontract.RuntimeLineageAssertionRule{Ref: "goal-original-repair", Kind: runtimecontract.RuntimeLineageRepairThenFreshValidation, ConsumptionPoint: runtimecontract.RuntimeProofPhaseExecution, ExecutionSourceContractRef: runtimecontract.RuntimeGoalSourceExecutionProof, RepairHistoryContractRef: runtimecontract.RuntimeConfirmedBindingRepairProofV1}
 	i.ExecutionProofMappings = []runtimecontract.RuntimeExecutionProofMapping{{ContractRef: rule.ExecutionSourceContractRef, ConsumerItemRef: "original-goal", RuleRef: rule.Ref, SourceItemRef: "cwi-2", ConsumerGoalText: bootstrap.Definition.GoalDefinition}}
 	i = i.WithHash()
 	bootstrap.Definition.SourceObligations = &i
@@ -169,7 +169,7 @@ func runtimeGoalAssertOriginalRepairConsumer(t *testing.T, record runtimecontrac
 			}
 		}
 	}
-	if binding.ID == "" || len(binding.LineageAssertions) != 1 || binding.LineageAssertions[0].SourceScope != "goal" || binding.LineageAssertions[0].Rule.ExecutionSourceContractRef != runtimecontract.RuntimeGoalSourceExecutionProofV2 {
+	if binding.ID == "" || len(binding.LineageAssertions) != 1 || binding.LineageAssertions[0].SourceScope != "goal" || binding.LineageAssertions[0].Rule.ExecutionSourceContractRef != runtimecontract.RuntimeGoalSourceExecutionProof {
 		t.Fatal("ordinary real validation lost exact original Goal consumer")
 	}
 	if _, err := runtimecontract.CompileRuntimeBindingValidationInputReview(binding, record.SemanticPlanning); err != nil {

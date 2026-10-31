@@ -31,7 +31,7 @@ func assertRuntimeCacheLayoutOperations(t *testing.T, input llmmodels.RuntimeCan
 		t.Fatal(err)
 	}
 	expected := input.ExpectedDocument.Clone()
-	expected.OperationsRenderContractRef = rc.RuntimeOperationsRenderContractV4
+	expected.OperationsContextEncoding = rc.RuntimeOperationsContextEncoding
 	input.ExpectedDocument = &expected
 	modern, err := runtimeProviderRequest(input)
 	if err != nil {
@@ -43,14 +43,9 @@ func assertRuntimeCacheLayoutOperations(t *testing.T, input llmmodels.RuntimeCan
 	before := cacheJSONValue(t, []byte(old.PromptContext.Sections[3].Content)).(map[string]any)
 	after := cacheJSONValue(t, []byte(modern.PromptContext.Sections[3].Content)).(map[string]any)
 	decision := after["decision"].(map[string]any)
-	current := after["context"].(map[string]any)
 	if decision["FocusRef"] != "context.focus" {
 		t.Fatal("duplicate focus was not explicitly referenced")
 	}
-	delete(decision, "FocusRef")
-	decision["Focus"] = current["focus"]
-	contract := after["outputContract"].(map[string]any)
-	contract["schema"] = expandCacheParameterSchema(t, contract["schema"].(map[string]any))
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("v4 lost or changed authority, constraint, source body or binding")
 	}
@@ -67,7 +62,7 @@ func assertRuntimeCacheLayoutOperations(t *testing.T, input llmmodels.RuntimeCan
 		old.Config.Capabilities.JSONSchemaResponse = strict
 		modern.RawTextOutput = !strict
 		old.RawTextOutput = !strict
-		if responsesPromptCacheKey(modern) != responsesPromptCacheKey(old) || responsesCacheSchemaScope(modern) != "runtime/operations-schema/v3" {
+		if responsesPromptCacheKey(modern) != responsesPromptCacheKey(old) || responsesCacheSchemaScope(modern) != "runtime/operations-schema" {
 			t.Fatal("C3 layout fragmented stable routing family")
 		}
 		if !reflect.DeepEqual(responsesTextForRequest(modern.Config.Capabilities, modern), responsesTextForRequest(old.Config.Capabilities, old)) {
@@ -146,7 +141,7 @@ func TestCacheLayoutSemanticPreservesContractsAndRejectsUnknownVersion(t *testin
 		t.Fatal(err)
 	}
 	expected := input.ExpectedDocument.Clone()
-	expected.SemanticRenderContractRef = rc.RuntimeSemanticRenderContractV4
+	expected.SemanticContextEncoding = rc.RuntimeSemanticContextEncoding
 	expected.Hash = rc.StableRuntimeExpectedDocumentHash(expected)
 	input.ExpectedDocument = &expected
 	modern, err := runtimeSemanticPlanProviderRequest(input)
@@ -172,9 +167,9 @@ func TestCacheLayoutSemanticPreservesContractsAndRejectsUnknownVersion(t *testin
 	if responsesPromptCacheKey(modern) != responsesPromptCacheKey(original) {
 		t.Fatal("C3 layout changed prefix key")
 	}
-	input.ExpectedDocument.SemanticRenderContractRef = "unknown"
+	input.ExpectedDocument.SemanticContextEncoding = "unknown"
 	if _, err := runtimeSemanticPlanProviderRequest(input); err == nil {
-		t.Fatal("unknown semantic renderer accepted")
+		t.Fatal("unsupported semantic context encoding accepted")
 	}
 }
 
@@ -198,12 +193,12 @@ func TestCacheLayoutParallelWorkspaceProfilesKeepDistinctContexts(t *testing.T) 
 			input.SemanticManifest.Hash = rc.StableRuntimeSemanticPlanManifestHash(input.SemanticManifest)
 			input.StablePrefixHash = rc.StableRuntimeCandidatePrefixHashWithExecutionContract(c.Definition, c.Activation.ExecutionContract)
 			refreshSemanticProgressForTest(t, &input)
-			input.ExpectedDocument = &rc.RuntimeExpectedDocumentContract{SemanticRenderContractRef: rc.RuntimeSemanticRenderContractV3, MaxOutputTokens: c.ProviderCeiling.EffectiveMaxOutputTokens}
+			input.ExpectedDocument = &rc.RuntimeExpectedDocumentContract{SemanticContextEncoding: rc.RuntimeSemanticContextEncoding, MaxOutputTokens: c.ProviderCeiling.EffectiveMaxOutputTokens}
 			original, err := runtimeSemanticPlanProviderRequest(input)
 			if err != nil {
 				t.Fatal(err)
 			}
-			input.ExpectedDocument.SemanticRenderContractRef = rc.RuntimeSemanticRenderContractV4
+			input.ExpectedDocument.SemanticContextEncoding = rc.RuntimeSemanticContextEncoding
 			r, err := runtimeSemanticPlanProviderRequest(input)
 			if err != nil {
 				t.Fatal(err)
@@ -245,12 +240,12 @@ func TestCacheLayoutSemanticRejectsStaleUnknownAndOverBudgetBeforeSubmission(t *
 		mutate        func(*llmmodels.RuntimeCandidateRequest)
 	}{
 		{"stale_prefix", "stable prefix mismatch", func(r *llmmodels.RuntimeCandidateRequest) { r.StablePrefixHash = "foreign-prefix" }},
-		{"unknown_renderer", "unsupported runtime semantic renderer", func(r *llmmodels.RuntimeCandidateRequest) { r.ExpectedDocument.SemanticRenderContractRef = "unknown" }},
+		{"unknown_renderer", "unsupported semantic context encoding", func(r *llmmodels.RuntimeCandidateRequest) { r.ExpectedDocument.SemanticContextEncoding = "unknown" }},
 		{"over_budget", "exceeds provider ceiling", func(r *llmmodels.RuntimeCandidateRequest) { r.SemanticContext.ProviderCeiling.MaxBytes = 1 }},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			request := runtimeSemanticRequestWithExpectedDocument(t)
-			request.ExpectedDocument.SemanticRenderContractRef = rc.RuntimeSemanticRenderContractV4
+			request.ExpectedDocument.SemanticContextEncoding = rc.RuntimeSemanticContextEncoding
 			scenario.mutate(&request)
 			generation, err := (&Biz{}).GenerateCandidate(context.Background(), request)
 			if err == nil || !strings.Contains(err.Error(), scenario.message) || generation.Audit == nil || generation.Audit.ProviderSubmitted {

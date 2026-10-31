@@ -10,15 +10,15 @@ import (
 )
 
 func preparationViewFixture() StartupPreparationView {
-	return StartupPreparationView{WorkspaceID: "ws", WorkspaceRevision: 2, OperationState: "unknown", CurrentValidity: "stale", Record: &PreparationRecordView{Version: "workorch-preparation-record/v1", Attempts: []PreparationAttemptView{{
-		RequestID: "original-request", PayloadHash: "payload", ExpectedWorkspaceRevision: 1, CommittedWorkspaceRevision: 2, StartedAt: time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC), State: "unknown",
+	return StartupPreparationView{WorkspaceID: "ws", WorkspaceRevision: 2, OperationState: "unknown", CurrentValidity: "stale", Record: &PreparationRecordView{Version: "workorch-preparation-record", Attempts: []PreparationAttemptView{{
+		RequestID: "original-request", PayloadHash: "payload", ExpectedWorkspaceRevision: 1, CommittedWorkspaceRevision: 2, StartedAt: time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC), State: "unknown", CreationEpoch: strings.Repeat("a", 32), Checks: []PreparationCheckView{{ID: "exact_seal", Owner: "workspace", Required: true, State: "pending", Reason: "not_observed"}},
 		Binding: PreparationBindingView{InputHash: "input", DerivationPermitID: "permit", ProposalHash: "proposal", SpecificationHash: "spec", CandidateID: "candidate", CandidateRevision: 1, CandidateHash: "candidate-hash", DefinitionRevision: "definition", StartupInputHash: "startup", AuthoringConfigurationHash: "config", SnapshotHash: "snapshot", ManifestHash: "manifest", CheckPolicyVersion: "policy", CompilerVersion: "compiler"},
 	}}}}
 }
 
 func TestPreparationProjectIssueIsFiniteAndBoundToUnresolvedOperation(t *testing.T) {
 	v := preparationViewFixture()
-	v.Record.Version, v.OperationState = "workorch-preparation-record/v2", "blocked"
+	v.Record.Version, v.OperationState = "workorch-preparation-record", "blocked"
 	a := &v.Record.Attempts[0]
 	a.State, a.CreationEpoch = "blocked", strings.Repeat("a", 32)
 	at := a.StartedAt.Add(time.Second)
@@ -80,7 +80,7 @@ func TestPreparationBootstrapCompilationSummaryIsNotReadiness(t *testing.T) {
 func TestPreparationNoRunFinalViewRequiresExactVersionAndRemainsHistorical(t *testing.T) {
 	fixture := func() StartupPreparationView {
 		v := preparationViewFixture()
-		v.WorkspaceRevision, v.OperationState, v.Record.Version = 3, "blocked", "workorch-preparation-record/v2"
+		v.WorkspaceRevision, v.OperationState, v.Record.Version = 3, "blocked", "workorch-preparation-record"
 		a := &v.Record.Attempts[0]
 		a.State, a.CommittedWorkspaceRevision, a.CreationEpoch = "blocked", 3, strings.Repeat("a", 32)
 		at := a.StartedAt.Add(time.Second)
@@ -125,7 +125,7 @@ func TestPreparationNoRunFinalViewRequiresExactVersionAndRemainsHistorical(t *te
 			case "seal_blocked":
 				a.Checks[0].State, a.Checks[0].Reason = "blocked", "binding_changed"
 			case "v1":
-				v.Record.Version = "workorch-preparation-record/v1"
+				v.Record.Version = "unsupported-record-contract"
 			case "ready":
 				a.State, v.OperationState = "ready", "ready"
 			case "revision":
@@ -144,7 +144,7 @@ func TestPreparationNoRunFinalViewRequiresExactVersionAndRemainsHistorical(t *te
 func TestPreparationProviderCacheReferenceNeverGrantsReadiness(t *testing.T) {
 	fixture := func() StartupPreparationView {
 		v := preparationViewFixture()
-		v.Record.Version, v.OperationState, v.CurrentValidity = "workorch-preparation-record/v2", "blocked", "not_evaluated"
+		v.Record.Version, v.OperationState, v.CurrentValidity = "workorch-preparation-record", "blocked", "not_evaluated"
 		a := &v.Record.Attempts[0]
 		a.State, a.CreationEpoch, a.ProviderCacheEvidenceRef = "blocked", strings.Repeat("a", 32), "provider-cache-observation:"+strings.Repeat("b", 32)
 		at := a.StartedAt.Add(time.Second)
@@ -160,7 +160,7 @@ func TestPreparationProviderCacheReferenceNeverGrantsReadiness(t *testing.T) {
 		}
 	}
 	for _, change := range []func(*StartupPreparationView){
-		func(v *StartupPreparationView) { v.Record.Version = "workorch-preparation-record/v1" },
+		func(v *StartupPreparationView) { v.Record.Version = "unsupported-record-contract" },
 		func(v *StartupPreparationView) {
 			v.Record.Attempts[0].ProviderCacheEvidenceRef = "provider-cache-observation:ready"
 		},
@@ -180,7 +180,7 @@ func TestPreparationProviderCacheReferenceNeverGrantsReadiness(t *testing.T) {
 func TestPreparationSkillHubEffectViewIsNotReadiness(t *testing.T) {
 	fixture := func(state, summary string) StartupPreparationView {
 		v := preparationViewFixture()
-		v.Record.Version = "workorch-preparation-record/v2"
+		v.Record.Version = "workorch-preparation-record"
 		v.OperationState = state
 		a := &v.Record.Attempts[0]
 		a.State = state
@@ -236,7 +236,7 @@ func TestPreparationSkillHubEffectViewIsNotReadiness(t *testing.T) {
 		case "missing_registry":
 			a.SkillRegistryEvidenceRef = ""
 		case "v1":
-			v.Record.Version = "workorch-preparation-record/v1"
+			v.Record.Version = "unsupported-record-contract"
 		case "accepted":
 			a.State = "accepted"
 		}
@@ -265,7 +265,7 @@ func TestPreparationSkillHubEffectViewIsNotReadiness(t *testing.T) {
 		case "accepted":
 			a.State = "accepted"
 		case "v1":
-			v.Record.Version = "workorch-preparation-record/v1"
+			v.Record.Version = "unsupported-record-contract"
 		}
 		if v.ValidateFor("ws") == nil {
 			t.Fatal("unbound reference observation accepted", change)
@@ -292,7 +292,7 @@ func TestPreparationSkillHubEffectViewIsNotReadiness(t *testing.T) {
 		case "accepted":
 			a.State = "accepted"
 		case "v1":
-			v.Record.Version = "workorch-preparation-record/v1"
+			v.Record.Version = "unsupported-record-contract"
 		}
 		if v.ValidateFor("ws") == nil {
 			t.Fatal("unbound status diagnosis accepted", change)
@@ -334,7 +334,7 @@ func TestPreparationSkillHubEffectViewIsNotReadiness(t *testing.T) {
 			func(v *StartupPreparationView) { v.Record.Attempts[0].SkillHubInstalledState = "ready" },
 			func(v *StartupPreparationView) { v.Record.Attempts[0].SkillHubEffectRef = "" },
 			func(v *StartupPreparationView) { v.Record.Attempts[0].State = "accepted" },
-			func(v *StartupPreparationView) { v.Record.Version = "workorch-preparation-record/v1" },
+			func(v *StartupPreparationView) { v.Record.Version = "unsupported-record-contract" },
 		} {
 			bad := fixture("blocked", "recorded")
 			bad.Record.Attempts[0].SkillHubInstalledState = state
@@ -347,7 +347,7 @@ func TestPreparationSkillHubEffectViewIsNotReadiness(t *testing.T) {
 	for _, mutate := range []func(*StartupPreparationView){
 		func(v *StartupPreparationView) { v.Record.Attempts[0].SkillHubEffectRef = "" },
 		func(v *StartupPreparationView) { v.Record.Attempts[0].SkillHubEffectRef = "skillhub-status:bad" },
-		func(v *StartupPreparationView) { v.Record.Version = "workorch-preparation-record/v1" },
+		func(v *StartupPreparationView) { v.Record.Version = "unsupported-record-contract" },
 	} {
 		v := fixture("blocked", "unresolved")
 		mutate(&v)
@@ -408,7 +408,7 @@ func TestStartupPreparationViewKeepsOperationAndValiditySeparate(t *testing.T) {
 func TestPreparationManagedConfigReferenceIsOpaqueAndBlockedOnly(t *testing.T) {
 	fixture := func() StartupPreparationView {
 		v := preparationViewFixture()
-		v.Record.Version = "workorch-preparation-record/v2"
+		v.Record.Version = "workorch-preparation-record"
 		v.OperationState = "blocked"
 		a := &v.Record.Attempts[0]
 		a.State = "blocked"
@@ -436,7 +436,7 @@ func TestPreparationManagedConfigReferenceIsOpaqueAndBlockedOnly(t *testing.T) {
 		func(v *StartupPreparationView) {
 			v.Record.Attempts[0].ManagedConfigEvidenceRef = "managed-config-observation:wrong"
 		},
-		func(v *StartupPreparationView) { v.Record.Version = "workorch-preparation-record/v1" },
+		func(v *StartupPreparationView) { v.Record.Version = "unsupported-record-contract" },
 		func(v *StartupPreparationView) { v.Record.Attempts[0].State = "unknown"; v.OperationState = "unknown" },
 		func(v *StartupPreparationView) { v.Record.Attempts[0].Checks[0].Reason = "ready" },
 		func(v *StartupPreparationView) {
@@ -454,7 +454,7 @@ func TestPreparationManagedConfigReferenceIsOpaqueAndBlockedOnly(t *testing.T) {
 func TestPreparationSoulReferenceIsHistoricalAndBlockedOnly(t *testing.T) {
 	fixture := func() StartupPreparationView {
 		v := preparationViewFixture()
-		v.Record.Version = "workorch-preparation-record/v2"
+		v.Record.Version = "workorch-preparation-record"
 		v.OperationState = "blocked"
 		a := &v.Record.Attempts[0]
 		a.State = "blocked"
@@ -478,7 +478,7 @@ func TestPreparationSoulReferenceIsHistoricalAndBlockedOnly(t *testing.T) {
 		func(v *StartupPreparationView) { v.Record.Attempts[0].SoulEvidenceRef = strings.Repeat("a", 64) },
 		func(v *StartupPreparationView) { v.Record.Attempts[0].SoulEvidenceRef = "soul-observation:invalid" },
 		func(v *StartupPreparationView) { v.Record.Attempts[0].SoulEvidenceRef = "" },
-		func(v *StartupPreparationView) { v.Record.Version = "workorch-preparation-record/v1" },
+		func(v *StartupPreparationView) { v.Record.Version = "unsupported-record-contract" },
 		func(v *StartupPreparationView) {
 			v.Record.Attempts[0].State = "accepted"
 			v.OperationState = "accepted"
@@ -498,7 +498,7 @@ func TestPreparationSoulReferenceIsHistoricalAndBlockedOnly(t *testing.T) {
 func TestPreparationSkillRegistryReferenceIsHistoricalAndBlockedOnly(t *testing.T) {
 	fixture := func() StartupPreparationView {
 		v := preparationViewFixture()
-		v.Record.Version = "workorch-preparation-record/v2"
+		v.Record.Version = "workorch-preparation-record"
 		v.OperationState = "blocked"
 		a := &v.Record.Attempts[0]
 		a.State = "blocked"
@@ -526,7 +526,7 @@ func TestPreparationSkillRegistryReferenceIsHistoricalAndBlockedOnly(t *testing.
 			v.Record.Attempts[0].SkillRegistryEvidenceRef = "skill-registry-observation:invalid"
 		},
 		func(v *StartupPreparationView) { v.Record.Attempts[0].SkillRegistryEvidenceRef = "" },
-		func(v *StartupPreparationView) { v.Record.Version = "workorch-preparation-record/v1" },
+		func(v *StartupPreparationView) { v.Record.Version = "unsupported-record-contract" },
 		func(v *StartupPreparationView) {
 			v.Record.Attempts[0].State = "accepted"
 			v.OperationState = "accepted"
@@ -546,7 +546,7 @@ func TestPreparationSkillRegistryReferenceIsHistoricalAndBlockedOnly(t *testing.
 
 func preparationCompletionViewFixture() StartupPreparationView {
 	v := preparationViewFixture()
-	v.WorkspaceRevision, v.OperationState, v.CurrentValidity, v.Record.Version = 3, "completed", "observed", "workorch-preparation-record/v2"
+	v.WorkspaceRevision, v.OperationState, v.CurrentValidity, v.Record.Version = 3, "completed", "observed", "workorch-preparation-record"
 	a := &v.Record.Attempts[0]
 	a.State, a.CommittedWorkspaceRevision, a.CreationEpoch = "blocked", 3, strings.Repeat("a", 32)
 	at := a.StartedAt.Add(time.Second)

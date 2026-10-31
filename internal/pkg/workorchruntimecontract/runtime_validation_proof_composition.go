@@ -18,12 +18,7 @@ func RuntimeValidationProofConsumerRefs(subject RuntimeValidationInputReviewSubj
 }
 
 func validateRuntimeValidationCompositionSubject(subject RuntimeValidationInputReviewSubject, binding RuntimeValidationProofRequirementBinding) error {
-	if subject.ProtocolRef != RuntimeValidationInputReviewProtocolV3 {
-		if subject.LineageAssertions != nil {
-			return fmt.Errorf("legacy input review cannot introduce composite proof consumers")
-		}
-		return nil
-	}
+
 	if err := ValidateRuntimeLineageAssertions(subject.LineageAssertions, binding.CoverageWorkItemID, binding.DeclarationRef); err != nil {
 		return err
 	}
@@ -39,13 +34,15 @@ func validateRuntimeValidationCompositionSubject(subject RuntimeValidationInputR
 }
 
 func validateRuntimeValidationCompositionCheck(check RuntimeValidationInputCheckReview, subject RuntimeValidationInputReviewSubject) error {
-	if subject.ProtocolRef != RuntimeValidationInputReviewProtocolV3 {
+
+	if len(subject.LineageAssertions) == 0 {
+		allAbsent := true
 		for _, obligation := range check.Obligations {
-			if obligation.ProofConsumerRefs != nil {
-				return fmt.Errorf("legacy input review cannot carry proof consumer mappings")
-			}
+			allAbsent = allAbsent && obligation.ProofConsumerRefs == nil
 		}
-		return nil
+		if allAbsent {
+			return nil
+		}
 	}
 	allowed := RuntimeValidationProofConsumerRefs(subject)
 	used := make(map[string]bool, len(allowed))
@@ -72,6 +69,6 @@ func validateRuntimeValidationCompositionCheck(check RuntimeValidationInputCheck
 // Independently compare owner-supplied declarations with the original compiled
 // requirement. Rehashing a substituted subject does not establish provenance.
 func runtimeValidationCompositionMatchesRequirement(subject *RuntimeValidationInputReviewSubject, requirement RuntimeValidationProofRequirement) bool {
-	return subject == nil || subject.ProtocolRef != RuntimeValidationInputReviewProtocolV3 ||
+	return subject == nil ||
 		slices.Equal(subject.LineageAssertions, requirement.LineageAssertions)
 }

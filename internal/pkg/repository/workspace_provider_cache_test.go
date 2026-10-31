@@ -59,7 +59,7 @@ func TestPreparationProviderCacheRepositoryPrivateCloneAndImmutableHistory(t *te
 			a.Checks[0].State, a.Checks[0].Reason = "blocked", "provider_declaration_only"
 			e := workspace.WorkspacePreparationProviderCacheEvidence{Version: workspace.PreparationProviderCacheEvidenceVersion, Ref: workspace.PreparationProviderCacheRefPrefix + strings.Repeat("b", 32), RequestID: a.RequestID, PayloadHash: a.PayloadHash, Binding: a.Binding, Facts: workspace.PreparationProviderCacheFacts{Version: workspace.PreparationProviderCacheEvidenceVersion, WorkspaceRevision: a.ExpectedWorkspaceRevision + 1, Observation: llmevents.ObserveProviderCatalogCacheResult{WorkspaceID: w.ID, OwnerEpoch: "llm-preparation-epoch:ABCDEFGHIJKLMNOPQRSTUVWXYZ", ObservedAt: now.Add(time.Millisecond), Catalog: llmmodel.ProviderModelCatalog{ProviderID: "ai-proxy", Source: "ai_proxy", State: llmmodel.ProviderCatalogStateFresh, Revision: "private-catalog-revision", FetchedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Minute), Models: []llmmodel.ProviderModelDescriptor{{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "original-model"}, RouteOwner: "ai-proxy", CapabilityRevision: "capability", SupportedEndpoints: []string{"/v1/responses"}, Operations: []string{"generate"}, Reasoning: llmmodel.ProviderReasoningCapability{Efforts: []string{"original-effort"}}}}}}}}
 			if mode == "compiled" {
-				e.Facts.Observation.Configuration = &llmevents.PreparationProviderConfiguration{Version: llmevents.PreparationProviderConfigurationVersion, DefaultChat: e.Facts.Observation.Catalog.Models[0].Target}
+				e.Facts.Observation.Configuration = &llmevents.PreparationProviderConfiguration{Version: llmevents.PreparationProviderConfigurationSnapshotVersion, DefaultChat: e.Facts.Observation.Catalog.Models[0].Target}
 				e.Facts.Observation.Catalog.Models[0].Operations = []string{"responses"}
 				e.Facts.Observation.Catalog.Models[0].CapabilityReady = true
 				e.Facts.Observation.Catalog.Models[0].ContextWindowTokens = 32000
@@ -74,6 +74,9 @@ func TestPreparationProviderCacheRepositoryPrivateCloneAndImmutableHistory(t *te
 			}
 			e.ContentHash = e.Hash()
 			a.Checks[0].Reason = e.BlockedReason()
+			if mode == "compiled" {
+				a.Checks[0].State = "passed"
+			}
 			current.PreparationProviderCacheEvidence, a.ProviderCacheEvidenceRef = []workspace.WorkspacePreparationProviderCacheEvidence{e}, e.Ref
 			if mode == "compiled" {
 				bad := *current
@@ -107,7 +110,7 @@ func TestPreparationProviderCacheRepositoryPrivateCloneAndImmutableHistory(t *te
 			current.PreparationProviderCacheEvidence[0].Facts.Observation.Catalog.Models[0].Operations[0] = "caller"
 			current.PreparationProviderCacheEvidence[0].Facts.Observation.Catalog.Models[0].Reasoning.Efforts[0] = "caller"
 			if mode == "compiled" {
-				current.PreparationProviderCacheEvidence[0].Selection.Descriptor.Operations[0] = "caller"
+				current.PreparationProviderCacheEvidence[0].Selection.Selection.Target.ModelID = "caller"
 				current.PreparationProviderCacheEvidence[0].Facts.Observation.Configuration.DefaultChat.ModelID = "caller"
 			}
 			public, _ := json.Marshal(baseline)

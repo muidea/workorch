@@ -16,8 +16,8 @@ const RuntimeValidationDiagnosticSourceMaxFiles = 64
 const RuntimeValidationDiagnosticSourceMaxBytes = 256 * 1024
 const RuntimeValidationDiagnosticSourceMaxReportBytes = 64 * 1024
 
-// Only the explicitly sealed extension selects this finite envelope. Legacy
-// subjects/reports retain their original bounds, including after reload.
+// Diagnostic-source reviews and ordinary input reviews have separate finite
+// envelopes determined by their declared semantic scope.
 func RuntimeValidationInputReviewBounds(s RuntimeValidationInputReviewSubject) (files, bytes, report int) {
 	if s.DiagnosticSourceContractRef == RuntimeValidationDiagnosticSourceReviewV1 {
 		return RuntimeValidationDiagnosticSourceMaxFiles, RuntimeValidationDiagnosticSourceMaxBytes, RuntimeValidationDiagnosticSourceMaxReportBytes
@@ -41,11 +41,11 @@ type RuntimeValidationDiagnosticSourceReview struct {
 func validateRuntimeDiagnosticSourceSubject(s RuntimeValidationInputReviewSubject) error {
 	if s.DiagnosticSourceContractRef == "" {
 		if s.DiagnosticSources != nil {
-			return fmt.Errorf("diagnostic sources require an explicit versioned review contract")
+			return fmt.Errorf("diagnostic sources require an explicit diagnostic-source review contract")
 		}
 		return nil
 	}
-	if s.ProtocolRef != RuntimeValidationInputReviewProtocolV3 || s.DiagnosticSourceContractRef != RuntimeValidationDiagnosticSourceReviewV1 || len(s.DiagnosticSources) == 0 || len(s.DiagnosticSources) > RuntimeValidationDiagnosticSourceLimit {
+	if s.ProtocolRef != RuntimeValidationInputReviewProtocol || s.DiagnosticSourceContractRef != RuntimeValidationDiagnosticSourceReviewV1 || len(s.DiagnosticSources) == 0 || len(s.DiagnosticSources) > RuntimeValidationDiagnosticSourceLimit {
 		return fmt.Errorf("unsupported or incomplete diagnostic source review contract")
 	}
 	previous := ""
@@ -71,7 +71,7 @@ func validateRuntimeDiagnosticSourceSubject(s RuntimeValidationInputReviewSubjec
 func validateRuntimeDiagnosticSourceReview(r RuntimeValidationInputReview, s RuntimeValidationInputReviewSubject) error {
 	if s.DiagnosticSourceContractRef == "" {
 		if r.DiagnosticSources != nil {
-			return fmt.Errorf("legacy review cannot add diagnostic source findings")
+			return fmt.Errorf("review without declared diagnostic sources cannot add source findings")
 		}
 		return nil
 	}
@@ -194,7 +194,7 @@ func ValidateRuntimeValidationDiagnosticExecution(observation RuntimeValidationO
 // The immutable binding, not optional receipt fields, selects the source
 // contract. A repair-authorizing failure may not erase attribution or borrow
 // targets outside the exact source-stage union. Unobserved failures remain
-// persistable without granting repair authority; legacy bindings stay legacy.
+// persistable without granting repair authority; bindings without source declarations cannot gain them.
 func ValidateRuntimeValidationDiagnosticFailureObservation(observation *RuntimeValidationObservation, binding RuntimeValidationProofRequirementBinding, scope []string, failure *RuntimeValidationFailureObservation) error {
 	if observation != nil {
 		if err := ValidateRuntimeValidationDiagnosticExecution(*observation, binding, scope); err != nil {

@@ -16,8 +16,8 @@ func validateGoalEvidencePurposeMappings(mappings []GoalEvidencePurposeMapping, 
 	}
 	seen := map[string]bool{}
 	for _, mapping := range mappings {
-		validHistory := mapping.ContractRef == runtimecontract.RuntimeCrossCWIEvidencePurposeV1 && refs[mapping.HistoricalItemRef] == 1 && mapping.HistoricalProfileID == "" && mapping.HistoricalDeliverableID == "" && mapping.HistoricalProfileHash == "" && mapping.HistoricalText == ""
-		if mapping.ContractRef == runtimecontract.RuntimeProfileDeliverableEvidencePurposeV2 {
+		validHistory := mapping.ContractRef == runtimecontract.RuntimeCrossCWIEvidencePurpose && refs[mapping.HistoricalItemRef] == 1 && mapping.HistoricalProfileID == "" && mapping.HistoricalDeliverableID == "" && mapping.HistoricalProfileHash == "" && mapping.HistoricalText == ""
+		if mapping.ContractRef == runtimecontract.RuntimeProfileDeliverableEvidencePurpose {
 			validHistory = refs[mapping.HistoricalItemRef] == 0 && runtimecontract.ValidateRuntimeProfileEvidencePurposeMappingDeclaration(runtimecontract.RuntimeEvidencePurposeMapping(mapping)) == nil
 		}
 		if !validHistory || refs[mapping.AcceptanceItemRef] != 1 ||

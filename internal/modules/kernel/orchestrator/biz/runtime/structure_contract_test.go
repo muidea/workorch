@@ -513,7 +513,7 @@ func TestO6GovernanceComparisonsUseFocusedEntries(t *testing.T) {
 		"governancecheck.GovernedDispatchMatches":        2,
 		"governancecheck.DependencyMatches":              2,
 		// 原执行/回执查询及只读来源重编都必须反查同一 persisted governance grant。
-		"governancecheck.GrantForExecution":                                   4,
+		"governancecheck.GrantForExecution":                                   5,
 		"runtimecontract.ValidateRuntimeOperationGovernanceExecutionBindings": 1,
 		"governancecheck.SameGrant":                                           1,
 		"governancecheck.EvaluateOperationSuspension":                         1,

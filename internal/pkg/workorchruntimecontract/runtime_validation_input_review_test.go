@@ -22,6 +22,7 @@ func semanticInputReviewFixture(t *testing.T) (RuntimeSemanticPlanManifest, Runt
 			Files: []RuntimeValidationInputReviewFile{{TargetRef: "checks/input_test.go", Content: content, ContentHash: RuntimeValidationInputContentHash(content)}}}
 		binding.InputReview.Hash = StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, binding)
 		catalog.ValidationSurfaces[0].ProofRequirementBindings[0] = binding.Clone()
+		catalog.ValidationRecipes = []RuntimeValidationRecipe{{ID: binding.ValidationRecipeID, AdapterRef: "owner/review", Command: "check", InputReviewProtocolRef: RuntimeValidationInputReviewProtocol}}
 		catalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
 	}
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
@@ -32,7 +33,7 @@ func semanticInputReviewFixture(t *testing.T) (RuntimeSemanticPlanManifest, Runt
 	review := &RuntimeValidationInputReview{SubjectHash: binding.InputReview.Hash}
 	for _, check := range binding.RequiredCheckRefs {
 		review.Checks = append(review.Checks, RuntimeValidationInputCheckReview{RequiredCheckRef: check, Conclusion: RuntimeValidationInputConsistent,
-			Reason: "The input preserves the original requirement without a skip or waiver.", InputTargetRefs: []string{"checks/input_test.go"}})
+			Reason: "The input preserves the original requirement without a skip or waiver.", InputTargetRefs: []string{"checks/input_test.go"}, Obligations: []RuntimeValidationInputObligationReview{{CriterionText: manifest.CoverageItems[0].TargetText, Finding: RuntimeValidationInputCovered, Reason: "Original criterion retained", InputTargetRefs: []string{"checks/input_test.go"}}}})
 	}
 	document.Proposals[1].ValidationInputReview = review
 	facts := []RuntimeSemanticProofFeasibility{
@@ -47,6 +48,14 @@ func TestValidationInputReviewSeparatesCompleteConclusionFromBindingAuthority(t 
 		t.Run(conclusion, func(t *testing.T) {
 			manifest, document, facts, _ := semanticInputReviewFixture(t)
 			document.Proposals[1].ValidationInputReview.Checks[0].Conclusion = conclusion
+			finding := RuntimeValidationInputCovered
+			if conclusion == RuntimeValidationInputConflict {
+				finding = RuntimeValidationInputConflicting
+			}
+			if conclusion == RuntimeValidationInputInconclusive {
+				finding = RuntimeValidationInputUnknown
+			}
+			document.Proposals[1].ValidationInputReview.Checks[0].Obligations[0].Finding = finding
 			facts[1].ProposalHash = StableRuntimeSemanticProofProposalHash(document.Proposals[1])
 			if err := document.ValidateAgainstManifest(manifest); err != nil {
 				t.Fatalf("complete observation rejected as malformed: %v", err)
@@ -215,6 +224,7 @@ func TestValidationInputReviewCatalogRejectsMixedReadVersions(t *testing.T) {
 	binding.InputReview.Hash = StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, *binding)
 	catalog.ValidationSurfaces = append(catalog.ValidationSurfaces, second)
 	catalog.ValidationRecipeRefs = append(catalog.ValidationRecipeRefs, second.ID)
+	catalog.ValidationRecipes = append(catalog.ValidationRecipes, RuntimeValidationRecipe{ID: second.ID, AdapterRef: "owner/review", Command: "check", InputReviewProtocolRef: RuntimeValidationInputReviewProtocol})
 	catalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	if err := catalog.Validate(); err == nil || !strings.Contains(err.Error(), "conflicting review input versions") {
 		t.Fatalf("mixed owner read versions admitted: %v", err)

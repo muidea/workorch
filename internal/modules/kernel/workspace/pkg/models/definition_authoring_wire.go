@@ -10,10 +10,8 @@ import (
 	"unicode/utf8"
 )
 
-// Empty selects immutable legacy echo wire. Only a new reservation selects a new version.
-const DefinitionAuthoringOwnerBoundV3 = "workorch.authoring.owner-bound/v3"
-
-const DefinitionAuthoringOwnerBoundV2 = "workorch.authoring.owner-bound/v2"
+// The owner binds machine identities; the model returns only the current semantic body.
+const DefinitionAuthoringOwnerBound = "workorch.authoring.owner-bound"
 
 const authoringDeriveSemanticSchema = `{"type":"object","additionalProperties":false,"required":["AdditionalItems"],"properties":{"AdditionalItems":{"type":"array","maxItems":128,"items":{"type":"string"}}}}`
 const authoringReviewSemanticSchema = `{"type":"object","additionalProperties":false,"required":["review"],"properties":{"review":{"type":"object","additionalProperties":false,"required":["Status","Reason","EvidenceRefs","RequirementIDs"],"properties":{"Status":{"type":"string","enum":["PASS","FAIL","UNKNOWN"]},"Reason":{"type":"string"},"EvidenceRefs":{"type":"array","items":{"type":"string"}},"RequirementIDs":{"type":"array","items":{"type":"string"}}}}}}`
@@ -33,9 +31,9 @@ func AuthoringWireSchema(ref, phase string) (string, error) {
 		}
 		mapping := schema["properties"].(map[string]any)["mapping"].(map[string]any)
 		fields := mapping["properties"].(map[string]any)
-		if ref == DefinitionAuthoringOwnerBoundV3 {
-			fields["ProfileAcceptanceSelections"] = map[string]any{"type": "array", "maxItems": 512, "items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"SourceRef", "AcceptanceItemRef"}, "properties": map[string]any{"SourceRef": map[string]any{"type": "string"}, "AcceptanceItemRef": map[string]any{"type": "string"}}}}
-		}
+
+		fields["ProfileAcceptanceSelections"] = map[string]any{"type": "array", "maxItems": 512, "items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"SourceRef", "AcceptanceItemRef"}, "properties": map[string]any{"SourceRef": map[string]any{"type": "string"}, "AcceptanceItemRef": map[string]any{"type": "string"}}}}
+
 		for _, k := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash"} {
 			delete(fields, k)
 		}
@@ -67,9 +65,7 @@ func AuthoringWireHash(ref, phase string) string {
 	return "authoring-wire-sha256:" + hex.EncodeToString(h[:])
 }
 func validateAuthoringWire(ref, hash, phase string) error {
-	if ref == "" && hash == "" {
-		return nil
-	}
+
 	if hash == "" || hash != AuthoringWireHash(ref, phase) {
 		return fmt.Errorf("authoring wire contract identity drift")
 	}
@@ -79,25 +75,11 @@ func validateAuthoringWire(ref, hash, phase string) error {
 // Provider bytes are never rewritten. The owner constructs a separate typed
 // canonical value from its exact reservation and the closed semantic body.
 func DecodeAuthoringMappingFor(d DefinitionDerivationRequest, payload []byte) (DefinitionAuthoringMapping, error) {
-	if d.WireContractRef == "" {
-		return DecodeDefinitionAuthoringMapping(payload)
-	}
+
 	if validateAuthoringWire(d.WireContractRef, d.WireContractHash, "derive") != nil {
 		return DefinitionAuthoringMapping{}, fmt.Errorf("authoring wire derivation drift")
 	}
-	fields := map[string]mappingShape{}
-	for k, v := range authoringMappingShape.fields["mapping"].fields {
-		fields[k] = v
-	}
-	if d.WireContractRef == DefinitionAuthoringOwnerBoundV3 {
-		shape := mappingArray(mappingObject(map[string]mappingShape{"SourceRef": mappingString, "AcceptanceItemRef": mappingString}))
-		shape.optional = true
-		fields["ProfileAcceptanceSelections"] = shape
-	}
-	for _, k := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash"} {
-		delete(fields, k)
-	}
-	m, err := decodeDefinitionAuthoringMappingShape(payload, mappingObject(map[string]mappingShape{"mapping": mappingObject(fields)}))
+	m, err := decodeDefinitionAuthoringMappingShape(payload, authoringSemanticMappingShape())
 	if err != nil {
 		return m, err
 	}
@@ -160,15 +142,10 @@ func DecodeOwnerBoundReview(r DefinitionAuthoringSpecificationRequest, payload [
 	if err := decodeAuthoringSemantic(payload, shape, &body); err != nil {
 		return GoalSpecificationCompletenessReview{}, err
 	}
-	return GoalSpecificationCompletenessReview{Kind: r.ReviewKind, SpecificationHash: r.ProposalHash, Status: body.Review.Status, Reason: body.Review.Reason, EvidenceRefs: body.Review.EvidenceRefs, RequirementIDs: body.Review.RequirementIDs}, nil
+	return GoalSpecificationCompletenessReview{Kind: r.ReviewKind, SpecificationHash: r.ProposalHash, Status: body.Review.Status, Reason: body.Review.Reason, EvidenceRefs: append([]string(nil), body.Review.EvidenceRefs...), RequirementIDs: append([]string(nil), body.Review.RequirementIDs...)}, nil
 }
 func validateOwnerBoundDerivationAudit(r DefinitionDerivationRequest, view bool) error {
-	if r.WireContractRef == "" {
-		if r.SuccessAudit != nil {
-			return fmt.Errorf("legacy derivation cannot carry v2 audit")
-		}
-		return nil
-	}
+
 	if r.Proposal == nil {
 		if r.SuccessAudit != nil {
 			return fmt.Errorf("non-success derivation carries audit")
@@ -193,5 +170,22 @@ func validateOwnerBoundDerivationAudit(r DefinitionDerivationRequest, view bool)
 
 // OwnerBoundAuthoringWire identifies immutable supported semantic-only contracts.
 func OwnerBoundAuthoringWire(ref string) bool {
-	return ref == DefinitionAuthoringOwnerBoundV2 || ref == DefinitionAuthoringOwnerBoundV3
+	return ref == DefinitionAuthoringOwnerBound
+}
+
+func authoringSemanticMappingShape() mappingShape {
+	fields := map[string]mappingShape{}
+	for k, v := range authoringMappingShape.fields["mapping"].fields {
+		fields[k] = v
+	}
+
+	shape := mappingArray(mappingObject(map[string]mappingShape{"SourceRef": mappingString, "AcceptanceItemRef": mappingString}))
+	shape.optional = true
+	fields["ProfileAcceptanceSelections"] = shape
+
+	for _, k := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash"} {
+		delete(fields, k)
+	}
+
+	return mappingObject(map[string]mappingShape{"mapping": mappingObject(fields)})
 }

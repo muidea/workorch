@@ -10,7 +10,7 @@ func TestPreparationSealWireRequiresOriginalBlockedReference(t *testing.T) {
 	for _, id := range []string{"exact_seal", "persistence_integrity"} {
 		fixture := func() StartupPreparationView {
 			v := preparationViewFixture()
-			v.Record.Version, v.OperationState = "workorch-preparation-record/v2", "blocked"
+			v.Record.Version, v.OperationState = "workorch-preparation-record", "blocked"
 			a := &v.Record.Attempts[0]
 			a.State, a.CreationEpoch, a.EvaluationVersion = "blocked", strings.Repeat("a", 32), "workorch-preparation-check-evaluation/v1"
 			a.SealEvidenceRef = "seal-observation:" + strings.Repeat("b", 32)
@@ -45,7 +45,7 @@ func TestPreparationSealWireRequiresOriginalBlockedReference(t *testing.T) {
 			case "reason":
 				a.Checks[0].Reason = "ready"
 			case "legacy":
-				v.Record.Version = "workorch-preparation-record/v1"
+				v.Record.Version = "unsupported-record-contract"
 			}
 			if v.ValidateFor("ws") == nil {
 				t.Fatal("unbound judgment accepted", id, change)

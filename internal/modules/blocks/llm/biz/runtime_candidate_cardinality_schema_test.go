@@ -111,7 +111,7 @@ func TestCardinalitySchemaKeepsDynamicParameterCapacity(t *testing.T) {
 	if _, err := rc.DecodeRuntimeCandidatePayloadWithManifest(manifest, body); err == nil {
 		t.Fatal("dynamic name duplication passed strict decoder")
 	}
-	if !strings.Contains(runtimeCandidateContractCatalogV3(), "same name in different operations") || !strings.Contains(runtimeCandidateContractCatalogV3(), "contiguous oldText") {
+	if !strings.Contains(runtimeCandidateContractCatalogCurrent(), "same name in different operations") || !strings.Contains(runtimeCandidateContractCatalogCurrent(), "contiguous oldText") {
 		t.Fatal("wire and File encoding instructions missing")
 	}
 }

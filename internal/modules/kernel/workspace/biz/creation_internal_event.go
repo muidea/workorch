@@ -89,7 +89,7 @@ func (m *goalDoDManager) submitWorkspaceCreationInternalEvent(ctx context.Contex
 		workspace.DefinitionAuthoringCreation = &workspacemodel.DefinitionAuthoringCreation{RequestID: cmd.RequestID, InputHash: cmd.CreationInputHash()}
 	}
 	// Only the creation dispatcher may mint this marker. Existing authoring
-	// replays returned above retain their original identity (including legacy).
+	// replays returned above retain their original identity.
 	var creationEpoch [16]byte
 	if _, err := rand.Read(creationEpoch[:]); err != nil {
 		return nil, err

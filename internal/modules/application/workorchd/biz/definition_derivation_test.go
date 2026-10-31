@@ -122,10 +122,17 @@ func TestDerivationApplicationReplaysHistoricalRequestWithoutCurrentTemplate(t *
 	input := workspace.DefinitionAuthoringInput{Version: 1, WorkspaceID: "ws", Revision: 1, GoalText: "目标", TemplateID: "t"}
 	template := workspace.WorkspaceTemplate{ID: "t"}
 	record := workspace.DefinitionAuthoringRecord{Input: input, InputHash: input.InputHash(), TemplateSnapshot: template, TemplateSnapshotHash: workspace.WorkspaceTemplateSnapshotHash(&template)}
-	request := workspace.DefinitionDerivationRequest{RequestID: "derive/" + record.InputHash, Input: input, Template: template, ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil), ProviderBindingHash: "provider"}
-	request.PermitID = request.ExpectedPermitID()
-	request.Proposal = &workspace.DefinitionDerivedAcceptance{AuthoringInputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"验收"}}
-	record.DerivationRequests = []workspace.DefinitionDerivationRequest{request}
+	var request workspace.DefinitionDerivationRequest
+	var err error
+	record, request, _, err = record.ReserveDerivation("derive/"+record.InputHash, "provider", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err = completeTestDerivation(record, request.PermitID, &workspace.DefinitionDerivedAcceptance{AuthoringInputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"验收"}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	owner := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	if err := owner.Subscribe(workspaceevents.TopicWorkspaceDefinitionAuthoringQuery, func(ev magicevent.Event, result magicevent.Result) {
 		copy := record.Clone()
@@ -159,7 +166,7 @@ func TestDerivationApplicationCallsProviderOnceAndReplays(t *testing.T) {
 				copy := record.Clone()
 				result.Set(workspaceevents.QueryDefinitionAuthoringResult{WorkspaceID: input.WorkspaceID, WorkspaceRevision: 1, Record: authoringTestRecord(copy), CurrentTemplateSnapshotHash: record.TemplateSnapshotHash, CurrentTemplateAvailable: true}, nil)
 			case workspaceevents.ReserveDefinitionDerivationCommand:
-				next, request, fresh, err := record.ReserveDerivation(cmd.RequestID, cmd.ProviderBindingHash, cmd.Resources, cmd.WireContractRef)
+				next, request, fresh, err := record.ReserveDerivation(cmd.RequestID, cmd.ProviderBindingHash, cmd.Resources)
 				if err != nil {
 					t.Error(err)
 					return

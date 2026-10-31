@@ -6,9 +6,8 @@ import (
 	"slices"
 )
 
-// This owner-private binding extension changes neither Profile permissions nor
-// provider vocabulary. Empty bindings retain their sealed historical behavior.
-const RuntimeImplementationWorkReceiptChainV1 = "runtime-implementation-work/receipt-chain/v1"
+// Every work receipt must prove the complete ordered owner revision chain.
+// This invariant does not extend Profile permissions or provider vocabulary.
 
 type implementationWorkResourceChain struct {
 	dependencies []RuntimeFreshnessDependency
@@ -56,11 +55,8 @@ func (c *implementationWorkResourceChain) advance(receipt RuntimeOperationReceip
 // are proved afresh; neither ledger order nor a caller-supplied revision cursor
 // can authorize the current effect. It returns no completion or evidence credit.
 func RuntimeImplementationWorkDispositionForDispatchReceipt(round RuntimeImplementationWorkRound, dispatch RuntimeDispatchRecord, receipts []RuntimeOperationReceipt, facts RuntimeFacts, governance []RuntimeOperationGovernanceBinding, receipt RuntimeOperationReceipt) (RuntimeImplementationWorkReceiptDisposition, error) {
-	if round.WorkingBinding == nil || round.WorkingBinding.ReceiptProtocolRef == "" {
-		return RuntimeImplementationWorkDispositionForReceipt(round, receipt), nil
-	}
-	if round.WorkingBinding.ReceiptProtocolRef != RuntimeImplementationWorkReceiptChainV1 {
-		return "", fmt.Errorf("unknown implementation work receipt protocol")
+	if round.WorkingBinding == nil {
+		return "", fmt.Errorf("implementation work receipt requires the original working binding")
 	}
 	if err := round.Validate(); err != nil {
 		return "", err

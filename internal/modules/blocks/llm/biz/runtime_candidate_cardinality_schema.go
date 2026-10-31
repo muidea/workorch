@@ -8,9 +8,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// V3 tightens the already enforced name cardinality without changing the
-// executable wire identity. V2/legacy rendering remains byte-for-byte available
-// to sealed sessions; a deployment cannot change their C0-C3 during recovery.
+// Parameter names have the exact cardinality enforced by the current wire contract.
 func runtimeCandidateCardinalitySchema(manifest runtimecontract.RuntimeCandidateContractManifest, wire runtimecontract.RuntimeCandidateWireContract) string {
 	base := runtimeCandidateSchemaForManifest(manifest)
 	if manifest.State != runtimecontract.ConvergenceStateNeedStateChange && manifest.State != runtimecontract.ConvergenceStateNeedValidation {
@@ -46,8 +44,7 @@ func runtimeCandidateCardinalitySchema(manifest runtimecontract.RuntimeCandidate
 		if !operation.AllowsDynamicParameters {
 			parameters["maxItems"] = len(rule.ProviderParameterNames)
 		} else {
-			// Legacy dynamic-name patterns double-escaped the separator. Render
-			// v3 directly from the sealed prefixes; retain old session bytes.
+			// Render the one current pattern directly from sealed prefixes.
 			prefixes := make([]string, 0, len(rule.DynamicParameterPrefixes))
 			for _, prefix := range rule.DynamicParameterPrefixes {
 				prefixes = append(prefixes, regexp.QuoteMeta(prefix))
@@ -71,8 +68,8 @@ func runtimeCandidateCardinalitySchema(manifest runtimecontract.RuntimeCandidate
 	return string(body)
 }
 
-func runtimeCandidateContractCatalogV3() string {
-	return strings.Replace(runtimeCandidateContractCatalogV2(), "operations-render/compact-contract/v2:", "operations-render/parameter-cardinality/v3:", 1) + "\n" +
+func runtimeCandidateContractCatalogCurrent() string {
+	return runtimeCandidateCompactContractCatalog() + "\n" +
 		"Within each operation parameters array every name must occur at most once, and every required name exactly once. The same name in different operations is allowed. An array of entries is not an edits list. maxContains counts entries by name, not by value; uniqueItems alone cannot establish this rule. Dynamic parameter names also must be unique and authorized by their exact prefixes.\n" +
 		"File adapter: file/edit represents exactly one oldText/newText replacement (and optional occurrence), not several replacement pairs. For multiple changes to one file, use one exact contiguous oldText from the current owner content and one newText preserving all intervening unchanged text. Never repeat oldText/newText, drop an intended change, split a required slot, or switch to an unsealed operation. If the current owner input is incomplete, do not invent missing source text."
 }

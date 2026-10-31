@@ -83,11 +83,11 @@ func TestAuthoringFailureDiagnosticSurvivesFileReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	acceptance := workspace.DefinitionDerivedAcceptance{AuthoringInputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"补充"}}
-	record, err = record.CompleteDerivation(derivation.PermitID, &acceptance, "")
+	record, err = completeTestDerivation(record, derivation.PermitID, &acceptance, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	specRequest := workspace.DefinitionAuthoringSpecificationRequest{RequestID: "proposal", DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationProposal, ProviderBindingHash: "provider"}
+	specRequest := workspace.DefinitionAuthoringSpecificationRequest{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal", DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationProposal, ProviderBindingHash: "provider"}
 	record, specRequest, _, err = record.ReserveSpecification(specRequest)
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +99,7 @@ func TestAuthoringFailureDiagnosticSurvivesFileReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := []byte("  {\"未知字段\":\"sk_test_marker\"}\r\n")
-	_, parseErr := workspace.DecodeDefinitionAuthoringMapping(raw)
+	_, parseErr := workspace.DecodeAuthoringMappingFor(record.DerivationRequests[0], raw)
 	if parseErr == nil {
 		t.Fatal("非法当前文档被解码")
 	}

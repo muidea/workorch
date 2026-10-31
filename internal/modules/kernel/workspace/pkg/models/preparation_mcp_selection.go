@@ -256,7 +256,7 @@ func validatePreparationMCPSelectionPersistence(w *Workspace) error {
 	for _, registry := range w.PreparationMCPRegistryEvidence {
 		if registry.Selection == nil {
 			continue
-		} // old registry-only history never upgraded
+		} // A stale settlement can retain observations without a compilation.
 		var skills *WorkspacePreparationSkillRegistryEvidence
 		for i := range w.PreparationSkillRegistryEvidence {
 			e := &w.PreparationSkillRegistryEvidence[i]

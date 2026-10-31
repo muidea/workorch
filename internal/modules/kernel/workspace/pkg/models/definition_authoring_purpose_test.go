@@ -18,7 +18,7 @@ func requiredPurposeDerivation(t *testing.T, profileIDs ...string) (DefinitionAu
 	if len(profileIDs) != 0 {
 		profileID = profileIDs[0]
 	}
-	raw := []byte(`{"profileContracts":{"neutral-profile":{"deliverableExpectations":[{"id":"initial-effect","required":true,"description":"完整原交付义务\n后继仍需独立验收","requiredEvidencePurposeContractRef":"runtime/profile-deliverable-evidence-purpose/v2"}],"evidenceRequirements":[{"id":"initial-effect","scope":"deliverable","requiredEvidenceKinds":["state_change"],"acceptedStepKinds":["file/write"]},{"id":"*","scope":"dodItem","requiredEvidenceKinds":["validation"],"acceptedStepKinds":["validation/managed_session"]}]}}}`)
+	raw := []byte(`{"profileContracts":{"neutral-profile":{"deliverableExpectations":[{"id":"initial-effect","required":true,"description":"完整原交付义务\n后继仍需独立验收","requiredEvidencePurposeContractRef":"runtime/profile-deliverable-evidence-purpose"}],"evidenceRequirements":[{"id":"initial-effect","scope":"deliverable","requiredEvidenceKinds":["state_change"],"acceptedStepKinds":["file/write"]},{"id":"*","scope":"dodItem","requiredEvidenceKinds":["validation"],"acceptedStepKinds":["validation/managed_session"]}]}}}`)
 	raw = bytes.ReplaceAll(raw, []byte("neutral-profile"), []byte(profileID))
 	if err := json.Unmarshal(raw, &r.TemplateSnapshot.ContextHints); err != nil {
 		t.Fatal(err)
@@ -26,7 +26,7 @@ func requiredPurposeDerivation(t *testing.T, profileIDs ...string) (DefinitionAu
 	r.TemplateSnapshotHash = WorkspaceTemplateSnapshotHash(&r.TemplateSnapshot)
 	r.DerivationRequests = nil
 	r.SpecificationRequests = nil
-	r, d, _, err := r.ReserveDerivation("required-purpose", "provider", nil, DefinitionAuthoringOwnerBoundV3)
+	r, d, _, err := r.ReserveDerivation("required-purpose", "provider", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestRequiredProfilePurposeMinimalWireCompilesExactSnapshotAndRawLedger(t *t
 	if _, _, err := reload.ConfirmableSpecification(d.PermitID, s.ContentHash()); err == nil {
 		t.Fatal("minimal edge bypassed six reviews")
 	}
-	for _, legacy := range []string{"", DefinitionAuthoringOwnerBoundV2} {
+	for _, legacy := range []string{"", "workorch.authoring.owner-bound/v2", "unknown"} {
 		old := d
 		old.WireContractRef = legacy
 		old.WireContractHash = AuthoringWireHash(legacy, "derive")
@@ -141,7 +141,7 @@ func TestRequiredProfilePurposeRejectsMissingDuplicateUnknownAndMachineEcho(t *t
 		"unknown consumer": func(m *DefinitionAuthoringMapping) { m.ProfileAcceptanceSelections[0].AcceptanceItemRef = "cwi-001" },
 		"full metadata instead": func(m *DefinitionAuthoringMapping) {
 			m.ProfileAcceptanceSelections = nil
-			m.EvidencePurposeMappings = []GoalEvidencePurposeMapping{{ContractRef: runtimecontract.RuntimeProfileDeliverableEvidencePurposeV2, HistoricalItemRef: "profile/neutral-profile/deliverable/initial-effect", AcceptanceItemRef: "derived-dod:user:000001", HistoricalProfileID: "neutral-profile", HistoricalDeliverableID: "initial-effect", HistoricalProfileHash: "profile-hash", HistoricalText: "完整原文"}}
+			m.EvidencePurposeMappings = []GoalEvidencePurposeMapping{{ContractRef: runtimecontract.RuntimeProfileDeliverableEvidencePurpose, HistoricalItemRef: "profile/neutral-profile/deliverable/initial-effect", AcceptanceItemRef: "derived-dod:user:000001", HistoricalProfileID: "neutral-profile", HistoricalDeliverableID: "initial-effect", HistoricalProfileHash: "profile-hash", HistoricalText: "完整原文"}}
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -167,9 +167,8 @@ func TestRequiredProfilePurposeRejectsMissingDuplicateUnknownAndMachineEcho(t *t
 	if err != nil || !strings.Contains(schema, "ProfileAcceptanceSelections") {
 		t.Fatal("v3 schema missing selection")
 	}
-	old, _ := AuthoringWireSchema(DefinitionAuthoringOwnerBoundV2, "proposal")
-	if strings.Contains(old, "ProfileAcceptanceSelections") {
-		t.Fatal("v2 schema changed")
+	if _, err := AuthoringWireSchema("workorch.authoring.owner-bound/v2", "proposal"); err == nil {
+		t.Fatal("obsolete schema alias accepted")
 	}
 }
 

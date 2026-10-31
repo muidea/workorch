@@ -84,7 +84,7 @@ func responsesPromptCacheKey(request llmmodels.ProviderRequest) string {
 		RawText      bool
 		Reasoning    string
 		PrefixHash   string
-	}{"workorch.section-cache/v2", request.WorkspaceID, request.Config.ID, request.Model, responsesCacheSchemaScope(request), request.SchemaFormat, request.Config.Capabilities.JSONSchemaResponse, request.RawTextOutput, request.ReasoningEffort, sectionMessagePrefixHash(request)})
+	}{"workorch.section-cache", request.WorkspaceID, request.Config.ID, request.Model, responsesCacheSchemaScope(request), request.SchemaFormat, request.Config.Capabilities.JSONSchemaResponse, request.RawTextOutput, request.ReasoningEffort, sectionMessagePrefixHash(request)})
 	sum := sha256.Sum256(identity)
 	return "workorch:" + hex.EncodeToString(sum[:])
 }
@@ -101,20 +101,12 @@ func responsesCacheSchemaScope(request llmmodels.ProviderRequest) string {
 		if first.Role == "system" {
 			switch request.PromptContext.SchemaVersion {
 			case "workorch.runtime_candidate_prompt":
-				if first.ID == "C0.runtime-candidate-contract" && first.Content == runtimeCandidateContractCatalog() {
-					return "runtime/operations-schema/v1"
-				}
-			case "workorch.runtime_candidate_prompt/v2":
-				if first.ID == "C0.runtime-candidate-contract" && first.Content == runtimeCandidateContractCatalogV2() {
-					return "runtime/operations-schema/v2"
-				}
-			case "workorch.runtime_candidate_prompt/v3":
-				if first.ID == "C0.runtime-candidate-contract" && first.Content == runtimeCandidateContractCatalogV3() {
-					return "runtime/operations-schema/v3"
+				if first.ID == "C0.runtime-candidate-contract" && first.Content == runtimeCandidateContractCatalogCurrent() {
+					return "runtime/operations-schema"
 				}
 			case "workorch.runtime_semantic_plan_prompt":
 				if first.ID == "C0.runtime-semantic-contract" && first.Content == runtimeSemanticPlanContractCatalog() {
-					return "runtime/semantic-plan-schema/v1"
+					return "runtime/semantic-plan-schema"
 				}
 			}
 		}

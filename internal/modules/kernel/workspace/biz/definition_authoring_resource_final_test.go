@@ -42,14 +42,14 @@ func TestResourceBoundSpecificationReservationUsesSealedDerivation(t *testing.T)
 		t.Fatal(err)
 	}
 	derived := workspace.DefinitionDerivedAcceptance{AuthoringInputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"补充验收"}}
-	record, err = record.CompleteDerivation(derivation.PermitID, &derived, "")
+	record, err = completeTestDerivation(record, derivation.PermitID, &derived, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := owners.repositories.Workspaces.Create(ctx, &workspace.Workspace{ID: input.WorkspaceID, TemplateID: input.TemplateID, DeliverableDirectory: directory, DefinitionAuthoring: &record}); err != nil {
 		t.Fatal(err)
 	}
-	command := workspaceevents.ReserveAuthoringSpecificationCommand{WorkspaceID: input.WorkspaceID, InputHash: record.InputHash, RequestID: "proposal/" + derivation.PermitID, DerivationPermitID: derivation.PermitID, ProviderBindingHash: derivation.ProviderBindingHash}
+	command := workspaceevents.ReserveAuthoringSpecificationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "proposal"), WorkspaceID: input.WorkspaceID, InputHash: record.InputHash, RequestID: "proposal/" + derivation.PermitID, DerivationPermitID: derivation.PermitID, ProviderBindingHash: derivation.ProviderBindingHash}
 	send := func() workspaceevents.AuthoringSpecificationRequestResult {
 		t.Helper()
 		response := owners.hub.Send(magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceAuthoringSpecificationReserve, definitionSpecificationCommandSource, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command))
@@ -116,7 +116,7 @@ func seedResourceBoundAuthoringConfirmationConfigured(t *testing.T, owners *file
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = record.CompleteDerivation(derivation.PermitID, &derived, "")
+	record, err = completeTestDerivation(record, derivation.PermitID, &derived, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func seedResourceBoundAuthoringConfirmationConfigured(t *testing.T, owners *file
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, request, _, err := record.ReserveSpecification(workspace.DefinitionAuthoringSpecificationRequest{RequestID: "proposal", DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
+	record, request, _, err := record.ReserveSpecification(workspace.DefinitionAuthoringSpecificationRequest{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal", DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,12 +142,12 @@ func seedResourceBoundAuthoringConfirmationConfigured(t *testing.T, owners *file
 		t.Fatal(err)
 	}
 	for _, kind := range []string{workspace.GoalReviewDimensionCoverage, workspace.GoalReviewNegativePath, workspace.GoalReviewRegression, workspace.GoalReviewResourceEnvironment, workspace.GoalReviewTraceability, workspace.GoalReviewVerifierFeasibility} {
-		record, request, _, err = record.ReserveSpecification(workspace.DefinitionAuthoringSpecificationRequest{RequestID: "review-" + kind, DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationCritic, ReviewKind: kind, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"})
+		record, request, _, err = record.ReserveSpecification(workspace.DefinitionAuthoringSpecificationRequest{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, kind), RequestID: "review-" + kind, DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationCritic, ReviewKind: kind, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "逐项覆盖", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: authoringRequiredRequirementIDs(t, proposal, kind)}
-		record, err = record.CompleteSpecification(request.PermitID, nil, &review, "")
+		record, err = completeTestSpecification(record, request.PermitID, nil, &review, "")
 		if err != nil {
 			t.Fatal(err)
 		}

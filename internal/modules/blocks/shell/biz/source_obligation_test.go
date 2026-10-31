@@ -32,7 +32,7 @@ func TestShellSourceObligationAttestationsHaveIndependentNativeChecks(t *testing
 		t.Run(adapter, func(t *testing.T) {
 			recipe := runtimecontract.RuntimeValidationRecipe{Command: "go", Args: []string{"test", "./..."}, AdapterRef: adapter}
 			if adapter == modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint {
-				recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV2
+				recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 			}
 			attestations, supported := shellValidationCheckAttestations(recipe, requirements[0])
 			if !supported || len(attestations) != 3 {
@@ -51,7 +51,7 @@ func TestShellSourceObligationAttestationsHaveIndependentNativeChecks(t *testing
 		})
 	}
 	// 单输入的版本化协议不能借新增来源声明自动变成多输入协议。
-	for _, adapter := range []string{modulecommon.ValidationRecipeAdapterVersionedEntrypoint, modulecommon.ValidationRecipeAdapterIsolatedEntrypoint} {
+	for _, adapter := range []string{modulecommon.ValidationRecipeAdapterReviewedEntrypoint, modulecommon.ValidationRecipeAdapterIsolatedEntrypoint} {
 		if _, supported := shellValidationCheckAttestations(runtimecontract.RuntimeValidationRecipe{Command: "go", Args: []string{"test", "./..."}, AdapterRef: adapter}, requirements[0]); supported {
 			t.Fatal("single-input protocol silently widened")
 		}

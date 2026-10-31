@@ -77,7 +77,7 @@ func TestRuntimeImplementationWorkPolicyInputIsLosslessAndUnavailable(t *testing
 	}
 	typ := reflect.TypeOf(expected)
 	for i := 0; i < typ.NumField(); i++ {
-		key := typ.Field(i).Tag.Get("json")
+		key := strings.Split(typ.Field(i).Tag.Get("json"), ",")[0]
 		if !known[key] {
 			t.Fatalf("typed field %s has no exact raw guard", key)
 		}

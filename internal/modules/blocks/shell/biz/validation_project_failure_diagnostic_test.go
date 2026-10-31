@@ -48,7 +48,7 @@ func TestProjectFailureDiagnosticRealOwnerNeverCreditsFailedProject(t *testing.T
 		t.Run(scenario, func(t *testing.T) {
 			root, internal := t.TempDir(), t.TempDir()
 			recipe := isolatedInputRecipe()
-			recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV2
+			recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 			recipe.AdapterRef = modulecommon.ValidationRecipeAdapterProjectFailureDiagnostic
 			if scenario == "legacy" {
 				recipe.AdapterRef = modulecommon.ValidationRecipeAdapterProjectConjunction

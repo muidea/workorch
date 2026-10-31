@@ -13,7 +13,6 @@ func progressPurposeFixture(t *testing.T) (RuntimeSemanticPlanManifest, RuntimeS
 	m := semanticWorkValidationManifest(t)
 	w := m.ProofObligations[0].ImplementationWork
 	w.PurposeChoiceOnly, w.EffectAvailable = true, true
-	w.Scope.Request.Policy.ProgressProtocolRef = RuntimeImplementationWorkProgressV1
 	w.Scope.Request.RequestID = implementationWorkScopeRequestID(w.Scope.Request)
 	w.Scope.Selection.PrerequisiteID = w.Scope.Request.RequestID
 	w.Scope.Selection.SnapshotID = StableRuntimeTargetSelectionSnapshotID(w.Scope.Selection)
@@ -211,7 +210,7 @@ func TestImplementationProgressSchemaMatchesPurposeAndRequiredShape(t *testing.T
 	}
 }
 
-func TestImplementationProgressRejectsUndeclaredProtocolAndMissingOwnerContent(t *testing.T) {
+func TestImplementationProgressRequiresOwnerContentWithoutProfileVersionSwitch(t *testing.T) {
 	m, d := progressPurposeFixture(t)
 	w := m.ProofObligations[0].ImplementationWork
 	w.Scope.Content = nil
@@ -220,14 +219,7 @@ func TestImplementationProgressRejectsUndeclaredProtocolAndMissingOwnerContent(t
 		t.Fatal("missing current owner content reached provider schema")
 	}
 	m, d = progressPurposeFixture(t)
-	w = m.ProofObligations[0].ImplementationWork
-	w.Scope.Request.Policy.ProgressProtocolRef = ""
-	if validateRuntimeImplementationProgress(d, m, w, d.ImplementationIntent.DeclarationRef) == nil {
-		t.Fatal("new progress fields injected into a legacy Profile")
-	}
-	p := w.Scope.Request.Policy.Clone()
-	p.ProgressProtocolRef = "unsupported"
-	if p.Validate() == nil {
-		t.Fatal("unsupported progress protocol accepted")
+	if err := validateRuntimeImplementationProgress(d, m, m.ProofObligations[0].ImplementationWork, d.ImplementationIntent.DeclarationRef); err != nil {
+		t.Fatal("current progress contract must not require a Profile version switch", err)
 	}
 }

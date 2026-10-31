@@ -55,7 +55,7 @@ func TestHistoricalEffectObservationDoesNotChangeCurrentResourceAuthority(t *tes
 	fact := historicalEffectPurposeFixture()
 	ordinaryFact := fact
 	ordinaryFact.ApplicabilityDependencies = CloneRuntimeEvidenceApplicabilityDependencies(fact.ApplicabilityDependencies)
-	ordinaryFact.ApplicabilityDependencies.ProtocolRef = RuntimeEvidenceApplicabilityDependenciesV1
+	ordinaryFact.ApplicabilityDependencies.ProtocolRef = RuntimeEvidenceApplicabilityDependenciesProtocol
 	ordinaryFact.ApplicabilityDependencies.PurposeRef = ""
 	ordinaryFact.ApplicabilityDependencies.OwnerModuleID = ""
 	ordinaryFact.ApplicabilityDependencies.OperationKind = ""

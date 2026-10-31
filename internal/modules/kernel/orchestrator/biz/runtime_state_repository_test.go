@@ -758,7 +758,7 @@ func TestRuntimeStateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 	requestSession.LogicalRequestID = runtimecontract.StableRuntimeCandidateRequestSessionID(
 		requestSession.DocumentKind, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction, requestSession.StablePrefixHash, requestSession.ManifestHash, requestSession.CorrectionHash,
 	)
-	expected := runtimecontract.RuntimeExpectedDocumentContract{
+	expected := runtimecontract.RuntimeExpectedDocumentContract{OperationsContextEncoding: runtimecontract.RuntimeOperationsContextEncoding,
 		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent, DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
 		ManifestHash: requestSession.ManifestHash, WireContractHash: "runtime-test-wire/" + requestSession.ManifestHash,
 		LogicalRequestID: requestSession.LogicalRequestID, StablePrefixHash: requestSession.StablePrefixHash,

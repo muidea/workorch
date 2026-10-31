@@ -11,7 +11,7 @@ func TestInputReviewFeedbackPreservesExactReportsWithoutRedaction(t *testing.T) 
 	_, document, binding := semanticInputReviewV2Fixture(t)
 	report := document.Proposals[1].ValidationInputReview.Clone()
 	feedback, err := ProjectRuntimeValidationInputReviewFeedback("runtime-input-review-source", binding, report)
-	if err != nil || feedback.Redacted || !reflect.DeepEqual(feedback.Report, report) {
+	if err != nil || !reflect.DeepEqual(feedback.Report, report) {
 		t.Fatalf("safe complete report lost: %v", err)
 	}
 	diagnostic := &RuntimeOriginalDiagnostic{SchemaVersion: RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: RuntimeModuleOrchestrator, OriginalClass: "contract", OriginalCode: "validation_input_review_conflict", OriginalMessage: "Input review blocked validation.", Signature: feedback.ReviewRef, ValidationInputReviews: []RuntimeValidationInputReviewFeedback{feedback}}
@@ -33,7 +33,7 @@ func TestInputReviewFeedbackPreservesExactReportsWithoutRedaction(t *testing.T) 
 	report.Checks[0].Reason = "authorization: Bearer secret-value"
 	report.Checks[0].Obligations[0].Reason = "https://private.example/secret-value"
 	preserved, err := ProjectRuntimeValidationInputReviewFeedback(feedback.ReviewRef, binding, report)
-	if err != nil || preserved.Redacted || preserved.ReportHash != StableRuntimeValidationInputReviewHash(report) || preserved.ReportHash == feedback.ReportHash {
+	if err != nil || preserved.ReportHash != StableRuntimeValidationInputReviewHash(report) || preserved.ReportHash == feedback.ReportHash {
 		t.Fatalf("projection lost original source commitment: %v", err)
 	}
 	data, _ = json.Marshal(preserved)
@@ -61,7 +61,7 @@ func TestInputReviewFeedbackPreservesExactReportsWithoutRedaction(t *testing.T) 
 	}
 	report.Checks[0].Reason = "unsafe terminal sequence: \x1b[31m"
 	controlled, err := ProjectRuntimeValidationInputReviewFeedback(feedback.ReviewRef, binding, report)
-	if err != nil || controlled.Redacted || controlled.Report.Checks[0].Reason != report.Checks[0].Reason {
+	if err != nil || controlled.Report.Checks[0].Reason != report.Checks[0].Reason {
 		t.Fatalf("original control bytes were changed before reversible presentation: %v", err)
 	}
 	copy = diagnostic.CloneOriginal()
@@ -78,7 +78,7 @@ func TestInputReviewProtocolIsExplicitAndRecipeCommitmentsCannotDowngrade(t *tes
 		t.Fatal("new policy field changed legacy activation JSON")
 	}
 	old := RuntimeValidationRecipeDeclarationsFromEvidencePolicies([]RuntimeEvidencePolicy{policy})[0]
-	policy.RecipeInputReviewProtocolRef = RuntimeValidationInputReviewProtocolV2
+	policy.RecipeInputReviewProtocolRef = RuntimeValidationInputReviewProtocol
 	if err := policy.Validate(); err != nil {
 		t.Fatal(err)
 	}

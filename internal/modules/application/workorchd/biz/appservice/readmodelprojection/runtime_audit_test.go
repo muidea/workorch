@@ -12,7 +12,7 @@ import (
 
 func TestMapRuntimeAuditPreservesDiagnosticProtocolWithoutCreditOrMutation(t *testing.T) {
 	observation := &runtimecontract.RuntimeValidationObservation{RecipeID: "recipe", ObservationProtocolRef: "owner/checks/v1",
-		FailedChecks: []string{"check"}, FailureDetailProtocolRef: runtimecontract.RuntimeValidationFailureDetailProtocolV2,
+		FailedChecks: []string{"check"}, FailureDetailProtocolRef: runtimecontract.RuntimeValidationFailureDetailProtocol,
 		CheckFailures: []runtimecontract.RuntimeValidationCheckFailure{{CheckRef: "check", TargetRef: "checks/input.test", Line: 12,
 			DiagnosticHash: strings.Repeat("a", 64), ComparisonHash: strings.Repeat("c", 64),
 			ReportedAssertion: runtimecontract.RuntimeValidationReportedAssertion{Code: "shape_mismatch", ExpectedShape: "object", ObservedShape: "array"}}}}

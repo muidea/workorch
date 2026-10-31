@@ -2,6 +2,10 @@ package workspace
 
 import (
 	"context"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/soulbinding"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"sort"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -97,4 +101,20 @@ func (m *Biz) currentWorkspaceTemplates(ctx context.Context) ([]*workspacemodel.
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
 	return items, nil
+}
+
+func builtinWorkspaceTemplate(raw workorchmanagementcontract.WorkspaceTemplate) (*workspacemodel.WorkspaceTemplate, error) {
+	contextHints, err := workorcheventpayload.FromMap(raw.ContextHints)
+	if err != nil {
+		return nil, err
+	}
+	policies, err := workorcheventpayload.FromMapSlice(raw.EvidencePolicies)
+	if err != nil {
+		return nil, err
+	}
+	return workspaceTemplateFromCommand(workspaceevents.CreateWorkspaceTemplateCommand{
+		TemplateID: raw.ID, Name: raw.Name, Description: raw.Description, GoalText: raw.GoalText,
+		DoDItems: raw.DoDItems, DefaultSoulID: raw.DefaultSoulID, SoulBindings: soulbinding.FromStringMap(raw.SoulBindings),
+		ContextHints: contextHints, EvidencePolicies: policies,
+	})
 }

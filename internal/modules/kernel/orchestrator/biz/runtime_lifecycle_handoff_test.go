@@ -709,7 +709,7 @@ func runtimeBoundDefinitionClarificationAggregate(t *testing.T) runtime.RuntimeA
 func runtimeBindDefinitionClarificationAggregate(t *testing.T, aggregate runtime.RuntimeAggregate) runtime.RuntimeAggregate {
 	t.Helper()
 	ctx := context.Background()
-	expected := runtimecontract.RuntimeExpectedDocumentContract{
+	expected := runtimecontract.RuntimeExpectedDocumentContract{SemanticContextEncoding: runtimecontract.RuntimeSemanticContextEncoding,
 		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:  runtimecontract.RuntimeProviderDocumentSemanticPlan,
 		PlanStep:      runtimecontract.RuntimeSemanticPlanStepCoverageOrder,

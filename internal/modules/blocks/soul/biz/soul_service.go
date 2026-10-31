@@ -18,7 +18,7 @@ import (
 
 type service struct {
 	souls repository.SoulRepository
-	// Serializes owner-local content replacement with guarded builtin upgrades.
+	// Serializes owner-local content replacement with program declaration synchronization.
 	mutationMu sync.Mutex
 }
 
@@ -52,10 +52,10 @@ func (s *service) createSoul(ctx context.Context, cmd soulevents.CreateSoulComma
 func (s *service) updateSoul(ctx context.Context, cmd soulevents.CreateSoulCommand) (*soulmodel.Soul, error) {
 	s.mutationMu.Lock()
 	defer s.mutationMu.Unlock()
-	return s.updateSoulLocked(ctx, cmd)
+	return s.updateSoulLocked(ctx, cmd, soulmodel.SoulSourceUserManaged)
 }
 
-func (s *service) updateSoulLocked(ctx context.Context, cmd soulevents.CreateSoulCommand) (*soulmodel.Soul, error) {
+func (s *service) updateSoulLocked(ctx context.Context, cmd soulevents.CreateSoulCommand, provenance string) (*soulmodel.Soul, error) {
 	item, err := normalizedSoulFromCommand(cmd)
 	if err != nil {
 		return nil, err
@@ -65,7 +65,7 @@ func (s *service) updateSoulLocked(ctx context.Context, cmd soulevents.CreateSou
 		return nil, err
 	}
 	item.Revision = current.Revision
-	item.SourceProvenance = current.SourceProvenance
+	item.SourceProvenance = provenance
 	item.ContentHash = soulmodel.StableSoulContentHash(item)
 	if item.ContentHash == current.ContentHash {
 		return current, nil

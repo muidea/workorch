@@ -25,21 +25,21 @@ func compileAuthoringEvidencePurposes(d DefinitionDerivationRequest, m Definitio
 	seen := map[string]bool{}
 	for _, selection := range m.ProfileAcceptanceSelections {
 		source, ok := catalog[selection.SourceRef]
-		if d.WireContractRef != DefinitionAuthoringOwnerBoundV3 || !ok || seen[selection.SourceRef] {
+		if !ok || seen[selection.SourceRef] {
 			return nil, fmt.Errorf("required_evidence_purpose_selection: unknown, duplicate or unsupported source %q", selection.SourceRef)
 		}
 		seen[selection.SourceRef] = true
 		source.AcceptanceItemRef = selection.AcceptanceItemRef
 		result = append(result, GoalEvidencePurposeMapping(source))
 	}
-	// A v3 required source must use the minimal selection, never full model metadata.
-	if d.WireContractRef == DefinitionAuthoringOwnerBoundV3 {
-		for _, r := range required {
-			if !seen[r.HistoricalItemRef] {
-				return nil, fmt.Errorf("required_evidence_purpose_missing: %s requires semantic selection", r.HistoricalItemRef)
-			}
+	// A required source uses minimal semantic selection, never model-supplied machine metadata.
+
+	for _, r := range required {
+		if !seen[r.HistoricalItemRef] {
+			return nil, fmt.Errorf("required_evidence_purpose_missing: %s requires semantic selection", r.HistoricalItemRef)
 		}
 	}
+
 	sources, ok := SpecificationDoDSources(items)
 	if !ok {
 		return nil, fmt.Errorf("purpose selection requires exact original source order")

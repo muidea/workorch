@@ -21,12 +21,12 @@ func projectExecutionFixture(t *testing.T, failed bool, adapters ...string) (Run
 	root, internal := t.TempDir(), t.TempDir()
 	recipe := isolatedInputRecipe()
 	recipe.AdapterRef = modulecommon.ValidationRecipeAdapterProjectConjunction
-	recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV2
+	recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 	if len(adapters) != 0 {
 		recipe.AdapterRef = adapters[0]
-		recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV2
+		recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 		if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
-			recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV3
+			recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 		}
 	}
 	requirement := shellValidationProofRequirementForTest(t, recipe.ID, "execution-cwi")
@@ -41,7 +41,7 @@ func projectExecutionFixture(t *testing.T, failed bool, adapters ...string) (Run
 		target:              fmt.Sprintf("package checks\nimport (\"testing\"; delivery \"fixture/delivery\")\nfunc %s(t *testing.T){if delivery.Value()!=4{t.Fatal(\"wrong\")}}\n", checks[0].NativeCheckRef),
 	}
 	if failed {
-		files["workorch_validation/v3/old_test.go"] = "package old\nimport \"testing\"\nfunc TestOld(t *testing.T){t.Fatal(\"原已知失败\")}\n"
+		files["workorch_validation/entrypoint/old_test.go"] = "package old\nimport \"testing\"\nfunc TestOld(t *testing.T){t.Fatal(\"原已知失败\")}\n"
 	}
 	var refs []string
 	for ref, body := range files {
@@ -141,7 +141,7 @@ func TestProjectDiagnosticPublicationFailureKeepsActualSourceHistory(t *testing.
 			request, execution := projectExecutionFixture(t, false, modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic)
 			recipe := isolatedInputRecipe()
 			recipe.AdapterRef = modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic
-			recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV3
+			recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 			request.ValidationRecipes = []runtimecontract.RuntimeValidationRecipe{recipe}
 			target := request.TargetRefs[0]
 			body, err := os.ReadFile(filepath.Join(request.WorkspaceDeliverableDirectory, target))
@@ -155,7 +155,7 @@ func TestProjectDiagnosticPublicationFailureKeepsActualSourceHistory(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			binding.InputReview, _ = shellVersionedInputReview(request.WorkspaceDeliverableDirectory, request.ValidationScopeTargetRefs, binding)
+			binding.InputReview, _ = shellInputReview(request.WorkspaceDeliverableDirectory, request.ValidationScopeTargetRefs, binding)
 			if binding.InputReview == nil {
 				t.Fatal("exact source input was not published")
 			}

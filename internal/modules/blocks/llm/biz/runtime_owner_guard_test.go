@@ -232,7 +232,7 @@ func unsubmittedRuntimeGeneration(identity runtimePhysicalSubmissionIdentity) ll
 func runtimeSemanticRequestWithExpectedDocument(t *testing.T) llmmodels.RuntimeCandidateRequest {
 	t.Helper()
 	request := runtimeSemanticProviderTestRequest(t)
-	expected := runtimecontract.RuntimeExpectedDocumentContract{
+	expected := runtimecontract.RuntimeExpectedDocumentContract{SemanticContextEncoding: runtimecontract.RuntimeSemanticContextEncoding,
 		SchemaVersion:            runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:             request.DocumentKind,
 		PlanStep:                 request.SemanticContext.PlanStep,

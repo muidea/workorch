@@ -103,7 +103,7 @@ func TestShellAssertionFeedbackRequiresFailedScopedNativeOutput(t *testing.T) {
 	attachShellValidationObservation(&output, "go", []string{"test", "-json"}, "recipe", true)
 	attachShellValidationCheckFailures(&output, RuntimeCommandRequest{ValidationScopeTargetRefs: []string{"checks/a_test.go", "passing/a_test.go"}})
 	o := output.ValidationObservation
-	if o == nil || o.FailureDetailProtocolRef != runtimecontract.RuntimeValidationFailureDetailProtocolV2 || len(o.CheckFailures) != 1 || o.ValidateFailureDetails() != nil {
+	if o == nil || o.FailureDetailProtocolRef != runtimecontract.RuntimeValidationFailureDetailProtocol || len(o.CheckFailures) != 1 || o.ValidateFailureDetails() != nil {
 		t.Fatalf("invalid typed feedback: %+v", o)
 	}
 	detail := o.CheckFailures[0]

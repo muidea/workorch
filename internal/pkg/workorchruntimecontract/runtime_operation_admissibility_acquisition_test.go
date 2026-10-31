@@ -152,7 +152,7 @@ func TestShellValidationAdmissibilityAcceptsOnlyOwnerResolutionOfAdapterDeclarat
 		Manifest:    WorkspaceManifest{Revision: "tree-adapter", TargetRefs: []string{"go.mod", "main.go", "main_test.go"}},
 		Observation: manifestObservation,
 	}
-	declaration := RuntimeValidationRecipe{ID: "project-native", AdapterRef: "shell/project-native-validation/v1", TimeoutMillis: 60_000}
+	declaration := RuntimeValidationRecipe{ID: "project-native", AdapterRef: "shell/project-native-validation", TimeoutMillis: 60_000}
 	confirmed := RuntimeValidationRecipe{ID: declaration.ID, AdapterRef: declaration.AdapterRef, Command: "go", Args: []string{"test", "-v", "./..."}, TimeoutMillis: declaration.TimeoutMillis}
 	request := RuntimeOperationAdmissibilityRequest{
 		WorkspaceID: "ws-adapter", RunID: "run-adapter", AuthoritySnapshotID: "authority-adapter",

@@ -96,6 +96,7 @@ func (m *Biz) verifyCurrentAuthoringResources(ctx context.Context, id common.Wor
 		return proof, nil
 	}
 	if err := m.verifyAuthoringDerivationResources(ctx, workspaceevents.ReserveDefinitionDerivationCommand{
+		WireContractRef: derivation.WireContractRef, WireContractHash: derivation.WireContractHash,
 		WorkspaceID: id, WorkspaceRevision: view.WorkspaceRevision, InputHash: view.Record.InputHash,
 		RequestID: derivation.RequestID, Resources: workspacemodel.CloneDefinitionAuthoringResources(derivation.Resources),
 		ResourceSnapshotHash: derivation.ResourceSnapshotHash, ProviderBindingHash: derivation.ProviderBindingHash,

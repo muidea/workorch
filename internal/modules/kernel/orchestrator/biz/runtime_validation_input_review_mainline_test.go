@@ -70,9 +70,9 @@ type validationInputReviewMainlineOptions struct {
 	SubmittedSettlementFault           string
 }
 
-func TestDriveRuntimeInputReviewV2OmissionAndRestart(t *testing.T) {
-	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterIsolatedEntrypoint, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV2}
-	// The shipped-default mainline below covers v2 consistency, contradiction,
+func TestDriveRuntimeInputReviewOmissionAndRestart(t *testing.T) {
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterIsolatedEntrypoint, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol}
+	// The shipped-default mainline below covers current consistency, contradiction,
 	// clarification and its recovery cuts. Exercise the additional omission
 	// branch here without repeating those expensive real-owner scenarios.
 	var baseline int64
@@ -117,7 +117,7 @@ func TestDriveRuntimeIsolatedInputReviewMainline(t *testing.T) {
 	if adapter != shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
 		t.Fatal("default template does not enable reviewed conjunctive inputs")
 	}
-	if protocol != runtimecontract.RuntimeValidationInputReviewProtocolV3 {
+	if protocol != runtimecontract.RuntimeValidationInputReviewProtocol {
 		t.Fatal("default template does not seal the obligation-review protocol")
 	}
 	options := validationInputReviewMainlineOptions{Adapter: adapter, ValidationCount: 1, ProtocolRef: protocol}
@@ -145,14 +145,17 @@ func TestDriveRuntimeIsolatedInputReviewMainline(t *testing.T) {
 
 func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested ...validationInputReviewMainlineOptions) int64 {
 	t.Helper()
-	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterVersionedEntrypoint, ValidationCount: 1}
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterReviewedEntrypoint, ValidationCount: 1}
 	if len(requested) != 0 {
 		options = requested[0]
+	}
+	if options.ProtocolRef == "" {
+		options.ProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 	}
 	projectAdapter := options.Adapter == shellcommon.ValidationRecipeAdapterProjectConjunction || options.Adapter == shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic
 	projectBehaviorRepair := mode == "project_behavior_failure"
 	if projectBehaviorRepair && options.Adapter != shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
-		t.Fatal("multi-source repair fixture requires explicitly selected v8")
+		t.Fatal("multi-source repair fixture requires the project multi-failure capability")
 	}
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
@@ -191,8 +194,8 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 		rules := []runtimecontract.RuntimeLineageAssertionRule{{Ref: "original-delivery", Kind: runtimecontract.RuntimeLineageDeliveryAcknowledgements, ConsumptionPoint: runtimecontract.RuntimeProofPhasePostTerminalDelivery}}
 		if options.TerminalMaterialGuards {
 			rules = append(rules,
-				runtimecontract.RuntimeLineageAssertionRule{Ref: "formal-result-index", Kind: runtimecontract.RuntimeLineageTerminalResultIndex, ConsumptionPoint: runtimecontract.RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: runtimecontract.RuntimeTerminalProofContractV1},
-				runtimecontract.RuntimeLineageAssertionRule{Ref: "original-validation-receipt", Kind: runtimecontract.RuntimeLineageTerminalOwnerReceipt, ConsumptionPoint: runtimecontract.RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: runtimecontract.RuntimeTerminalProofContractV1, ReceiptSourceScope: "dodItem", ReceiptSourceID: "cwi-2", OwnerModuleID: runtimecontract.RuntimeModuleShell, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession, RequiredEffectScope: runtimecontract.RuntimeEffectEphemeralSession})
+				runtimecontract.RuntimeLineageAssertionRule{Ref: "formal-result-index", Kind: runtimecontract.RuntimeLineageTerminalResultIndex, ConsumptionPoint: runtimecontract.RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: runtimecontract.RuntimeTerminalReceiptProofContract},
+				runtimecontract.RuntimeLineageAssertionRule{Ref: "original-validation-receipt", Kind: runtimecontract.RuntimeLineageTerminalOwnerReceipt, ConsumptionPoint: runtimecontract.RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: runtimecontract.RuntimeTerminalReceiptProofContract, ReceiptSourceScope: "dodItem", ReceiptSourceID: "cwi-2", OwnerModuleID: runtimecontract.RuntimeModuleShell, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession, RequiredEffectScope: runtimecontract.RuntimeEffectEphemeralSession})
 		}
 		bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[1].LineageAssertions = rules
 		bootstrap.DefinitionFocuses[1].LineageAssertions = rules
@@ -456,7 +459,7 @@ func %s(t *testing.T) {
 				review := &runtimecontract.RuntimeValidationInputReview{SubjectHash: binding.InputReview.Hash}
 				for _, check := range binding.RequiredCheckRefs {
 					review.Checks = append(review.Checks, runtimecontract.RuntimeValidationInputCheckReview{RequiredCheckRef: check, Conclusion: conclusion, Reason: "Confirm whether this input invokes the delivered program without bypassing the original requirement.", InputTargetRefs: []string{inputTargets[proposal.CoverageWorkItemID]}})
-					if binding.InputReview.ProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocol {
+					{
 						item := &review.Checks[len(review.Checks)-1]
 						finding := runtimecontract.RuntimeValidationInputCovered
 						if conclusion == runtimecontract.RuntimeValidationInputConflict {
@@ -489,10 +492,8 @@ func %s(t *testing.T) {
 								{CriterionText: "and document its output", Finding: runtimecontract.RuntimeValidationInputMissing, Reason: "No documentation assertion exists in the reviewed input.", InputTargetRefs: item.InputTargetRefs},
 							}
 						}
-						if binding.InputReview.ProtocolRef == runtimecontract.RuntimeValidationInputReviewProtocolV3 {
-							for i := range item.Obligations {
-								item.Obligations[i].ProofConsumerRefs = runtimecontract.RuntimeValidationProofConsumerRefs(*binding.InputReview)
-							}
+						for i := range item.Obligations {
+							item.Obligations[i].ProofConsumerRefs = runtimecontract.RuntimeValidationProofConsumerRefs(*binding.InputReview)
 						}
 					}
 				}
@@ -871,7 +872,7 @@ func %s(t *testing.T) {
 					t.Fatal(err)
 				}
 				if options.Adapter == shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
-					expectation := projectConjunctionExpectation{ProtocolRef: "shell/go-test-json/project-conjunction-behavior/v3"}
+					expectation := projectConjunctionExpectation{ProtocolRef: "shell/go-test-json/project-multi-failure-behavior"}
 					if projectBehaviorRepair {
 						expectation.RepairSources = len(preparations[requirements[0].Hash].CheckAttestations) + 1
 					}
@@ -1047,9 +1048,9 @@ func %s(t *testing.T) {
 		if err != nil || reopened.RuntimeState == nil || !reflect.DeepEqual(runtimeStateRecordFromAggregate(completed), *reopened.RuntimeState) {
 			t.Fatal("reopened Run lost original persisted conjunction")
 		}
-		protocol := "shell/go-test-json/project-conjunction-behavior/v1"
+		protocol := "shell/go-test-json/project-conjunction-behavior"
 		if options.Adapter == shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
-			protocol = "shell/go-test-json/project-conjunction-behavior/v3"
+			protocol = "shell/go-test-json/project-multi-failure-behavior"
 		}
 		expectation := projectConjunctionExpectation{ProtocolRef: protocol, ValidationReceipts: options.ValidationCount}
 		if projectBehaviorRepair {

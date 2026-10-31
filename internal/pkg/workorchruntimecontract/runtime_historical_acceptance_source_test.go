@@ -162,7 +162,7 @@ func TestHistoricalAcceptancePurposeAndEquivalentIdentityRetainOriginalSource(t 
 			case "missing":
 				declared = nil
 			case "legacy":
-				declared.ProtocolRef = RuntimeEvidenceApplicabilityDependenciesV1
+				declared.ProtocolRef = RuntimeEvidenceApplicabilityDependenciesProtocol
 				declared.PurposeRef, declared.OwnerContractRef, declared.OwnerModuleID, declared.OperationKind = "", "", "", ""
 			case "purpose":
 				declared.PurposeRef = ""

@@ -11,7 +11,7 @@ import (
 func TestPreparationMCPRegistryReferenceNeverGrantsConnectionReadiness(t *testing.T) {
 	fixture := func() StartupPreparationView {
 		v := preparationViewFixture()
-		v.Record.Version, v.OperationState = "workorch-preparation-record/v2", "blocked"
+		v.Record.Version, v.OperationState = "workorch-preparation-record", "blocked"
 		a := &v.Record.Attempts[0]
 		a.State, a.CreationEpoch = "blocked", strings.Repeat("a", 32)
 		a.MCPRegistryEvidenceRef = "mcp-registry-observation:" + strings.Repeat("b", 32)
@@ -28,7 +28,7 @@ func TestPreparationMCPRegistryReferenceNeverGrantsConnectionReadiness(t *testin
 		}
 	}
 	for _, change := range []func(*StartupPreparationView){
-		func(v *StartupPreparationView) { v.Record.Version = "workorch-preparation-record/v1" },
+		func(v *StartupPreparationView) { v.Record.Version = "unsupported-record-contract" },
 		func(v *StartupPreparationView) {
 			v.Record.Attempts[0].MCPRegistryEvidenceRef = "mcp-registry-observation:ready"
 		},
@@ -56,7 +56,7 @@ func TestPreparationMCPSelectionProjectionRequiresVersionAndExactOwnerShape(t *t
 	for _, reason := range reasons {
 		fixture := func() StartupPreparationView {
 			v := preparationViewFixture()
-			v.Record.Version, v.OperationState = "workorch-preparation-record/v2", "blocked"
+			v.Record.Version, v.OperationState = "workorch-preparation-record", "blocked"
 			a := &v.Record.Attempts[0]
 			a.State, a.CreationEpoch, a.EvaluationVersion = "blocked", strings.Repeat("a", 32), "workorch-preparation-check-evaluation/v1"
 			a.MCPRegistryEvidenceRef = "mcp-registry-observation:" + strings.Repeat("b", 32)
@@ -93,7 +93,7 @@ func TestPreparationMCPSelectionProjectionRequiresVersionAndExactOwnerShape(t *t
 			case "scope":
 				a.Checks[0].ID = "exact_seal"
 			case "legacy":
-				v.Record.Version = "workorch-preparation-record/v1"
+				v.Record.Version = "unsupported-record-contract"
 			}
 			if v.ValidateFor("ws") == nil {
 				t.Fatal("unbound or unversioned classification accepted", reason, change)

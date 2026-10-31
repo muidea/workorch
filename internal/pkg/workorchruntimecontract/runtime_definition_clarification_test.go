@@ -12,7 +12,7 @@ import (
 func runtimeDefinitionGapDocumentForTest(t *testing.T) (RuntimeSemanticPlanManifest, RuntimeExpectedDocumentContract, RuntimeDefinitionGapProviderDocument) {
 	t.Helper()
 	manifest := semanticContractTestManifest(t)
-	expected := RuntimeExpectedDocumentContract{
+	expected := RuntimeExpectedDocumentContract{SemanticContextEncoding: RuntimeSemanticContextEncoding,
 		SchemaVersion:       RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:        RuntimeProviderDocumentSemanticPlan,
 		PlanStep:            RuntimeSemanticPlanStepCoverageOrder,
@@ -117,7 +117,7 @@ func TestEvaluateRuntimeDefinitionGapAdmissionAcceptsManifestBoundGapWithoutDecl
 
 func TestEvaluateRuntimeDefinitionGapAdmissionRejectsUndeclaredPrerequisiteWithSealedOwnerFactAcquisition(t *testing.T) {
 	manifest, semanticDocument, _ := semanticMissingOwnerFactAcquisitionFixture(t)
-	expected := RuntimeExpectedDocumentContract{
+	expected := RuntimeExpectedDocumentContract{SemanticContextEncoding: RuntimeSemanticContextEncoding,
 		SchemaVersion:            RuntimeExpectedDocumentSchemaCurrent,
 		DocumentKind:             RuntimeProviderDocumentSemanticPlan,
 		PlanStep:                 RuntimeSemanticPlanStepProofBatch,
@@ -163,7 +163,7 @@ func TestEvaluateRuntimeDefinitionGapAdmissionRejectsSatisfiedDeclaredPrerequisi
 	source.RequiredOwnerFacts = []RuntimeOwnerFactRequirement{requirement}
 	source.OwnerFactConvergences = []RuntimeOwnerFactConvergence{{Requirement: requirement, RequirePreexisting: true}}
 	manifest = sealSemanticTestManifestWithSource(t, manifest, source)
-	expected := RuntimeExpectedDocumentContract{
+	expected := RuntimeExpectedDocumentContract{SemanticContextEncoding: RuntimeSemanticContextEncoding,
 		SchemaVersion: RuntimeExpectedDocumentSchemaCurrent, DocumentKind: RuntimeProviderDocumentSemanticPlan,
 		PlanStep: RuntimeSemanticPlanStepProofBatch, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
 		LogicalRequestID: "semantic-request-satisfied-owner-fact-gap", StablePrefixHash: "stable-prefix-satisfied-owner-fact-gap",

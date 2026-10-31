@@ -6468,7 +6468,7 @@ func runtimeFileShellGitMappedBootstrap(t *testing.T, profileDomain ...bool) run
 		CandidateHash: "file-shell-git-original-candidate", SpecificationHash: "file-shell-git-confirmed-specification",
 		DefinitionRevision: bootstrap.Definition.Revision, StartupInputHash: bootstrap.Definition.StartupInputHash,
 		Sources:                 []runtimecontract.RuntimeDefinitionSource{{CandidateItemRef: "original-goal", ItemRef: "formal-goal", SourceScope: "goal", SourceID: "goal", Text: bootstrap.Definition.GoalDefinition}},
-		EvidencePurposeMappings: []runtimecontract.RuntimeEvidencePurposeMapping{{ContractRef: runtimecontract.RuntimeCrossCWIEvidencePurposeV1, HistoricalItemRef: "cwi-file", AcceptanceItemRef: "cwi-edit"}},
+		EvidencePurposeMappings: []runtimecontract.RuntimeEvidencePurposeMapping{{ContractRef: runtimecontract.RuntimeCrossCWIEvidencePurpose, HistoricalItemRef: "cwi-file", AcceptanceItemRef: "cwi-edit"}},
 	}
 	for index := range bootstrap.CoverageItems {
 		item := &bootstrap.CoverageItems[index]
@@ -6506,7 +6506,7 @@ func runtimeFileShellGitMappedBootstrap(t *testing.T, profileDomain ...bool) run
 		inventory.Requirements = slices.DeleteFunc(inventory.Requirements, func(s runtimecontract.RuntimeSourceRequirement) bool { return s.ID == "requirement/cwi-file" })
 		inventory.Obligations = slices.DeleteFunc(inventory.Obligations, func(s runtimecontract.RuntimeSourceObligation) bool { return s.ID == "obligation/cwi-file" })
 		inventory.Verifications = slices.DeleteFunc(inventory.Verifications, func(s runtimecontract.RuntimeSourceVerification) bool { return s.ID == "verification/cwi-file" })
-		inventory.EvidencePurposeMappings = []runtimecontract.RuntimeEvidencePurposeMapping{{ContractRef: runtimecontract.RuntimeProfileDeliverableEvidencePurposeV2,
+		inventory.EvidencePurposeMappings = []runtimecontract.RuntimeEvidencePurposeMapping{{ContractRef: runtimecontract.RuntimeProfileDeliverableEvidencePurpose,
 			HistoricalItemRef: runtimecontract.RuntimeProfileDeliverablePurposeRef(profile.ID, history.SourceID), AcceptanceItemRef: "cwi-edit",
 			HistoricalProfileID: profile.ID, HistoricalDeliverableID: history.SourceID, HistoricalText: history.TargetText,
 			HistoricalProfileHash: runtimecontract.StableRuntimeProfileContractsHash([]runtimecontract.RuntimeProfileContract{*profile})}}

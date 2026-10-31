@@ -97,7 +97,7 @@ func TestPreparationMCPRealProtocolDuplicateAndBoundary(t *testing.T) {
 		t.Fatal("unaccepted application source allowed")
 	}
 	oldCommand := c
-	oldCommand.Version = mcpevents.PreparationObservationVersionV1
+	oldCommand.Version = "unsupported-observation-shape"
 	if _, err = send(workspacecommon.ModuleID, oldCommand); err == nil {
 		t.Fatal("historical protocol accepted as a fresh observation")
 	}

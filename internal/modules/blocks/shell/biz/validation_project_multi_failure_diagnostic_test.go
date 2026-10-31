@@ -16,7 +16,7 @@ import (
 func TestProjectMultiFailureSourcePublicationIsExactAndProtectsOriginalTests(t *testing.T) {
 	recipe, requirement, _ := conjunctiveSourceRequirement(t)
 	recipe.AdapterRef = modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic
-	recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV3
+	recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 	checks, ok := shellValidationCheckAttestations(recipe, requirement)
 	if !ok {
 		t.Fatal("v8 mapping missing")
@@ -57,15 +57,15 @@ func TestProjectMultiFailureSourcePublicationIsExactAndProtectsOriginalTests(t *
 		t.Fatal("production native source absent")
 	}
 	writeNativeStructureSource(t, root, "delivery/value.go", strings.Replace(files["delivery/value.go"], "n*2+3", "n*2+4", 1))
-	current, code := shellVersionedInputReview(root, refs, binding)
+	current, code := shellInputReview(root, refs, binding)
 	if code != "" || current.Hash != binding.InputReview.Hash {
 		t.Fatal("legitimate implementation repair changed immutable test subject", code)
 	}
-	for _, protocol := range []string{runtimecontract.RuntimeValidationInputReviewProtocol, runtimecontract.RuntimeValidationInputReviewProtocolV2} {
+	for _, protocol := range []string{"", "unsupported-review-contract"} {
 		unsupported := recipe
 		unsupported.InputReviewProtocolRef = protocol
 		if shellProjectRecipeDeclared(unsupported) {
-			t.Fatal("v8 silently accepted unreviewed sources")
+			t.Fatal("project adapter accepted unreviewed sources")
 		}
 	}
 }
@@ -76,7 +76,7 @@ func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
 			root, internal := t.TempDir(), t.TempDir()
 			recipe := isolatedInputRecipe()
 			recipe.AdapterRef = modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic
-			recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV3
+			recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 			requirement := shellValidationProofRequirementForTest(t, recipe.ID, "diagnostic-cwi")
 			checks, ok := shellValidationCheckAttestations(recipe, requirement)
 			if !ok {
@@ -107,7 +107,7 @@ func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			binding.InputReview, _ = shellVersionedInputReview(root, refs, binding)
+			binding.InputReview, _ = shellInputReview(root, refs, binding)
 			if binding.InputReview == nil {
 				t.Fatal("complete project input not observed")
 			}
@@ -118,7 +118,7 @@ func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
 				body = strings.ReplaceAll(body, "if Value()!=4", "if true")
 				body = strings.ReplaceAll(body, `delivery "fixture/delivery"`, `_ "fixture/delivery"`)
 				writeNativeStructureSource(t, root, last.InputTargetRef, body)
-				binding.InputReview, _ = shellVersionedInputReview(root, refs, binding)
+				binding.InputReview, _ = shellInputReview(root, refs, binding)
 				if binding.InputReview == nil {
 					t.Fatal("partial attribution fixture not independently observed")
 				}

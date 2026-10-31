@@ -140,7 +140,7 @@ func ownerFactVersionedAssessmentFixture(t *testing.T) (*RuntimeController, *con
 	current := *runtimecontract.CloneRuntimeOwnerRevisionSet(&reads)
 	current.Entries[0].Revision = "actual-current"
 	current = current.WithHash()
-	pair := &runtimecontract.RuntimeEvidenceApplicabilityDependencies{ProtocolRef: runtimecontract.RuntimeEvidenceApplicabilityDependenciesV1, OwnerRevisionSet: current}
+	pair := &runtimecontract.RuntimeEvidenceApplicabilityDependencies{ProtocolRef: runtimecontract.RuntimeEvidenceApplicabilityDependenciesProtocol, OwnerRevisionSet: current}
 	controller, repository, _ := prepareOwnerFactAssessmentWithDependencyPair(t, false, nil, &reads, pair, runtimecontract.RuntimeBlockKindPatchApply)
 	return controller, repository
 }

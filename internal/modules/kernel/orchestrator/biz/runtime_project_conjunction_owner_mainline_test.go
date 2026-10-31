@@ -19,7 +19,7 @@ import (
 // provider 为脚本替身；准备、评审输入、dispatch、File/Shell 执行、文件型 Run CAS、
 // 原回执查询与 Workspace 目录读取均使用现有真实 owner。不是公开 authoring 或 fresh-process 验收。
 func TestDriveRuntimeProjectConjunctionOwnerMainline(t *testing.T) {
-	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectConjunction, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV2, SourceObligations: true}
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectConjunction, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, SourceObligations: true}
 	baseline := runValidationInputReviewMainline(t, "consistent", "", options)
 	var failureBaseline int64
 	var failureOnce sync.Once
@@ -56,7 +56,7 @@ type projectConjunctionExpectation struct {
 func assertProjectReceiptReplyLossBoundary(t *testing.T, aggregate runtime.RuntimeAggregate, success bool, selected ...projectConjunctionExpectation) runtimecontract.RuntimeOperationReceipt {
 	t.Helper()
 	failureStages := 2
-	if len(selected) != 0 && selected[0].ProtocolRef == "shell/go-test-json/project-conjunction-behavior/v3" {
+	if len(selected) != 0 && selected[0].ProtocolRef == "shell/go-test-json/project-multi-failure-behavior" {
 		failureStages = 3
 		if selected[0].RepairSources != 0 {
 			failureStages = 2 + selected[0].RepairSources
@@ -161,7 +161,7 @@ func assertProjectReceiptPreservedAfterRecovery(t *testing.T, before, after runt
 
 func assertProjectConjunctionPersistedOwnerOutputs(t *testing.T, ctx context.Context, hub magicevent.Hub, module *Biz, record runtimecontract.RuntimeStateRecord, success bool, selected ...projectConjunctionExpectation) {
 	t.Helper()
-	protocol := "shell/go-test-json/project-conjunction-behavior/v1"
+	protocol := "shell/go-test-json/project-conjunction-behavior"
 	expectedReceipts := 1
 	repairSources := 0
 	if len(selected) != 0 {
@@ -171,7 +171,7 @@ func assertProjectConjunctionPersistedOwnerOutputs(t *testing.T, ctx context.Con
 		}
 	}
 	failureStages := 2
-	if protocol == "shell/go-test-json/project-conjunction-behavior/v3" {
+	if protocol == "shell/go-test-json/project-multi-failure-behavior" {
 		failureStages = 3
 		if repairSources != 0 {
 			failureStages = 2 + repairSources
@@ -211,7 +211,7 @@ func assertProjectConjunctionPersistedOwnerOutputs(t *testing.T, ctx context.Con
 		} else if len(conjunction.Stages) != failureStages || !conjunction.Stages[1].KnownFailure || conjunction.Stages[1].ExitCode == 0 || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || len(observation.PassedChecks) != 0 {
 			t.Fatalf("original project failure disappeared or supplied current CWI proof: stages=%d expected=%d outcome=%s passed=%d known=%t exit=%d", len(conjunction.Stages), failureStages, receipt.Outcome, len(observation.PassedChecks), conjunction.Stages[1].KnownFailure, conjunction.Stages[1].ExitCode)
 		}
-		if !accepted && repairSources == 0 && protocol == "shell/go-test-json/project-conjunction-behavior/v3" && (conjunction.Stages[2].DiagnosticSourceRef != "" || len(conjunction.Stages[2].BehaviorTargetRefs) != 0 || len(conjunction.BehaviorTargetRefs) != 0 || receipt.Feedback.OriginalDiagnostic != nil && receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation != nil) {
+		if !accepted && repairSources == 0 && protocol == "shell/go-test-json/project-multi-failure-behavior" && (conjunction.Stages[2].DiagnosticSourceRef != "" || len(conjunction.Stages[2].BehaviorTargetRefs) != 0 || len(conjunction.BehaviorTargetRefs) != 0 || receipt.Feedback.OriginalDiagnostic != nil && receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation != nil) {
 			t.Fatal("unobserved adjacent failure obtained source-specific repair authority")
 		}
 		if !accepted && repairSources != 0 {

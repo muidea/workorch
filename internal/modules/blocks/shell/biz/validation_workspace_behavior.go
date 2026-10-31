@@ -15,10 +15,10 @@ import (
 
 const maxShellBehaviorNativeChecks = 32
 
-// v1 remains an execution/replay contract for already-sealed checks. The
-// versioned project-native adapter selects v2/v3 or v4, each requiring execution
-// of the workspace's non-test implementation. This is necessary behavior
-// grounding, not a semantic grader or authorization to edit the assertions.
+// Observation identities distinguish direct command output, delivery behavior,
+// supplements and entrypoint isolation. They describe different capabilities,
+// not historical versions. Behavior checks require actual non-test execution;
+// none authorizes edits to the assertions or replaces semantic review.
 func shellNativeObservationProtocolSupported(ref string) bool {
 	return ref == shellGoTestObservationProtocolRef || ref == shellGoBehaviorObservationProtocolRef || ref == shellGoSupplementObservationProtocolRef || shellEntrypointObservationProtocol(ref)
 }
