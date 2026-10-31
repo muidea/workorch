@@ -43,6 +43,9 @@ func (c RuntimeCandidateCorrectionInput) ValidateAgainstObservation(manifest run
 	); err != nil {
 		return err
 	}
+	if c.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessParameterCardinality {
+		return runtimecontract.ValidateRuntimeCandidateParameterCardinality(manifest, c.Witness.ParameterCardinality)
+	}
 	if c.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField {
 		return validateRuntimeCandidateSchemaWitnessManifest(manifest, observation.Diagnostic, c.Witness)
 	}

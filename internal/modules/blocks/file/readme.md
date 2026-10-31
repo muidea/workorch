@@ -172,6 +172,10 @@ lost-receipt recovery 若确认 sealed 后像，只保留本次实际读取的 `
   current revision 下缺失/歧义/occurrence 越界的匹配返回 bounded applicability violation，不能冒充 stale 或扩大 target。
   baseHash、binary/path/resource failure 保持普通 owner infeasibility；无 current snapshot 时仅返回既有 typed prerequisite。
   `file/edit` 仍是 at-most-once effect，不因新增预检而取得 patch replay authority。
+- `file/edit` 只接收一个 `oldText` / `newText` 对及可选 `occurrence`；参数数组不是 edits 列表。
+  同文件多处变更由 provider 从完整真实原文选择一个连续片段，保留中间未改内容并提交唯一替换对；
+  不允许重复参数、按 first/last-wins 丢弃变更、分裂 required slot 或切换未封存 capability。
+  无完整原文时不能猜造 preimage；File 原 applicability/版本/权限门禁不变。结构纠错不等于 File receipt 或终验。
 - `oldText` 非空、`oldText != newText` 与 `occurrence >= 1` 属于 manifest v7 的纯 `ValueRules`，由 shared strict admission 在任何
   File I/O 前判断；File 不保存该结果、不发布对应 EventHub fact，也不触发 correction。File 只拥有上述依赖 parser/current
   target 的 conformance/applicability 事实及自身 effect/receipt 状态。

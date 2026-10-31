@@ -1817,6 +1817,88 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 			}
 		}
 	})
+	t.Run("cardinality renderer native and text transport share exact contract", func(t *testing.T) {
+		wire := runtimeCandidateWireForTest(t, manifest)
+		input := llmmodels.RuntimeCandidateRequest{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix, CandidateManifest: manifest, DefinitionContext: definition, CandidateContext: candidateContext, ExpectedDocument: &runtimecontract.RuntimeExpectedDocumentContract{WireContractHash: wire.Hash, OperationsRenderContractRef: runtimecontract.RuntimeOperationsRenderContractV3}}
+		modern, err := runtimeProviderRequest(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if modern.Schema != runtimeCandidateCardinalitySchema(manifest, wire) || modern.ContextBudget.PromptRenderer != "workorch.runtime_candidate_prompt/v3" {
+			t.Fatal("v3 schema/audit diverged")
+		}
+		var current map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(modern.PromptContext.Sections[3].Content), &current); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(current["outputContract"], []byte(`maxContains`)) {
+			t.Fatal("C3 lacks executable cardinality")
+		}
+		content := "private provider document value"
+		body, err := runtimecontract.EncodeRuntimeCandidatePayloadWithManifest(manifest, runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{Kind: runtimecontract.StepKindFileWrite, BindingRefs: []string{facts.Focus.CoverageEvidenceBindings[0].ID}, TargetRefs: []string{selection.ProspectiveTargetRef}, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &content}}}}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		body = bytes.Replace(body, []byte(`"string":"private provider document value"}`), []byte(`"string":"private provider document value"},{"name":"content","string":"second private value"}`), 1)
+		_, err = runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, body)
+		var rejected *runtimecontract.RuntimeCandidatePayloadDiagnostic
+		if !errors.As(err, &rejected) || rejected.ParameterCardinality == nil {
+			t.Fatalf("cardinality fixture failed: %v", err)
+		}
+		diagnostic := runtimecontract.RuntimeCandidateFailureDiagnosticFromPayloadDiagnostic(rejected)
+		diagnostic.ManifestHash = manifest.Hash
+		diagnostic.Objectives = []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConsolidateParameters}
+		witness := runtimecontract.RuntimeCandidateCorrectionWitness{Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessParameterCardinality, Path: "$.operations", RejectedValue: runtimecontract.RuntimeCandidateParameterNamesRepeated, AlternativeValue: runtimecontract.RuntimeCandidateParameterNamesUnique, ParameterCardinality: diagnostic.ParameterCardinality.Clone()}
+		observation := &runtimecontract.RuntimeCandidateCorrectionObservation{Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "cardinality", Diagnostic: diagnostic, SealedCorrectionHash: runtimecontract.StableRuntimeCandidateSealedCorrectionHash(manifest.Hash, diagnostic.Objectives, &witness)}
+		correction := &llmmodels.RuntimeCandidateCorrectionInput{ManifestHash: manifest.Hash, Objectives: diagnostic.Objectives, Witness: witness}
+		input.CandidateAttempt, input.CandidateCorrectionObservation, input.CandidateCorrection = 1, observation, correction
+		retry, err := runtimeProviderRequest(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 4; i++ {
+			if modern.PromptContext.Sections[i].Content != retry.PromptContext.Sections[i].Content {
+				t.Fatalf("bounded retry drifted C%d", i)
+			}
+		}
+		if modern.Schema != retry.Schema || modern.ContextBudget.CachePlan.RenderedStablePrefixHash != retry.ContextBudget.CachePlan.RenderedStablePrefixHash {
+			t.Fatal("retry changed schema or cache prefix")
+		}
+		tail := retry.PromptContext.Sections[4].Content
+		if !strings.Contains(tail, "Only values of the listed repeated names may change") || !strings.Contains(tail, `"parameterCardinality"`) || strings.Contains(tail, content) || strings.Contains(tail, "second private value") {
+			t.Fatal("C4 lost bounded facts or exposed raw values")
+		}
+		changed := correction.Normalized()
+		changed.Witness.ParameterCardinality.DocumentSHA256 = strings.Repeat("0", 64)
+		if changed.ValidateAgainstObservation(manifest, *observation) == nil {
+			t.Fatal("consumer accepted substituted document")
+		}
+		input.CandidateAttempt, input.CandidateCorrectionObservation, input.CandidateCorrection = 0, nil, nil
+		for _, strict := range []bool{false, true} {
+			modern.Config.Capabilities.JSONSchemaResponse = strict
+			modern.RawTextOutput = !strict
+			transport := responsesTextForRequest(modern.Config.Capabilities, modern)
+			if strict && (transport == nil || transport.Format == nil || !transport.Format.Strict) {
+				t.Fatal("v3 native schema was not dispatched")
+			}
+			if !strict && transport != nil {
+				t.Fatal("raw text unexpectedly dispatched native schema")
+			}
+			if responsesCacheSchemaScope(modern) != "runtime/operations-schema/v3" {
+				t.Fatal("v3 cache identity missing")
+			}
+			assertRuntimeSectionCacheWire(t, modern)
+			first, err := runtimeProviderRequest(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := range first.PromptContext.Sections {
+				if first.PromptContext.Sections[i].Content != modern.PromptContext.Sections[i].Content {
+					t.Fatalf("same snapshot C%d drift", i)
+				}
+			}
+		}
+	})
 	assertRuntimeSectionCacheWire(t, request)
 	if request.ContextBudget == nil || request.ContextBudget.CachePlan == nil || request.ContextBudget.CachePlan.StablePrefixHash != prefix ||
 		request.ContextBudget.CachePlan.RenderedStablePrefixHash == "" || len(request.PromptContext.Sections) != 6 {

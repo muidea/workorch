@@ -50,7 +50,7 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 	if request.ExpectedDocument != nil {
 		renderer = request.ExpectedDocument.Normalized().OperationsRenderContractRef
 	}
-	if renderer != "" && renderer != runtimecontract.RuntimeOperationsRenderContractV2 {
+	if renderer != "" && renderer != runtimecontract.RuntimeOperationsRenderContractV2 && renderer != runtimecontract.RuntimeOperationsRenderContractV3 {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("unsupported runtime operations renderer")
 	}
 	catalog := runtimeCandidateContractCatalog()
@@ -60,6 +60,13 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 		catalog = runtimeCandidateContractCatalogV2()
 		promptVersion = "workorch.runtime_candidate_prompt/v2"
 		outputContract = runtimeCandidateCompactOutputContract(manifest, wire)
+	}
+	if renderer == runtimecontract.RuntimeOperationsRenderContractV3 {
+		catalog = runtimeCandidateContractCatalogV3()
+		promptVersion = "workorch.runtime_candidate_prompt/v3"
+		outputContract = runtimeCandidateCompactOutputContract(manifest, wire)
+		outputContract.StructuredOutputInstruction = "Apply operations-render/parameter-cardinality/v3 in C0 to this exact outputContract; all request-specific values remain mandatory."
+		outputContract.Schema = json.RawMessage(runtimeCandidateCardinalitySchema(manifest, wire))
 	}
 	if err := validateRuntimeCandidateManifestSupportingFacts(manifest, candidateContext.Resources); err != nil {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate manifest supporting facts: %w", err)
@@ -132,7 +139,7 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 		WorkspaceID: string(candidateContext.WorkspaceID), RunID: string(candidateContext.RunID),
 		StepID: request.Transaction.AuthoritySnapshotID, Kind: "runtime_candidate",
 		ReasoningEffort: ceiling.Selection.ReasoningEffort,
-		Schema:          runtimeCandidateSchemaForManifest(manifest),
+		Schema:          string(outputContract.Schema),
 		PromptContext: &llmmodels.PromptContext{SchemaVersion: promptVersion, MessageLayout: llmmodels.PromptMessageLayoutSectionsV1, Sections: []llmmodels.PromptSection{
 			{ID: "C0.runtime-candidate-contract", Name: "Runtime candidate contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, SourceRefs: []string{"runtime://candidate-contract"}, Content: catalog},
 			{ID: "C1.goal-dod", Name: "Goal and DoD", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 1, DefinitionRevision: definitionContext.Revision, SourceRefs: []string{"runtime://definition/" + definitionContext.Revision}, Content: string(definitionJSON)},

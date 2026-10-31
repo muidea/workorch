@@ -293,8 +293,8 @@ Source observations never authorize writing another target, skipping review or c
 
 ### Runtime 请求渲染与缓存观测
 
-- operations 新请求使用 `operations-render/compact-contract/v2`，由 Orchestrator 在 SM-3 ExpectedDocument 中封存。
-  空引用保留旧渲染；transport recovery、进程重载及同合同 correction 继承原引用。LLM 不自行升级，未知引用拒绝。
+- operations 新请求使用 `operations-render/parameter-cardinality/v3`，由 Orchestrator 在 SM-3 ExpectedDocument 中封存。
+  空引用与 `operations-render/compact-contract/v2` 保留原渲染；transport recovery、进程重载及同合同 correction 继承原引用。LLM 不自行升级，未知引用拒绝。
 - v2 的 C0 是通用结构说明和原 effect 指引；C3 保留完整原 schema、wireRules、operationContracts、例子以及精确
   requiredOperationSequence 对应关系，只去除这些值的重复长篇说明。raw-text 与 strict-output 适用同一合同和本地 decoder。
   C1/C2 与 C4/C5 不变；缓存 scope 只认可 owner 的精确 C0/version，继续隔离 Workspace、Profile 内容及模型/transport。
@@ -305,3 +305,12 @@ Source observations never authorize writing another target, skipping review or c
 - 只读 nativeCache 汇总按 Workspace/Run/logical/physical 身份去重，排除 preflight；已知零为 measured miss，
   缺失、估算或不合法原生 cache usage 为 unknown。调用命中比例和 token 加权比例均只用已测分母，并保留未知计数。
   当前查询窗口不代表全部历史；旧记录原文不回填。字节减少、缓存命中均不授予运行或验收 credit。
+
+- v3 从同一 wire rule 的 provider 参数集合生成按 name 的 `minContains`/`maxContains=1`：必需恰好一次、可选至多一次，
+  闭合集合 `maxItems` 为真实可选名称数。动态 MCP 参数保留授权前缀与容量，动态 name 唯一仍由 strict decoder 核验。
+  transport schema 与 C3 schema 完全相同；原生结构化输出与 raw text 均遵守完整合同，不以 provider 启用 strict 与否替代本地校验。
+  C0 明确 File adapter 单对替换及完整连续原文要求；不是新增多编辑操作或 Profile 权限。v3/version 参与实际缓存身份。
+- `parameter_cardinality` correction 消费 exact manifest、原首错及完整 v1 fact；C4 只投影结构坐标和不可逆值 hash，
+  不复制原始 provider 值或诊断 Cause。只能重新生成重复 name 的值以表达完整语义，其余参数/操作 scope 冻结。
+  同合同 attempt0/1 保持 C0–C3、schema、wire、rendered stable prefix；LLM 不选择是否重试，不证明修订语义正确，
+  不授予 effect、readiness 或验收 credit。真实效果仍需 File owner，普通 validation/repair/终态沿原合同。

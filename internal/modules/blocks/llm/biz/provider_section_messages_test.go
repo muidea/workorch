@@ -299,11 +299,19 @@ func TestSectionMessageWireEnvelopeRespectsConfiguredByteLimit(t *testing.T) {
 }
 
 func TestCompactRuntimeCacheScopeConcurrentWorkspaceProfileIsolation(t *testing.T) {
+	testRuntimeCacheScopeConcurrentWorkspaceProfileIsolation(t, "v2", runtimeCandidateContractCatalogV2())
+}
+
+func TestCardinalityRuntimeCacheScopeConcurrentWorkspaceProfileIsolation(t *testing.T) {
+	testRuntimeCacheScopeConcurrentWorkspaceProfileIsolation(t, "v3", runtimeCandidateContractCatalogV3())
+}
+
+func testRuntimeCacheScopeConcurrentWorkspaceProfileIsolation(t *testing.T, version, catalog string) {
 	makeRequest := func(workspace, profile, schema string) llmmodels.ProviderRequest {
 		r := sectionCacheRequest(workspace, "operations")
-		r.PromptContext.SchemaVersion = "workorch.runtime_candidate_prompt/v2"
+		r.PromptContext.SchemaVersion = "workorch.runtime_candidate_prompt/" + version
 		r.PromptContext.Sections[0].ID = "C0.runtime-candidate-contract"
-		r.PromptContext.Sections[0].Content = runtimeCandidateContractCatalogV2()
+		r.PromptContext.Sections[0].Content = catalog
 		r.PromptContext.Sections[2].Content = profile
 		r.Schema = schema
 		return r

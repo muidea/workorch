@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -40,6 +41,14 @@ func TestImplementationWorkProductionDriverFourTargetsTwoRounds(t *testing.T) {
 	}
 }
 
+func TestImplementationWorkProductionDriverCardinalityCorrectionRealFile(t *testing.T) {
+	for _, empty := range []bool{false, true} {
+		t.Run(fmt.Sprintf("empty_%t", empty), func(t *testing.T) {
+			testImplementationWorkProductionDriverTargetsWithCardinality(t, empty, []string{"resource-a", "resource-b", "resource-c", "resource-d"}, true)
+		})
+	}
+}
+
 func testImplementationWorkProductionDriverSameCWIRealFileTwoRounds(t *testing.T, empty bool) {
 	testImplementationWorkProductionDriverTargets(t, empty, []string{"resource-a"})
 }
@@ -71,6 +80,10 @@ func configureImplementationWorkDriverTargets(t *testing.T, aggregate *runtime.R
 }
 
 func testImplementationWorkProductionDriverTargets(t *testing.T, empty bool, targets []string) {
+	testImplementationWorkProductionDriverTargetsWithCardinality(t, empty, targets, false)
+}
+
+func testImplementationWorkProductionDriverTargetsWithCardinality(t *testing.T, empty bool, targets []string, injectCardinality bool) {
 	t.Helper()
 	ctx := context.Background()
 	module, repo, aggregate := implementationWorkPurposeDebtDriverFixtureWithEmptyDirectory(t, empty)
@@ -134,6 +147,14 @@ func testImplementationWorkProductionDriverTargets(t *testing.T, empty bool, tar
 		operationCalls++
 		manifest := command.CandidateManifest
 		ordinal := operationCalls
+		if injectCardinality && operationCalls > 1 {
+			ordinal--
+		}
+		if injectCardinality && operationCalls == 2 {
+			if command.CandidateAttempt != 1 || command.CandidateCorrection == nil || command.CandidateCorrection.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessParameterCardinality || len(repo.aggregate.OperationReceipts) != 0 {
+				t.Error("raw document correction did not retain one attempt and zero partial File effects")
+			}
+		}
 		oldText := "original implementation"
 		if ordinal > 1 {
 			oldText = fmt.Sprintf("实际工作内容-%d", ordinal-1)
@@ -168,6 +189,37 @@ func testImplementationWorkProductionDriverTargets(t *testing.T, empty bool, tar
 			operations = append(operations, runtimecontract.StateChangingOperation{Operation: runtimecontract.RuntimeOperation{ID: fmt.Sprintf("work-operation-%d-%d", ordinal, targetIndex), Kind: kind, TargetRefs: []string{target}, RequiredOperationRef: requirement, Parameters: parameters}})
 		}
 		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: operations}}
+		if injectCardinality && operationCalls == 1 {
+			// Supply the original invalid bytes, never a partially decoded DTO.
+			response := runtimeCandidateResultForTest(t, command, candidate)
+			var document map[string]json.RawMessage
+			if response.DocumentOutcome == nil || json.Unmarshal(response.DocumentOutcome.Content, &document) != nil {
+				t.Error("missing fixture document")
+				result.Set(response, nil)
+				return
+			}
+			var rawOperations []map[string]json.RawMessage
+			json.Unmarshal(document["operations"], &rawOperations)
+			for i := range rawOperations {
+				var parameters []map[string]any
+				json.Unmarshal(rawOperations[i]["parameters"], &parameters)
+				name := "newText"
+				if empty {
+					name = "content"
+				}
+				for _, parameter := range parameters {
+					if parameter["name"] == name {
+						parameter["string"] = "实际工作内容-"
+					}
+				}
+				parameters = append(parameters, map[string]any{"name": name, "string": "1"})
+				rawOperations[i]["parameters"], _ = json.Marshal(parameters)
+			}
+			document["operations"], _ = json.Marshal(rawOperations)
+			body, _ := json.Marshal(document)
+			result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{DocumentOutcome: runtimeCompleteDocumentOutcome(command.ExpectedDocument, body)}), nil)
+			return
+		}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	})
 	t.Cleanup(func() { provider.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
@@ -186,7 +238,11 @@ func testImplementationWorkProductionDriverTargets(t *testing.T, empty bool, tar
 			t.Fatalf("unexpected terminal before two real work receipts: %+v failure=%+v", outcome.result, aggregate.Facts.Failure)
 		}
 	}
-	if len(aggregate.ImplementationWork.Rounds) != 2 || aggregate.ImplementationWork.Rounds[0].CompletedReceiptSetHash == "" || aggregate.ImplementationWork.Rounds[1].CompletedReceiptSetHash == "" || operationCalls != 2 || semanticCalls != 6 || committedReceipts != 2*len(targets) {
+	expectedOperationCalls := 2
+	if injectCardinality {
+		expectedOperationCalls++
+	}
+	if len(aggregate.ImplementationWork.Rounds) != 2 || aggregate.ImplementationWork.Rounds[0].CompletedReceiptSetHash == "" || aggregate.ImplementationWork.Rounds[1].CompletedReceiptSetHash == "" || operationCalls != expectedOperationCalls || semanticCalls != 6 || committedReceipts != 2*len(targets) {
 		t.Fatalf("two-round production chain incomplete: rounds=%+v semantic=%d operations=%d failure=%+v", aggregate.ImplementationWork.Rounds, semanticCalls, operationCalls, aggregate.Facts.Failure)
 	}
 	first, second := aggregate.ImplementationWork.Rounds[0], aggregate.ImplementationWork.Rounds[1]

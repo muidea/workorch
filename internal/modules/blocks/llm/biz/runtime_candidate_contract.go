@@ -166,16 +166,17 @@ type runtimeCandidateCorrectionInputProjection struct {
 }
 
 type runtimeCandidateCorrectionWitnessProjection struct {
-	Dimension               runtimecontract.RuntimeCandidateCorrectionWitnessDimension `json:"dimension"`
-	OperationKind           string                                                     `json:"operationKind,omitempty"`
-	Path                    string                                                     `json:"path"`
-	RejectedValue           string                                                     `json:"rejectedValue,omitempty"`
-	AlternativeValue        string                                                     `json:"alternativeValue"`
-	RejectedShapeHash       string                                                     `json:"rejectedShapeHash,omitempty"`
-	AlternativeShapeHash    string                                                     `json:"alternativeShapeHash,omitempty"`
-	ConstraintRef           string                                                     `json:"constraintRef,omitempty"`
-	ParameterEntryEncodings []runtimeCandidateParameterEntryEncodingProjection         `json:"parameterEntryEncodings,omitempty"`
-	OperationSetViolation   *runtimecontract.RuntimeCandidateOperationSetViolation     `json:"operationSetViolation,omitempty"`
+	ParameterCardinality    *runtimecontract.RuntimeCandidateParameterCardinalityViolation `json:"parameterCardinality,omitempty"`
+	Dimension               runtimecontract.RuntimeCandidateCorrectionWitnessDimension     `json:"dimension"`
+	OperationKind           string                                                         `json:"operationKind,omitempty"`
+	Path                    string                                                         `json:"path"`
+	RejectedValue           string                                                         `json:"rejectedValue,omitempty"`
+	AlternativeValue        string                                                         `json:"alternativeValue"`
+	RejectedShapeHash       string                                                         `json:"rejectedShapeHash,omitempty"`
+	AlternativeShapeHash    string                                                         `json:"alternativeShapeHash,omitempty"`
+	ConstraintRef           string                                                         `json:"constraintRef,omitempty"`
+	ParameterEntryEncodings []runtimeCandidateParameterEntryEncodingProjection             `json:"parameterEntryEncodings,omitempty"`
+	OperationSetViolation   *runtimecontract.RuntimeCandidateOperationSetViolation         `json:"operationSetViolation,omitempty"`
 }
 
 type runtimeCandidateParameterEntryEncodingProjection struct {
@@ -770,7 +771,9 @@ func runtimeCandidateRetryForManifest(attempt int, observation *runtimecontract.
 	if manifest.Hash != "" {
 		instruction += " Re-read outputContract.structuredOutputInstruction and schema in the C3 current runtime authority for sealed manifest hash " + manifest.Hash + "; they are the only source of allowed fields, kinds, variants, parameters, targets, coverage and dependencies."
 	}
-	if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessParameterEntryEncoding {
+	if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessParameterCardinality {
+		instruction += " The previous document repeated declared parameter names. Re-emit one complete document with exactly one typed entry for each observed parameter name in every operation. Consolidate all intended changes for each repeated parameter using the exact C3 owner input. Only values of the listed repeated names may change; retain every other parameter value, operation position, required slot, kind, variant, target and binding. Never drop intended edits by selecting first/last duplicate, split operations or add parameters. This structural correction grants no execution or acceptance credit."
+	} else if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessParameterEntryEncoding {
 		instruction += " The previous candidate encoded manifest-declared logical parameters as sibling keys inside another parameters[] entry. Re-emit a fresh complete document: every listed logical parameter must be its own parameters[] item containing exactly name plus the listed typed wireValueField. Keep the container parameter as its own item; do not place logical parameter names beside its value field. Re-generate values from C3 authority and do not copy this diagnostic as output data."
 	} else if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField && input.Witness.AlternativeValue == runtimecontract.RuntimeCandidateCorrectionFieldPresent {
 		instruction += " The previous document omitted, emptied, set null, or used the wrong JSON type for a required field. Rebuild the entire document and emit that field exactly once with the type and nested shape required by outputContract.schema; field presence without schema conformance is still invalid."
@@ -796,6 +799,7 @@ func runtimeCandidateRetryForManifest(attempt int, observation *runtimecontract.
 			RejectedValue: witness.RejectedValue, AlternativeValue: witness.AlternativeValue,
 			RejectedShapeHash: witness.RejectedShapeHash, AlternativeShapeHash: witness.AlternativeShapeHash,
 			ConstraintRef:           witness.ConstraintRef,
+			ParameterCardinality:    witness.ParameterCardinality.Clone(),
 			ParameterEntryEncodings: runtimeCandidateParameterEntryEncodingProjections(witness.ParameterEntryEncodings),
 			OperationSetViolation:   witness.OperationSetViolation.Clone(),
 		},

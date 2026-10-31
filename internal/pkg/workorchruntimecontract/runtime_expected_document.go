@@ -10,6 +10,7 @@ import (
 )
 
 const RuntimeOperationsRenderContractV2 = "operations-render/compact-contract/v2"
+const RuntimeOperationsRenderContractV3 = "operations-render/parameter-cardinality/v3"
 
 const RuntimeSemanticRenderContractV2 = "semantic-render/owner-work-vocabulary/v2"
 
@@ -84,7 +85,7 @@ func (c RuntimeExpectedDocumentContract) Validate() error {
 	}
 	switch c.DocumentKind {
 	case RuntimeProviderDocumentOperations:
-		if (c.OperationsRenderContractRef != "" && c.OperationsRenderContractRef != RuntimeOperationsRenderContractV2) || c.SemanticRenderContractRef != "" || c.WireContractHash == "" || c.PlanStep != "" || c.DefinitionSeedHash != "" || c.BatchID != "" || c.BatchSequence != 0 || len(c.BatchCoverageWorkItemIDs) != 0 || c.CoverageOrderHash != "" {
+		if (c.OperationsRenderContractRef != "" && c.OperationsRenderContractRef != RuntimeOperationsRenderContractV2 && c.OperationsRenderContractRef != RuntimeOperationsRenderContractV3) || c.SemanticRenderContractRef != "" || c.WireContractHash == "" || c.PlanStep != "" || c.DefinitionSeedHash != "" || c.BatchID != "" || c.BatchSequence != 0 || len(c.BatchCoverageWorkItemIDs) != 0 || c.CoverageOrderHash != "" {
 			return common.ErrInvalidArgument
 		}
 	case RuntimeProviderDocumentSemanticPlan:

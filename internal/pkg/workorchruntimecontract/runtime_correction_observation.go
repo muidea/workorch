@@ -109,7 +109,14 @@ func (o RuntimeCandidateCorrectionObservation) Validate() error {
 			return fmt.Errorf("runtime candidate correction diagnostic wire rule does not match its operation path")
 		}
 	}
+	if diagnostic.ViolationKind != RuntimeCandidatePayloadViolationParameterCardinality && diagnostic.ParameterCardinality != nil {
+		return fmt.Errorf("unrelated diagnostic carries parameter cardinality")
+	}
 	switch diagnostic.ViolationKind {
+	case RuntimeCandidatePayloadViolationParameterCardinality:
+		if diagnostic.ParameterCardinality.Validate() != nil || !diagnostic.ParameterCardinality.MatchesDiagnostic(&diagnostic) || !RuntimeCandidateCorrectionObjectivesEqual(diagnostic.Objectives, []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionConsolidateParameters}) || len(diagnostic.ParameterEntryEncodings) != 0 || diagnostic.OperationSetViolation != nil {
+			return fmt.Errorf("invalid parameter cardinality diagnostic")
+		}
 	case "":
 		if len(diagnostic.ParameterEntryEncodings) != 0 {
 			return fmt.Errorf("runtime candidate correction diagnostic carries parameter-entry facts without a violation kind")
@@ -123,6 +130,9 @@ func (o RuntimeCandidateCorrectionObservation) Validate() error {
 		}
 	default:
 		return fmt.Errorf("runtime candidate correction diagnostic has unsupported violation kind %q", diagnostic.ViolationKind)
+	}
+	if runtimeCandidateCorrectionHasObjective(diagnostic.Objectives, RuntimeCandidateCorrectionConsolidateParameters) && diagnostic.ViolationKind != RuntimeCandidatePayloadViolationParameterCardinality {
+		return fmt.Errorf("parameter consolidation objective requires exact cardinality facts")
 	}
 	if diagnostic.OperationSetViolation != nil {
 		violation := diagnostic.OperationSetViolation.Normalized()
@@ -191,6 +201,7 @@ func (o RuntimeCandidateCorrectionObservation) Validate() error {
 			RuntimeCandidateCorrectionSatisfyDependency,
 			RuntimeCandidateCorrectionSelectEvidenceBinding,
 			RuntimeCandidateCorrectionReencodeParameterEntries,
+			RuntimeCandidateCorrectionConsolidateParameters,
 			RuntimeCandidateCorrectionConformOwnerConstraint,
 			RuntimeCandidateCorrectionSatisfyOperationValueRule,
 			RuntimeCandidateCorrectionConsolidateOperationSet:
@@ -232,6 +243,7 @@ func StableRuntimeCandidateSealedCorrectionHash(manifestHash string, objectives 
 	writeHashString(h, witnessValue.AlternativeShapeHash)
 	writeHashString(h, witnessValue.ConstraintRef)
 	writeHashRuntimeCandidateParameterEntryEncodings(h, witnessValue.ParameterEntryEncodings)
+	writeHashRuntimeCandidateParameterCardinality(h, witnessValue.ParameterCardinality)
 	writeHashRuntimeCandidateOperationSetViolation(h, witnessValue.OperationSetViolation)
 	return hex.EncodeToString(h.Sum(nil))
 }

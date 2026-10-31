@@ -912,11 +912,20 @@ ordinary 前驱，state-change-only 不补造来源，明确 `cwi_revalidation_s
   preimage 声明封入 manifest/wire/hash，并在选定 singleton target 后纯派生 exact 参数；provider echo 必须拒绝，owner
   ingress 仍重验 catalog/freshness。Core 不解释参数的业务含义，不重新观察资源，也不新增 owner/correction authority；
   nil/empty 扩展保持旧 archive identity。动态声明只影响 C3。
-- SM-3 的 operations ExpectedDocument 另可封存 `OperationsRenderContractRef=operations-render/compact-contract/v2`。
-  fresh authority 默认使用 v2；同 authority/manifest 的已封存 session（含空引用 legacy）决定 reload/recovery/correction
+- SM-3 的 operations ExpectedDocument 封存 `OperationsRenderContractRef`；fresh authority 默认使用
+  `operations-render/parameter-cardinality/v3`，已封存 `operations-render/compact-contract/v2` 继续原渲染。
+  同 authority/manifest 的已封存 session（含空引用 legacy）决定 reload/recovery/correction
   版本，私有 writer 在 CAS 前拒绝版本切换或冲突。引用进入 expected-document hash，空值省略且不改变旧 hash/序列化。
   该引用仅选择 LLM owner 的纯 rendering；manifest/wire、预算、attempt、dispatch 和全部 SM-2 门禁不变。
   SM-1 生命周期与 SM-4 恢复/交付不新增迁移，也不能通过部署升级旧请求或恢复失败 Run。
+- `runtime-candidate-parameter-cardinality/v1` 仅处理完整原文中重复的已声明 provider 参数。strict decoder 保留原首错；
+  完整 bounded 文档的 bytes/SHA256、每 operation exact wire identity、scope hash、全部参数 name/type/indexes 和单次值 hash
+  成为 SM-3 纯事实。未知字段/类型、动态参数、缺 slot/required、重复 slot、歧义 JSON key 或超界不能产生部分纠错事实。
+  `consolidate_parameter_entries` 只打开既有 attempt1：保持操作顺序/数量、slot/kind/variant、target/binding、完整参数集合，
+  只有重复 name 的值可重新生成；非重复值必须精确保持。Core 不解释文本编辑、不去重/选择保留值、不修改原文。
+  完整后继仍须通过 manifest、owner conformance/feasibility、preimage 和 seal；零局部派发、零终验 credit。
+  fact 参与 observation/witness/session hash、raw clone 与 fresh-load；nil 扩展保持既有失败 archive identity。
+  CAS 失败/响应丢失/重启不增开修订身份；attempt1 再失败仍 `candidate_retry_exhausted`，预算与四状态机边界不变。
 - operations ExpectedDocument 持久化 exact `WireContractHash`，request session 保留 manifest identity；任一 framing 为单一
   JSON object 的 completed document
   进入 accepted 或 rejected candidate attempt 时，都在关闭该 attempt 的同一个 owner-private CAS 中封存 exact

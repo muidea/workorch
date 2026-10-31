@@ -186,6 +186,7 @@ type RuntimeCandidateFailure struct {
 // of a schema or semantic candidate rejection. It is a pure value DTO: no
 // action selection, aggregate mutation, EventHub, or I/O belongs here.
 type RuntimeCandidateFailureDiagnostic struct {
+	ParameterCardinality    *RuntimeCandidateParameterCardinalityViolation    `json:"parameterCardinality,omitempty"`
 	OperationID             string                                            `json:"operationId,omitempty"`
 	Path                    string                                            `json:"path,omitempty"`
 	Actual                  string                                            `json:"actual,omitempty"`
@@ -209,6 +210,7 @@ type RuntimeCandidateFailureDiagnostic struct {
 type RuntimeCandidateCorrectionObjective string
 
 const (
+	RuntimeCandidateCorrectionConsolidateParameters     RuntimeCandidateCorrectionObjective = "consolidate_parameter_entries"
 	RuntimeCandidateCorrectionRemoveForbiddenField      RuntimeCandidateCorrectionObjective = "remove_forbidden_field"
 	RuntimeCandidateCorrectionSupplyRequiredField       RuntimeCandidateCorrectionObjective = "supply_required_field"
 	RuntimeCandidateCorrectionReplaceTarget             RuntimeCandidateCorrectionObjective = "replace_target_with_allowed_target"
@@ -238,6 +240,7 @@ func (d RuntimeCandidateFailureDiagnostic) Normalized() RuntimeCandidateFailureD
 	d.Actual = strings.TrimSpace(d.Actual)
 	d.ViolationKind = RuntimeCandidatePayloadViolationKind(strings.TrimSpace(string(d.ViolationKind)))
 	d.ParameterEntryEncodings = cloneRuntimeCandidateParameterEntryEncodings(d.ParameterEntryEncodings)
+	d.ParameterCardinality = d.ParameterCardinality.Clone()
 	d.OperationSetViolation = d.OperationSetViolation.Clone()
 	d.ConstraintRef = strings.TrimSpace(d.ConstraintRef)
 	d.RequiredShape = strings.TrimSpace(d.RequiredShape)

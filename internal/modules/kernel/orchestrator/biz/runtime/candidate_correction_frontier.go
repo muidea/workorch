@@ -62,6 +62,13 @@ func candidateCorrectionWitness(
 	if strings.TrimSpace(manifest.Hash) == "" {
 		return nil
 	}
+	if failure.Diagnostic != nil && failure.Diagnostic.ViolationKind == runtimecontract.RuntimeCandidatePayloadViolationParameterCardinality {
+		d := failure.Diagnostic
+		if failure.Code != "candidate_schema_invalid" || runtimecontract.ValidateRuntimeCandidateParameterCardinality(manifest, d.ParameterCardinality) != nil || !d.ParameterCardinality.MatchesDiagnostic(d) {
+			return nil
+		}
+		return (&runtimecontract.RuntimeCandidateCorrectionWitness{Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessParameterCardinality, Path: "$.operations", RejectedValue: runtimecontract.RuntimeCandidateParameterNamesRepeated, AlternativeValue: runtimecontract.RuntimeCandidateParameterNamesUnique, ParameterCardinality: d.ParameterCardinality.Clone()}).Clone()
+	}
 	if witness := candidateOperationSetCorrectionWitness(failure, manifest, frontier.candidate); witness != nil {
 		return witness
 	}
@@ -1168,6 +1175,8 @@ func candidateCrossesCorrectionWitness(candidate runtimecontract.RuntimeCandidat
 		operation = operations[operationIndex].Normalized()
 	}
 	switch witness.Dimension {
+	case runtimecontract.RuntimeCandidateCorrectionWitnessParameterCardinality:
+		return runtimecontract.ValidateRuntimeCandidateParameterCardinalityCorrection(manifest, witness.ParameterCardinality, operations) == nil
 	case runtimecontract.RuntimeCandidateCorrectionWitnessParameterEntryEncoding:
 		return candidateCrossesParameterEntryEncodingWitness(operations, manifest, witness)
 	case runtimecontract.RuntimeCandidateCorrectionWitnessOperationKind:

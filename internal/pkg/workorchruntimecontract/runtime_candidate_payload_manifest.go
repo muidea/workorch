@@ -27,6 +27,7 @@ type RuntimeCandidatePayloadDiagnostic struct {
 	WireRule                *RuntimeCandidateWireRuleIdentity
 	ViolationKind           RuntimeCandidatePayloadViolationKind
 	ParameterEntryEncodings []RuntimeCandidateParameterEntryEncodingViolation
+	ParameterCardinality    *RuntimeCandidateParameterCardinalityViolation
 	SemanticViolations      []RuntimeSemanticContractViolation
 	Cause                   error
 }
@@ -82,6 +83,7 @@ func RuntimeCandidateFailureDiagnosticFromPayloadDiagnostic(value *RuntimeCandid
 		WireRule:                value.WireRule.Clone(),
 		ViolationKind:           value.ViolationKind,
 		ParameterEntryEncodings: cloneRuntimeCandidateParameterEntryEncodings(value.ParameterEntryEncodings),
+		ParameterCardinality:    value.ParameterCardinality.Clone(),
 	}).Clone()
 }
 
@@ -170,6 +172,13 @@ func compileRuntimeCandidateProviderWirePayload(manifest RuntimeCandidateContrac
 	for index, rawOperation := range envelope.Operations {
 		operation, selectedWireRule, err := compileRuntimeCandidateProviderWireOperation(wire, rawOperation, index)
 		if err != nil {
+			var diagnostic *RuntimeCandidatePayloadDiagnostic
+			if errors.As(err, &diagnostic) && strings.HasPrefix(diagnostic.Actual, "duplicate_") && strings.Contains(diagnostic.Path, ".parameters[") {
+				if fact := runtimeCandidatePayloadParameterCardinality(manifest, wire, payload, envelope); fact != nil {
+					diagnostic.ParameterCardinality = fact
+					diagnostic.ViolationKind = RuntimeCandidatePayloadViolationParameterCardinality
+				}
+			}
 			return nil, nil, err
 		}
 		compiled.Operations = append(compiled.Operations, operation)
@@ -191,6 +200,20 @@ type runtimeCandidateCompiledWireEnvelope struct {
 }
 
 func compileRuntimeCandidateProviderWireOperation(wire RuntimeCandidateWireContract, rawOperation json.RawMessage, index int) (map[string]json.RawMessage, *RuntimeCandidateWireRuleIdentity, error) {
+	compiled, identity, err := compileRuntimeCandidateProviderWireOperationHeader(wire, rawOperation, index)
+	if err != nil {
+		return nil, nil, err
+	}
+	rule, _ := runtimeCandidateWireRuleForIdentitySelector(wire, identity.RequiredOperationRef, identity.OperationKind)
+	if err := compileRuntimeCandidateWireParameters(compiled, rule, fmt.Sprintf("$.operations[%d]", index), identity); err != nil {
+		return nil, nil, err
+	}
+	return compiled, identity, nil
+}
+
+// Header compilation selects authority but deliberately performs no parameter
+// admission. The complete-document diagnostic collector uses the same selector.
+func compileRuntimeCandidateProviderWireOperationHeader(wire RuntimeCandidateWireContract, rawOperation json.RawMessage, index int) (map[string]json.RawMessage, *RuntimeCandidateWireRuleIdentity, error) {
 	path := fmt.Sprintf("$.operations[%d]", index)
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(rawOperation, &raw); err != nil || raw == nil {
@@ -261,9 +284,6 @@ func compileRuntimeCandidateProviderWireOperation(wire RuntimeCandidateWireContr
 	}
 	if len(rule.DerivedTargetRefs) != 0 {
 		compiled["targetRefs"] = runtimeCandidateWireJSONValue(rule.DerivedTargetRefs)
-	}
-	if err := compileRuntimeCandidateWireParameters(compiled, rule, path, wireRule); err != nil {
-		return nil, nil, err
 	}
 	return compiled, wireRule, nil
 }

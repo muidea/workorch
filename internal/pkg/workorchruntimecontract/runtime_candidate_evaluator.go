@@ -30,6 +30,7 @@ const (
 type RuntimeCandidateCorrectionWitnessDimension string
 
 const (
+	RuntimeCandidateCorrectionWitnessParameterCardinality    RuntimeCandidateCorrectionWitnessDimension = "parameter_cardinality"
 	RuntimeCandidateCorrectionWitnessOperationKind           RuntimeCandidateCorrectionWitnessDimension = "operation_kind"
 	RuntimeCandidateCorrectionWitnessTarget                  RuntimeCandidateCorrectionWitnessDimension = "target"
 	RuntimeCandidateCorrectionWitnessVariant                 RuntimeCandidateCorrectionWitnessDimension = "variant"
@@ -54,6 +55,7 @@ const (
 // hashes are required for operation-level differences and intentionally omit
 // operation IDs and display-only summary parameters.
 type RuntimeCandidateCorrectionWitness struct {
+	ParameterCardinality    *RuntimeCandidateParameterCardinalityViolation `json:",omitempty"`
 	Dimension               RuntimeCandidateCorrectionWitnessDimension
 	OperationKind           string
 	Path                    string
@@ -76,6 +78,7 @@ func (w RuntimeCandidateCorrectionWitness) Normalized() RuntimeCandidateCorrecti
 	w.AlternativeShapeHash = strings.TrimSpace(w.AlternativeShapeHash)
 	w.ConstraintRef = strings.TrimSpace(w.ConstraintRef)
 	w.ParameterEntryEncodings = cloneRuntimeCandidateParameterEntryEncodings(w.ParameterEntryEncodings)
+	w.ParameterCardinality = w.ParameterCardinality.Clone()
 	w.OperationSetViolation = w.OperationSetViolation.Clone()
 	return w
 }
@@ -88,7 +91,17 @@ func (w RuntimeCandidateCorrectionWitness) Validate() error {
 	if w.Dimension != RuntimeCandidateCorrectionWitnessOperationSetCardinality && w.OperationSetViolation != nil {
 		return fmt.Errorf("candidate correction witness dimension %q cannot carry an operation-set violation", w.Dimension)
 	}
+	if w.Dimension != RuntimeCandidateCorrectionWitnessParameterCardinality && w.ParameterCardinality != nil {
+		return fmt.Errorf("unrelated correction witness carries parameter cardinality")
+	}
 	switch w.Dimension {
+	case RuntimeCandidateCorrectionWitnessParameterCardinality:
+		if w.OperationKind != "" || w.Path != "$.operations" || w.RejectedValue != RuntimeCandidateParameterNamesRepeated || w.AlternativeValue != RuntimeCandidateParameterNamesUnique || w.RejectedShapeHash != "" || w.AlternativeShapeHash != "" || w.ConstraintRef != "" {
+			return fmt.Errorf("invalid parameter cardinality witness")
+		}
+		if err := w.ParameterCardinality.Validate(); err != nil {
+			return err
+		}
 	case RuntimeCandidateCorrectionWitnessOperationKind,
 		RuntimeCandidateCorrectionWitnessTarget,
 		RuntimeCandidateCorrectionWitnessVariant,

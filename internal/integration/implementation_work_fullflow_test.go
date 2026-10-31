@@ -49,11 +49,22 @@ func implementationWorkFullflowActivate(t *testing.T) (context.Context, workorch
 	t.Cleanup(proxy.Close)
 	baseURL, client := implementationWorkFullflowStart(t, ctx, storage, proxy.URL, repos)
 	implementationWorkFullflowPreparationMCP(t, client, baseURL, protocolFixture)
-	template, err := repos.WorkspaceTemplates.Get(ctx, "software-dev")
-	if err != nil {
-		t.Fatal(err)
+	// Built-in templates are resolved by the System owner, not persisted in
+	// the project repository. Consume the same public catalog as authoring.
+	var catalog struct {
+		Templates []management.WorkspaceTemplate `json:"workspaceTemplates"`
 	}
-	template = implementationWorkFullflowDeclareProject(t, client, baseURL, template)
+	productionJSON(t, client, http.MethodGet, baseURL+"/api/v1/workorch/workspace-templates", nil, &catalog)
+	var builtIn *management.WorkspaceTemplate
+	for i := range catalog.Templates {
+		if catalog.Templates[i].ID == "software-dev" {
+			builtIn = &catalog.Templates[i]
+		}
+	}
+	if builtIn == nil {
+		t.Fatal("public built-in software-dev template missing")
+	}
+	template := implementationWorkFullflowDeclareProject(t, client, baseURL, builtIn)
 	assertEmptyDeliverable(t, directory)
 	var created struct {
 		Authoring management.DefinitionAuthoringView `json:"authoring"`
@@ -281,9 +292,9 @@ func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 // synthetic Goal requires Runtime facts which engineering tests cannot prove;
 // the default must not require two rounds or an intentional failure for every
 // unrelated software project merely to satisfy this fixture.
-func implementationWorkFullflowDeclareProject(t *testing.T, client *http.Client, baseURL string, base *workspace.WorkspaceTemplate) *workspace.WorkspaceTemplate {
+func implementationWorkFullflowDeclareProject(t *testing.T, client *http.Client, baseURL string, base *management.WorkspaceTemplate) *workspace.WorkspaceTemplate {
 	t.Helper()
-	hints := base.ContextHints.Map()
+	hints := base.ContextHints
 	profiles := hints["profileContracts"].(map[string]any)
 	profile := profiles["software-dev"].(map[string]any)
 	requirements := profile["evidenceRequirements"].([]any)
@@ -327,9 +338,7 @@ func implementationWorkFullflowDeclareProject(t *testing.T, client *http.Client,
 		t.Fatal(err)
 	}
 	request := management.WorkspaceTemplate{ID: "software-dev-public-workload", Name: "公开两轮工程验收", Description: base.Description, GoalText: base.GoalText, DoDItems: slices.Clone(base.DoDItems), DefaultSoulID: base.DefaultSoulID, SoulBindings: base.SoulBindings, ContextHints: hints}
-	for _, p := range base.EvidencePolicies {
-		request.EvidencePolicies = append(request.EvidencePolicies, p.Map())
-	}
+	request.EvidencePolicies = base.EvidencePolicies
 	productionJSON(t, client, http.MethodPost, baseURL+"/api/v1/workorch/workspace-templates", request, nil)
 	// The next read still goes through the production owner in authoring. This
 	// return value supplies only the public template identity, never authority.
