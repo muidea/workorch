@@ -33,7 +33,7 @@ const (
 	RuntimeImplementationWorkPurposeEffect   RuntimeImplementationWorkPurpose = "implementation_effect"
 	RuntimeImplementationWorkPurposeTerminal RuntimeImplementationWorkPurpose = "terminal_proof"
 	// These are observations, never effect permissions or terminal credit.
-	RuntimeImplementationWorkPurposeIncomplete   RuntimeImplementationWorkPurpose = "implementation_incomplete"
+	RuntimeImplementationWorkPurposeStalled      RuntimeImplementationWorkPurpose = "implementation_stalled"
 	RuntimeImplementationWorkPurposeInconclusive RuntimeImplementationWorkPurpose = "implementation_inconclusive"
 )
 
@@ -124,7 +124,6 @@ type RuntimeImplementationWorkLedgerSources struct {
 	Seed             RuntimeDefinitionSeed
 	Focuses          []RuntimeDefinitionFocus
 	Profiles         []RuntimeProfileContract
-	MaxRecords       int
 	// ReceiptSets must be projected independently from the original dispatch,
 	// owner receipt and evidence ledgers, not synthesized from round labels.
 	ReceiptSets []RuntimeImplementationWorkReceiptSet
@@ -225,7 +224,7 @@ func (r RuntimeImplementationWorkRound) validateCompleteInSemanticSession(sessio
 		r.PolicyHash != StableRuntimeImplementationWorkPolicyHash(request.Policy) {
 		return fmt.Errorf("implementation work round scope/policy source mismatch")
 	}
-	if r.Ordinal < 1 || r.Ordinal > request.Policy.MaxRoundsPerCWI || (r.Ordinal == 1) != (r.PrecedingReceiptSetHash == "") {
+	if r.Ordinal < 1 || (r.Ordinal == 1) != (r.PrecedingReceiptSetHash == "") {
 		return fmt.Errorf("implementation work round ordinal/preceding receipt lineage is invalid")
 	}
 	if r.PrecedingReceiptSetHash != "" && !implementationWorkExactRef(r.PrecedingReceiptSetHash) {
@@ -274,7 +273,7 @@ func (r RuntimeImplementationWorkRound) validateCompleteInSemanticSession(sessio
 	if len(r.GovernanceDispatchIDs) == 0 && r.GovernanceDispatchIDs != nil {
 		return fmt.Errorf("implementation governance history must preserve canonical absence")
 	}
-	if r.GovernanceReceiptHash != "" && (r.DispatchID == "" || !implementationWorkExactRef(r.GovernanceReceiptHash) || r.CompletedReceiptSetHash != "" || r.FailedReceiptHash != "") || len(r.GovernanceDispatchIDs) > MaxRuntimeImplementationWorkRounds {
+	if r.GovernanceReceiptHash != "" && (r.DispatchID == "" || !implementationWorkExactRef(r.GovernanceReceiptHash) || r.CompletedReceiptSetHash != "" || r.FailedReceiptHash != "") || len(r.GovernanceDispatchIDs) > MaxRuntimeImplementationGovernanceDispatches {
 		return fmt.Errorf("implementation governance suspension must retain one outstanding bounded round")
 	}
 	seenGovernanceDispatches := map[string]bool{}
@@ -416,8 +415,8 @@ func (l RuntimeImplementationWorkLedger) ValidateForSources(s RuntimeImplementat
 }
 
 func (l RuntimeImplementationWorkLedger) validateForSourcesInSemanticSession(s RuntimeImplementationWorkLedgerSources, session *runtimeSemanticValidationSession) error {
-	if !implementationWorkExactRef(s.StartupInputHash) || !implementationWorkExactRef(string(s.WorkspaceID)) || !implementationWorkExactRef(string(s.RunID)) || s.MaxRecords < 1 || len(l.Rounds) > s.MaxRecords {
-		return fmt.Errorf("implementation work ledger requires bounded exact startup sources")
+	if !implementationWorkExactRef(s.StartupInputHash) || !implementationWorkExactRef(string(s.WorkspaceID)) || !implementationWorkExactRef(string(s.RunID)) {
+		return fmt.Errorf("implementation work ledger requires exact startup sources")
 	}
 	if err := validateRuntimeWorkDefinitionSourcesInSession(s.Seed, s.Focuses, s.Profiles, session); err != nil {
 		return err

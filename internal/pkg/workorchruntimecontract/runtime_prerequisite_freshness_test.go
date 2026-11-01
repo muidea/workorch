@@ -27,3 +27,25 @@ func TestRuntimePrerequisiteInvalidationRetainsReceiptResourceChanges(t *testing
 		t.Fatal("stale invalidation with resource changes was accepted")
 	}
 }
+
+func TestRuntimePrerequisiteInvalidationRetainsCausalOrderAndPendingReceipt(t *testing.T) {
+	first := RuntimePrerequisiteInvalidationRecord{Signature: "z-first", ReceiptHash: "receipt-first", ResourceChanges: []RuntimeResourceChange{{Domain: RuntimeResourceWorkspaceTarget, OwnerModuleID: RuntimeModuleFile, SubjectRef: "target", BeforeRevision: "A", AfterRevision: "B"}}}
+	second := RuntimePrerequisiteInvalidationRecord{Signature: "a-second", ReceiptHash: "receipt-second", ResourceChanges: []RuntimeResourceChange{{Domain: RuntimeResourceWorkspaceTarget, OwnerModuleID: RuntimeModuleFile, SubjectRef: "target", BeforeRevision: "B", AfterRevision: "A"}}}
+	values := NormalizeRuntimePrerequisiteInvalidations([]RuntimePrerequisiteInvalidationRecord{first, second})
+	if len(values) != 2 || values[0].Signature != first.Signature || values[1].Signature != second.Signature {
+		t.Fatal("signature sorting destroyed receipt chronology")
+	}
+	for _, value := range values {
+		if err := value.Validate(); err != nil {
+			t.Fatal("receipt while dependent observations pending was lost", err)
+		}
+	}
+	first.ReceiptHash = ""
+	if first.Validate() == nil {
+		t.Fatal("unrooted pending change accepted")
+	}
+	second.ObservationIDs = []string{"unpaired"}
+	if second.Validate() == nil {
+		t.Fatal("unpaired affected observation accepted")
+	}
+}

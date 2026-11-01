@@ -17,7 +17,7 @@ func implementationWorkPolicyFixture() RuntimeImplementationWorkPolicy {
 		TargetSelectorRef:     "work-scope", TargetSelectorOwnerRef: "profile/example", TargetSelectorSubjectRef: "implementation",
 		TargetSelectorCandidateRefs:          []string{"resource-a", "resource-b"},
 		ProspectiveTargetAllOfConstraintRefs: []string{"constraint-a", "constraint-b"},
-		MaxRoundsPerCWI:                      2, MaxTargetsPerRound: 2,
+		MaxRepeatedWorkStates:                2, MaxTargetsPerRound: 2,
 		RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true,
 	}
 }
@@ -56,15 +56,27 @@ func TestRuntimeImplementationWorkPolicyRejectsUnboundedOrExpandedAuthority(t *t
 		"duplicate policy": func(p *RuntimeImplementationWorkPolicy) {
 			p.AllowedTargetPolicies = append(p.AllowedTargetPolicies, p.AllowedTargetPolicies[0])
 		},
-		"missing policies":  func(p *RuntimeImplementationWorkPolicy) { p.AllowedTargetPolicies = nil },
-		"missing selector":  func(p *RuntimeImplementationWorkPolicy) { p.TargetSelectorRef = "" },
-		"wildcard owner":    func(p *RuntimeImplementationWorkPolicy) { p.TargetSelectorOwnerRef = "*" },
-		"invalid subject":   func(p *RuntimeImplementationWorkPolicy) { p.TargetSelectorSubjectRef = "bad\nsubject" },
-		"oversize subject":  func(p *RuntimeImplementationWorkPolicy) { p.TargetSelectorSubjectRef = strings.Repeat("x", 513) },
-		"bad utf8":          func(p *RuntimeImplementationWorkPolicy) { p.TargetSelectorSubjectRef = string([]byte{255}) },
-		"zero rounds":       func(p *RuntimeImplementationWorkPolicy) { p.MaxRoundsPerCWI = 0 },
-		"negative rounds":   func(p *RuntimeImplementationWorkPolicy) { p.MaxRoundsPerCWI = -1 },
-		"oversize rounds":   func(p *RuntimeImplementationWorkPolicy) { p.MaxRoundsPerCWI = 9 },
+		"missing policies":                func(p *RuntimeImplementationWorkPolicy) { p.AllowedTargetPolicies = nil },
+		"missing selector":                func(p *RuntimeImplementationWorkPolicy) { p.TargetSelectorRef = "" },
+		"wildcard owner":                  func(p *RuntimeImplementationWorkPolicy) { p.TargetSelectorOwnerRef = "*" },
+		"invalid subject":                 func(p *RuntimeImplementationWorkPolicy) { p.TargetSelectorSubjectRef = "bad\nsubject" },
+		"oversize subject":                func(p *RuntimeImplementationWorkPolicy) { p.TargetSelectorSubjectRef = strings.Repeat("x", 513) },
+		"bad utf8":                        func(p *RuntimeImplementationWorkPolicy) { p.TargetSelectorSubjectRef = string([]byte{255}) },
+		"zero repeated-state guard":       func(p *RuntimeImplementationWorkPolicy) { p.MaxRepeatedWorkStates = 0 },
+		"negative repeated-state guard":   func(p *RuntimeImplementationWorkPolicy) { p.MaxRepeatedWorkStates = -1 },
+		"oversize repeated-state guard":   func(p *RuntimeImplementationWorkPolicy) { p.MaxRepeatedWorkStates = 9 },
+		"input revision without protocol": func(p *RuntimeImplementationWorkPolicy) { p.MaxInputRevisionsPerCWI = 1 },
+		"zero input revision limit": func(p *RuntimeImplementationWorkPolicy) {
+			p.InputRevisionProtocolRef = RuntimeValidationInputRevisionProtocolV1
+		},
+		"negative input revision limit": func(p *RuntimeImplementationWorkPolicy) {
+			p.InputRevisionProtocolRef = RuntimeValidationInputRevisionProtocolV1
+			p.MaxInputRevisionsPerCWI = -1
+		},
+		"oversize input revision limit": func(p *RuntimeImplementationWorkPolicy) {
+			p.InputRevisionProtocolRef = RuntimeValidationInputRevisionProtocolV1
+			p.MaxInputRevisionsPerCWI = 9
+		},
 		"zero targets":      func(p *RuntimeImplementationWorkPolicy) { p.MaxTargetsPerRound = 0 },
 		"oversize targets":  func(p *RuntimeImplementationWorkPolicy) { p.MaxTargetsPerRound = 9 },
 		"no observation":    func(p *RuntimeImplementationWorkPolicy) { p.RequireFreshObservation = false },
@@ -203,7 +215,7 @@ func TestRuntimeImplementationWorkAvailabilityRequiresIntegratedOwnerProtocol(t 
 		t.Fatalf("unexpected valid-policy blocker: %#v", report.Blockers[0])
 	}
 	invalid := CloneRuntimeProfileContracts(profiles)
-	invalid[0].EvidenceRequirements[0].ImplementationWorkPolicy.MaxRoundsPerCWI = 0
+	invalid[0].EvidenceRequirements[0].ImplementationWorkPolicy.MaxRepeatedWorkStates = 0
 	invalidReport := ExplainRuntimeImplementationWorkAvailability(invalid)
 	if invalidReport.Available || len(invalidReport.Blockers) != 1 || !strings.Contains(invalidReport.Blockers[0].Reason, "invalid implementation work declaration") {
 		t.Fatalf("invalid declaration was not diagnosed: %#v", invalidReport)
@@ -294,7 +306,7 @@ func TestRuntimeImplementationWorkPolicyCannotWeakenTerminalProofOrConflict(t *t
 	if err := ValidateRuntimeProfileContracts(profiles); err != nil {
 		t.Fatal(err)
 	}
-	exact.ImplementationWorkPolicy.MaxRoundsPerCWI++
+	exact.ImplementationWorkPolicy.MaxRepeatedWorkStates++
 	if err := ValidateRuntimeProfileContracts(profiles); err == nil {
 		t.Fatal("exact policy silently overrides wildcard boundary")
 	}

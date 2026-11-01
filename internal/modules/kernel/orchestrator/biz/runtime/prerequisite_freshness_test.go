@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strconv"
@@ -295,7 +296,7 @@ func TestPrerequisiteOwnerFactFreshnessCombinationMatrix(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			err := validatePrerequisiteResultFreshness(test.result, test.invalidations)
+			err := validatePrerequisiteResultFreshness(test.result, test.invalidations, nil)
 			if test.wantConflict && !errors.Is(err, common.ErrConflict) {
 				t.Fatalf("freshness error = %v, want conflict", err)
 			}
@@ -2057,4 +2058,103 @@ func addFreshFileAdmissibilityObservation(t *testing.T, aggregate *RuntimeAggreg
 	}
 	aggregate.Decision = decision
 	return prerequisite, observation
+}
+
+func TestPrerequisiteFreshnessReceiptProvenRollbackDoesNotReviveRetiredObservation(t *testing.T) {
+	const id = "file-scope"
+	dependency := runtimecontract.RuntimeFreshnessDependency{Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "target.txt", Revision: "A"}
+	change := func(before, after string) runtimecontract.RuntimeResourceChange {
+		return runtimecontract.RuntimeResourceChange{Domain: dependency.Domain, OwnerModuleID: dependency.OwnerModuleID, SubjectRef: dependency.SubjectRef, BeforeRevision: before, AfterRevision: after}
+	}
+	invalidations := []runtimecontract.RuntimePrerequisiteInvalidationRecord{
+		{Signature: "z-first", PrerequisiteIDs: []string{id}, ObservationIDs: []string{"retired-A"}, ResourceChanges: []runtimecontract.RuntimeResourceChange{change("A", "B")}},
+		{Signature: "a-second", PrerequisiteIDs: []string{id}, ObservationIDs: []string{"retired-B"}, ResourceChanges: []runtimecontract.RuntimeResourceChange{change("B", "A")}},
+	}
+	var receipts []runtimecontract.RuntimeOperationReceipt
+	for index := range invalidations {
+		r := &invalidations[index]
+		r.OperationID = "op-" + strconv.Itoa(index)
+		receipt := runtimecontract.RuntimeOperationReceipt{OperationID: r.OperationID, ResourceChanges: r.ResourceChanges}
+		r.ReceiptHash = runtimecontract.StableRuntimeOperationReceiptHash(receipt)
+		receipts = append(receipts, receipt)
+	}
+	invalidations = runtimecontract.NormalizeRuntimePrerequisiteInvalidations(invalidations)
+	if invalidations[0].Signature != "z-first" {
+		t.Fatal("persistence sorted receipt chronology by random signature")
+	}
+	result := PrerequisiteResult{PrerequisiteID: id, Observation: &runtimecontract.RuntimePrerequisiteObservation{ObservationID: "fresh-after-receipt", Dependencies: []runtimecontract.RuntimeFreshnessDependency{dependency}}}
+	if err := validatePrerequisiteResultFreshness(result, invalidations, receipts); err != nil {
+		t.Fatal("latest trusted after-image was treated as ancient before-image", err)
+	}
+	// A Shell catalog may remain pending throughout a multi-operation batch.
+	// The second receipt then retires only the File observations acquired in
+	// between; its resource after-image is still authoritative for Shell.
+	invalidations[1].PrerequisiteIDs = []string{"other-file-observation"}
+	if err := validatePrerequisiteResultFreshness(result, invalidations, receipts); err != nil {
+		t.Fatal("pending cross-owner prerequisite lost the latest receipt after-image", err)
+	}
+	invalidations[1].PrerequisiteIDs = []string{id}
+	if err := validatePrerequisiteResultFreshness(result, invalidations, nil); !errors.Is(err, common.ErrConflict) {
+		t.Fatal("unproven invalidation after-image authorized freshness", err)
+	}
+	result.Observation.ObservationID = "retired-A"
+	if err := validatePrerequisiteResultFreshness(result, invalidations, receipts); !errors.Is(err, common.ErrConflict) {
+		t.Fatal("retired ABA observation revived", err)
+	}
+	result.Observation.ObservationID = "fresh-after-receipt"
+	stale := runtimecontract.RuntimePrerequisiteStale{Domain: dependency.Domain, OwnerModuleID: dependency.OwnerModuleID, SubjectRef: dependency.SubjectRef, ExpectedRevision: "A", ObservedRevision: "C"}
+	invalidations = append(invalidations, runtimecontract.RuntimePrerequisiteInvalidationRecord{PrerequisiteIDs: []string{id}, Stale: &stale})
+	if err := validatePrerequisiteResultFreshness(result, invalidations, receipts); !errors.Is(err, common.ErrConflict) {
+		t.Fatal("later stale finding ignored", err)
+	}
+	raw, err := json.Marshal(invalidations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reopened []runtimecontract.RuntimePrerequisiteInvalidationRecord
+	if err = json.Unmarshal(raw, &reopened); err != nil {
+		t.Fatal(err)
+	}
+	if err = validatePrerequisiteResultFreshness(result, reopened, receipts); !errors.Is(err, common.ErrConflict) {
+		t.Fatal("restart lost stale barrier", err)
+	}
+}
+
+func TestPrerequisiteFreshnessRecordsReceiptWhileDependentAlreadyPending(t *testing.T) {
+	change := runtimecontract.RuntimeResourceChange{Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "target.txt", BeforeRevision: "B", AfterRevision: "A"}
+	receipt := runtimecontract.RuntimeOperationReceipt{OperationID: "restore", ResourceChanges: []runtimecontract.RuntimeResourceChange{change}}
+	a := RuntimeAggregate{}
+	changed, err := applyReceiptResourceChangeInvalidation(&a, "dispatch", receipt.OperationID, receipt)
+	if err != nil || changed || len(a.PrerequisiteInvalidations) != 1 {
+		t.Fatal("pending observation lost original receipt change", changed, err)
+	}
+	if err := a.PrerequisiteInvalidations[0].Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err = applyReceiptResourceChangeInvalidation(&a, "dispatch", receipt.OperationID, receipt); err != nil || changed || len(a.PrerequisiteInvalidations) != 1 {
+		t.Fatal("duplicate receipt added chronology", changed, err)
+	}
+	invalidations := append([]runtimecontract.RuntimePrerequisiteInvalidationRecord{{PrerequisiteIDs: []string{"pending"}, ObservationIDs: []string{"retired"}, InvalidatedDependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: change.Domain, OwnerModuleID: change.OwnerModuleID, SubjectRef: change.SubjectRef, Revision: "A"}}}}, a.PrerequisiteInvalidations...)
+	result := PrerequisiteResult{PrerequisiteID: "pending", Observation: &runtimecontract.RuntimePrerequisiteObservation{ObservationID: "fresh", Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: change.Domain, OwnerModuleID: change.OwnerModuleID, SubjectRef: change.SubjectRef, Revision: "A"}}}}
+	if err = validatePrerequisiteResultFreshness(result, invalidations, []runtimecontract.RuntimeOperationReceipt{receipt}); err != nil {
+		t.Fatal("pending prerequisite rejected trusted restored resource", err)
+	}
+}
+
+func TestPrerequisiteInvalidationChronologyCannotBeRewritten(t *testing.T) {
+	before := RuntimeAggregate{PrerequisiteInvalidations: []runtimecontract.RuntimePrerequisiteInvalidationRecord{{Signature: "z-first"}, {Signature: "a-second"}}}
+	for _, records := range [][]runtimecontract.RuntimePrerequisiteInvalidationRecord{
+		{{Signature: "a-second"}, {Signature: "z-first"}},
+		{{Signature: "z-first"}},
+		{{Signature: "z-first"}, {Signature: "a-second"}, {Signature: "z-first"}},
+	} {
+		if err := validatePrerequisiteInvalidationChronologyTransition(before, RuntimeAggregate{PrerequisiteInvalidations: records}); !errors.Is(err, common.ErrConflict) {
+			t.Fatal("chronology rewrite survived transition gate", err)
+		}
+	}
+	after := before.CloneRaw()
+	after.PrerequisiteInvalidations = append(after.PrerequisiteInvalidations, runtimecontract.RuntimePrerequisiteInvalidationRecord{Signature: "b-third"})
+	if err := validatePrerequisiteInvalidationChronologyTransition(before, after); err != nil {
+		t.Fatal("legitimate append rejected", err)
+	}
 }

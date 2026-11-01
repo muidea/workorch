@@ -17,7 +17,7 @@ func TestRuntimeLineageAssertionClosedUnionCannotGrantStandaloneCredit(t *testin
 		},
 		"zero rounds": func(r *RuntimeLineageAssertionRule) { r.MinCompletedRounds = 0 },
 		"unbounded rounds": func(r *RuntimeLineageAssertionRule) {
-			r.MinCompletedRounds = MaxRuntimeImplementationWorkRounds + 1
+			r.MinCompletedRounds = -1
 		},
 		"mixed union":     func(r *RuntimeLineageAssertionRule) { r.OperationKind = StepKindFileWrite },
 		"trim laundering": func(r *RuntimeLineageAssertionRule) { r.Ref += " " },

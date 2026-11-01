@@ -12,17 +12,18 @@ func referenceSemanticWorkValidation(w RuntimeSemanticImplementationWork) error 
 	if w.Scope.Content == nil {
 		return fmt.Errorf("missing current content")
 	}
-	maxOrdinal := w.Scope.Request.Policy.MaxRoundsPerCWI
+	if w.RepeatedWorkStates < 0 || w.RepeatedWorkStates >= w.Ordinal {
+		return fmt.Errorf("semantic work repetition count exceeds original preceding rounds")
+	}
 	if w.PurposeChoiceOnly {
-		maxOrdinal++
-		if w.EffectAvailable != (w.Ordinal <= w.Scope.Request.Policy.MaxRoundsPerCWI) {
-			return fmt.Errorf("semantic purpose vocabulary must reflect immutable remaining effect rounds")
+		if w.EffectAvailable != (w.RepeatedWorkStates < w.Scope.Request.Policy.MaxRepeatedWorkStates) {
+			return fmt.Errorf("semantic purpose vocabulary must reflect the original repeated-state guard")
 		}
-	} else if w.EffectAvailable {
+	} else if w.EffectAvailable || w.RepeatedWorkStates != 0 {
 		return fmt.Errorf("working semantic purpose cannot carry a purpose-choice availability arm")
 	}
-	if !implementationWorkExactRef(w.RoundHash) || w.PolicyHash != StableRuntimeImplementationWorkPolicyHash(w.Scope.Request.Policy) || w.Ordinal < 1 || w.Ordinal > maxOrdinal || (w.Ordinal == 1) != (w.PrecedingReceiptSetHash == "") {
-		return fmt.Errorf("semantic implementation work requires exact policy and bounded round/receipt lineage")
+	if !implementationWorkExactRef(w.RoundHash) || w.PolicyHash != StableRuntimeImplementationWorkPolicyHash(w.Scope.Request.Policy) || w.Ordinal < 1 || (w.Ordinal == 1) != (w.PrecedingReceiptSetHash == "") {
+		return fmt.Errorf("semantic implementation work requires exact policy and continuous round/receipt lineage")
 	}
 	if err := w.Scope.ValidateForRequest(w.Scope.Request); err != nil {
 		return err

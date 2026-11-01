@@ -364,7 +364,7 @@ func (c *authorityComponent) commitGovernanceResolutionWithContinuationLease(
 				if round.DispatchID != binding.OperationDispatchID {
 					continue
 				}
-				if round.GovernanceReceiptHash != binding.GovernanceReceiptHash || round.CompletedReceiptSetHash != "" || round.FailedReceiptHash != "" || len(round.GovernanceDispatchIDs) >= runtimecontract.MaxRuntimeImplementationWorkRounds {
+				if round.GovernanceReceiptHash != binding.GovernanceReceiptHash || round.CompletedReceiptSetHash != "" || round.FailedReceiptHash != "" || len(round.GovernanceDispatchIDs) >= runtimecontract.MaxRuntimeImplementationGovernanceDispatches {
 					return EvidenceCommitResult{}, fmt.Errorf("implementation governance continuation differs from suspended round")
 				}
 				round.GovernanceDispatchIDs = append(round.GovernanceDispatchIDs, round.DispatchID)

@@ -26,7 +26,7 @@ func TestImplementationWorkScopeIndependentSourceFence(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, mutate := range map[string]func(*RuntimeImplementationWorkScopeRequest){
-		"policy expansion": func(r *RuntimeImplementationWorkScopeRequest) { r.Policy.MaxRoundsPerCWI = 8 },
+		"policy expansion": func(r *RuntimeImplementationWorkScopeRequest) { r.Policy.MaxRepeatedWorkStates = 8 },
 		"workspace":        func(r *RuntimeImplementationWorkScopeRequest) { r.WorkspaceID = "other-workspace" },
 		"run":              func(r *RuntimeImplementationWorkScopeRequest) { r.RunID = "other-run" },
 		"authority":        func(r *RuntimeImplementationWorkScopeRequest) { r.AuthoritySnapshotID = "other-authority" },
@@ -153,7 +153,7 @@ func TestImplementationWorkScopeRequestBindsExactDefinitionAndPolicy(t *testing.
 		"authority":  func(r *RuntimeImplementationWorkScopeRequest) { r.AuthoritySnapshotID = "authority-2" },
 		"definition": func(r *RuntimeImplementationWorkScopeRequest) { r.DefinitionSeedHash = "seed-2" },
 		"CWI":        func(r *RuntimeImplementationWorkScopeRequest) { r.CoverageWorkItemID = "cwi-2" },
-		"policy":     func(r *RuntimeImplementationWorkScopeRequest) { r.Policy.MaxRoundsPerCWI++ },
+		"policy":     func(r *RuntimeImplementationWorkScopeRequest) { r.Policy.MaxRepeatedWorkStates++ },
 		"manifest":   func(r *RuntimeImplementationWorkScopeRequest) { r.ManifestBinding.Manifest.Revision = "tree-2" },
 	} {
 		t.Run(name, func(t *testing.T) {

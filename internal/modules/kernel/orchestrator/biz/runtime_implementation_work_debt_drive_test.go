@@ -76,7 +76,7 @@ func implementationWorkPurposeDebtDriverFixtureWithDirectory(t *testing.T, empty
 		AllowedOperations:     []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileEdit}},
 		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
 		TargetSelectorRef:     "file/workspace_deliverable", TargetSelectorOwnerRef: "profile/work-debt", TargetSelectorSubjectRef: "implementation",
-		TargetSelectorCandidateRefs: []string{"resource-a"}, MaxRoundsPerCWI: 2, MaxTargetsPerRound: 1,
+		TargetSelectorCandidateRefs: []string{"resource-a"}, MaxRepeatedWorkStates: 2, MaxTargetsPerRound: 1,
 		RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true,
 	}
 	if empty {

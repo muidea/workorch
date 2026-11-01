@@ -11,7 +11,6 @@ import (
 )
 
 const RuntimeImplementationWorkContentV1 = "implementation-work-content/v1"
-const RuntimeImplementationWorkContentMaxBytes = 128 * 1024
 
 // These are exact, detached read-only inputs, sealed with the scope observation.
 // They never become receipt, readiness, evidence, or completion authority.
@@ -36,16 +35,11 @@ func (c RuntimeImplementationWorkContent) Validate(scope RuntimeImplementationWo
 	if c.ProtocolRef != RuntimeImplementationWorkContentV1 || c.ManifestRevision != scope.Selection.ObservedRevision || c.ManifestRevision == "" || len(c.Snapshots) != len(scope.Selection.TargetRefs) {
 		return fmt.Errorf("implementation work content requires exact complete scope revision and targets")
 	}
-	total := 0
 	for i, s := range c.Snapshots {
 		h := sha256.Sum256([]byte(s.Content))
-		total += len(s.Content)
 		if s.TargetRef != scope.Selection.TargetRefs[i] || !s.Complete() || s.Size != int64(len(s.Content)) || s.ContentHash != hex.EncodeToString(h[:]) || !utf8.ValidString(s.Content) {
 			return fmt.Errorf("implementation work content missing, altered or incomplete for target %q", s.TargetRef)
 		}
-	}
-	if total > RuntimeImplementationWorkContentMaxBytes {
-		return fmt.Errorf("implementation work content exceeds explicit byte capacity")
 	}
 	return nil
 }
@@ -89,8 +83,7 @@ func validateRuntimeImplementationIntent(i *RuntimeImplementationIntent, w *Runt
 }
 
 // Work context is a projection, not another completion ledger. PriorRounds is
-// complete for this CWI (bounded by its original policy), unlike the 16-receipt
-// general history suffix. Original goals/criteria remain in C1/C3.
+// complete for this CWI, independently of the general execution history. Original goals/criteria remain in C1/C3.
 type RuntimeSemanticWorkContext struct {
 	Content     *RuntimeImplementationWorkContent `json:"content"`
 	PriorRounds []RuntimeSemanticWorkRound        `json:"priorRounds"`

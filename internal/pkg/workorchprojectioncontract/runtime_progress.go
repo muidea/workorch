@@ -50,7 +50,10 @@ type RuntimeImplementationProgress struct {
 	CurrentIntent       string                                            `json:"currentIntent,omitempty"`
 	LastIntentReview    *runtimecontract.RuntimeImplementationRoundReview `json:"lastIntentReview,omitempty"`
 	WorkRoundsUsed      int                                               `json:"workRoundsUsed"`
-	WorkRoundsLimit     int                                               `json:"workRoundsLimit"`
+	RepeatedWorkStates  int                                               `json:"repeatedWorkStates"`
+	InputRevisionsUsed  int                                               `json:"inputRevisionsUsed"`
+	InputRevisionLimit  int                                               `json:"inputRevisionLimit"`
+	RepeatedStateLimit  int                                               `json:"repeatedStateLimit"`
 	ReservedRounds      int                                               `json:"reservedRounds"`
 	CompletedRounds     int                                               `json:"completedRounds"`
 	CommittedReceipts   int                                               `json:"committedReceipts"`

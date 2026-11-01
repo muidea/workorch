@@ -32,11 +32,12 @@ func runtimeSemanticWorkProviderRequestForTest(t *testing.T, purpose bool, revis
 	policy := runtimecontract.RuntimeImplementationWorkPolicy{ProtocolRef: runtimecontract.RuntimeImplementationWorkProtocolV1, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		AllowedOperations: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileWrite}}, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
 		TargetSelectorRef: "work-scope", TargetSelectorOwnerRef: "profile/work", TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: []string{"main.go"},
-		MaxRoundsPerCWI: 2, MaxTargetsPerRound: 1, RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true}
+		MaxRepeatedWorkStates: 2, MaxTargetsPerRound: 1, RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true}
 	var revision *runtimecontract.RuntimeValidationInputRevision
 	if len(revisions) > 0 {
 		revision = revisions[0].Clone()
 		policy.InputRevisionProtocolRef = runtimecontract.RuntimeValidationInputRevisionProtocolV1
+		policy.MaxInputRevisionsPerCWI = 2
 		policy.AllowedOperations = []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileEdit}}
 		ctx.Definition.CapabilityContract = []string{runtimecontract.StepKindFileEdit}
 	}
@@ -236,7 +237,8 @@ func TestRuntimeSemanticWorkPurposeNativeAndPromptRemainEquivalent(t *testing.T)
 		changed.SemanticManifest = request.SemanticManifest.Clone()
 		work := changed.SemanticManifest.ProofObligations[0].ImplementationWork
 		work.Ordinal, work.PrecedingReceiptSetHash = ordinal, fmt.Sprint("set-", ordinal-1)
-		work.EffectAvailable = ordinal <= work.Scope.Request.Policy.MaxRoundsPerCWI
+		work.RepeatedWorkStates = ordinal - 1
+		work.EffectAvailable = work.RepeatedWorkStates < work.Scope.Request.Policy.MaxRepeatedWorkStates
 		work.PreviousRound = &runtimecontract.RuntimeImplementationRoundReviewSource{Ordinal: ordinal - 1, DispatchID: fmt.Sprint("dispatch-", ordinal-1), ReceiptSetHash: work.PrecedingReceiptSetHash, IntentBinding: &runtimecontract.RuntimeImplementationWorkIntentBinding{Intent: document.ImplementationIntent.Clone(), Source: runtimecontract.RuntimeImplementationWorkPurposeChoice{CoverageWorkItemID: work.Scope.Request.CoverageWorkItemID}}, Before: work.Scope.Content.Snapshots}
 
 		changed.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(changed.SemanticManifest)
@@ -268,7 +270,7 @@ func TestRuntimeSemanticWorkPurposeNativeAndPromptRemainEquivalent(t *testing.T)
 			if err := json.Unmarshal(mustSemanticSchemaProperty(t, next.Schema, "implementationPurpose"), &choice); err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(choice.Enum, []string{string(runtimecontract.RuntimeImplementationWorkPurposeTerminal), string(runtimecontract.RuntimeImplementationWorkPurposeIncomplete), string(runtimecontract.RuntimeImplementationWorkPurposeInconclusive)}) {
+			if !reflect.DeepEqual(choice.Enum, []string{string(runtimecontract.RuntimeImplementationWorkPurposeTerminal), string(runtimecontract.RuntimeImplementationWorkPurposeStalled), string(runtimecontract.RuntimeImplementationWorkPurposeInconclusive)}) {
 				t.Fatal("exhausted rounds retained effect enum")
 			}
 			document.ManifestHash, document.ImplementationPurpose = changed.SemanticManifest.Hash, runtimecontract.RuntimeImplementationWorkPurposeTerminal

@@ -24,7 +24,7 @@ func referenceWorkRoundCatalogSession(r RuntimeImplementationWorkRound) error {
 		r.PolicyHash != StableRuntimeImplementationWorkPolicyHash(request.Policy) {
 		return fmt.Errorf("implementation work round scope/policy source mismatch")
 	}
-	if r.Ordinal < 1 || r.Ordinal > request.Policy.MaxRoundsPerCWI || (r.Ordinal == 1) != (r.PrecedingReceiptSetHash == "") {
+	if r.Ordinal < 1 || (r.Ordinal == 1) != (r.PrecedingReceiptSetHash == "") {
 		return fmt.Errorf("implementation work round ordinal/preceding receipt lineage is invalid")
 	}
 	if r.PrecedingReceiptSetHash != "" && !implementationWorkExactRef(r.PrecedingReceiptSetHash) {
@@ -73,7 +73,7 @@ func referenceWorkRoundCatalogSession(r RuntimeImplementationWorkRound) error {
 	if len(r.GovernanceDispatchIDs) == 0 && r.GovernanceDispatchIDs != nil {
 		return fmt.Errorf("implementation governance history must preserve canonical absence")
 	}
-	if r.GovernanceReceiptHash != "" && (r.DispatchID == "" || !implementationWorkExactRef(r.GovernanceReceiptHash) || r.CompletedReceiptSetHash != "" || r.FailedReceiptHash != "") || len(r.GovernanceDispatchIDs) > MaxRuntimeImplementationWorkRounds {
+	if r.GovernanceReceiptHash != "" && (r.DispatchID == "" || !implementationWorkExactRef(r.GovernanceReceiptHash) || r.CompletedReceiptSetHash != "" || r.FailedReceiptHash != "") || len(r.GovernanceDispatchIDs) > MaxRuntimeImplementationGovernanceDispatches {
 		return fmt.Errorf("implementation governance suspension must retain one outstanding bounded round")
 	}
 	seenGovernanceDispatches := map[string]bool{}

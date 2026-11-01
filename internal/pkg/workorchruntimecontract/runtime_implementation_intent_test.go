@@ -83,7 +83,8 @@ func reviewedImplementationPurposeFixture(t *testing.T, exhausted bool) (Runtime
 	}
 	w.Ordinal = 2
 	if exhausted {
-		w.Ordinal = w.Scope.Request.Policy.MaxRoundsPerCWI + 1
+		w.RepeatedWorkStates = w.Scope.Request.Policy.MaxRepeatedWorkStates
+		w.Ordinal = w.RepeatedWorkStates + 1
 	}
 	w.EffectAvailable = !exhausted
 	w.PrecedingReceiptSetHash = "previous-receipts"
@@ -92,7 +93,7 @@ func reviewedImplementationPurposeFixture(t *testing.T, exhausted bool) (Runtime
 	d.ManifestHash = m.Hash
 	d.ImplementationIntent.PreviousRoundReview = &RuntimeImplementationRoundReview{DispatchID: w.PreviousRound.DispatchID, ReceiptSetHash: w.PrecedingReceiptSetHash, Outcome: "partial", Reason: "the owner edit changed another branch; original behavior still missing"}
 	if exhausted {
-		d.ImplementationPurpose = RuntimeImplementationWorkPurposeIncomplete
+		d.ImplementationPurpose = RuntimeImplementationWorkPurposeStalled
 		d.ImplementationIntent.SelectedRequirementRefs = nil
 	}
 	if err := m.Validate(); err != nil {
@@ -151,14 +152,14 @@ func TestImplementationPreviousIntentReviewAndTruthfulBudgetOutcome(t *testing.T
 			"unknown": func(v *RuntimeSemanticPlanDocument) {
 				v.ImplementationIntent.PreviousRoundReview.Outcome = "inconclusive"
 			},
-			"false-terminal": func(v *RuntimeSemanticPlanDocument) {
-				v.ImplementationPurpose = RuntimeImplementationWorkPurposeTerminal
-				v.ImplementationIntent.SelectedRequirementRefs = nil
-			},
 		} {
 			t.Run(name, func(t *testing.T) { v := d.Clone(); mutate(&v); assertImplementationSchemaAndParser(t, m, v, false) })
 		}
 		v := d.Clone()
+		v.ImplementationPurpose = RuntimeImplementationWorkPurposeTerminal
+		v.ImplementationIntent.SelectedRequirementRefs = nil
+		assertImplementationSchemaAndParser(t, m, v, true)
+		v = d.Clone()
 		v.ImplementationPurpose = RuntimeImplementationWorkPurposeInconclusive
 		v.ImplementationIntent.SelectedRequirementRefs = nil
 		v.ImplementationIntent.PreviousRoundReview.Outcome = "inconclusive"
@@ -204,22 +205,26 @@ func TestImplementationExhaustionDoesNotBecomeDefinitionTicket(t *testing.T) {
 	}
 }
 
-func TestImplementationReviewCannotSilentlySwitchOriginalGap(t *testing.T) {
+func TestImplementationReviewMaySelectAnotherUnitButCannotDropOriginalGap(t *testing.T) {
 	m, d := reviewedImplementationPurposeFixture(t, false)
 	work := m.ProofObligations[0].ImplementationWork
 	d.ImplementationIntent.RequirementReviews = append(d.ImplementationIntent.RequirementReviews, RuntimeImplementationRequirementReview{RequirementRef: "other-original", WorkRequired: true})
 	d.ImplementationIntent.SelectedRequirementRefs = []string{"other-original"}
-	if err := validateImplementationRoundReview(d.ImplementationIntent, work); err == nil {
-		t.Fatal("partial original intent silently replaced by unrelated work")
+	if err := validateImplementationRoundReview(d.ImplementationIntent, work); err != nil {
+		t.Fatal("next bounded work unit was rejected despite retaining the original gap", err)
 	}
-	d.ImplementationIntent.SelectedRequirementRefs = append(d.ImplementationIntent.SelectedRequirementRefs, work.PreviousRound.IntentBinding.Intent.SelectedRequirementRefs...)
+	d.ImplementationIntent.RequirementReviews[0].WorkRequired = false
+	if err := validateImplementationRoundReview(d.ImplementationIntent, work); err == nil {
+		t.Fatal("unfulfilled original gap disappeared")
+	}
+	d.ImplementationIntent.RequirementReviews[0].WorkRequired = true
 	if err := validateImplementationRoundReview(d.ImplementationIntent, work); err != nil {
 		t.Fatal("necessary continuation was rejected", err)
 	}
 }
 
 func TestImplementationObservationFailurePreservesOriginalReason(t *testing.T) {
-	for _, purpose := range []RuntimeImplementationWorkPurpose{RuntimeImplementationWorkPurposeIncomplete, RuntimeImplementationWorkPurposeInconclusive} {
+	for _, purpose := range []RuntimeImplementationWorkPurpose{RuntimeImplementationWorkPurposeStalled, RuntimeImplementationWorkPurposeInconclusive} {
 		reason := "  原始判断\n不改写也不截断  "
 		choice := RuntimeImplementationWorkPurposeChoice{Purpose: purpose, SemanticManifestHash: "manifest", DocumentHash: "original-document"}
 		failure := RuntimeImplementationWorkObservationFailure(choice, &RuntimeImplementationIntent{Reason: reason})

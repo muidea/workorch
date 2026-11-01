@@ -61,8 +61,19 @@ func TestConfirmedRepairMultiOperationReceiptChainSurvivesRestartAndDuplicate(t 
 		settled.Aggregate.Facts.RepairDirective.CurrentFailure != nil || len(settled.Aggregate.Facts.RepairDirective.TargetRefs) != 0 ||
 		settled.Aggregate.Facts.RepairDirective.Closure == nil || settled.Aggregate.Facts.RepairDirective.Closure.ID != fixture.closureID ||
 		settled.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite ||
-		len(settled.Aggregate.PrerequisiteInvalidations) != 1 {
+		len(settled.Aggregate.PrerequisiteInvalidations) != 2 {
 		t.Fatalf("complete all-of repair did not close into fresh validation: %+v", settled.Aggregate)
+	}
+	// The second receipt advances the tree while its dependents are already
+	// pending. Preserve that causal edge without retiring the first observation
+	// twice; fresh validation must use tree-v3 rather than the intermediate tree.
+	changes := settled.Aggregate.PrerequisiteInvalidations
+	if !reflect.DeepEqual(changes[0], partial.Aggregate.PrerequisiteInvalidations[0]) ||
+		len(changes[1].PrerequisiteIDs) != 0 || len(changes[1].ObservationIDs) != 0 ||
+		len(changes[1].InvalidatedDependencies) != 0 || changes[1].OperationID != second.OperationID ||
+		len(changes[1].ResourceChanges) != 2 || changes[1].ResourceChanges[1].BeforeRevision != "tree-v2" ||
+		changes[1].ResourceChanges[1].AfterRevision != "tree-v3" {
+		t.Fatal("completed repair lost or rewrote its receipt resource-change chronology")
 	}
 	if err := settled.Aggregate.Validate(); err != nil {
 		t.Fatalf("settled all-of repair did not survive fresh load: %v", err)

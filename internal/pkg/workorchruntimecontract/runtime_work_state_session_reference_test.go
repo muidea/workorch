@@ -21,9 +21,6 @@ func referenceWorkStateCompilerSession(definition RuntimeDefinitionContext, fact
 			return fmt.Errorf("implementation purpose preview requires current owner manifest")
 		}
 	}
-	if len(ledger.PurposeChoices) > len(facts.DefinitionSeed.CoverageItems)*(MaxRuntimeImplementationWorkRounds+1) {
-		return fmt.Errorf("implementation purpose choices exceed bounded per-CWI history")
-	}
 	seenChoices := map[string]bool{}
 	for _, choice := range ledger.PurposeChoices {
 		if choice.Purpose != RuntimeImplementationWorkPurposeEffect && choice.Purpose != RuntimeImplementationWorkPurposeTerminal || seenChoices[choice.SemanticManifestHash] {
@@ -81,8 +78,7 @@ func referenceWorkStateCompilerSession(definition RuntimeDefinitionContext, fact
 		return nil
 	}
 	sources := RuntimeImplementationWorkLedgerSources{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, StartupInputHash: definition.StartupInputHash,
-		Seed: facts.DefinitionSeed, Focuses: facts.DefinitionFocuses, Profiles: facts.Activation.ExecutionContract.ProfileContracts,
-		MaxRecords: len(facts.DefinitionSeed.CoverageItems) * MaxRuntimeImplementationWorkRounds}
+		Seed: facts.DefinitionSeed, Focuses: facts.DefinitionFocuses, Profiles: facts.Activation.ExecutionContract.ProfileContracts}
 	dispatches := append([]RuntimeDispatchRecord(nil), completed...)
 	if active != nil {
 		dispatches = append(dispatches, *active)

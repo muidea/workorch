@@ -678,6 +678,8 @@ func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtime
 		return runtimecontract.RuntimeDecision{}, false, nil
 	case runtimecontract.FailureClassPrerequisiteRefreshExhausted:
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "prerequisite_refresh_exhausted", failure.Message), true, nil
+	case runtimecontract.FailureClassSemanticObservationInconclusive:
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, failure.Code, failure.Message), true, nil
 	case runtimecontract.FailureClassNoProgressExhausted:
 		// A sealed owner observation can prove that no admissible recipe exists
 		// for the current authority (for example, validation has no recipe).

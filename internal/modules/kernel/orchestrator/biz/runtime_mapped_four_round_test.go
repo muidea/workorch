@@ -19,7 +19,7 @@ func runtimeMappedFourRoundBootstrap(t *testing.T, b runtimecontract.RuntimeBoot
 	t.Helper()
 	policy := runtimecontract.RuntimeImplementationWorkPolicy{ProtocolRef: runtimecontract.RuntimeImplementationWorkProtocolV1, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		AllowedOperations: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileEdit}}, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
-		TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: "profile/test-file-shell-git", TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: nil, MaxRoundsPerCWI: 8, MaxTargetsPerRound: 4, RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true}
+		TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: "profile/test-file-shell-git", TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: nil, MaxRepeatedWorkStates: 8, MaxTargetsPerRound: 4, RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true}
 	p := &b.Activation.ExecutionContract.ProfileContracts[0]
 	p.DeliverableExpectations[0].RequiredEvidencePurposeContractRef = runtimecontract.RuntimeProfileDeliverableEvidencePurpose
 	p.EvidenceRequirements[1].ImplementationWorkPolicy = &policy

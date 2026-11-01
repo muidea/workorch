@@ -17,7 +17,7 @@ func TestRuntimeControllerRejectsInjectedDefinitionImplementationWorkWithoutWrit
 		AllowedOperations:     []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileWrite}},
 		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget},
 		TargetSelectorRef:     "work", TargetSelectorOwnerRef: "profile", TargetSelectorSubjectRef: "implementation",
-		TargetSelectorCandidateRefs: []string{"resource-a"}, MaxRoundsPerCWI: 2, MaxTargetsPerRound: 1,
+		TargetSelectorCandidateRefs: []string{"resource-a"}, MaxRepeatedWorkStates: 2, MaxTargetsPerRound: 1,
 		RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true,
 	}
 	if err := policy.Validate(); err != nil {

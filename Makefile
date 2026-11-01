@@ -394,7 +394,7 @@ verify-runtime-implementation-work-readiness:
 	bash scripts/lib/go-test-must-run.sh --each-package ./internal/modules/kernel/orchestrator/biz/runtime -run '^TestCWISuspension' -count=1 -timeout=3m
 	bash scripts/lib/go-test-must-run.sh --each-package ./internal/modules/kernel/orchestrator/biz -run '^TestDriveRuntime(CWISuspension(RevalidatesOrdinaryPredecessorWithinOriginalBudget|ProcessRecovery)|DurableDispatchBudgetRejectsUndeclaredPredecessorRevalidation|AssertionFeedbackCannotInventPredecessorRevalidationAcrossRestart)$$' -count=1 -timeout=$(GOTEST_TIMEOUT)
 	bash scripts/lib/go-test-must-run.sh --each-package ./internal/pkg/workorchruntimecontract -run '^Test(CoverageEvidenceBindingCannotConjoinIndependentValidationRecipes|ValidationObservationCannotBorrowPassedChecksAcrossRecipes)$$' -count=1 -timeout=3m
-	bash scripts/lib/go-test-must-run.sh --each-package ./internal/integration -run '^TestImplementationWork(PublicAuthoringFullFlow|PublicAuthoringBudgetExhaustedFullFlow|FullflowUnsupportedCombinationStaysClosed|CommitEvidence.*)$$' -count=1 -timeout=$(GOTEST_TIMEOUT)
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/integration -run '^TestImplementationWork(PublicAuthoringFullFlow|PublicAuthoringRepeatedStateExhaustedFullFlow|FullflowUnsupportedCombinationStaysClosed|CommitEvidence.*)$$' -count=1 -timeout=$(GOTEST_TIMEOUT)
 
 verify-ci-mvp: verify-runtime-implementation-work-readiness verify-service verify-workspace-template-soul verify-llm verify-mcp-stdio
 

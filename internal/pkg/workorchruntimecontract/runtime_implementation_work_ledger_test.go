@@ -12,7 +12,7 @@ import (
 func implementationWorkLedgerFixture(t *testing.T) (RuntimeImplementationWorkLedger, RuntimeImplementationWorkLedgerSources) {
 	t.Helper()
 	seed, focuses, profiles := definitionImplementationWorkFixture(t)
-	sources := RuntimeImplementationWorkLedgerSources{WorkspaceID: "ws-1", RunID: "run-1", StartupInputHash: "startup-1", Seed: seed, Focuses: focuses, Profiles: profiles, MaxRecords: 16}
+	sources := RuntimeImplementationWorkLedgerSources{WorkspaceID: "ws-1", RunID: "run-1", StartupInputHash: "startup-1", Seed: seed, Focuses: focuses, Profiles: profiles}
 	observation := workScopeObservationFixture(t)
 	observation.Content = &RuntimeImplementationWorkContent{ProtocolRef: RuntimeImplementationWorkContentV1, ManifestRevision: observation.Selection.ObservedRevision}
 	for _, target := range observation.Selection.TargetRefs {

@@ -124,3 +124,81 @@ func TestSemanticWorkRequestContractRejectsEmptyOwnerIntersection(t *testing.T) 
 		t.Fatalf("schema did not run same gate: %v", err)
 	}
 }
+
+func TestSemanticWorkMixedCreateAndEditCollectiveWire(t *testing.T) {
+	m, d := workWireFixture(t, false)
+	w := m.ProofObligations[0].ImplementationWork
+	w.Scope.Request.Policy.AllowedOperations = []RuntimeOperationVariantRef{{Kind: StepKindFileWrite}, {Kind: StepKindFileEdit}}
+	w.Scope.Request.Policy.TargetSelectorCandidateRefs = nil
+	w.Scope.Request.Policy.MaxTargetsPerRound = 3
+	w.Scope.Request.RequestID = implementationWorkScopeRequestID(w.Scope.Request)
+	w.Scope.Selection.SelectorCandidateRefs = nil
+	w.Scope.Selection.PrerequisiteID = w.Scope.Request.RequestID
+	w.Scope.Selection.SnapshotID = StableRuntimeTargetSelectionSnapshotID(w.Scope.Selection)
+	w.Scope.Observation.PrerequisiteID = w.Scope.Request.RequestID
+	w.Scope.Observation.ContentHash = w.Scope.Selection.SnapshotID
+	w.Scope.Observation.ObservationID = StableRuntimePrerequisiteObservationID(w.Scope.Observation)
+	w.PolicyHash = StableRuntimeImplementationWorkPolicyHash(w.Scope.Request.Policy)
+	c := &m.OwnerCatalogs[0]
+	c.OperationKinds = []string{StepKindFileWrite, StepKindFileEdit}
+	c.OperationVariants = []RuntimeOperationAdmissibilityVariant{
+		{Kind: StepKindFileWrite, AllowedTargetPolicies: []RuntimeOperationTargetPolicy{RuntimeOperationTargetPolicyProspectiveOwnerTarget}, SelectorRefs: []string{"native-new"}, ConstraintRefs: c.ConstraintRefs},
+		{Kind: StepKindFileEdit, AllowedTargetPolicies: []RuntimeOperationTargetPolicy{RuntimeOperationTargetPolicyExistingOwnerScope}, SelectorRefs: []string{"native-existing"}},
+	}
+	*c = c.Normalized()
+	c.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(*c)
+	m.AllowedOperationKinds = c.OperationKinds
+	m.Hash = StableRuntimeSemanticPlanManifestHash(m)
+	d.ManifestHash = m.Hash
+	d.Proposals[0].OperationKind = StepKindFileEdit
+	for _, target := range []string{"resource-b", "resource-c"} {
+		p := d.Proposals[0].Clone()
+		p.OperationKind = StepKindFileWrite
+		p.Target = RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyProspectiveOwnerTarget, OwnerSelectorRefs: []string{"native-new"}, ProspectiveTargetRefs: []string{target}, ProspectiveConstraintRefs: c.ConstraintRefs}
+		d.Proposals = append(d.Proposals, p)
+	}
+	wire, err := EncodeRuntimeSemanticPlanPayloadWithManifest(m, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawSchema, err := RuntimeSemanticPlanJSONSchemaForRequest(m, d.PlanStep, d.BatchID, d.BatchSequence, d.BatchCoverageWorkItemIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schemaDoc, _ := jsonschema.UnmarshalJSON(strings.NewReader(rawSchema))
+	compiler := jsonschema.NewCompiler()
+	if err := compiler.AddResource("https://workorch.invalid/mixed-work.json", schemaDoc); err != nil {
+		t.Fatal(err)
+	}
+	schema, err := compiler.Compile("https://workorch.invalid/mixed-work.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, _ := jsonschema.UnmarshalJSON(strings.NewReader(string(wire)))
+	if err := schema.Validate(value); err != nil {
+		t.Fatal("schema rejected policy-bounded mixed work", err)
+	}
+	if _, err := DecodeRuntimeSemanticPlanPayloadWithManifest(m, wire); err != nil {
+		t.Fatal("parser rejected policy-bounded mixed work", err)
+	}
+	for _, mutation := range []string{"duplicate target", "target limit", "existing target as creation"} {
+		bad := d.Clone()
+		for index := range bad.Proposals {
+			p := &bad.Proposals[index]
+			if !reflect.DeepEqual(p.Target.ProspectiveTargetRefs, []string{"resource-c"}) {
+				continue
+			}
+			switch mutation {
+			case "duplicate target":
+				p.Target.ProspectiveTargetRefs = []string{"resource-b"}
+			case "target limit":
+				p.Target.ProspectiveTargetRefs = []string{"resource-c", "resource-d"}
+			case "existing target as creation":
+				p.Target.ProspectiveTargetRefs = []string{"resource-a"}
+			}
+		}
+		if err := bad.ValidateAgainstManifest(m); err == nil {
+			t.Fatal("mixed collective bypassed", mutation)
+		}
+	}
+}

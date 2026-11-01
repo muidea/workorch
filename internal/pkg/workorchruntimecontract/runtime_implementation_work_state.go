@@ -171,12 +171,9 @@ func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinition
 			return fmt.Errorf("implementation purpose preview requires current owner manifest")
 		}
 	}
-	if len(ledger.PurposeChoices) > len(facts.DefinitionSeed.CoverageItems)*(MaxRuntimeImplementationWorkRounds+1) {
-		return fmt.Errorf("implementation purpose choices exceed bounded per-CWI history")
-	}
 	seenChoices := map[string]bool{}
 	for _, choice := range ledger.PurposeChoices {
-		if choice.Purpose != RuntimeImplementationWorkPurposeEffect && choice.Purpose != RuntimeImplementationWorkPurposeTerminal && choice.Purpose != RuntimeImplementationWorkPurposeIncomplete && choice.Purpose != RuntimeImplementationWorkPurposeInconclusive || seenChoices[choice.SemanticManifestHash] {
+		if choice.Purpose != RuntimeImplementationWorkPurposeEffect && choice.Purpose != RuntimeImplementationWorkPurposeTerminal && choice.Purpose != RuntimeImplementationWorkPurposeStalled && choice.Purpose != RuntimeImplementationWorkPurposeInconclusive || seenChoices[choice.SemanticManifestHash] {
 			return fmt.Errorf("implementation purpose choice is invalid or duplicated")
 		}
 		seenChoices[choice.SemanticManifestHash] = true
@@ -243,8 +240,7 @@ func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinition
 		return nil
 	}
 	sources := RuntimeImplementationWorkLedgerSources{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, StartupInputHash: definition.StartupInputHash,
-		Seed: facts.DefinitionSeed, Focuses: facts.DefinitionFocuses, Profiles: facts.Activation.ExecutionContract.ProfileContracts,
-		MaxRecords: len(facts.DefinitionSeed.CoverageItems) * MaxRuntimeImplementationWorkRounds}
+		Seed: facts.DefinitionSeed, Focuses: facts.DefinitionFocuses, Profiles: facts.Activation.ExecutionContract.ProfileContracts}
 	dispatches := append([]RuntimeDispatchRecord(nil), completed...)
 	if active != nil {
 		dispatches = append(dispatches, *active)

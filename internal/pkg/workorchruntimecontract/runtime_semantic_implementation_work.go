@@ -15,6 +15,7 @@ type RuntimeSemanticImplementationWork struct {
 	// PurposeChoiceOnly 的 vocabulary 不授 effect，接受 order intent 后另行编译工作/终验。
 	PurposeChoiceOnly       bool
 	EffectAvailable         bool
+	RepeatedWorkStates      int
 	RoundHash               string
 	Ordinal                 int
 	PrecedingReceiptSetHash string
@@ -57,17 +58,18 @@ func (w RuntimeSemanticImplementationWork) validateInSemanticSession(session *ru
 			return fmt.Errorf("implementation review source differs from preceding original round")
 		}
 	}
-	maxOrdinal := w.Scope.Request.Policy.MaxRoundsPerCWI
+	if w.RepeatedWorkStates < 0 || w.RepeatedWorkStates >= w.Ordinal {
+		return fmt.Errorf("semantic work repetition count exceeds original preceding rounds")
+	}
 	if w.PurposeChoiceOnly {
-		maxOrdinal++
-		if w.EffectAvailable != (w.Ordinal <= w.Scope.Request.Policy.MaxRoundsPerCWI) {
-			return fmt.Errorf("semantic purpose vocabulary must reflect immutable remaining effect rounds")
+		if w.EffectAvailable != (w.RepeatedWorkStates < w.Scope.Request.Policy.MaxRepeatedWorkStates) {
+			return fmt.Errorf("semantic purpose vocabulary must reflect the original repeated-state guard")
 		}
-	} else if w.EffectAvailable {
+	} else if w.EffectAvailable || w.RepeatedWorkStates != 0 {
 		return fmt.Errorf("working semantic purpose cannot carry a purpose-choice availability arm")
 	}
-	if !implementationWorkExactRef(w.RoundHash) || w.PolicyHash != StableRuntimeImplementationWorkPolicyHash(w.Scope.Request.Policy) || w.Ordinal < 1 || w.Ordinal > maxOrdinal || (w.Ordinal == 1) != (w.PrecedingReceiptSetHash == "") {
-		return fmt.Errorf("semantic implementation work requires exact policy and bounded round/receipt lineage")
+	if !implementationWorkExactRef(w.RoundHash) || w.PolicyHash != StableRuntimeImplementationWorkPolicyHash(w.Scope.Request.Policy) || w.Ordinal < 1 || (w.Ordinal == 1) != (w.PrecedingReceiptSetHash == "") {
+		return fmt.Errorf("semantic implementation work requires exact policy and continuous round/receipt lineage")
 	}
 	if err := w.Scope.ValidateForRequest(w.Scope.Request); err != nil {
 		return err
@@ -180,7 +182,7 @@ func compileRuntimeWorkManifestInSession(workspace common.WorkspaceID, run commo
 }
 
 // CompileRuntimeSemanticImplementationPurposeManifest 复用原 semantic 请求合同与预算。
-// Preview 不是 effect round；达到工作轮次上限仍可选择原 terminal proof。
+// Preview 不是 effect round；累计 ordinal 不关闭合法后继工作，重复状态保护不授终验 credit。
 func CompileRuntimeSemanticImplementationPurposeManifest(workspace common.WorkspaceID, run common.RunID, definition RuntimeDefinitionContext, seed RuntimeDefinitionSeed, focuses []RuntimeDefinitionFocus, execution RuntimeExecutionContract, catalogs []RuntimeOperationAdmissibility, preview RuntimeImplementationWorkScopePreview, rounds []RuntimeImplementationWorkRound) (RuntimeSemanticPlanManifest, error) {
 	return compileRuntimeWorkPurposeInSession(workspace, run, definition, seed, focuses, execution, catalogs, preview, rounds, newRuntimeSemanticValidationSession())
 }
@@ -213,7 +215,8 @@ func compileRuntimeWorkPurposeInSession(workspace common.WorkspaceID, run common
 		return RuntimeSemanticPlanManifest{}, err
 	}
 	work := manifest.ProofObligations[0].ImplementationWork
-	work.PurposeChoiceOnly, work.EffectAvailable = true, ordinal <= preview.Request.Policy.MaxRoundsPerCWI
+	work.RepeatedWorkStates = RuntimeImplementationRepeatedWorkStates(preview, rounds)
+	work.PurposeChoiceOnly, work.EffectAvailable = true, work.RepeatedWorkStates < preview.Request.Policy.MaxRepeatedWorkStates
 	work.Ordinal, work.PrecedingReceiptSetHash = ordinal, preceding
 	work.PreviousRound = previous
 	work.RoundHash = implementationWorkRawHash("implementation-purpose-preview:", preview)

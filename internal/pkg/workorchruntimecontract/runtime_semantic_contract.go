@@ -1942,7 +1942,7 @@ func validateRuntimeSemanticPlanDocumentAgainstValidatedManifestUncached(d Runti
 		if purposeWork.Scope.Request.InputRevision != nil && d.ImplementationPurpose == RuntimeImplementationWorkPurposeTerminal {
 			return fmt.Errorf("rejected input requires a real bounded revision before fresh review")
 		}
-		allowed := d.ImplementationPurpose == RuntimeImplementationWorkPurposeTerminal || d.ImplementationPurpose == RuntimeImplementationWorkPurposeInconclusive || (d.ImplementationPurpose == RuntimeImplementationWorkPurposeIncomplete && !purposeWork.EffectAvailable) || (d.ImplementationPurpose == RuntimeImplementationWorkPurposeEffect && purposeWork.EffectAvailable)
+		allowed := d.ImplementationPurpose == RuntimeImplementationWorkPurposeTerminal || d.ImplementationPurpose == RuntimeImplementationWorkPurposeInconclusive || (d.ImplementationPurpose == RuntimeImplementationWorkPurposeStalled && !purposeWork.EffectAvailable) || (d.ImplementationPurpose == RuntimeImplementationWorkPurposeEffect && purposeWork.EffectAvailable)
 		if d.PlanStep != RuntimeSemanticPlanStepCoverageOrder || !allowed {
 			return fmt.Errorf("implementation purpose document exceeds sealed purpose vocabulary")
 		}
@@ -1992,6 +1992,10 @@ func validateRuntimeSemanticPlanDocumentAgainstValidatedManifestUncached(d Runti
 	}
 	seenCoverage := make(map[common.CoverageWorkItemID]struct{}, len(d.Proposals))
 	seenProofKinds := make(map[string]struct{}, len(d.Proposals))
+	workCoverage := make(map[common.CoverageWorkItemID]bool)
+	for _, obligation := range manifest.ProofObligations {
+		workCoverage[obligation.CoverageWorkItemID] = obligation.ImplementationWork != nil
+	}
 	for proposalIndex, proposal := range d.Proposals {
 		if err := proposal.Validate(); err != nil {
 			var constraint *RuntimeSemanticProposalConstraintError
@@ -2024,7 +2028,10 @@ func validateRuntimeSemanticPlanDocumentAgainstValidatedManifestUncached(d Runti
 		}
 		proofKind := proposal.RequiredEvidenceKinds[0]
 		proofKey := string(proposal.CoverageWorkItemID) + "\x00" + proofKind
-		if _, duplicate := seenProofKinds[proofKey]; duplicate {
+		// Working effects are a bounded, disjoint target collective, not
+		// multiple terminal proofs. Its complete proof-set gate below enforces
+		// the exact owner, policy, protection and collective target limit.
+		if _, duplicate := seenProofKinds[proofKey]; duplicate && !workCoverage[proposal.CoverageWorkItemID] {
 			return runtimeSemanticProposalViolation(proposal, proposalIndex, "requiredEvidenceKinds", RuntimeSemanticConstraintRelational,
 				proofKind, []string{"one proof per evidence kind for each CWI"}, nil,
 				fmt.Errorf("runtime semantic document duplicates proof kind %q for coverage %q", proofKind, proposal.CoverageWorkItemID))

@@ -73,6 +73,9 @@ func (c *RuntimeTransitionCoordinator) Commit(ctx context.Context, aggregate Run
 		if previous.StateRevision != expectedRevision {
 			return &RuntimeCASConflictError{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, ExpectedRevision: expectedRevision, ObservedRevision: previous.StateRevision}
 		}
+		if err := validatePrerequisiteInvalidationChronologyTransition(previous, aggregate); err != nil {
+			return err
+		}
 		if err := validateHistoricalBehaviorTransition(previous, aggregate); err != nil {
 			return err
 		}

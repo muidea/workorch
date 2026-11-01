@@ -106,6 +106,10 @@ func TestRequiredProfilePurposePublicAuthoringHTTP(t *testing.T) {
 func testEmptyDirectoryProduction(t *testing.T, requireImplementationWork bool, authoringOnly ...bool) {
 	ctx := context.Background()
 	storage, directory, configDir := t.TempDir(), t.TempDir(), t.TempDir()
+	var preparationFixture string
+	if !requireImplementationWork && len(authoringOnly) == 0 {
+		storage, directory, preparationFixture = implementationWorkFullflowPreparationEnvironment(t)
+	}
 	repos := workorchrepo.NewWorkspaceScopedFileRepositorySet(storage)
 	provider := &emptyDirectoryProvider{repos: repos}
 	if len(authoringOnly) > 1 {
@@ -178,6 +182,9 @@ operations = ["responses"]
 	baseURL := "http://" + address
 	client := &http.Client{Timeout: 10 * time.Second}
 	waitForHTTP(t, client, baseURL)
+	if preparationFixture != "" {
+		implementationWorkFullflowPreparationMCP(t, client, baseURL, preparationFixture)
+	}
 	var executeCalls atomic.Int64
 	if requireImplementationWork {
 		observer := magicevent.NewSimpleObserver("*", hub)
@@ -222,23 +229,10 @@ operations = ["responses"]
 		t.Fatal("正式默认模板没有 DoD")
 	}
 	assertEmptyDeliverable(t, directory)
-	created := struct {
-		Authoring management.DefinitionAuthoringView `json:"authoring"`
-	}{}
-	productionJSON(t, client, http.MethodPost, baseURL+"/api/v1/workorch/workspace-authoring", management.DefinitionAuthoringCreate{
-		RequestID: "empty-directory-production", Title: "空目录工程组合", TemplateID: template.ID, DeliverableDirectory: directory,
-		Input: management.DefinitionAuthoringInput{GoalText: "创建一个小型通用多文件 Go 工程，先实现行为，再通过至少两轮独立实现修订完成验收，交付完整构建与测试证据。", AcceptanceRequirements: []string{"至少两轮合法 durable 实现变更，完整 build/test/race 与 Git 交付"}},
-	}, &created)
-	if created.Authoring.WorkspaceID == "" {
-		t.Fatal("production 创建未返回 Workspace 身份")
-	}
-	workspaceID := common.WorkspaceID(created.Authoring.WorkspaceID)
 	if requireImplementationWork {
-		current, err := repos.Workspaces.Get(ctx, workspaceID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		// 完整复制模板声明，仅增加显式工作策略，不丢失原 proof 或默认约束。
+		// Publish this negative project's exact template BEFORE authoring. A
+		// workspace-only override after derivation would invalidate the reviewed
+		// original Profile hash rather than exercise protocol availability.
 		hints := template.ContextHints.Map()
 		profiles, ok := hints["profileContracts"].(map[string]any)
 		if !ok {
@@ -264,20 +258,19 @@ operations = ["responses"]
 				"allowedTargetPolicies": []string{string(runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget), string(runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope)},
 				"targetSelectorRef":     "file/profile_declared_candidates", "targetSelectorOwnerRef": "profile/software-dev", "targetSelectorSubjectRef": "implementation",
 				"targetSelectorCandidateRefs": []string{"resource-a"}, "prospectiveTargetAllOfConstraintRefs": []string{},
-				"maxRoundsPerCWI": 2, "maxTargetsPerRound": 1, "requireFreshObservation": true, "requireFreshValidation": true, "protectValidationInputs": true,
+				"maxRepeatedWorkStates": 2, "maxTargetsPerRound": 1, "requireFreshObservation": true, "requireFreshValidation": true, "protectValidationInputs": true,
 			}
 			selected++
 		}
 		if selected != 1 {
 			t.Fatal("工作策略必须绑定唯一原 wildcard 声明")
 		}
-		workspaceHints := current.ContextHints.Map()
-		workspaceHints["profileContracts"] = profiles
-		current.ContextHints, err = workorcheventpayload.FromMap(workspaceHints)
+		template.ContextHints, err = workorcheventpayload.FromMap(hints)
 		if err != nil {
 			t.Fatal(err)
 		}
-		bindings, err := definitionconfiguration.Compile(current, template)
+		template.ID, template.Name, template.Builtin = "software-dev-unavailable-work", "不可执行工作协议反例", false
+		bindings, err := definitionconfiguration.Compile(&workspace.Workspace{}, template)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -287,10 +280,33 @@ operations = ["responses"]
 		if runtimecontract.ExplainRuntimeImplementationWorkAvailability(bindings.ProfileContracts).Available {
 			t.Fatal("显式工作策略未进入完整有效 Profile")
 		}
-		if err := workspaceports.UpdateWorkspaceRecord(ctx, hub, current); err != nil {
-			t.Fatalf("typed Workspace 策略更新：%v", err)
+		raw, err := json.Marshal(template)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var request management.WorkspaceTemplate
+		if err := json.Unmarshal(raw, &request); err != nil {
+			t.Fatal(err)
+		}
+		request.EffectiveSources = nil // Query provenance is not a writable template field.
+		productionJSON(t, client, http.MethodPost, baseURL+"/api/v1/workorch/workspace-templates", request, nil)
+		template, err = workspaceports.ReadWorkspaceTemplateRecord(ctx, hub, request.ID)
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
+	created := struct {
+		Authoring management.DefinitionAuthoringView `json:"authoring"`
+	}{}
+	productionJSON(t, client, http.MethodPost, baseURL+"/api/v1/workorch/workspace-authoring", management.DefinitionAuthoringCreate{
+		RequestID: "empty-directory-production", Title: "空目录工程组合", TemplateID: template.ID, DeliverableDirectory: directory,
+		Input: management.DefinitionAuthoringInput{GoalText: "创建一个小型通用多文件 Go 工程，先实现行为，再通过至少两轮独立实现修订完成验收，交付完整构建与测试证据。", AcceptanceRequirements: []string{"至少两轮合法 durable 实现变更，完整 build/test/race 与 Git 交付"}},
+	}, &created)
+	if created.Authoring.WorkspaceID == "" {
+		t.Fatal("production 创建未返回 Workspace 身份")
+	}
+	workspaceID := common.WorkspaceID(created.Authoring.WorkspaceID)
+
 	assertNoRun(t, repos)
 	assertEmptyDeliverable(t, directory)
 	path := baseURL + "/api/v1/workorch/workspaces/" + created.Authoring.WorkspaceID
@@ -347,8 +363,12 @@ operations = ["responses"]
 			t.Fatal(err)
 		}
 		response, requestErr := client.Post(path+"/authoring/confirm", "application/json", strings.NewReader(string(wire)))
+		var confirmationStatus int
+		var confirmationBody []byte
 		if response != nil {
-			_, readErr := io.ReadAll(response.Body)
+			confirmationStatus = response.StatusCode
+			body, readErr := io.ReadAll(response.Body)
+			confirmationBody = body
 			response.Body.Close()
 			if readErr != nil {
 				t.Fatal(readErr)
@@ -368,7 +388,7 @@ operations = ["responses"]
 			time.Sleep(150 * time.Millisecond)
 		}
 		if blocked.State != "clarification_required" || blocked.AdmissionViolationCode != workspace.DefinitionAdmissionProfileContractInvalid {
-			t.Fatalf("工作策略未到达持久准入阻塞：%+v requestErr=%v", blocked, requestErr)
+			t.Fatalf("工作策略未到达持久准入阻塞：%+v requestErr=%v status=%d body=%s", blocked, requestErr, confirmationStatus, string(confirmationBody))
 		}
 		current, err := repos.Workspaces.Get(ctx, workspaceID)
 		if err != nil {
@@ -454,6 +474,8 @@ operations = ["responses"]
 		assertNoRun(t, reopened)
 		return
 	}
+	implementationWorkFullflowPrepare(t, ctx, client, path, repos, workspaceID)
+	preparedFiles := productionDirectoryBytes(t, directory)
 	productionJSON(t, client, http.MethodPost, path+"/execution-activations", management.WorkspaceExecutionCommandRequest{Intent: "restart", RequestID: "explicit-first-execution"}, nil)
 
 	var first *runmodel.Run
@@ -503,9 +525,40 @@ operations = ["responses"]
 			t.Fatalf("authoring HTTP 调用不是 exact-once: kind=%s count=%d", kind, count)
 		}
 	}
-	assertEmptyDeliverable(t, directory)
+	if !reflect.DeepEqual(preparedFiles, productionDirectoryBytes(t, directory)) || len(state.OperationReceipts) != 0 {
+		t.Fatal("bootstrap-only observation changed files after legitimate preparation")
+	}
 	// pre-semantic target_grounding_unresolved 是暂态投影，不能当 Runtime 终结/owner-effect 失败。
 	t.Log("证据范围=bootstrap_only；首个真实 capability effect/稳定 Runtime 失败=not-run，完整多轮工程正例=blocked/未完成。")
+}
+
+// Preparation may install .agents resources. Preserve its full real after-image;
+// only later Runtime effects are forbidden by this bootstrap-only assertion.
+func productionDirectoryBytes(t *testing.T, directory string) map[string]string {
+	t.Helper()
+	result := map[string]string{}
+	err := filepath.WalkDir(directory, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(directory, path)
+		if err != nil {
+			return err
+		}
+		result[relative] = string(data)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
 }
 
 func productionPrerequisitesObserved(state *runtimecontract.RuntimeStateRecord) bool {

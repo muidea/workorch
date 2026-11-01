@@ -449,9 +449,8 @@ func applyReceiptResourceChangeInvalidation(aggregate *RuntimeAggregate, dispatc
 	if err != nil {
 		return false, err
 	}
-	if len(prerequisiteIDs) == 0 {
-		return false, nil
-	}
+	// Preserve every receipt change in causal order, including while all
+	// dependent prerequisites are already pending. It grants no new fact.
 	aggregate.Facts = facts
 	aggregate.PrerequisiteInvalidations = append(aggregate.PrerequisiteInvalidations, runtimecontract.RuntimePrerequisiteInvalidationRecord{
 		Signature: signature, PrerequisiteIDs: prerequisiteIDs, ObservationIDs: observationIDs,
@@ -459,7 +458,7 @@ func applyReceiptResourceChangeInvalidation(aggregate *RuntimeAggregate, dispatc
 		DispatchID:              strings.TrimSpace(dispatchID), OperationID: strings.TrimSpace(operationID), ReceiptHash: receiptHash,
 		ResourceChanges: receipt.ResourceChanges,
 	})
-	return true, nil
+	return len(prerequisiteIDs) != 0, nil
 }
 
 func prerequisiteInvalidationExists(aggregate RuntimeAggregate, signature string) bool {
@@ -472,6 +471,24 @@ func prerequisiteInvalidationExists(aggregate RuntimeAggregate, signature string
 	return false
 }
 
+func validatePrerequisiteInvalidationChronologyTransition(previous, next RuntimeAggregate) error {
+	before, after := previous.PrerequisiteInvalidations, next.PrerequisiteInvalidations
+	if len(after) < len(before) {
+		return fmt.Errorf("%w: prerequisite invalidation chronology is append-only", common.ErrConflict)
+	}
+	seen := make(map[string]bool, len(after))
+	for index, record := range after {
+		if index < len(before) && !reflect.DeepEqual(record, before[index]) {
+			return fmt.Errorf("%w: prerequisite invalidation chronology cannot be reordered or rewritten", common.ErrConflict)
+		}
+		if seen[record.Signature] {
+			return fmt.Errorf("%w: prerequisite invalidation chronology repeats a signature", common.ErrConflict)
+		}
+		seen[record.Signature] = true
+	}
+	return nil
+}
+
 // validatePrerequisiteResultFreshness prevents an owner response produced for
 // a previous instance of a stable prerequisite ID from satisfying the current
 // re-acquisition. Prerequisites intentionally retain their semantic ID after
@@ -481,12 +498,44 @@ func prerequisiteInvalidationExists(aggregate RuntimeAggregate, signature string
 // This is an Orchestrator admission rule, not a DTO transition: capability
 // owners continue to report only their current observation, while SM-2 decides
 // whether that observation may re-enter the aggregate.
-func validatePrerequisiteResultFreshness(result PrerequisiteResult, invalidations []runtimecontract.RuntimePrerequisiteInvalidationRecord) error {
+func validatePrerequisiteResultFreshness(result PrerequisiteResult, invalidations []runtimecontract.RuntimePrerequisiteInvalidationRecord, receipts []runtimecontract.RuntimeOperationReceipt) error {
 	prerequisiteID := strings.TrimSpace(result.PrerequisiteID)
 	if prerequisiteID == "" {
 		return common.ErrInvalidArgument
 	}
-	for _, invalidation := range invalidations {
+	// A completed, independently validated receipt can return a resource to an
+	// earlier content hash. Its latest after-image supersedes earlier invalidated
+	// *values*, but never reauthorizes the retired observation itself. A later
+	// read-only stale finding still wins. No wall clock or model claim is used.
+	latestAfter := map[runtimecontract.RuntimeFreshnessDependency]int{}
+	// Local reverse index only: hash each complete owner receipt once per gate.
+	// No result, observation or validation credential survives the invocation.
+	receiptByHash := make(map[string]runtimecontract.RuntimeOperationReceipt, len(receipts))
+	for _, receipt := range receipts {
+		receiptByHash[runtimecontract.StableRuntimeOperationReceiptHash(receipt)] = receipt
+	}
+	if result.Observation != nil {
+		for _, dependency := range result.Observation.Normalized().Dependencies {
+			for index, record := range invalidations {
+				record = record.Normalized()
+				if !receiptProvesFreshnessChange(record, receiptByHash) {
+					continue
+				}
+				// Resource changes are Run-wide receipt facts. A prerequisite
+				// can already be pending when a later receipt restores the
+				// resource, so it need not occur in that receipt's retired set.
+				for _, change := range record.ResourceChanges {
+					if runtimecontract.RuntimeFreshnessDependencyIntersectsChange(dependency, change) {
+						delete(latestAfter, dependency)
+						if change.AfterRevision != "" && dependency.Revision == change.AfterRevision {
+							latestAfter[dependency] = index
+						}
+					}
+				}
+			}
+		}
+	}
+	for index, invalidation := range invalidations {
 		invalidation = invalidation.Normalized()
 		if !containsFreshnessString(invalidation.PrerequisiteIDs, prerequisiteID) {
 			continue
@@ -495,12 +544,18 @@ func validatePrerequisiteResultFreshness(result PrerequisiteResult, invalidation
 			return fmt.Errorf("%w: prerequisite %q was invalidated and requires a fresh owner observation", common.ErrConflict, prerequisiteID)
 		}
 		observation := result.Observation.Normalized()
+		if containsFreshnessString(invalidation.ObservationIDs, observation.ObservationID) {
+			return fmt.Errorf("%w: prerequisite %q reuses a retired owner observation", common.ErrConflict, prerequisiteID)
+		}
 		for _, dependency := range observation.Dependencies {
+			if latest, found := latestAfter[dependency]; found && index <= latest {
+				continue
+			}
 			for _, invalidatedDependency := range invalidation.InvalidatedDependencies {
 				invalidatedDependency = invalidatedDependency.Normalized()
 				if dependency.Domain == invalidatedDependency.Domain && dependency.OwnerModuleID == invalidatedDependency.OwnerModuleID &&
 					dependency.SubjectRef == invalidatedDependency.SubjectRef && dependency.Revision == invalidatedDependency.Revision {
-					return fmt.Errorf("%w: prerequisite %q result retains an invalidated owner freshness dependency", common.ErrConflict, prerequisiteID)
+					return fmt.Errorf("%w: prerequisite %q result retains an invalidated owner freshness dependency %s/%s/%s@%s", common.ErrConflict, prerequisiteID, dependency.Domain, dependency.OwnerModuleID, dependency.SubjectRef, dependency.Revision)
 				}
 			}
 			if invalidation.Stale != nil {
@@ -519,6 +574,16 @@ func validatePrerequisiteResultFreshness(result PrerequisiteResult, invalidation
 		}
 	}
 	return nil
+}
+
+// An invalidation is an index, never independent receipt authority. The enclosing
+// aggregate gate validates these owner receipts against their sealed execution.
+func receiptProvesFreshnessChange(record runtimecontract.RuntimePrerequisiteInvalidationRecord, receipts map[string]runtimecontract.RuntimeOperationReceipt) bool {
+	if record.ReceiptHash == "" || len(record.ResourceChanges) == 0 {
+		return false
+	}
+	receipt, found := receipts[record.ReceiptHash]
+	return found && receipt.OperationID == record.OperationID && reflect.DeepEqual(receipt.ResourceChanges, record.ResourceChanges)
 }
 
 func containsFreshnessString(values []string, value string) bool {

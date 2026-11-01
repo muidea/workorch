@@ -100,17 +100,12 @@ func acquireRuntimeImplementationWorkScope(ctx context.Context, hub magicevent.H
 	// scope CAS freezes this same input for attempt 1 and process recovery.
 	if result.Selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected || result.Selection.Disposition == runtimecontract.RuntimeTargetSelectionScope {
 		content := &runtimecontract.RuntimeImplementationWorkContent{ProtocolRef: runtimecontract.RuntimeImplementationWorkContentV1, ManifestRevision: result.Selection.ObservedRevision}
-		remaining := runtimecontract.RuntimeImplementationWorkContentMaxBytes
 		for _, target := range result.Selection.TargetRefs {
-			if remaining <= 0 {
-				return observation, fmt.Errorf("implementation_work_content_capacity_exceeded: full target content not acquired")
-			}
-			snapshot, err := AcquireTargetSnapshotPrerequisite(ctx, hub, fileevents.AcquireTargetSnapshotCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.AuthoritySnapshotID, PrerequisiteID: request.RequestID, WorkspaceDeliverableDirectory: directory, TargetRef: target, MaxBytes: remaining})
+			snapshot, err := AcquireTargetSnapshotPrerequisite(ctx, hub, fileevents.AcquireTargetSnapshotCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.AuthoritySnapshotID, PrerequisiteID: request.RequestID, WorkspaceDeliverableDirectory: directory, TargetRef: target})
 			if err != nil {
 				return observation, fmt.Errorf("implementation_work_content_unavailable: %w", err)
 			}
 			content.Snapshots = append(content.Snapshots, snapshot.Snapshot)
-			remaining -= len(snapshot.Snapshot.Content)
 		}
 		fresh, err := AcquireWorkspaceManifestPrerequisite(ctx, hub, fileevents.AcquireWorkspaceManifestCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.AuthoritySnapshotID, PrerequisiteID: request.RequestID, WorkspaceDeliverableDirectory: directory})
 		if err != nil {

@@ -88,10 +88,10 @@ func TestImplementationWorkContentAndIntentAreExactOriginalInputs(t *testing.T) 
 	}
 }
 
-func TestImplementationWorkContentCapacityPreservesExactBytes(t *testing.T) {
+func TestImplementationWorkContentHasNoCumulativeWorkspaceByteCeiling(t *testing.T) {
 	for _, count := range []int{1, 4} {
 		for _, delta := range []int{-1, 0, 1} {
-			total := RuntimeImplementationWorkContentMaxBytes + delta
+			total := 128*1024 + delta
 			scope := RuntimeImplementationWorkScopeObservation{Selection: RuntimeTargetSelection{ObservedRevision: "fixed-tree"}}
 			content := RuntimeImplementationWorkContent{ProtocolRef: RuntimeImplementationWorkContentV1, ManifestRevision: "fixed-tree"}
 			remaining := total
@@ -103,7 +103,7 @@ func TestImplementationWorkContentCapacityPreservesExactBytes(t *testing.T) {
 				content.Snapshots = append(content.Snapshots, workContentSnapshot(target, strings.Repeat("x", size)))
 			}
 			err := content.Validate(scope)
-			if (err == nil) != (delta <= 0) {
+			if err != nil {
 				t.Fatalf("capacity count=%d bytes=%d: %v", count, total, err)
 			}
 			raw, _ := json.Marshal(content)

@@ -8101,7 +8101,7 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
 	baseRepository := runtimeStateRepository{hub: hub}
 	failingRepository := &failWhenRuntimeStateRepository{
-		RuntimeStateRepository: baseRepository, err: errors.New("injected owner receipt CAS failure"),
+		RuntimeStateRepository: baseRepository, err: &runtime.RuntimeOwnerTransientError{WorkspaceID: "ws-v2", RunID: "run-v2"},
 		match: func(aggregate runtime.RuntimeAggregate) bool {
 			if aggregate.ActiveDispatch == nil || len(aggregate.OperationReceipts) != 1 || aggregate.EvidenceSequence != 0 {
 				return false
@@ -8177,11 +8177,11 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 	}
 	func() {
 		defer func() {
-			if recovered := recover(); recovered != "runtime-test-crash-after-owner-receipt-commit-error" {
+			if recovered := recover(); recovered != "runtime-test-crash-after-owner-receipt" {
 				t.Fatalf("unexpected crash marker: %v", recovered)
 			}
 		}()
-		_, _ = crashingBiz.ExecuteRuntimeDispatch(ctx, "ws-v2", "run-v2", panicAfterOwnerReceiptCommitErrorExecutor{delegate: eventRuntimeOperationExecutor{hub: hub}})
+		_, _ = crashingBiz.ExecuteRuntimeDispatch(ctx, "ws-v2", "run-v2", panicAfterOwnerReceiptExecutor{delegate: eventRuntimeOperationExecutor{hub: hub}})
 		t.Fatal("expected injected receipt-CAS crash")
 	}()
 	if !failingRepository.failed {
@@ -8191,11 +8191,11 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 		t.Fatalf("durable side effect before restart content=%q err=%v", content, err)
 	}
 	crashed, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-	if err != nil || crashed.RuntimeState == nil || crashed.RuntimeState.ActiveDispatch == nil || len(crashed.RuntimeState.OperationReceipts) != 0 || crashed.RuntimeState.EvidenceSequence != 0 {
+	if err != nil || crashed.RuntimeState == nil || crashed.RuntimeState.ActiveDispatch == nil || len(crashed.RuntimeState.OperationReceipts) != 1 || crashed.RuntimeState.EvidenceSequence != 0 {
 		t.Fatalf("receipt-CAS crash persisted state=%+v err=%v", crashed, err)
 	}
 	claimed, found := runtimeDriveOperationExecutionRecord(crashed.RuntimeState.ActiveDispatch.OperationExecutions, operationID)
-	if !found || claimed.State != runtimecontract.OperationExecutionClaimed || claimed.Fence == 0 || claimed.ExecutionKey != sealedExecution.ExecutionKey || claimed.ReplayProof == nil {
+	if !found || claimed.State != runtimecontract.OperationExecutionOwnerCommitted || claimed.Fence == 0 || claimed.ExecutionKey != sealedExecution.ExecutionKey || claimed.ReplayProof == nil {
 		t.Fatalf("receipt-CAS crash lost claimed proof execution=%+v", claimed)
 	}
 
@@ -8211,9 +8211,9 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 	}
 	hub.Terminate(ctx)
 
-	// The replay-proof recovery is deliberately a new process. Its owner can
-	// execute only with the sealed key/fence/proof persisted before the receipt
-	// CAS loss; no old owner cache, responder or provider session survives.
+	// File redelivers the identical saved receipt after the typed transient CAS
+	// failure. Process loss then occurs before evidence settlement. Recovery uses
+	// the durable receipt and sealed key/fence/proof; no old owner cache survives.
 	restartedHub := magicevent.NewHub(32)
 	t.Cleanup(func() { restartedHub.Terminate(ctx) })
 	restartedRunOwner := runmodule.New()
@@ -8274,10 +8274,13 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 	})
 	completed, err := restartedBiz.ExecuteRuntimeDispatch(ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: restartedHub})
 	if err == nil {
+		completed, err = restartedModule.prepareRuntimePrerequisites(ctx, completed)
+	}
+	if err == nil {
 		completed = settleRuntimeOwnerApplicabilityForTest(t, ctx, restartedModule, completed)
 	}
-	if err != nil || completed.ActiveDispatch != nil || completed.Decision.State != runtimecontract.ConvergenceStateNeedAssessment || completed.Facts.Recovery.OperationRecoveryAttempts != 1 || len(completed.OperationReceipts) != 1 || len(completed.Facts.Evidence.Accepted) != 1 {
-		t.Fatalf("restart did not recover proof-bound receipt exactly once aggregate=%+v err=%v", completed, err)
+	if err != nil || completed.ActiveDispatch != nil || completed.Decision.State != runtimecontract.ConvergenceStateNeedAssessment || completed.Facts.Recovery.OperationRecoveryAttempts != 0 || len(completed.OperationReceipts) != 1 || len(completed.Facts.Evidence.Accepted) != 1 {
+		t.Fatalf("restart did not recover proof-bound receipt exactly once state=%s active=%t recovery=%d receipts=%d accepted=%d err=%v", completed.Decision.State, completed.ActiveDispatch != nil, completed.Facts.Recovery.OperationRecoveryAttempts, len(completed.OperationReceipts), len(completed.Facts.Evidence.Accepted), err)
 	}
 	receipt := completed.OperationReceipts[0]
 	if receipt.ExecutionKey != claimed.ExecutionKey || receipt.Fence != claimed.Fence || receipt.BeforeHash != claimed.ReplayProof.BeforeHash || receipt.AfterHash != claimed.ReplayProof.AfterHash {

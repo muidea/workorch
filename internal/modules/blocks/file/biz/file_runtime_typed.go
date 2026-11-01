@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -214,7 +215,7 @@ func (a *RuntimeAdapter) ListFiles(request FileListRequest) (FileListResult, err
 		}
 		item := FileListEntry{
 			Path: entryRef, Kind: fileKind(entryInfo), Size: entryInfo.Size(),
-			ModifiedAt: entryInfo.ModTime().UTC().Format("2006-01-02T15:04:05Z07:00"),
+			ModifiedAt: entryInfo.ModTime().UTC().Format(time.RFC3339Nano),
 		}
 		if !entryInfo.IsDir() && entryInfo.Mode()&os.ModeSymlink == 0 {
 			item.ContentHash, item.Binary, infoErr = streamHashAndType(resolved)
@@ -329,7 +330,7 @@ func (a *RuntimeAdapter) ReadFile(ctx context.Context, request FileReadRequest) 
 	ret := FileReadResult{
 		Status: "completed", Stage: "file_read", Path: targetRef, TargetRef: targetRef, Exists: true,
 		Content: content, ContentHash: scan.ContentHash, Size: info.Size(),
-		ModifiedAt: info.ModTime().UTC().Format("2006-01-02T15:04:05Z07:00"), LineCount: scan.LineCount,
+		ModifiedAt: info.ModTime().UTC().Format(time.RFC3339Nano), LineCount: scan.LineCount,
 		Truncated: truncated, Binary: isBinary, ContentComplete: contentComplete,
 		SafeForPatch: contentComplete && scan.Size > 0, SafeForFileWrite: contentComplete && scan.Size > 0,
 	}

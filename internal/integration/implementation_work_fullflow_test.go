@@ -302,7 +302,7 @@ func implementationWorkFullflowDeclareProject(t *testing.T, client *http.Client,
 	for _, value := range requirements {
 		r := value.(map[string]any)
 		if exhaustWork && r["scope"] == "dodItem" && r["implementationWorkPolicy"] != nil {
-			r["implementationWorkPolicy"].(map[string]any)["maxRoundsPerCWI"] = 2
+			r["implementationWorkPolicy"].(map[string]any)["maxRepeatedWorkStates"] = 2
 		}
 		policy = policy || (r["scope"] == "dodItem" && r["implementationWorkPolicy"] != nil)
 	}
@@ -439,7 +439,7 @@ func TestImplementationWorkFullflowUnsupportedCombinationStaysClosed(t *testing.
 	policy := runtimecontract.RuntimeImplementationWorkPolicy{
 		ProtocolRef: runtimecontract.RuntimeImplementationWorkProtocolV1, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		AllowedOperations: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileEdit}}, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
-		TargetSelectorRef: "file/unimplemented-fullflow-selector", TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "dodItem", MaxRoundsPerCWI: 2, MaxTargetsPerRound: 4, RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true,
+		TargetSelectorRef: "file/unimplemented-fullflow-selector", TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "dodItem", MaxRepeatedWorkStates: 2, MaxTargetsPerRound: 4, RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true,
 	}
 	if err := policy.Validate(); err != nil {
 		t.Fatalf("负例须是语法合法、执行不支持的 policy: %v", err)
@@ -751,14 +751,14 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 				p.workCWI = work.CoverageID
 			}
 			purpose := runtimecontract.RuntimeImplementationWorkPurposeTerminal
-			if work.CoverageID == p.workCWI && work.Ordinal <= 2 {
+			if work.CoverageID == p.workCWI && (work.Ordinal <= 2 || p.exhaustWork && work.EffectAvailable) {
 				if !work.EffectAvailable {
 					return nil, kind, fmt.Errorf("原 CWI 第%d轮 working effect 不可用", work.Ordinal)
 				}
 				purpose = runtimecontract.RuntimeImplementationWorkPurposeEffect
 			}
 			if p.exhaustWork && work.CoverageID == p.workCWI && !work.EffectAvailable {
-				purpose = runtimecontract.RuntimeImplementationWorkPurposeIncomplete
+				purpose = runtimecontract.RuntimeImplementationWorkPurposeStalled
 			}
 			p.workOrdinal = work.Ordinal
 			document["implementationPurpose"] = purpose
@@ -767,7 +767,7 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 				intent := runtimecontract.RuntimeImplementationIntent{DeclarationRef: decl.Declaration.Value, ContentHash: decl.Content.Value, RemainingWork: "scripted original requirement implementation or independent validation", Reason: "bounded deterministic fixture purpose bound to exact supplied content"}
 				if decl.Reviews != nil {
 					for _, ref := range decl.Reviews.Items.Properties.Ref.Values {
-						intent.RequirementReviews = append(intent.RequirementReviews, runtimecontract.RuntimeImplementationRequirementReview{RequirementRef: ref, WorkRequired: purpose == runtimecontract.RuntimeImplementationWorkPurposeEffect || purpose == runtimecontract.RuntimeImplementationWorkPurposeIncomplete})
+						intent.RequirementReviews = append(intent.RequirementReviews, runtimecontract.RuntimeImplementationRequirementReview{RequirementRef: ref, WorkRequired: purpose == runtimecontract.RuntimeImplementationWorkPurposeEffect || purpose == runtimecontract.RuntimeImplementationWorkPurposeStalled})
 						if purpose == runtimecontract.RuntimeImplementationWorkPurposeEffect {
 							intent.SelectedRequirementRefs = append(intent.SelectedRequirementRefs, ref)
 						}
@@ -775,10 +775,20 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 				}
 				if p := work.PreviousRound; p != nil {
 					intent.PreviousRoundReview = &runtimecontract.RuntimeImplementationRoundReview{DispatchID: p.DispatchID, ReceiptSetHash: p.ReceiptSetHash, Outcome: "addressed", Reason: "actual deterministic fixture change implements the preceding task"}
-					if purpose == runtimecontract.RuntimeImplementationWorkPurposeIncomplete {
+					if purpose == runtimecontract.RuntimeImplementationWorkPurposeStalled {
 						intent.PreviousRoundReview.Outcome = "partial"
 						intent.PreviousRoundReview.Reason = "the change returns 3 but original goal requires 4; implementation remains incomplete"
 					}
+				}
+				if !p.exhaustWork && purpose == runtimecontract.RuntimeImplementationWorkPurposeTerminal && work.CoverageID == p.workCWI && work.Ordinal == 3 {
+					// Exercise early independent checking of the ORIGINAL all-of proof.
+					// The real test fails on value 3, then existing repair and fresh validation
+					// produce value 4; this semantic review itself cannot grant any credit.
+					for n := range intent.RequirementReviews {
+						intent.RequirementReviews[n].WorkRequired = true
+					}
+					intent.PreviousRoundReview.Outcome = "partial"
+					intent.PreviousRoundReview.Reason = "preceding bounded effect is real but original behavior still needs independent checking"
 				}
 				document["implementationIntent"] = intent
 			}
@@ -793,8 +803,8 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 			switch {
 			case obligation.Work != nil:
 				work := obligation.Work
-				if work.CoverageID != p.workCWI || work.Ordinal < 1 || work.Ordinal > 2 {
-					return nil, kind, fmt.Errorf("working proof 非原两轮 CWI")
+				if work.CoverageID != p.workCWI || work.Ordinal < 1 || (!p.exhaustWork && work.Ordinal > 2) {
+					return nil, kind, fmt.Errorf("working proof 非原 CWI 或有效工作边界")
 				}
 				p.workOrdinal = work.Ordinal
 				proposal["ownerModuleId"], proposal["operationKind"] = runtimecontract.RuntimeModuleFile, runtimecontract.StepKindFileEdit
@@ -1138,7 +1148,11 @@ func (p *implementationWorkFullflowProvider) candidate(raw map[string]json.RawMe
 					}
 				}
 				old, new := "return 0", "return 1"
-				if p.workOrdinal == 2 {
+				if p.exhaustWork {
+					if p.workOrdinal%2 == 0 {
+						old, new = "return 1", "return 0"
+					}
+				} else if p.workOrdinal == 2 {
 					old, new = "return 1", "return 3"
 				}
 				if len(request.Context.Repair) != 0 && string(request.Context.Repair) != "null" {
@@ -1636,8 +1650,8 @@ func implementationWorkFullflowAssertDocuments(t *testing.T, state *runtimecontr
 }
 
 // The same public authoring/activation and real File owners must also close
-// honestly when a project-declared work budget ends before implementation.
-func TestImplementationWorkPublicAuthoringBudgetExhaustedFullFlow(t *testing.T) {
+// honestly when a project-declared repeated-state guard detects real cycles.
+func TestImplementationWorkPublicAuthoringRepeatedStateExhaustedFullFlow(t *testing.T) {
 	ctx, repos, provider, workspaceID, original, startupBytes, _ := implementationWorkFullflowActivate(t, true)
 	var run *runmodel.Run
 	for deadline := time.Now().Add(5 * time.Minute); time.Now().Before(deadline); {
@@ -1669,10 +1683,11 @@ func TestImplementationWorkPublicAuthoringBudgetExhaustedFullFlow(t *testing.T) 
 	if err := state.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if state.Facts.Failure == nil || state.Facts.Failure.Code != "implementation_work_budget_exhausted" || state.DefinitionClarification != nil || state.Decision.Terminal == nil || state.Decision.State != runtimecontract.ConvergenceStateFailed {
+	if state.Facts.Failure == nil || state.Facts.Failure.Code != "implementation_work_repeated_state_exhausted" || state.DefinitionClarification != nil || state.Decision.Terminal == nil || state.Decision.State != runtimecontract.ConvergenceStateFailed {
+		t.Logf("freshness invalidations: %+v; current observations: %+v", state.PrerequisiteInvalidations, state.Facts.Resources.PrerequisiteObservations)
 		t.Fatalf("wrong failure closure: %+v", state.Facts.Failure)
 	}
-	if len(state.ImplementationWork.Rounds) != 2 {
+	if len(state.ImplementationWork.Rounds) != 4 {
 		t.Fatal("factual observation reserved extra work")
 	}
 	for _, round := range state.ImplementationWork.Rounds {

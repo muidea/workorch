@@ -171,7 +171,7 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 	if strings.HasPrefix(mode, "input_revision") {
 		configureRuntimeInputRevisionMainline(&bootstrap)
 		if mode == "input_revision_exhausted" {
-			bootstrap.DefinitionFocuses[1].ImplementationWorkPolicy.MaxRoundsPerCWI = 1
+			bootstrap.DefinitionFocuses[1].ImplementationWorkPolicy.MaxInputRevisionsPerCWI = 1
 		}
 	}
 	bootstrap.Activation.EvidencePolicies[0].RecipeAdapterRef = options.Adapter

@@ -19,7 +19,7 @@ READINESS_CHECKS = (
     ("./internal/modules/kernel/orchestrator/biz/runtime", "^TestCWISuspension", "3m"),
     ("./internal/modules/kernel/orchestrator/biz", "^TestDriveRuntime(CWISuspension(RevalidatesOrdinaryPredecessorWithinOriginalBudget|ProcessRecovery)|DurableDispatchBudgetRejectsUndeclaredPredecessorRevalidation|AssertionFeedbackCannotInventPredecessorRevalidationAcrossRestart)$", None),
     ("./internal/pkg/workorchruntimecontract", "^Test(CoverageEvidenceBindingCannotConjoinIndependentValidationRecipes|ValidationObservationCannotBorrowPassedChecksAcrossRecipes)$", "3m"),
-    ("./internal/integration", "^TestImplementationWork(PublicAuthoringFullFlow|PublicAuthoringBudgetExhaustedFullFlow|FullflowUnsupportedCombinationStaysClosed|CommitEvidence.*)$", None),
+    ("./internal/integration", "^TestImplementationWork(PublicAuthoringFullFlow|PublicAuthoringRepeatedStateExhaustedFullFlow|FullflowUnsupportedCombinationStaysClosed|CommitEvidence.*)$", None),
 )
 
 
@@ -91,7 +91,7 @@ class ReleaseConvergenceGateTest(unittest.TestCase):
             ("fixed deadline", "-timeout=3m", "-timeout=15m"),
             ("required package", "./internal/pkg/workorchruntimecontract ", ""),
             ("public fullflow", "PublicAuthoringFullFlow|", ""),
-            ("budget fullflow", "PublicAuthoringBudgetExhaustedFullFlow|", ""),
+            ("repeated state fullflow", "PublicAuthoringRepeatedStateExhaustedFullFlow|", ""),
             ("fail closed", "FullflowUnsupportedCombinationStaysClosed|", ""),
             ("commit evidence", "|CommitEvidence.*", ""),
             ("failure mask", "-count=1", "-count=1 || true"),

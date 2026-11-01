@@ -24,7 +24,7 @@ func TestDefinitionAdmissionImplementationWorkUnavailableSurvivesReload(t *testi
 		AllowedOperations:     []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileWrite}},
 		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget},
 		TargetSelectorRef:     "work-scope", TargetSelectorOwnerRef: "profile/example", TargetSelectorSubjectRef: "implementation",
-		TargetSelectorCandidateRefs: []string{"resource-a"}, MaxRoundsPerCWI: 2, MaxTargetsPerRound: 1,
+		TargetSelectorCandidateRefs: []string{"resource-a"}, MaxRepeatedWorkStates: 2, MaxTargetsPerRound: 1,
 		RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true,
 	}
 	candidate := testAdmissionCandidate()

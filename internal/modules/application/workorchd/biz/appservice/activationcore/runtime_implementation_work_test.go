@@ -16,7 +16,7 @@ func definitionWorkPolicyForTest() runtimecontract.RuntimeImplementationWorkPoli
 		AllowedOperations:     []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileWrite}},
 		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget},
 		TargetSelectorRef:     "implementation", TargetSelectorOwnerRef: "profile", TargetSelectorSubjectRef: "work",
-		TargetSelectorCandidateRefs: []string{"resource-a"}, MaxRoundsPerCWI: 2, MaxTargetsPerRound: 1,
+		TargetSelectorCandidateRefs: []string{"resource-a"}, MaxRepeatedWorkStates: 2, MaxTargetsPerRound: 1,
 		RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true,
 	}
 }
@@ -133,7 +133,7 @@ func TestCompileRuntimeCoverageRejectsImplementationWorkConflictsAfterPolicyMerg
 	}}}}
 	activation := runtimecontract.RuntimeActivationContext{ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: profiles}}
 	changed := base.Clone()
-	changed.MaxRoundsPerCWI++
+	changed.MaxRepeatedWorkStates++
 	exact := profiles[0].EvidenceRequirements[0]
 	exact.ID, exact.ImplementationWorkPolicy = "dod-001", &changed
 	activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements = append(profiles[0].EvidenceRequirements, exact)

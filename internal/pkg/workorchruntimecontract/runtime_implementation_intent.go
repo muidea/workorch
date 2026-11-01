@@ -198,9 +198,6 @@ func validateImplementationRoundReview(i *RuntimeImplementationIntent, w *Runtim
 			if !found {
 				return fmt.Errorf("unfulfilled previous intent cannot disappear from original requirement gaps")
 			}
-			if len(i.SelectedRequirementRefs) != 0 && !slices.Contains(i.SelectedRequirementRefs, ref) {
-				return fmt.Errorf("new work must retain unfulfilled preceding intent requirement")
-			}
 		}
 	}
 	return nil
@@ -215,8 +212,8 @@ func sameImplementationIntentBinding(a, b *RuntimeImplementationWorkIntentBindin
 func RuntimeImplementationWorkObservationFailure(choice RuntimeImplementationWorkPurposeChoice, intent *RuntimeImplementationIntent) *FailureFact {
 	code := ""
 	switch choice.Purpose {
-	case RuntimeImplementationWorkPurposeIncomplete:
-		code = "implementation_work_budget_exhausted"
+	case RuntimeImplementationWorkPurposeStalled:
+		code = "implementation_work_repeated_state_exhausted"
 	case RuntimeImplementationWorkPurposeInconclusive:
 		code = "implementation_work_review_inconclusive"
 	default:
@@ -225,10 +222,12 @@ func RuntimeImplementationWorkObservationFailure(choice RuntimeImplementationWor
 	if intent == nil {
 		return nil
 	}
-	message := "implementation work budget exhausted with unresolved original requirements"
+	class := FailureClassNoProgressExhausted
+	message := "implementation work revisited the same complete resource state without resolving original requirements"
 	if choice.Purpose == RuntimeImplementationWorkPurposeInconclusive {
 		message = "implementation intent review could not establish a conclusive result"
+		class = FailureClassSemanticObservationInconclusive
 	}
-	return &FailureFact{Class: FailureClassNoProgressExhausted, Code: code, Signature: code + "/" + choice.SemanticManifestHash, Message: message,
+	return &FailureFact{Class: class, Code: code, Signature: code + "/" + choice.SemanticManifestHash, Message: message,
 		OriginalDiagnostic: &RuntimeOriginalDiagnostic{SchemaVersion: RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: RuntimeModuleLLM, OriginalClass: "implementation_work_observation", OriginalCode: string(choice.Purpose), OriginalMessage: intent.Reason, Signature: choice.DocumentHash}}
 }

@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	RuntimeImplementationWorkProtocolV1 = "runtime-implementation-work/v1"
-	MaxRuntimeImplementationWorkRounds  = 8
-	MaxRuntimeImplementationWorkTargets = 8
+	RuntimeImplementationWorkProtocolV1          = "runtime-implementation-work/v1"
+	MaxRuntimeImplementationGovernanceDispatches = 8
+	MaxRuntimeImplementationWorkTargets          = 8
 
 	// RuntimeImplementationWorkFileWorkspaceDeliverableSelectorRef identifies
 	// the bounded owner-backed implementation-work scope. Its presence does not
@@ -116,6 +116,7 @@ func implementationWorkProtocolSupported(policy RuntimeImplementationWorkPolicy)
 // route can open an exact reviewed input; ordinary work keeps it protected.
 type RuntimeImplementationWorkPolicy struct {
 	InputRevisionProtocolRef             string                         `json:"inputRevisionProtocolRef,omitempty"`
+	MaxInputRevisionsPerCWI              int                            `json:"maxInputRevisionsPerCWI,omitempty"`
 	ProtocolRef                          string                         `json:"protocolRef"`
 	OwnerModuleID                        string                         `json:"ownerModuleId"`
 	AllowedOperations                    []RuntimeOperationVariantRef   `json:"allowedOperations"`
@@ -125,7 +126,7 @@ type RuntimeImplementationWorkPolicy struct {
 	TargetSelectorSubjectRef             string                         `json:"targetSelectorSubjectRef"`
 	TargetSelectorCandidateRefs          []string                       `json:"targetSelectorCandidateRefs"`
 	ProspectiveTargetAllOfConstraintRefs []string                       `json:"prospectiveTargetAllOfConstraintRefs"`
-	MaxRoundsPerCWI                      int                            `json:"maxRoundsPerCWI"`
+	MaxRepeatedWorkStates                int                            `json:"maxRepeatedWorkStates"`
 	MaxTargetsPerRound                   int                            `json:"maxTargetsPerRound"`
 	RequireFreshObservation              bool                           `json:"requireFreshObservation"`
 	RequireFreshValidation               bool                           `json:"requireFreshValidation"`
@@ -191,6 +192,9 @@ func (p RuntimeImplementationWorkPolicy) Validate() error {
 	if p.InputRevisionProtocolRef != "" && p.InputRevisionProtocolRef != RuntimeValidationInputRevisionProtocolV1 {
 		return fmt.Errorf("unsupported input revision protocol")
 	}
+	if p.InputRevisionProtocolRef == "" && p.MaxInputRevisionsPerCWI != 0 || p.InputRevisionProtocolRef != "" && (p.MaxInputRevisionsPerCWI < 1 || p.MaxInputRevisionsPerCWI > 8) {
+		return fmt.Errorf("input revision requires its own declared limit in 1..8; ordinary implementation rounds do not consume it")
+	}
 
 	if p.ProtocolRef != RuntimeImplementationWorkProtocolV1 {
 		return fmt.Errorf("implementation work requires protocol %q", RuntimeImplementationWorkProtocolV1)
@@ -200,9 +204,9 @@ func (p RuntimeImplementationWorkPolicy) Validate() error {
 			return fmt.Errorf("implementation work requires bounded exact owner and declaration selector identities")
 		}
 	}
-	if p.MaxRoundsPerCWI < 1 || p.MaxRoundsPerCWI > MaxRuntimeImplementationWorkRounds ||
+	if p.MaxRepeatedWorkStates < 1 || p.MaxRepeatedWorkStates > 8 ||
 		p.MaxTargetsPerRound < 1 || p.MaxTargetsPerRound > MaxRuntimeImplementationWorkTargets {
-		return fmt.Errorf("implementation work requires finite rounds and targets in 1..8")
+		return fmt.Errorf("implementation work requires a repeated-state guard and per-transaction targets in 1..8")
 	}
 	if !p.RequireFreshObservation || !p.RequireFreshValidation || !p.ProtectValidationInputs {
 		return fmt.Errorf("implementation work requires fresh observation, fresh validation and validation-input protection")

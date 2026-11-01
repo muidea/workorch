@@ -79,12 +79,13 @@ func referenceWorkManifestCompiler(workspace common.WorkspaceID, run common.RunI
 }
 
 // referenceWorkPurposeCompiler 复用原 semantic 请求合同与预算。
-// Preview 不是 effect round；达到工作轮次上限仍可选择原 terminal proof。
+// Preview 不是 effect round；重复状态保护不影响选择原 terminal proof。
 func referenceWorkPurposeCompiler(workspace common.WorkspaceID, run common.RunID, definition RuntimeDefinitionContext, seed RuntimeDefinitionSeed, focuses []RuntimeDefinitionFocus, execution RuntimeExecutionContract, catalogs []RuntimeOperationAdmissibility, preview RuntimeImplementationWorkScopePreview, rounds []RuntimeImplementationWorkRound) (RuntimeSemanticPlanManifest, error) {
 	if preview.Observation == nil {
 		return RuntimeSemanticPlanManifest{}, fmt.Errorf("implementation purpose requires complete fresh scope preview")
 	}
 	ordinal, preceding := 1, ""
+	var previous *RuntimeImplementationRoundReviewSource
 	for _, prior := range rounds {
 		if prior.CoverageWorkItemID != preview.Request.CoverageWorkItemID {
 			continue
@@ -93,6 +94,11 @@ func referenceWorkPurposeCompiler(workspace common.WorkspaceID, run common.RunID
 			return RuntimeSemanticPlanManifest{}, fmt.Errorf("implementation purpose cannot bypass incomplete prior work")
 		}
 		ordinal, preceding = prior.Ordinal+1, prior.CompletedReceiptSetHash
+		var err error
+		previous, err = implementationRoundReviewSource(prior)
+		if err != nil {
+			return RuntimeSemanticPlanManifest{}, err
+		}
 	}
 	// 复用词汇编译器的来源校验；这个局部 value 从不入账、从不授 dispatch。
 	vocabularySource := RuntimeImplementationWorkRound{WorkspaceID: workspace, RunID: run, StartupInputHash: definition.StartupInputHash, DefinitionSeedHash: seed.Hash, CoverageWorkItemID: preview.Request.CoverageWorkItemID, PolicyHash: StableRuntimeImplementationWorkPolicyHash(preview.Request.Policy), Ordinal: 1, ScopeRequest: preview.Request.Clone(), ScopeObservation: preview.Observation}
@@ -102,8 +108,10 @@ func referenceWorkPurposeCompiler(workspace common.WorkspaceID, run common.RunID
 		return RuntimeSemanticPlanManifest{}, err
 	}
 	work := manifest.ProofObligations[0].ImplementationWork
-	work.PurposeChoiceOnly, work.EffectAvailable = true, ordinal <= preview.Request.Policy.MaxRoundsPerCWI
+	work.RepeatedWorkStates = RuntimeImplementationRepeatedWorkStates(preview, rounds)
+	work.PurposeChoiceOnly, work.EffectAvailable = true, work.RepeatedWorkStates < preview.Request.Policy.MaxRepeatedWorkStates
 	work.Ordinal, work.PrecedingReceiptSetHash = ordinal, preceding
+	work.PreviousRound = previous
 	work.RoundHash = implementationWorkRawHash("implementation-purpose-preview:", preview)
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
 	if err := manifest.Validate(); err != nil {

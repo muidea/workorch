@@ -60,6 +60,7 @@ type runtimeSemanticImplementationWorkProjection struct {
 	InputRevision           *runtimecontract.RuntimeValidationInputRevision         `json:"inputRevision,omitempty"`
 	CoverageWorkItemID      common.CoverageWorkItemID                               `json:"coverageWorkItemId"`
 	PurposeChoiceOnly       bool                                                    `json:"purposeChoiceOnly"`
+	RepeatedWorkStates      int                                                     `json:"repeatedWorkStates"`
 	EffectAvailable         bool                                                    `json:"effectAvailable"`
 	RoundHash               string                                                  `json:"roundHash"`
 	Ordinal                 int                                                     `json:"ordinal"`
@@ -100,7 +101,7 @@ func runtimeSemanticImplementationWorkForProvider(work *runtimecontract.RuntimeS
 		PreviousRound:      work.PreviousRound.Clone(),
 		CoverageWorkItemID: work.Scope.Request.CoverageWorkItemID,
 		InputRevision:      work.Scope.Request.InputRevision.Clone(),
-		PurposeChoiceOnly:  work.PurposeChoiceOnly, EffectAvailable: work.EffectAvailable,
+		PurposeChoiceOnly:  work.PurposeChoiceOnly, EffectAvailable: work.EffectAvailable, RepeatedWorkStates: work.RepeatedWorkStates,
 		RoundHash: work.RoundHash, Ordinal: work.Ordinal, PrecedingReceiptSetHash: work.PrecedingReceiptSetHash,
 		PolicyHash: work.PolicyHash, Policy: work.Scope.Request.Policy.Clone(),
 		ExcludedTargetRefs: append([]string(nil), work.ExcludedTargetRefs...),

@@ -7,8 +7,8 @@ import (
 
 // Original complete ledger path before scope compiler session reuse.
 func referenceWorkLedgerBeforeScopeSession(l RuntimeImplementationWorkLedger, s RuntimeImplementationWorkLedgerSources) error {
-	if !implementationWorkExactRef(s.StartupInputHash) || !implementationWorkExactRef(string(s.WorkspaceID)) || !implementationWorkExactRef(string(s.RunID)) || s.MaxRecords < 1 || len(l.Rounds) > s.MaxRecords {
-		return fmt.Errorf("implementation work ledger requires bounded exact startup sources")
+	if !implementationWorkExactRef(s.StartupInputHash) || !implementationWorkExactRef(string(s.WorkspaceID)) || !implementationWorkExactRef(string(s.RunID)) {
+		return fmt.Errorf("implementation work ledger requires exact startup sources")
 	}
 	if err := s.Seed.Validate(); err != nil {
 		return err
@@ -29,7 +29,7 @@ func referenceWorkLedgerBeforeScopeSession(l RuntimeImplementationWorkLedger, s 
 			return fmt.Errorf("implementation work ledger round escapes sealed startup")
 		}
 		scopeSources := RuntimeImplementationWorkScopeSources{WorkspaceID: s.WorkspaceID, RunID: s.RunID, AuthoritySnapshotID: r.ScopeRequest.AuthoritySnapshotID,
-			Seed: s.Seed, Focuses: s.Focuses, Profiles: s.Profiles, CoverageWorkItemID: r.CoverageWorkItemID, ManifestBinding: r.ScopeRequest.ManifestBinding}
+			Seed: s.Seed, Focuses: s.Focuses, Profiles: s.Profiles, CoverageWorkItemID: r.CoverageWorkItemID, ManifestBinding: r.ScopeRequest.ManifestBinding, InputRevision: r.ScopeRequest.InputRevision}
 		if err := referenceWorkScopeAgainstSources(r.ScopeRequest, scopeSources); err != nil {
 			return err
 		}

@@ -660,7 +660,7 @@ func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifes
 				if work.EffectAvailable {
 					purposes = append(purposes, string(RuntimeImplementationWorkPurposeEffect))
 				} else {
-					purposes = append(purposes, string(RuntimeImplementationWorkPurposeIncomplete))
+					purposes = append(purposes, string(RuntimeImplementationWorkPurposeStalled))
 				}
 				purposes = append(purposes, string(RuntimeImplementationWorkPurposeInconclusive))
 				properties["implementationPurpose"] = map[string]any{"type": "string", "enum": purposes}
@@ -736,7 +736,17 @@ func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifes
 			return "", fmt.Errorf("runtime semantic proof-batch schema proposals are missing")
 		}
 		proposals["minItems"] = len(coverageIDs)
-		proposals["maxItems"] = len(coverageIDs) * 2
+		maxProposals := 0
+		for _, coverageID := range batchCoverageIDs {
+			limit := 2 // Ordinary proof: one per terminal evidence kind.
+			for _, obligation := range manifest.ProofObligations {
+				if obligation.CoverageWorkItemID == coverageID && obligation.ImplementationWork != nil {
+					limit = obligation.ImplementationWork.Scope.Request.Policy.MaxTargetsPerRound
+				}
+			}
+			maxProposals += limit
+		}
+		proposals["maxItems"] = maxProposals
 		items, ok := proposals["items"].(map[string]any)
 		if !ok {
 			return "", fmt.Errorf("runtime semantic proof-batch schema proposal items are missing")

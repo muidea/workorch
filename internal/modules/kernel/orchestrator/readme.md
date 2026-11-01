@@ -1599,7 +1599,7 @@ SM-2 的 exact complete input-review conflict 私有事件保留旧 generation�
 待修订报告只允许真实 effect purpose，不允许 unchanged re-review 或借用 post-execution repair。未 opt-in 继续原 conflict 失败。
 
 File opt-in edit feasibility 预览同一 edit，核对原输入 before hash、变化后像；候选/最终 seal/dispatch reload 重核。
-仍使用原 MaxRoundsPerCWI、proof/provider/capability budget，真实 accepted receipt 零 CWI/validation credit；
+修订使用独立 `MaxInputRevisionsPerCWI`，普通开发不消耗该额度；proof/provider/capability budget 保留，真实 accepted receipt 零 CWI/validation credit；
 资源失效后取得真实当前输入，再独立审查、执行全部原 validation 和终态交付。未知、stale、预算不足或混合/歧义来源不放行。
 Core 不解释语言/框架/项目语义；具体改法来自原 Profile/project 和完整审查反馈。SM-1/4 不获新决策权。
 验证：input-revision 回归、input-review revision drive 回归，后者用真实 File/Shell/Run/Result/Workspace owner，
@@ -1615,7 +1615,7 @@ Found 或普通 response 均不授 effect/evidence/完成；驱动必须重读 R
 将它替换为推测底层原因。SM-1 不变、不复活 failed；SM-2 仅消费最终可信事实。
 
 工作 scope 使用唯一当前 `implementation-work-content/v1` exact 原文观察，内容是必需输入。生产 File adapter 在完整 scope target set
-中读取有界完整正文，并再次真实读 manifest 核对原 revision；容量 128 KiB、缺失/二进制/截断或漂移显式拒绝。
+中逐目标读取完整正文，并再次真实读 manifest 核对原 revision；各目标保留 File owner 的读取容量，缺失/二进制/截断或漂移显式拒绝。累计 workspace 正文不再受另一个 128 KiB 总量门禁约束；provider context/token 容量仍独立拒绝，不能静默截断。
 完整内容随原 scope private event/CAS 冻结，不借修订/重启重读另一个输入。旧封存 scope 不原地升级。
 `SemanticWorkContext` 从原同 CWI 完整 round、sealed dispatch/execution、可信 receipt/version 边和历史原用途理由编译 priorRounds，
 不受通用 16 receipt history suffix 遗漏影响，不另设完成账本。真实内容及 priorRounds 只进入 C4；C0-C2 和稳定前缀不变。
@@ -1623,7 +1623,7 @@ Found 或普通 response 均不授 effect/evidence/完成；驱动必须重读 R
 内容绑定请求封存 `semantic/shared-work`，用途文档只增加最小 typed `implementationIntent`：原 declarationRef、
 exact contentHash、remainingWork、reason。schema、strict decoder、document hash/clone、compiler 与 owner admission 一致。
 代码只检查身份、来源和有限形状；模型的理由不构成语义充分性、readiness、validation 或 CWI credit。
-原 Goal/DoD、Profile、protected inputs、8 轮/4 目标与普通独立验证均保持；业务差异继续在 Profile 和项目上下文。
+原 Goal/DoD、Profile、protected inputs、单次目标上限与普通独立验证均保持；累计轮次只作审计；业务差异继续在 Profile 和项目上下文。
 必要修复仍走既有 revision/repair/fresh validation，不强制切换终验、不把重复抽样直至 PASS 当成稳定性。
 
 ### Semantic history segments v1 and work receipt settlement
@@ -1645,11 +1645,11 @@ settlement error 后把 receipt 强行记成合法；真正缺原结果仍走原
 所有 source-ledger、working intent、输入修订/信息补充、assessment、binding preimage、
 budget 和 fresh-load 消费者按 `AllHistory()` 的全序访问完整正文。段滚动不退款、不去重或改变原封存预算；
 `runtime-execution-limits/v1` 的显式 proof batch 策略上界独立保持 17，不再从段大小派生。
-每 CWI 原工作轮次/目标限制及 provider/capability/recovery 预算保持，SM-1 生命周期不变。
+每轮目标限制及 provider/capability/recovery 预算保持，累计工作轮次不作为停止条件，SM-1 生命周期不变。
 这是一份记录内的分段存储，尚未减少总记录字节或启用延迟加载；仍须核对完整校验、clone 和 CAS 成本。
 
 `runtime_semantic_history_test.go` 覆盖段边界、完整正文/顺序/反例、clone/raw-clone、重载、scope 与不退额。
-`semantic_history_workflow_test.go` 在原 8 轮预算内通过真实 File owner、私有 event/CAS 和第 17 次退休，
+`semantic_history_workflow_test.go` 通过真实 File owner、33 轮私有 event/CAS、四次完整 history rollover 和第 67 次退休，
 随后以独立进程重读分段记录、重投 exact duplicate，证明零额外 CAS/effect/credit/预算。
 它不是公开 fullflow 或真实 provider 验收。进度只读投影将 Runtime 已提交回执、工作轮次、unknown、validation、
 CWI 和精确终态 ACK 分轴展示；owner 私存而未被 Runtime 接纳的物理 effect/receipt 不能从该投影推断。
@@ -1694,25 +1694,48 @@ Its `previousRound` supplies the original intent, affected complete before-conte
 receipt-set identities. Fresh complete after-content and trusted target receipts retain their existing sources. The typed
 `previousRoundReview` is mandatory and distinguishes `addressed`, `partial`, `diverged` and `inconclusive`; it is a semantic
 proposal rather than owner-proven semantic correctness. Partial/diverged original gaps cannot disappear or be silently
-replaced in the next effect selection. Receipt acceptance remains a physical fact, never a review, validation or CWI credit.
+removed from the original requirement review. The next selected work unit may address another original gap or necessary dependency; remaining gaps persist. Receipt acceptance remains a physical fact, never a review, validation or CWI credit.
 
-The purpose grammar separates truthful observations from permission to work. While effect allowance remains,
-`implementation_effect` reserves only one existing bounded round. With no proposed gaps, `terminal_proof` requests the
-original independent validation path; it does not assert project completion. At exhausted allowance,
-`implementation_incomplete` retains truthful original gaps and creates `implementation_work_budget_exhausted` failure
-through the existing reducer and delivery chain, without reserving work. `implementation_inconclusive` selects no effects
-and closes as `implementation_work_review_inconclusive`; it cannot claim addressed work. Both preserve the accepted original
-semantic document. Exhausted-purpose `semantic_ambiguity` is rejected as `implementation_work_exhausted_review_missing`
+The purpose grammar separates observations from permission to work. There is no cumulative work-round allowance.
+`MaxRepeatedWorkStates` bounds visits to the same complete original-CWI resource state, independently of ordinal.
+The compiler derives `RepeatedWorkStates` from completed original rounds and full target bytes, ignoring request IDs,
+mtime/tree revisions and model explanations; fresh-load independently recompiles it from prior collective receipts.
+Different actual contents do not consume that repeated-state guard. It detects physical state cycles, not arbitrary
+semantic wheel-spinning through different states; original provider/token/capability budgets remain mandatory.
+`implementation_effect` reserves one bounded transaction. Its proof batch may combine independently feasible
+create/edit proposals with the same `state_change` kind; the complete working proof-set gate checks unique disjoint
+targets, the collective target bound, exact owner policy and protected inputs. The request schema uses that same
+per-transaction bound. Ordinary terminal proof still allows only one proof per evidence kind and CWI. `terminal_proof` may request the original independent all-of
+validation while truthfully retaining known gaps; it is neither a readiness declaration nor weaker partial acceptance.
+Real validation failures still need exact owner-grounded repair and fresh validation. At repeated-state exhaustion,
+`implementation_stalled` preserves unresolved originals and creates `implementation_work_repeated_state_exhausted`
+without reserving work. `implementation_inconclusive` selects no effects and closes as
+`implementation_work_review_inconclusive`, class `semantic_observation_inconclusive`; it is not mislabeled no-progress.
+Both preserve the accepted original semantic document. Exhausted-purpose `semantic_ambiguity` is rejected as
+`implementation_work_exhausted_review_missing`
 at pure admission, private persistence and ticket I/O; it cannot instruct users to alter Goal merely to resolve this internal
 conflict. Genuine alternatives/prerequisite gaps retain their existing admission rules.
 
 SM-2 validates sources, consumes observations and seals existing failure authority atomically. SM-3 preserves the bound
 intent and exact review identities in existing transactions. SM-4 only re-drives those persisted transactions and delivers
 the judged outcome; SM-1 ownership and lifecycle states are unchanged. Ordinary validation, exact repair, all-of CWI
-convergence and Result/Workspace/Run ACK remain mandatory for success. Original round/target, provider, capability and repair
-budgets are unchanged. Existing Runs are never backfilled, migrated, unlocked or granted new rounds.
+convergence and Result/Workspace/Run ACK remain mandatory for success. Single-transaction target, provider, capability and repair budgets remain. Input-review revisions have their own sealed
+`MaxInputRevisionsPerCWI` and reload count; completed ordinary work does not spend that allowance. There is no `8*CWI`
+round/choice ledger capacity or lineage minimum upper bound. Governance dispatch handoffs keep their separate
+`MaxRuntimeImplementationGovernanceDispatches`. Existing Runs are never backfilled, migrated, unlocked or granted new policy.
 
-Progress projections expose current intent, last review and focus-scoped round allowance separately from physical receipts,
-ordinary validation and CWI satisfaction. Their clones are detached and confer no authority. Complete content capacity stays
-128KiB with explicit refusal beyond the boundary; provider ceilings remain independently enforced. No truncation, global
-business-context sharing, profile version switch or domain-specific semantic heuristic is added.
+Progress projections expose current intent, last review, cumulative rounds and the distinct repeated-state guard,
+separately from physical receipts, ordinary validation, CWI satisfaction and real execution budgets. Their detached
+clones confer no authority. File per-target read, complete owner inventory and provider context capacities stay explicit; cumulative workspace
+content has no additional 128 KiB ceiling. Complete history is retained in existing segments and shared-work local
+references; no suffix replaces source history. No truncation, global business-context sharing, profile version switch
+or domain-specific semantic heuristic is added.
+
+Receipt-proven resource rollback may legitimately return to an earlier content hash. Prerequisite reacquisition may
+consume the latest trusted after-image, but never a retired observation ID, an older delayed observation, or a value
+superseded by a later stale finding. File manifest mtimes retain nanosecond precision to distinguish subsecond changes.
+These are SM-2 freshness and capability observation corrections; SM-4 still only re-drives persisted work. They neither
+modify receipt history nor revive failed Runs.
+
+
+长任务中的前置条件失效记录保留原追加因果顺序，不能按签名排序。前置条件已经 pending 时，后继 owner 回执的 resource changes 仍保全于原索引；CAS 禁止重排、改写或删除既有记录。合法资源回退的 fresh observation 仅能依真实 owner receipt 的完整来源匹配恢复，不能复活 retired observation 或忽略更晚的 stale 事实。该索引不提供 validation 或终态 credit。

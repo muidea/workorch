@@ -149,6 +149,38 @@ func (r *implementationWorkDetachedRepository) Load(ctx context.Context, workspa
 	return detached, nil
 }
 
+// Exercise the production owner-local compiler with independently decoded raw
+// DTO and aggregate inputs. Every query and transition still reloads and runs
+// the complete gates; no validation credential is retained by the fixture.
+func (r *implementationWorkDetachedRepository) LoadOwnerStateOriginal(ctx context.Context, workspace common.WorkspaceID, run common.RunID) (runtimecontract.RuntimeStateRecord, RuntimeAggregate, error) {
+	value, err := r.controllerRepository.Load(ctx, workspace, run)
+	if err != nil {
+		return runtimecontract.RuntimeStateRecord{}, RuntimeAggregate{}, err
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return runtimecontract.RuntimeStateRecord{}, RuntimeAggregate{}, err
+	}
+	var raw runtimecontract.RuntimeStateRecord
+	var aggregate RuntimeAggregate
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return raw, aggregate, err
+	}
+	if err := json.Unmarshal(data, &aggregate); err != nil {
+		return raw, aggregate, err
+	}
+	return raw, aggregate, nil
+}
+
+func (r *implementationWorkDetachedRepository) LoadTransitionPreimage(ctx context.Context, request RuntimeTransitionPreimageRequest) (RuntimeTransitionPreimage, error) {
+	workspace, run, _ := request.Scope()
+	raw, aggregate, err := r.LoadOwnerStateOriginal(ctx, workspace, run)
+	if err != nil {
+		return RuntimeTransitionPreimage{}, err
+	}
+	return request.CompileOwnerRecord(raw, aggregate)
+}
+
 // 完整 private Controller/CAS fixture；不是公开 Workspace admission 成功正例。
 func implementationWorkPurposeController(t *testing.T, targetOptions ...[]string) (*RuntimeController, *implementationWorkDetachedRepository, RuntimeAggregate) {
 	t.Helper()
@@ -159,14 +191,14 @@ func implementationWorkPurposeController(t *testing.T, targetOptions ...[]string
 	return implementationWorkPurposeControllerWithLineage(t, targets, nil)
 }
 
-func implementationWorkPurposeControllerWithLineage(t *testing.T, targets []string, rules []runtimecontract.RuntimeLineageAssertionRule, roundLimits ...int) (*RuntimeController, *implementationWorkDetachedRepository, RuntimeAggregate) {
+func implementationWorkPurposeControllerWithLineage(t *testing.T, targets []string, rules []runtimecontract.RuntimeLineageAssertionRule, repetitionLimits ...int) (*RuntimeController, *implementationWorkDetachedRepository, RuntimeAggregate) {
 	t.Helper()
 	facts := controllerFacts()
-	maxRounds := 2
-	if len(roundLimits) > 0 && roundLimits[0] > 0 {
-		maxRounds = roundLimits[0]
+	maxRepeatedStates := 2
+	if len(repetitionLimits) > 0 && repetitionLimits[0] > 0 {
+		maxRepeatedStates = repetitionLimits[0]
 	}
-	policy := runtimecontract.RuntimeImplementationWorkPolicy{ProtocolRef: runtimecontract.RuntimeImplementationWorkProtocolV1, OwnerModuleID: runtimecontract.RuntimeModuleFile, AllowedOperations: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileWrite}}, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope}, TargetSelectorRef: "work-scope", TargetSelectorOwnerRef: "profile/work-test", TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: targets, MaxRoundsPerCWI: maxRounds, MaxTargetsPerRound: len(targets), RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true}
+	policy := runtimecontract.RuntimeImplementationWorkPolicy{ProtocolRef: runtimecontract.RuntimeImplementationWorkProtocolV1, OwnerModuleID: runtimecontract.RuntimeModuleFile, AllowedOperations: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileWrite}}, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope}, TargetSelectorRef: "work-scope", TargetSelectorOwnerRef: "profile/work-test", TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: targets, MaxRepeatedWorkStates: maxRepeatedStates, MaxTargetsPerRound: len(targets), RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true}
 	facts.Activation.ExecutionContract.ProfileContracts = []runtimecontract.RuntimeProfileContract{{ID: "work-test", EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{ID: "*", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ImplementationWorkPolicy: &policy}}}}
 	facts.DefinitionFocuses[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	facts.DefinitionFocuses[0].AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
@@ -230,14 +262,15 @@ func TestImplementationWorkPurposeFirstPrivateCASAndTerminalEntry(t *testing.T) 
 }
 
 type implementationWorkRealFileFixture struct {
-	progress     bool
-	maxRounds    int
-	hub          magicevent.Hub
-	directory    string
-	controller   *RuntimeController
-	repository   *implementationWorkDetachedRepository
-	aggregate    *RuntimeAggregate
-	lineageRules []runtimecontract.RuntimeLineageAssertionRule
+	contentForRound   func(int) string
+	progress          bool
+	maxRepeatedStates int
+	hub               magicevent.Hub
+	directory         string
+	controller        *RuntimeController
+	repository        *implementationWorkDetachedRepository
+	aggregate         *RuntimeAggregate
+	lineageRules      []runtimecontract.RuntimeLineageAssertionRule
 }
 
 func (f *implementationWorkRealFileFixture) send(t *testing.T, topic string, command any) any {
@@ -545,11 +578,11 @@ func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.Run
 	if owner != nil {
 		rules = owner.lineageRules
 	}
-	maxRounds := 2
-	if owner != nil && owner.maxRounds > 0 {
-		maxRounds = owner.maxRounds
+	maxRepeatedStates := 2
+	if owner != nil && owner.maxRepeatedStates > 0 {
+		maxRepeatedStates = owner.maxRepeatedStates
 	}
-	controller, repository, aggregate := implementationWorkPurposeControllerWithLineage(t, targets, rules, maxRounds)
+	controller, repository, aggregate := implementationWorkPurposeControllerWithLineage(t, targets, rules, maxRepeatedStates)
 	if owner != nil {
 		controller, repository, aggregate = owner.current(t, aggregate)
 	}
@@ -573,9 +606,8 @@ func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.Run
 		if repository.saves != beforeSaves+1 {
 			t.Fatalf("%s did not use one CAS", event.Kind)
 		}
-		if err := aggregate.Validate(); err != nil {
-			t.Fatal(err)
-		}
+		// The fresh owner query below runs the production complete DTO and
+		// aggregate gates, then compares every field with the event after-image.
 		fresh, err := controller.Load(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 		if err != nil || !reflect.DeepEqual(fresh, aggregate) {
 			t.Fatalf("fresh full aggregate reload after %s: %v; first mismatch %s", event.Kind, err, implementationWorkFirstDifference(reflect.ValueOf(fresh), reflect.ValueOf(aggregate), "aggregate"))
@@ -620,14 +652,14 @@ func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.Run
 		work := obligation.ImplementationWork
 		intent := &runtimecontract.RuntimeImplementationIntent{DeclarationRef: obligation.DeclarationRef, ContentHash: work.Scope.Content.Hash(), RemainingWork: "scripted minimal original requirement work or independent verification", Reason: "compare exact current content with original obligation"}
 		for _, ref := range runtimecontract.RuntimeImplementationRequirementRefs(manifest, *work, obligation.DeclarationRef) {
-			intent.RequirementReviews = append(intent.RequirementReviews, runtimecontract.RuntimeImplementationRequirementReview{RequirementRef: ref, WorkRequired: purpose == runtimecontract.RuntimeImplementationWorkPurposeEffect || purpose == runtimecontract.RuntimeImplementationWorkPurposeIncomplete})
+			intent.RequirementReviews = append(intent.RequirementReviews, runtimecontract.RuntimeImplementationRequirementReview{RequirementRef: ref, WorkRequired: purpose == runtimecontract.RuntimeImplementationWorkPurposeEffect || purpose == runtimecontract.RuntimeImplementationWorkPurposeStalled})
 			if purpose == runtimecontract.RuntimeImplementationWorkPurposeEffect {
 				intent.SelectedRequirementRefs = append(intent.SelectedRequirementRefs, ref)
 			}
 		}
 		if p := work.PreviousRound; p != nil {
 			intent.PreviousRoundReview = &runtimecontract.RuntimeImplementationRoundReview{DispatchID: p.DispatchID, ReceiptSetHash: p.ReceiptSetHash, Outcome: "addressed", Reason: "fixture actual effect implements the preceding bounded task"}
-			if purpose == runtimecontract.RuntimeImplementationWorkPurposeIncomplete {
+			if purpose == runtimecontract.RuntimeImplementationWorkPurposeStalled {
 				intent.PreviousRoundReview.Outcome = "partial"
 				intent.PreviousRoundReview.Reason = "receipt is accepted but original implementation remains incomplete"
 			}
@@ -724,6 +756,9 @@ func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.Run
 					t.Fatal(readErr)
 				}
 				oldText, newText := string(data), fmt.Sprintf("实际工作内容-%d", priorRounds+1)
+				if owner.contentForRound != nil {
+					newText = owner.contentForRound(priorRounds + 1)
+				}
 				operation.Kind = runtimecontract.StepKindFileEdit
 				sum := sha256.Sum256(data)
 				baseHash := hex.EncodeToString(sum[:])

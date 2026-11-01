@@ -30,8 +30,8 @@ func TestDriveRuntimeInputReviewRevisionOriginalCWIBudgetExhaustion(t *testing.T
 }
 
 func configureRuntimeInputRevisionMainline(b *runtimecontract.RuntimeBootstrap) {
-	p := &runtimecontract.RuntimeImplementationWorkPolicy{ProtocolRef: runtimecontract.RuntimeImplementationWorkProtocolV1, InputRevisionProtocolRef: runtimecontract.RuntimeValidationInputRevisionProtocolV1, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-		AllowedOperations: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileEdit}}, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope}, TargetSelectorRef: runtimecontract.RuntimeImplementationWorkFileWorkspaceDeliverableSelectorRef, TargetSelectorOwnerRef: "profile/revision", TargetSelectorSubjectRef: "original-input", MaxRoundsPerCWI: 2, MaxTargetsPerRound: 1, RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true}
+	p := &runtimecontract.RuntimeImplementationWorkPolicy{ProtocolRef: runtimecontract.RuntimeImplementationWorkProtocolV1, InputRevisionProtocolRef: runtimecontract.RuntimeValidationInputRevisionProtocolV1, MaxInputRevisionsPerCWI: 2, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		AllowedOperations: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileEdit}}, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope}, TargetSelectorRef: runtimecontract.RuntimeImplementationWorkFileWorkspaceDeliverableSelectorRef, TargetSelectorOwnerRef: "profile/revision", TargetSelectorSubjectRef: "original-input", MaxRepeatedWorkStates: 2, MaxTargetsPerRound: 1, RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true}
 	b.DefinitionFocuses[1].ImplementationWorkPolicy = p
 	b.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[1].ImplementationWorkPolicy = p
 }

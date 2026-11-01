@@ -161,6 +161,8 @@ Production path is **Runtime only** (`DriveRuntime` + reducer + sealed dispatch)
 
 Core runtime must remain functionally neutral. Do not hard-code software development, language stacks, test frameworks, MCP-specific behavior, or business-domain logic into orchestrator core. Put feature behavior in profile, capability, template, or adapter layers. Cross-owner I/O must use EventHub + concrete typed command/result.
 
+长任务的有效增量实施不设置内建累计轮数停止条件。Ordinal、CAS 和真实版本边保留为审计证据；单次目标大小、重复状态、语义纠正、输入修订、恢复/修复与真实资源预算分别约束，不借用累计工作轮数代替无进展判定。不能把 receipt、文件变化或模型 partial/addressed 单独当作验收 credit。通用框架保护保持业务中立，Profile/项目差异仍在各自上下文。
+
 Keep the provider-facing LLM cache prefix stable: long-lived system/schema/runtime contracts in `C0`, Goal/DoD definitions in `C1`, declarative capability/governance contracts in `C2`, volatile runtime details in `C3`–`C5`. Treat unexpected `stablePrefixHash` drift as a request rendering bug.
 
 ### LLM 处理稳定性：后续开发与优化的核心约束

@@ -305,9 +305,10 @@ type RuntimePrerequisiteInvalidationRecord struct {
 	DispatchID              string
 	OperationID             string
 	ReceiptHash             string
-	// ResourceChanges preserve the owner-observed source of a receipt-driven
-	// invalidation for audit/read projections. They do not participate in the
-	// reducer beyond the receipt's already-completed exact intersection.
+	// ResourceChanges preserve the ordered owner-observed receipt edges, even
+	// while all affected observations are already pending. Freshness admission
+	// must reverse-prove each edge against the actual receipt before using its
+	// after-image; this index is never independent resource authority.
 	ResourceChanges   []RuntimeResourceChange
 	Stale             *RuntimePrerequisiteStale
 	RefreshDiagnostic *RuntimeOriginalDiagnostic
@@ -332,7 +333,8 @@ func (r RuntimePrerequisiteInvalidationRecord) Normalized() RuntimePrerequisiteI
 
 func (r RuntimePrerequisiteInvalidationRecord) Validate() error {
 	r = r.Normalized()
-	if r.Signature == "" || len(r.PrerequisiteIDs) == 0 || len(r.ObservationIDs) == 0 {
+	if r.Signature == "" || (len(r.PrerequisiteIDs) == 0) != (len(r.ObservationIDs) == 0) ||
+		(len(r.PrerequisiteIDs) == 0 && (len(r.InvalidatedDependencies) != 0 || r.Stale != nil || r.RefreshDiagnostic != nil || r.ReceiptHash == "" || len(r.ResourceChanges) == 0)) {
 		return fmt.Errorf("runtime prerequisite invalidation requires signature and affected observations")
 	}
 	if r.Stale != nil {
@@ -366,22 +368,22 @@ func (r RuntimePrerequisiteInvalidationRecord) Validate() error {
 	return nil
 }
 
+// Preserve the original append order. Receipt after-images and later stale
+// findings have causal meaning; signature order is only an identity order.
 func NormalizeRuntimePrerequisiteInvalidations(values []RuntimePrerequisiteInvalidationRecord) []RuntimePrerequisiteInvalidationRecord {
-	bySignature := make(map[string]RuntimePrerequisiteInvalidationRecord, len(values))
+	positions := make(map[string]int, len(values))
+	ret := make([]RuntimePrerequisiteInvalidationRecord, 0, len(values))
 	for _, value := range values {
 		value = value.Normalized()
-		if value.Signature != "" {
-			bySignature[value.Signature] = value
+		if value.Signature == "" {
+			continue
 		}
-	}
-	keys := make([]string, 0, len(bySignature))
-	for key := range bySignature {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	ret := make([]RuntimePrerequisiteInvalidationRecord, 0, len(keys))
-	for _, key := range keys {
-		ret = append(ret, bySignature[key])
+		if index, found := positions[value.Signature]; found {
+			ret[index] = value
+			continue
+		}
+		positions[value.Signature] = len(ret)
+		ret = append(ret, value)
 	}
 	return nilIfEmpty(ret)
 }

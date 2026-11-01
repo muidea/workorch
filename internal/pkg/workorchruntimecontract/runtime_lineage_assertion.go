@@ -138,7 +138,7 @@ func (r RuntimeLineageAssertionRule) Validate() error {
 	}
 	switch r.Kind {
 	case RuntimeLineageCompletedWorkRounds:
-		if r.ConsumptionPoint != RuntimeProofPhaseExecution || r.MinCompletedRounds < 1 || r.MinCompletedRounds > MaxRuntimeImplementationWorkRounds || r.OwnerModuleID != "" || r.OperationKind != "" || r.OperationVariantID != "" || r.RequiredEffectScope != "" {
+		if r.ConsumptionPoint != RuntimeProofPhaseExecution || r.MinCompletedRounds < 1 || r.OwnerModuleID != "" || r.OperationKind != "" || r.OperationVariantID != "" || r.RequiredEffectScope != "" {
 			return fmt.Errorf("completed work assertion requires bounded rounds and execution phase only")
 		}
 	case RuntimeLineageRepairThenFreshValidation:

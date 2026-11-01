@@ -289,7 +289,8 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 					command := event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand)
 					next, receipt, commitErr := runtimeTestControllerCommitOperationReceipt(receiptController, event.Context(), command.WorkspaceID, command.RunID, command.DispatchID, command.Fence, event.Source(), command.Receipt)
 					if commitErr != nil {
-						result.Set(nil, runtimeOperationMagicFailure(commitErr))
+						var transient *runtime.RuntimeOwnerTransientError
+						result.Set(nil, runtimeOperationMagicFailure(&runtimecontract.RuntimeReceiptDeliveryError{Retryable: errors.As(commitErr, &transient), Cause: commitErr}))
 						return
 					}
 					result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: receipt, StateRevision: next.StateRevision}, nil)
@@ -485,7 +486,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				}
 				sealedPatchOperationID := sealedPatch.ActiveDispatch.Candidate.StateChange.Operations[0].Operation.ID
 				failingPatchController, err := runtime.NewRuntimeController(&failWhenRuntimeStateRepository{
-					RuntimeStateRepository: repository, err: errors.New("injected grounded File receipt CAS failure"),
+					RuntimeStateRepository: repository, err: &runtime.RuntimeOwnerTransientError{WorkspaceID: "ws-v2", RunID: "run-v2"},
 					match: func(next runtime.RuntimeAggregate) bool {
 						return len(next.OperationReceipts) == 2 && next.ActiveDispatch != nil && next.ActiveDispatch.ID == sealedPatch.ActiveDispatch.ID
 					},
@@ -496,18 +497,18 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				receiptController = failingPatchController
 				func() {
 					defer func() {
-						if recovered := recover(); recovered != "runtime-test-crash-after-owner-receipt-commit-error" {
+						if recovered := recover(); recovered != "runtime-test-crash-after-owner-receipt" {
 							t.Fatalf("unexpected grounded File receipt crash marker: %v", recovered)
 						}
 					}()
-					_, _ = runtimeTestControllerExecuteDispatch(restarted, ctx, "ws-v2", "run-v2", panicAfterOwnerReceiptCommitErrorExecutor{delegate: eventRuntimeOperationExecutor{hub: hub}})
+					_, _ = runtimeTestControllerExecuteDispatch(restarted, ctx, "ws-v2", "run-v2", panicAfterOwnerReceiptExecutor{delegate: eventRuntimeOperationExecutor{hub: hub}})
 					t.Fatal("expected crash after MCP-grounded File receipt CAS failure")
 				}()
 				if content, readErr := os.ReadFile(filepath.Join(deliverable, target)); readErr != nil || string(content) != variant.want {
 					t.Fatalf("grounded File durable effect before restart=%q err=%v", content, readErr)
 				}
 				crashedPatch, err := repository.Load(ctx, "ws-v2", "run-v2")
-				if err != nil || crashedPatch.ActiveDispatch == nil || len(crashedPatch.OperationReceipts) != 1 || len(crashedPatch.Facts.Evidence.Accepted) != 0 {
+				if err != nil || crashedPatch.ActiveDispatch == nil || len(crashedPatch.OperationReceipts) != 2 || len(crashedPatch.Facts.Evidence.Accepted) != 0 {
 					t.Fatalf("grounded File receipt-CAS crash persisted wrong aggregate=%+v err=%v", crashedPatch, err)
 				}
 				patchExecution, found := runtimeDriveOperationExecutionRecord(crashedPatch.ActiveDispatch.OperationExecutions, sealedPatchOperationID)

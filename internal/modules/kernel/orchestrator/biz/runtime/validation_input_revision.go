@@ -25,16 +25,27 @@ func retireRuntimeInputReviewForRevision(a RuntimeAggregate) (RuntimeAggregate, 
 	if a.ActiveDispatch != nil || a.Facts.Failure != nil || a.Facts.RepairDirective != nil || a.ImplementationWork.ScopePreview != nil || a.Termination != nil || len(a.Facts.Focus.CoverageWorkItemIDs) != 1 || a.Facts.Focus.CoverageWorkItemIDs[0] != v.Binding.CoverageWorkItemID || !slices.Contains(runtimecontract.RuntimeCWIsEligibleForPlanning(a.Facts), v.Binding.CoverageWorkItemID) {
 		return a, false, nil
 	}
-	rounds := 0
 	for _, r := range a.ImplementationWork.Rounds {
 		if r.CoverageWorkItemID == v.Binding.CoverageWorkItemID {
 			if r.CompletedReceiptSetHash == "" || r.FailedReceiptHash != "" {
 				return a, false, nil
 			}
-			rounds++
 		}
 	}
-	if rounds >= policy.MaxRoundsPerCWI {
+	revisions := 0
+	for _, prior := range a.SemanticPlanning.AllHistory() {
+		if prior.Reason != runtimecontract.RuntimeSemanticPlanningRetirementInputRevision {
+			continue
+		}
+		original, err := runtimecontract.CompileRuntimeValidationInputRevision(prior.Snapshot)
+		if err != nil {
+			return a, false, err
+		}
+		if original.Binding.CoverageWorkItemID == v.Binding.CoverageWorkItemID {
+			revisions++
+		}
+	}
+	if revisions >= policy.MaxInputRevisionsPerCWI {
 		return a, false, nil
 	}
 	if pending, e := runtimecontract.PendingRuntimeValidationInputRevision(a.SemanticPlanning, a.ImplementationWork, v.Binding.CoverageWorkItemID); e != nil || pending != nil {

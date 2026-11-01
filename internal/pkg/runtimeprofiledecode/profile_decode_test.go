@@ -17,7 +17,7 @@ func TestDecodePreservesNestedProfileContractValues(t *testing.T) {
 		"allowedOperations":     []any{map[string]any{"kind": "operation", "variantId": "variant"}},
 		"allowedTargetPolicies": []any{"existing"}, "targetSelectorRef": "selector", "targetSelectorOwnerRef": "selector-owner",
 		"targetSelectorSubjectRef": "selector-subject", "targetSelectorCandidateRefs": []any{"candidate"},
-		"prospectiveTargetAllOfConstraintRefs": []any{"constraint"}, "maxRoundsPerCWI": 2, "maxTargetsPerRound": 3,
+		"prospectiveTargetAllOfConstraintRefs": []any{"constraint"}, "maxRepeatedWorkStates": 2, "maxTargetsPerRound": 3, "maxInputRevisionsPerCWI": 4,
 		"requireFreshObservation": true, "requireFreshValidation": true, "protectValidationInputs": true,
 	}
 	convergence := map[string]any{
@@ -101,5 +101,12 @@ func TestProfileShapeRejectsRetiredProgressVersionSwitch(t *testing.T) {
 				t.Fatalf("retired management field %s accepted", field)
 			}
 		})
+	}
+}
+
+func TestImplementationWorkPolicyRejectsRetiredCumulativeRoundField(t *testing.T) {
+	object := map[string]any{"maxRoundsPerCWI": 8}
+	if err := ValidateObject(object, "implementationWork", "test"); err == nil {
+		t.Fatal("retired cumulative policy silently accepted")
 	}
 }

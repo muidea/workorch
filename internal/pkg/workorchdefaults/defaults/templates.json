@@ -1016,8 +1016,9 @@
                   "workspace-relative-path",
                   "new-target-requires-owner-selector"
                 ],
-                "maxRoundsPerCWI": 8,
+                "maxRepeatedWorkStates": 2,
                 "inputRevisionProtocolRef": "validation/input-revision/v1",
+                "maxInputRevisionsPerCWI": 4,
                 "maxTargetsPerRound": 4,
                 "requireFreshObservation": true,
                 "requireFreshValidation": true,

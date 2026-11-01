@@ -86,7 +86,7 @@ func Fields(kind string) InputFields {
 		return InputFields{
 			Text:       "protocolRef inputRevisionProtocolRef ownerModuleId targetSelectorRef targetSelectorOwnerRef targetSelectorSubjectRef",
 			Boolean:    "requireFreshObservation requireFreshValidation protectValidationInputs",
-			Integer:    "maxRoundsPerCWI maxTargetsPerRound",
+			Integer:    "maxRepeatedWorkStates maxTargetsPerRound maxInputRevisionsPerCWI",
 			StringList: "allowedTargetPolicies targetSelectorCandidateRefs prospectiveTargetAllOfConstraintRefs",
 			Arrays:     map[string]string{"allowedOperations": "variant"},
 		}

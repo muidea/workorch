@@ -20,7 +20,7 @@ func implementationWorkInputFixture() map[string]any {
 		"allowedTargetPolicies": []string{"existing_owner_scope", "prospective_owner_target"},
 		"targetSelectorRef":     "work-scope", "targetSelectorOwnerRef": "profile/example", "targetSelectorSubjectRef": "implementation",
 		"targetSelectorCandidateRefs": []string{"resource-a", "resource-b"}, "prospectiveTargetAllOfConstraintRefs": []string{"constraint-a", "constraint-b"},
-		"maxRoundsPerCWI": 2, "maxTargetsPerRound": 2,
+		"maxRepeatedWorkStates": 2, "maxTargetsPerRound": 2,
 		"requireFreshObservation": true, "requireFreshValidation": true, "protectValidationInputs": true,
 	}
 }
@@ -90,7 +90,7 @@ func TestRuntimeImplementationWorkPolicyInputIsLosslessAndUnavailable(t *testing
 
 func TestRuntimeImplementationWorkPolicyMalformedInputCannotDisappear(t *testing.T) {
 	cases := map[string]any{"null": nil, "string": "enabled", "array": []any{}, "empty": map[string]any{}}
-	for _, field := range []string{"maxRoundsPerCWI", "maxTargetsPerRound"} {
+	for _, field := range []string{"maxRepeatedWorkStates", "maxTargetsPerRound"} {
 		for name, value := range map[string]any{"fraction": 1.5, "overflow": math.Inf(1), "string": "2", "zero": 0} {
 			raw := implementationWorkInputFixture()
 			raw[field] = value

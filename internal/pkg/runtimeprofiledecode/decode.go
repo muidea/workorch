@@ -136,11 +136,12 @@ func ImplementationWorkPolicy(input map[string]any) *runtimecontract.RuntimeImpl
 	}
 	policy := &runtimecontract.RuntimeImplementationWorkPolicy{
 		InputRevisionProtocolRef: String(object["inputRevisionProtocolRef"]),
+		MaxInputRevisionsPerCWI:  Int(object["maxInputRevisionsPerCWI"]),
 		ProtocolRef:              String(object["protocolRef"]), OwnerModuleID: String(object["ownerModuleId"]),
 		TargetSelectorRef: String(object["targetSelectorRef"]), TargetSelectorOwnerRef: String(object["targetSelectorOwnerRef"]),
 		TargetSelectorSubjectRef: String(object["targetSelectorSubjectRef"]), TargetSelectorCandidateRefs: Strings(object["targetSelectorCandidateRefs"]),
 		ProspectiveTargetAllOfConstraintRefs: Strings(object["prospectiveTargetAllOfConstraintRefs"]),
-		MaxRoundsPerCWI:                      Int(object["maxRoundsPerCWI"]), MaxTargetsPerRound: Int(object["maxTargetsPerRound"]),
+		MaxRepeatedWorkStates:                Int(object["maxRepeatedWorkStates"]), MaxTargetsPerRound: Int(object["maxTargetsPerRound"]),
 		RequireFreshObservation: Bool(object["requireFreshObservation"]), RequireFreshValidation: Bool(object["requireFreshValidation"]),
 		ProtectValidationInputs: Bool(object["protectValidationInputs"]),
 	}

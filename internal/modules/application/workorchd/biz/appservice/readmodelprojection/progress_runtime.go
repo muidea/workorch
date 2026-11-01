@@ -132,11 +132,17 @@ func runtimeImplementationProgress(state runtimecontract.RuntimeStateRecord) *pr
 	}
 	for _, focus := range state.Facts.DefinitionFocuses {
 		if len(focus.CoverageWorkItemIDs) == 1 && string(focus.CoverageWorkItemIDs[0]) == ret.CurrentWorkItemID && focus.ImplementationWorkPolicy != nil {
-			ret.WorkRoundsLimit = focus.ImplementationWorkPolicy.MaxRoundsPerCWI
+			ret.RepeatedStateLimit = focus.ImplementationWorkPolicy.MaxRepeatedWorkStates
+			ret.InputRevisionLimit = focus.ImplementationWorkPolicy.MaxInputRevisionsPerCWI
 		}
 	}
 	// Read complete accepted purpose history, including archived generations.
 	for _, generation := range state.SemanticPlanning.AllHistory() {
+		if generation.Reason == runtimecontract.RuntimeSemanticPlanningRetirementInputRevision {
+			if revision, err := runtimecontract.CompileRuntimeValidationInputRevision(generation.Snapshot); err == nil && string(revision.Binding.CoverageWorkItemID) == ret.CurrentWorkItemID {
+				ret.InputRevisionsUsed++
+			}
+		}
 		s := generation.Snapshot
 		if s.Manifest == nil || s.CoverageOrderDocument == nil || len(s.Manifest.ProofObligations) != 1 {
 			continue
@@ -146,6 +152,7 @@ func runtimeImplementationProgress(state runtimecontract.RuntimeStateRecord) *pr
 			continue
 		}
 		i := s.CoverageOrderDocument.ImplementationIntent
+		ret.RepeatedWorkStates = w.RepeatedWorkStates
 		ret.CurrentIntent = i.RemainingWork
 		if i.PreviousRoundReview != nil {
 			copy := *i.PreviousRoundReview
@@ -162,7 +169,8 @@ func runtimeImplementationProgress(state runtimecontract.RuntimeStateRecord) *pr
 	for _, round := range state.ImplementationWork.Rounds {
 		if ret.CurrentWorkItemID != "" && string(round.CoverageWorkItemID) == ret.CurrentWorkItemID {
 			ret.WorkRoundsUsed++
-			ret.WorkRoundsLimit = round.ScopeRequest.Policy.MaxRoundsPerCWI
+			ret.RepeatedStateLimit = round.ScopeRequest.Policy.MaxRepeatedWorkStates
+			ret.InputRevisionLimit = round.ScopeRequest.Policy.MaxInputRevisionsPerCWI
 		}
 		if round.CompletedReceiptSetHash != "" {
 			ret.CompletedRounds++

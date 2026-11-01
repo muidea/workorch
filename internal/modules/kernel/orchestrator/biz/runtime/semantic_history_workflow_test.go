@@ -40,8 +40,8 @@ func refreshImplementationHistoryTestOwners(t *testing.T, owner *implementationW
 }
 
 // Real File owner effects and private Runtime transitions, not a public
-// provider/fullflow acceptance test. Eight original rounds remain the limit.
-func TestImplementationWorkEightRoundsHistoryRolloverAndTerminalPurpose(t *testing.T) {
+// provider/fullflow acceptance test. Continuous effective work has no cumulative round limit.
+func TestImplementationWorkThirtyThreeRoundsHistoryRolloverAndTerminalPurpose(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -57,9 +57,9 @@ func TestImplementationWorkEightRoundsHistoryRolloverAndTerminalPurpose(t *testi
 	if err := os.WriteFile(filepath.Join(directory, "target.txt"), []byte("initial implementation"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	owner := &implementationWorkRealFileFixture{hub: hub, directory: directory, maxRounds: 8}
+	owner := &implementationWorkRealFileFixture{hub: hub, directory: directory, maxRepeatedStates: 2}
 	var a RuntimeAggregate
-	for round := 1; round <= 8; round++ {
+	for round := 1; round <= 33; round++ {
 		a = implementationWorkPrivatePipeline(t, runtimecontract.RuntimeImplementationWorkPurposeEffect, []string{"target.txt"}, owner)
 		if len(a.OperationReceipts) != round || len(a.ImplementationWork.Rounds) != round || a.SemanticPlanning.HistoryCount() != round*2 || a.ActiveDispatch != nil || a.Facts.Failure != nil {
 			t.Fatalf("round %d did not atomically settle receipt, budget, work and retirement", round)
@@ -93,7 +93,7 @@ func TestImplementationWorkEightRoundsHistoryRolloverAndTerminalPurpose(t *testi
 		owner.aggregate = &reopened
 	}
 	before := a.CloneRaw()
-	for _, purpose := range []runtimecontract.RuntimeImplementationWorkPurpose{runtimecontract.RuntimeImplementationWorkPurposeIncomplete, runtimecontract.RuntimeImplementationWorkPurposeInconclusive} {
+	for _, purpose := range []runtimecontract.RuntimeImplementationWorkPurpose{runtimecontract.RuntimeImplementationWorkPurposeInconclusive} {
 		restored := before.CloneRaw()
 		owner.aggregate, owner.repository.aggregate = &restored, &restored
 		owner.controller, err = NewRuntimeController(owner.repository)
@@ -101,7 +101,7 @@ func TestImplementationWorkEightRoundsHistoryRolloverAndTerminalPurpose(t *testi
 			t.Fatal(err)
 		}
 		failed := implementationWorkPrivatePipeline(t, purpose, []string{"target.txt"}, owner)
-		expectedCode := "implementation_work_budget_exhausted"
+		expectedCode := "implementation_work_repeated_state_exhausted"
 		if purpose == runtimecontract.RuntimeImplementationWorkPurposeInconclusive {
 			expectedCode = "implementation_work_review_inconclusive"
 		}
@@ -130,14 +130,14 @@ func TestImplementationWorkEightRoundsHistoryRolloverAndTerminalPurpose(t *testi
 		t.Fatal(err)
 	}
 	terminal := implementationWorkPrivatePipeline(t, runtimecontract.RuntimeImplementationWorkPurposeTerminal, []string{"target.txt"}, owner)
-	if terminal.SemanticPlanning.HistoryCount() != 17 || terminal.SemanticPlanning.HistoryArchive == nil || len(terminal.SemanticPlanning.HistoryArchive.Segments) != 1 || len(terminal.SemanticPlanning.History) != 1 {
-		t.Fatal("17th retirement failed to roll over complete history")
+	if terminal.SemanticPlanning.HistoryCount() != 67 || terminal.SemanticPlanning.HistoryArchive == nil || len(terminal.SemanticPlanning.HistoryArchive.Segments) != 4 || len(terminal.SemanticPlanning.History) != 3 {
+		t.Fatal("67th retirement failed to roll over complete history")
 	}
 	if !reflect.DeepEqual(before.ExecutionBudget, terminal.ExecutionBudget) || !reflect.DeepEqual(before.ImplementationWork.Rounds, terminal.ImplementationWork.Rounds) || !reflect.DeepEqual(before.Definition, terminal.Definition) || !reflect.DeepEqual(before.Facts.Evidence, terminal.Facts.Evidence) {
 		t.Fatal("rollover changed prior consumption, original contract or proof")
 	}
 	if request, err := NextRuntimeImplementationWorkScopeRequest(terminal); err != nil || request != nil {
-		t.Fatal("terminal purpose reopened a ninth work round")
+		t.Fatal("terminal purpose reopened a additional work round")
 	}
 	if err := terminal.Validate(); err != nil {
 		t.Fatal(err)
@@ -145,7 +145,7 @@ func TestImplementationWorkEightRoundsHistoryRolloverAndTerminalPurpose(t *testi
 	receipt := terminal.OperationReceipts[len(terminal.OperationReceipts)-1].Clone()
 	event := RuntimeInternalEvent{Kind: RuntimeInternalEventOperationReceiptObserved,
 		Scope:       RuntimeInternalEventScope{WorkspaceID: terminal.Facts.WorkspaceID, RunID: terminal.Facts.RunID},
-		Transaction: &RuntimeInternalTransactionPayload{DispatchID: terminal.ImplementationWork.Rounds[7].DispatchID, Fence: receipt.Fence, OperationReceiptOwnerSource: runtimecontract.RuntimeModuleFile, OperationReceipt: &receipt}}
+		Transaction: &RuntimeInternalTransactionPayload{DispatchID: terminal.ImplementationWork.Rounds[32].DispatchID, Fence: receipt.Fence, OperationReceiptOwnerSource: runtimecontract.RuntimeModuleFile, OperationReceipt: &receipt}}
 	// Fresh OS processes read the full segmented record and exact duplicate;
 	// neither a second CAS nor effect/recovery/provider budget is granted.
 	implementationWorkUnknownLateReceiptAcrossProcesses(t, terminal, event, true)

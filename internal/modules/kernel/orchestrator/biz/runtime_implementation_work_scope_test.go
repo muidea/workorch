@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -74,7 +75,7 @@ func TestImplementationWorkScopeRealOwnerReadOnlyAndRevisionFence(t *testing.T) 
 		},
 		ProspectiveTargetAllOfConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
 		TargetSelectorRef:                    "file/workspace_deliverable", TargetSelectorOwnerRef: "profile", TargetSelectorSubjectRef: "work",
-		MaxRoundsPerCWI: 2, MaxTargetsPerRound: 1, RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true,
+		MaxRepeatedWorkStates: 2, MaxTargetsPerRound: 1, RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true,
 	}
 	sources := map[string]runtimecontract.RuntimeImplementationWorkScopeSources{}
 	compile := func(selector string, binding runtimecontract.RuntimeWorkspaceManifestBinding) runtimecontract.RuntimeImplementationWorkScopeRequest {
@@ -205,9 +206,28 @@ func TestImplementationWorkScopeRealOwnerReadOnlyAndRevisionFence(t *testing.T) 
 	if string(before) != string(after) {
 		t.Fatal("read-only adapter changed request")
 	}
+	// Independent owner reads retain complete bytes when the workspace total
+	// crosses the retired 128 KiB scope ceiling. Per-target owner bounds remain.
+	for n := 0; n < 3; n++ {
+		if err := os.WriteFile(filepath.Join(directory, fmt.Sprintf("large-%d.txt", n)), []byte(strings.Repeat("x", 60*1024)), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	grown := compile(policy.TargetSelectorRef, manifest())
+	grownScope, err := acquireRuntimeImplementationWorkScope(ctx, hub, directory, grown, sources[grown.RequestID])
+	if err != nil {
+		t.Fatal("cumulative workspace bytes incorrectly limited", err)
+	}
+	total := 0
+	for _, snapshot := range grownScope.Content.Snapshots {
+		total += len(snapshot.Content)
+	}
+	if total <= 128*1024 || grownScope.Content.Validate(grownScope) != nil {
+		t.Fatal("grown scope lost complete bytes")
+	}
 	// Full original bytes are required; an oversized source cannot silently
 	// become a complete input, even when its prefix and inventory are available.
-	if err := os.WriteFile(filepath.Join(directory, "implementation.txt"), []byte(strings.Repeat("x", runtimecontract.RuntimeImplementationWorkContentMaxBytes+1)), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(directory, "implementation.txt"), []byte(strings.Repeat("x", 128*1024+1)), 0600); err != nil {
 		t.Fatal(err)
 	}
 	tooLarge := compile(policy.TargetSelectorRef, manifest())

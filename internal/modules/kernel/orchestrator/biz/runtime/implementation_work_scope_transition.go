@@ -242,17 +242,17 @@ func (c *authorityComponent) reserveImplementationWorkScope(ctx context.Context,
 	if err := request.ValidateForSources(sources); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	ordinal, preceding := 1, ""
+	preceding := ""
 	for _, round := range a.ImplementationWork.Rounds {
 		if round.CoverageWorkItemID == request.CoverageWorkItemID {
 			if round.CompletedReceiptSetHash == "" {
 				return RuntimeAggregate{}, fmt.Errorf("%w: same CWI work round is still outstanding", common.ErrConflict)
 			}
-			ordinal, preceding = round.Ordinal+1, round.CompletedReceiptSetHash
+			preceding = round.CompletedReceiptSetHash
 		}
 	}
-	if ordinal > request.Policy.MaxRoundsPerCWI+1 || len(a.ImplementationWork.Rounds) > len(a.Facts.DefinitionSeed.CoverageItems)*runtimecontract.MaxRuntimeImplementationWorkRounds || a.ImplementationWork.ScopePreview != nil {
-		return RuntimeAggregate{}, fmt.Errorf("%w: implementation purpose preview budget exhausted or already reserved", common.ErrConflict)
+	if a.ImplementationWork.ScopePreview != nil {
+		return RuntimeAggregate{}, fmt.Errorf("%w: implementation purpose preview already reserved", common.ErrConflict)
 	}
 	_ = preceding // 前轮 receipt 由 semantic purpose manifest 从原账本独立投影。
 	expected := a.StateRevision

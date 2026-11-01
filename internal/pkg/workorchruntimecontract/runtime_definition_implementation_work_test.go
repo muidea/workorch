@@ -55,7 +55,7 @@ func TestRuntimeDefinitionImplementationWorkProjectionIsExactAndDoesNotGrantProo
 	}
 	for name, mutate := range map[string]func(*RuntimeDefinitionFocus){
 		"missing policy":        func(f *RuntimeDefinitionFocus) { f.ImplementationWorkPolicy = nil },
-		"expanded rounds":       func(f *RuntimeDefinitionFocus) { f.ImplementationWorkPolicy.MaxRoundsPerCWI++ },
+		"expanded rounds":       func(f *RuntimeDefinitionFocus) { f.ImplementationWorkPolicy.MaxRepeatedWorkStates++ },
 		"other CWI source":      func(f *RuntimeDefinitionFocus) { f.AssessmentScope = "acceptanceDimension" },
 		"wildcard source":       func(f *RuntimeDefinitionFocus) { f.AssessmentID = "*" },
 		"terminal state change": func(f *RuntimeDefinitionFocus) { f.RequiredEvidenceKinds = []string{EvidenceKindStateChange} },
@@ -166,7 +166,7 @@ func TestRuntimeDefinitionImplementationWorkResolverRejectsConflictsWithoutPrece
 	if p, err := ResolveRuntimeDefinitionImplementationWorkPolicy(profiles, "dodItem", "dod-1"); err != nil || p == nil {
 		t.Fatalf("absent exact declaration erased wildcard: %v", err)
 	}
-	exact.ImplementationWorkPolicy.MaxRoundsPerCWI++
+	exact.ImplementationWorkPolicy.MaxRepeatedWorkStates++
 	profiles[0].EvidenceRequirements[1] = exact
 	if _, err := ResolveRuntimeDefinitionImplementationWorkPolicy(profiles, "dodItem", "dod-1"); err == nil {
 		t.Fatal("exact declaration silently overrode wildcard")

@@ -121,7 +121,10 @@ func runtimeProgressSummary(runtime *projectioncontract.RuntimeProgress) string 
 		parts = append(parts, fmt.Sprintf("implementation: rounds completed %d/%d | Runtime receipts %d | unknown executions %d | semantic generations %d (archived segments %d); work is not validation credit", work.CompletedRounds, work.ReservedRounds, work.CommittedReceipts, work.UnknownExecutions, work.SemanticGenerations, work.ArchivedSegments))
 	}
 	if work := runtime.ImplementationWork; work != nil && work.CurrentWorkItemID != "" {
-		parts = append(parts, fmt.Sprintf("current CWI %s work budget %d/%d | intent: %s", work.CurrentWorkItemID, work.WorkRoundsUsed, work.WorkRoundsLimit, work.CurrentIntent))
+		parts = append(parts, fmt.Sprintf("current CWI %s cumulative rounds %d | repeated state %d/%d | intent: %s", work.CurrentWorkItemID, work.WorkRoundsUsed, work.RepeatedWorkStates, work.RepeatedStateLimit, work.CurrentIntent))
+		if work.InputRevisionLimit > 0 {
+			parts = append(parts, fmt.Sprintf("input revisions %d/%d", work.InputRevisionsUsed, work.InputRevisionLimit))
+		}
 		if work.LastIntentReview != nil {
 			parts = append(parts, "intent review: "+string(work.LastIntentReview.Outcome)+" | "+work.LastIntentReview.Reason)
 		} else {

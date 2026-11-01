@@ -48,13 +48,10 @@ func projectImplementationPurpose(a *RuntimeAggregate) (bool, error) {
 				ordinal, preceding = prior.Ordinal+1, prior.CompletedReceiptSetHash
 			}
 		}
-		if ordinal > preview.Request.Policy.MaxRoundsPerCWI {
-			return false, fmt.Errorf("%w: implementation effect round budget exhausted", common.ErrConflict)
-		}
 		round := runtimecontract.RuntimeImplementationWorkRound{WorkspaceID: a.Facts.WorkspaceID, RunID: a.Facts.RunID, StartupInputHash: a.Definition.StartupInputHash, DefinitionSeedHash: a.Facts.DefinitionSeed.Hash, CoverageWorkItemID: choice.CoverageWorkItemID, PolicyHash: runtimecontract.StableRuntimeImplementationWorkPolicyHash(preview.Request.Policy), Ordinal: ordinal, PrecedingReceiptSetHash: preceding, ScopeRequest: preview.Request, ScopeObservation: preview.Observation}
 		round.Hash = runtimecontract.StableRuntimeImplementationWorkRoundHash(round)
 		a.ImplementationWork.Rounds = append(a.ImplementationWork.Rounds, round)
-	} else if choice.Purpose != runtimecontract.RuntimeImplementationWorkPurposeTerminal && choice.Purpose != runtimecontract.RuntimeImplementationWorkPurposeIncomplete && choice.Purpose != runtimecontract.RuntimeImplementationWorkPurposeInconclusive {
+	} else if choice.Purpose != runtimecontract.RuntimeImplementationWorkPurposeTerminal && choice.Purpose != runtimecontract.RuntimeImplementationWorkPurposeStalled && choice.Purpose != runtimecontract.RuntimeImplementationWorkPurposeInconclusive {
 		return false, common.ErrConflict
 	}
 	a.ImplementationWork.PurposeChoices = append(a.ImplementationWork.PurposeChoices, choice)

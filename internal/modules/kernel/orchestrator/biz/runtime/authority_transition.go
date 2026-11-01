@@ -238,7 +238,7 @@ func (c *authorityComponent) commitPrerequisite(ctx context.Context, workspaceID
 	// Validate the concrete owner fact before consuming a recovery probe. A
 	// stale/mismatched result cannot spend the current wait allocation, even if
 	// its observation timestamp is already beyond the deadline.
-	if err := validatePrerequisiteResultFreshness(result, aggregate.PrerequisiteInvalidations); err != nil {
+	if err := validatePrerequisiteResultFreshness(result, aggregate.PrerequisiteInvalidations, aggregate.OperationReceipts); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	facts, err := CommitPrerequisiteResult(aggregate.Facts, result)

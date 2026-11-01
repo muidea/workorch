@@ -159,16 +159,16 @@ func TestRuntimeImplementationIntentReviewIsReadOnlyAndFocusScoped(t *testing.T)
 	intent := &runtimecontract.RuntimeImplementationIntent{RemainingWork: "finish original A", PreviousRoundReview: &runtimecontract.RuntimeImplementationRoundReview{DispatchID: "dispatch-1", ReceiptSetHash: "receipts-1", Outcome: "diverged", Reason: "owner changed B, A remains unimplemented"}}
 	state := runtimecontract.RuntimeStateRecord{
 		Facts:              runtimecontract.RuntimeFacts{Focus: runtimecontract.CoverageFocus{CoverageWorkItemIDs: []common.CoverageWorkItemID{"a"}}},
-		ImplementationWork: runtimecontract.RuntimeImplementationWorkLedger{Rounds: []runtimecontract.RuntimeImplementationWorkRound{{CoverageWorkItemID: "a", ScopeRequest: runtimecontract.RuntimeImplementationWorkScopeRequest{Policy: runtimecontract.RuntimeImplementationWorkPolicy{MaxRoundsPerCWI: 8}}}, {CoverageWorkItemID: "b"}}},
+		ImplementationWork: runtimecontract.RuntimeImplementationWorkLedger{Rounds: []runtimecontract.RuntimeImplementationWorkRound{{CoverageWorkItemID: "a", ScopeRequest: runtimecontract.RuntimeImplementationWorkScopeRequest{Policy: runtimecontract.RuntimeImplementationWorkPolicy{MaxRepeatedWorkStates: 8}}}, {CoverageWorkItemID: "b"}}},
 		SemanticPlanning:   runtimecontract.RuntimeSemanticPlanningLedger{History: []runtimecontract.RuntimeSemanticPlanningGeneration{{Snapshot: runtimecontract.RuntimeSemanticPlanningLedger{Manifest: &runtimecontract.RuntimeSemanticPlanManifest{ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{ImplementationWork: &runtimecontract.RuntimeSemanticImplementationWork{PurposeChoiceOnly: true, Scope: runtimecontract.RuntimeImplementationWorkScopeObservation{Request: runtimecontract.RuntimeImplementationWorkScopeRequest{CoverageWorkItemID: "a"}}}}}}, CoverageOrderDocument: &runtimecontract.RuntimeSemanticPlanDocument{ImplementationIntent: intent}}}}},
 	}
 	before, _ := json.Marshal(state)
 	progress := mapRuntimeProgress(state)
 	w := progress.ImplementationWork
-	if w.CurrentIntent != intent.RemainingWork || w.LastIntentReview == nil || w.LastIntentReview.Outcome != "diverged" || w.WorkRoundsUsed != 1 || w.WorkRoundsLimit != 8 || progress.SatisfiedCWICount != 0 {
+	if w.CurrentIntent != intent.RemainingWork || w.LastIntentReview == nil || w.LastIntentReview.Outcome != "diverged" || w.WorkRoundsUsed != 1 || w.RepeatedStateLimit != 8 || progress.SatisfiedCWICount != 0 {
 		t.Fatalf("intent/credit/focus projection mismatch: %+v", w)
 	}
-	for _, fragment := range []string{"current CWI a work budget 1/8", "finish original A", "intent review: diverged"} {
+	for _, fragment := range []string{"current CWI a cumulative rounds 1 | repeated state 0/8", "finish original A", "intent review: diverged"} {
 		if !strings.Contains(runtimeProgressSummary(&progress), fragment) {
 			t.Fatal("summary lost intent/review/budget", fragment)
 		}
