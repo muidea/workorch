@@ -12,6 +12,13 @@ func implementationWorkIntentForTest(m contract.RuntimeSemanticPlanManifest) *co
 				intent.RequirementReviews = append(intent.RequirementReviews, contract.RuntimeImplementationRequirementReview{RequirementRef: ref, WorkRequired: true})
 				intent.SelectedRequirementRefs = append(intent.SelectedRequirementRefs, ref)
 			}
+			if previous := w.PreviousRound; previous != nil {
+				intent.PreviousRoundReview = &contract.RuntimeImplementationRoundReview{
+					DispatchID: previous.DispatchID, ReceiptSetHash: previous.ReceiptSetHash,
+					Outcome: contract.RuntimeImplementationRoundAddressed,
+					Reason:  "The fixture's completed owner edit implements the preceding intent; the next bounded step continues the original requirement.",
+				}
+			}
 			return intent
 		}
 	}

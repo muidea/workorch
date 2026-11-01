@@ -39,12 +39,12 @@ import (
 // 额外原准则，通过公开模板接口声明并在正常创作/六审/确认链封存，不能强加给所有项目。
 // 不直接创建 Run、bootstrap、authority、binding 或 receipt，不改变默认模板。
 // synthetic provider 仅提议文档；所有交付文件、Git、证据与终态由 production owners 产生。
-func implementationWorkFullflowActivate(t *testing.T) (context.Context, workorchrepo.WorkspaceScopedFileRepositorySet, *implementationWorkFullflowProvider, common.WorkspaceID, *workspace.Workspace, []byte, string) {
+func implementationWorkFullflowActivate(t *testing.T, exhaustWork ...bool) (context.Context, workorchrepo.WorkspaceScopedFileRepositorySet, *implementationWorkFullflowProvider, common.WorkspaceID, *workspace.Workspace, []byte, string) {
 	t.Helper()
 	ctx := context.Background()
 	storage, directory, protocolFixture := implementationWorkFullflowPreparationEnvironment(t)
 	repos := workorchrepo.NewWorkspaceScopedFileRepositorySet(storage)
-	provider := &implementationWorkFullflowProvider{authoring: emptyDirectoryProvider{repos: repos, mappingProposal: implementationWorkFullflowAuthoringMapping}, reviewedInputs: map[string]string{}}
+	provider := &implementationWorkFullflowProvider{authoring: emptyDirectoryProvider{repos: repos, mappingProposal: implementationWorkFullflowAuthoringMapping}, reviewedInputs: map[string]string{}, exhaustWork: len(exhaustWork) > 0 && exhaustWork[0]}
 	proxy := httptest.NewServer(http.HandlerFunc(provider.serveHTTP))
 	t.Cleanup(proxy.Close)
 	baseURL, client := implementationWorkFullflowStart(t, ctx, storage, proxy.URL, repos)
@@ -64,7 +64,7 @@ func implementationWorkFullflowActivate(t *testing.T) (context.Context, workorch
 	if builtIn == nil {
 		t.Fatal("public built-in software-dev template missing")
 	}
-	template := implementationWorkFullflowDeclareProject(t, client, baseURL, builtIn)
+	template := implementationWorkFullflowDeclareProject(t, client, baseURL, builtIn, provider.exhaustWork)
 	assertEmptyDeliverable(t, directory)
 	var created struct {
 		Authoring management.DefinitionAuthoringView `json:"authoring"`
@@ -292,7 +292,7 @@ func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 // synthetic Goal requires Runtime facts which engineering tests cannot prove;
 // the default must not require two rounds or an intentional failure for every
 // unrelated software project merely to satisfy this fixture.
-func implementationWorkFullflowDeclareProject(t *testing.T, client *http.Client, baseURL string, base *management.WorkspaceTemplate) *workspace.WorkspaceTemplate {
+func implementationWorkFullflowDeclareProject(t *testing.T, client *http.Client, baseURL string, base *management.WorkspaceTemplate, exhaustWork bool) *workspace.WorkspaceTemplate {
 	t.Helper()
 	hints := base.ContextHints
 	profiles := hints["profileContracts"].(map[string]any)
@@ -301,6 +301,9 @@ func implementationWorkFullflowDeclareProject(t *testing.T, client *http.Client,
 	policy := false
 	for _, value := range requirements {
 		r := value.(map[string]any)
+		if exhaustWork && r["scope"] == "dodItem" && r["implementationWorkPolicy"] != nil {
+			r["implementationWorkPolicy"].(map[string]any)["maxRoundsPerCWI"] = 2
+		}
 		policy = policy || (r["scope"] == "dodItem" && r["implementationWorkPolicy"] != nil)
 	}
 	if !policy {
@@ -522,6 +525,7 @@ type implementationWorkFullflowProvider struct {
 	failures       []string
 	workCWI        common.CoverageWorkItemID
 	workOrdinal    int
+	exhaustWork    bool
 	reviewedInputs map[string]string
 	criteria       map[common.CoverageWorkItemID]string
 	inputCriteria  map[string]string
@@ -601,11 +605,12 @@ func (p *implementationWorkFullflowProvider) serveHTTP(w http.ResponseWriter, r 
 
 // 以下 DTO 只读 provider-safe C3，绝不从 Run repo 重建 Runtime authority。
 type implementationWorkFullflowWork struct {
-	CoverageID        common.CoverageWorkItemID                       `json:"coverageWorkItemId"`
-	PurposeChoiceOnly bool                                            `json:"purposeChoiceOnly"`
-	EffectAvailable   bool                                            `json:"effectAvailable"`
-	Ordinal           int                                             `json:"ordinal"`
-	Policy            runtimecontract.RuntimeImplementationWorkPolicy `json:"policy"`
+	PreviousRound     *runtimecontract.RuntimeImplementationRoundReviewSource `json:"previousRound,omitempty"`
+	CoverageID        common.CoverageWorkItemID                               `json:"coverageWorkItemId"`
+	PurposeChoiceOnly bool                                                    `json:"purposeChoiceOnly"`
+	EffectAvailable   bool                                                    `json:"effectAvailable"`
+	Ordinal           int                                                     `json:"ordinal"`
+	Policy            runtimecontract.RuntimeImplementationWorkPolicy         `json:"policy"`
 }
 type implementationWorkFullflowPreparation struct {
 	NativeCheckRef     string `json:"nativeCheckRef"`
@@ -752,6 +757,9 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 				}
 				purpose = runtimecontract.RuntimeImplementationWorkPurposeEffect
 			}
+			if p.exhaustWork && work.CoverageID == p.workCWI && !work.EffectAvailable {
+				purpose = runtimecontract.RuntimeImplementationWorkPurposeIncomplete
+			}
 			p.workOrdinal = work.Ordinal
 			document["implementationPurpose"] = purpose
 			if request.Schema.Properties.Intent != nil {
@@ -759,10 +767,17 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 				intent := runtimecontract.RuntimeImplementationIntent{DeclarationRef: decl.Declaration.Value, ContentHash: decl.Content.Value, RemainingWork: "scripted original requirement implementation or independent validation", Reason: "bounded deterministic fixture purpose bound to exact supplied content"}
 				if decl.Reviews != nil {
 					for _, ref := range decl.Reviews.Items.Properties.Ref.Values {
-						intent.RequirementReviews = append(intent.RequirementReviews, runtimecontract.RuntimeImplementationRequirementReview{RequirementRef: ref, WorkRequired: purpose == runtimecontract.RuntimeImplementationWorkPurposeEffect})
+						intent.RequirementReviews = append(intent.RequirementReviews, runtimecontract.RuntimeImplementationRequirementReview{RequirementRef: ref, WorkRequired: purpose == runtimecontract.RuntimeImplementationWorkPurposeEffect || purpose == runtimecontract.RuntimeImplementationWorkPurposeIncomplete})
 						if purpose == runtimecontract.RuntimeImplementationWorkPurposeEffect {
 							intent.SelectedRequirementRefs = append(intent.SelectedRequirementRefs, ref)
 						}
+					}
+				}
+				if p := work.PreviousRound; p != nil {
+					intent.PreviousRoundReview = &runtimecontract.RuntimeImplementationRoundReview{DispatchID: p.DispatchID, ReceiptSetHash: p.ReceiptSetHash, Outcome: "addressed", Reason: "actual deterministic fixture change implements the preceding task"}
+					if purpose == runtimecontract.RuntimeImplementationWorkPurposeIncomplete {
+						intent.PreviousRoundReview.Outcome = "partial"
+						intent.PreviousRoundReview.Reason = "the change returns 3 but original goal requires 4; implementation remains incomplete"
 					}
 				}
 				document["implementationIntent"] = intent
@@ -939,10 +954,11 @@ func (p *implementationWorkFullflowProvider) candidate(raw map[string]json.RawMe
 			} `json:"operationContracts"`
 		} `json:"outputContract"`
 		Context struct {
-			Focus        runtimecontract.CoverageFocus           `json:"focus"`
-			Evidence     []string                                `json:"allowedAcceptedEvidenceRefs"`
-			Preparations []implementationWorkFullflowPreparation `json:"validationProofPreparations"`
-			Repair       json.RawMessage                         `json:"repairDirective"`
+			Intent       *runtimecontract.RuntimeImplementationWorkIntentBinding `json:"implementationIntent"`
+			Focus        runtimecontract.CoverageFocus                           `json:"focus"`
+			Evidence     []string                                                `json:"allowedAcceptedEvidenceRefs"`
+			Preparations []implementationWorkFullflowPreparation                 `json:"validationProofPreparations"`
+			Repair       json.RawMessage                                         `json:"repairDirective"`
 		} `json:"context"`
 	}
 	wire, err := json.Marshal(raw)
@@ -1116,6 +1132,11 @@ func (p *implementationWorkFullflowProvider) candidate(raw map[string]json.RawMe
 				}
 				add("content", content)
 			case runtimecontract.StepKindFileEdit:
+				if len(request.Context.Repair) == 0 || string(request.Context.Repair) == "null" {
+					if request.Context.Intent == nil || request.Context.Intent.Intent == nil || request.Context.Intent.Source.CoverageWorkItemID != p.workCWI || request.Context.Intent.Intent.RemainingWork == "" {
+						return nil, kind, fmt.Errorf("operations lost accepted implementation intent")
+					}
+				}
 				old, new := "return 0", "return 1"
 				if p.workOrdinal == 2 {
 					old, new = "return 1", "return 3"
@@ -1611,5 +1632,81 @@ func implementationWorkFullflowAssertDocuments(t *testing.T, state *runtimecontr
 		if matches != 1 {
 			t.Fatal("dispatch不是唯一original accepted admission")
 		}
+	}
+}
+
+// The same public authoring/activation and real File owners must also close
+// honestly when a project-declared work budget ends before implementation.
+func TestImplementationWorkPublicAuthoringBudgetExhaustedFullFlow(t *testing.T) {
+	ctx, repos, provider, workspaceID, original, startupBytes, _ := implementationWorkFullflowActivate(t, true)
+	var run *runmodel.Run
+	for deadline := time.Now().Add(5 * time.Minute); time.Now().Before(deadline); {
+		if observed := provider.snapshot(); len(observed.Failures) > 0 {
+			t.Fatalf("provider contract failure: %+v", observed)
+		}
+		runs, err := repos.Runs.List(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(runs) > 1 {
+			t.Fatal("exhaustion created a successor Run")
+		}
+		if len(runs) == 1 {
+			run = runs[0]
+			if run.State == common.RunStateBlockedOnDecision || run.State == common.RunStateBlockedOnApproval {
+				t.Fatal("work exhaustion opened a business ticket")
+			}
+			if run.State == common.RunStateFailed && run.RuntimeState != nil && len(run.RuntimeState.DeliveryAcknowledgements) == 3 {
+				break
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if run == nil || run.RuntimeState == nil || run.State != common.RunStateFailed || len(run.RuntimeState.DeliveryAcknowledgements) != 3 {
+		t.Fatalf("exhaustion did not close through three owners: run=%+v calls=%+v", run, provider.snapshot())
+	}
+	state := run.RuntimeState
+	if err := state.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if state.Facts.Failure == nil || state.Facts.Failure.Code != "implementation_work_budget_exhausted" || state.DefinitionClarification != nil || state.Decision.Terminal == nil || state.Decision.State != runtimecontract.ConvergenceStateFailed {
+		t.Fatalf("wrong failure closure: %+v", state.Facts.Failure)
+	}
+	if len(state.ImplementationWork.Rounds) != 2 {
+		t.Fatal("factual observation reserved extra work")
+	}
+	for _, round := range state.ImplementationWork.Rounds {
+		if round.CompletedReceiptSetHash == "" || round.WorkingBinding.IntentBinding == nil {
+			t.Fatal("lost accepted work source/physical receipts")
+		}
+	}
+	for _, fact := range state.Facts.Evidence.Accepted {
+		if fact.Kind == runtimecontract.EvidenceKindValidation && slices.Contains(fact.CoverageWorkItemIDs, provider.snapshot().WorkCWI) {
+			t.Fatal("unimplemented work received terminal validation credit")
+		}
+	}
+	results, err := repos.Results.ListByRun(ctx, run.ID)
+	if err != nil || len(results) != 1 || results[0].State != common.ResultStateRejected || results[0].RuntimeCloseout == nil || len(results[0].RuntimeCloseout.UnsatisfiedCoverageWorkItemIDs) == 0 {
+		t.Fatalf("failed Result missing truthful closeout: %+v %v", results, err)
+	}
+	owners := map[runtimecontract.RuntimeDeliveryOwner]bool{}
+	for _, ack := range state.DeliveryAcknowledgements {
+		if ack.WorkspaceID != workspaceID || ack.RunID != run.ID || owners[ack.Owner] || ack.AcknowledgedState == runtimecontract.RuntimeDeliveryAcknowledgedNoop {
+			t.Fatal("invalid failed delivery ACK")
+		}
+		owners[ack.Owner] = true
+	}
+	for _, owner := range []runtimecontract.RuntimeDeliveryOwner{runtimecontract.RuntimeDeliveryOwnerResult, runtimecontract.RuntimeDeliveryOwnerWorkspace, runtimecontract.RuntimeDeliveryOwnerRun} {
+		if !owners[owner] {
+			t.Fatal("missing failed owner ACK", owner)
+		}
+	}
+	current, err := repos.Workspaces.Get(ctx, workspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentBytes, _ := json.Marshal(current.StartupInput)
+	if !bytes.Equal(currentBytes, startupBytes) || run.StartupInputHash != original.StartupInput.StartupInputHash {
+		t.Fatal("exhaustion changed sealed original input")
 	}
 }

@@ -235,12 +235,14 @@ func TestRuntimeSemanticWorkPurposeNativeAndPromptRemainEquivalent(t *testing.T)
 		changed := request
 		changed.SemanticManifest = request.SemanticManifest.Clone()
 		work := changed.SemanticManifest.ProofObligations[0].ImplementationWork
-		work.Ordinal, work.PrecedingReceiptSetHash = ordinal, "exact-prior-collective-hash"
+		work.Ordinal, work.PrecedingReceiptSetHash = ordinal, fmt.Sprint("set-", ordinal-1)
 		work.EffectAvailable = ordinal <= work.Scope.Request.Policy.MaxRoundsPerCWI
+		work.PreviousRound = &runtimecontract.RuntimeImplementationRoundReviewSource{Ordinal: ordinal - 1, DispatchID: fmt.Sprint("dispatch-", ordinal-1), ReceiptSetHash: work.PrecedingReceiptSetHash, IntentBinding: &runtimecontract.RuntimeImplementationWorkIntentBinding{Intent: document.ImplementationIntent.Clone(), Source: runtimecontract.RuntimeImplementationWorkPurposeChoice{CoverageWorkItemID: work.Scope.Request.CoverageWorkItemID}}, Before: work.Scope.Content.Snapshots}
+
 		changed.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(changed.SemanticManifest)
 		changed.SemanticContext = request.SemanticContext.Clone()
 		for n := 1; n < ordinal; n++ {
-			changed.SemanticContext.WorkContext.PriorRounds = append(changed.SemanticContext.WorkContext.PriorRounds, runtimecontract.RuntimeSemanticWorkRound{Ordinal: n, DispatchID: fmt.Sprint("dispatch-", n), ReceiptSetHash: fmt.Sprint("set-", n), Targets: []runtimecontract.RuntimeSemanticWorkTarget{{OperationID: "op", TargetRefs: []string{"main.go"}, ReceiptRef: "receipt", ReceiptHash: "hash"}}})
+			changed.SemanticContext.WorkContext.PriorRounds = append(changed.SemanticContext.WorkContext.PriorRounds, runtimecontract.RuntimeSemanticWorkRound{Ordinal: n, DispatchID: fmt.Sprint("dispatch-", n), ReceiptSetHash: fmt.Sprint("set-", n), Intent: work.PreviousRound.IntentBinding.Intent.Clone(), Targets: []runtimecontract.RuntimeSemanticWorkTarget{{OperationID: "op", TargetRefs: []string{"main.go"}, ReceiptRef: "receipt", ReceiptHash: "hash"}}})
 		}
 		refreshSemanticProgressForTest(t, &changed)
 		next, err := runtimeSemanticPlanProviderRequest(changed)
@@ -266,11 +268,12 @@ func TestRuntimeSemanticWorkPurposeNativeAndPromptRemainEquivalent(t *testing.T)
 			if err := json.Unmarshal(mustSemanticSchemaProperty(t, next.Schema, "implementationPurpose"), &choice); err != nil {
 				t.Fatal(err)
 			}
-			if len(choice.Enum) != 1 || choice.Enum[0] != string(runtimecontract.RuntimeImplementationWorkPurposeTerminal) {
+			if !reflect.DeepEqual(choice.Enum, []string{string(runtimecontract.RuntimeImplementationWorkPurposeTerminal), string(runtimecontract.RuntimeImplementationWorkPurposeIncomplete), string(runtimecontract.RuntimeImplementationWorkPurposeInconclusive)}) {
 				t.Fatal("exhausted rounds retained effect enum")
 			}
 			document.ManifestHash, document.ImplementationPurpose = changed.SemanticManifest.Hash, runtimecontract.RuntimeImplementationWorkPurposeTerminal
 			document.ImplementationIntent.SelectedRequirementRefs = nil
+			document.ImplementationIntent.PreviousRoundReview = &runtimecontract.RuntimeImplementationRoundReview{DispatchID: work.PreviousRound.DispatchID, ReceiptSetHash: work.PrecedingReceiptSetHash, Outcome: "addressed", Reason: "fixture verifies preceding work"}
 			for n := range document.ImplementationIntent.RequirementReviews {
 				document.ImplementationIntent.RequirementReviews[n].WorkRequired = false
 			}

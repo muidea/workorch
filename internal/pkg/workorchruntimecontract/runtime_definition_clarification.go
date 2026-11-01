@@ -319,6 +319,9 @@ func EvaluateRuntimeDefinitionGapAdmission(manifest RuntimeSemanticPlanManifest,
 	if err := ValidateRuntimeSemanticRequestContract(normalizedManifest, normalizedExpected.PlanStep, normalizedExpected.BatchCoverageWorkItemIDs); err != nil {
 		return runtimeDefinitionGapAdmissionFailure(RuntimeDefinitionGapAdmissionRejected, "semantic_request_contract_conflict", err)
 	}
+	if RuntimeDefinitionGapConflictsWithImplementationObservation(normalizedManifest, document.GapKind) {
+		return runtimeDefinitionGapAdmissionFailure(RuntimeDefinitionGapAdmissionRejected, "implementation_work_exhausted_review_missing", fmt.Errorf("exhausted implementation purpose requires a truthful incomplete or inconclusive observation, not a Definition ambiguity ticket"))
+	}
 	for _, obligation := range normalizedManifest.ProofObligations {
 		evidence, err := ResolveRuntimeSemanticEvidenceObligation(obligation)
 		if err != nil {
@@ -775,4 +778,18 @@ func RuntimeDefinitionClarificationGapKinds() []string {
 	values := []string{string(RuntimeDefinitionGapImplicitOneOf), string(RuntimeDefinitionGapUndeclaredPrerequisite), string(RuntimeDefinitionGapSemanticAmbiguity)}
 	sort.Strings(values)
 	return values
+}
+
+// RuntimeDefinitionGapConflictsWithImplementationObservation fences the same
+// deterministic exhausted-work fact at admission, persistence and owner I/O.
+func RuntimeDefinitionGapConflictsWithImplementationObservation(manifest RuntimeSemanticPlanManifest, kind RuntimeDefinitionGapKind) bool {
+	if kind != RuntimeDefinitionGapSemanticAmbiguity {
+		return false
+	}
+	for _, obligation := range manifest.ProofObligations {
+		if work := obligation.ImplementationWork; work != nil && work.PurposeChoiceOnly && !work.EffectAvailable {
+			return true
+		}
+	}
+	return false
 }

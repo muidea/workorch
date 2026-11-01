@@ -368,7 +368,8 @@ func (f FailureFact) Normalized() FailureFact {
 	f.Code = strings.TrimSpace(f.Code)
 	f.Signature = strings.TrimSpace(f.Signature)
 	f.Message = strings.TrimSpace(f.Message)
-	f.OriginalDiagnostic = f.OriginalDiagnostic.Normalized()
+	// Original diagnostic is immutable producer data, never authority normalization.
+	f.OriginalDiagnostic = f.OriginalDiagnostic.CloneOriginal()
 	f.TargetRefs = normalizeStrings(f.TargetRefs)
 	if f.TargetObservation != nil {
 		observation := f.TargetObservation.Normalized()

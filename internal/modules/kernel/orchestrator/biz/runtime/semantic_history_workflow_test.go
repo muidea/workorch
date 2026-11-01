@@ -93,6 +93,42 @@ func TestImplementationWorkEightRoundsHistoryRolloverAndTerminalPurpose(t *testi
 		owner.aggregate = &reopened
 	}
 	before := a.CloneRaw()
+	for _, purpose := range []runtimecontract.RuntimeImplementationWorkPurpose{runtimecontract.RuntimeImplementationWorkPurposeIncomplete, runtimecontract.RuntimeImplementationWorkPurposeInconclusive} {
+		restored := before.CloneRaw()
+		owner.aggregate, owner.repository.aggregate = &restored, &restored
+		owner.controller, err = NewRuntimeController(owner.repository)
+		if err != nil {
+			t.Fatal(err)
+		}
+		failed := implementationWorkPrivatePipeline(t, purpose, []string{"target.txt"}, owner)
+		expectedCode := "implementation_work_budget_exhausted"
+		if purpose == runtimecontract.RuntimeImplementationWorkPurposeInconclusive {
+			expectedCode = "implementation_work_review_inconclusive"
+		}
+		if failed.Facts.Failure == nil || failed.Facts.Failure.Code != expectedCode || failed.DefinitionClarification != nil || failed.Decision.State != runtimecontract.ConvergenceStateFailed {
+			t.Fatalf("factual observation did not reduce to honest failure: %+v", failed.Facts.Failure)
+		}
+		if !reflect.DeepEqual(before.ExecutionBudget, failed.ExecutionBudget) || !reflect.DeepEqual(before.ImplementationWork.Rounds, failed.ImplementationWork.Rounds) || !reflect.DeepEqual(before.Facts.Evidence, failed.Facts.Evidence) {
+			t.Fatal("factual observation created work, spent effect budget or granted credit")
+		}
+		if request, err := NextRuntimeImplementationWorkScopeRequest(failed); err != nil || request != nil {
+			t.Fatal("failed observation reopened work", err)
+		}
+		if err := failed.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		tampered := failed.CloneRaw()
+		tampered.Facts.Failure.Code = "other"
+		if err := tampered.Validate(); err == nil {
+			t.Fatal("rehydration lost factual failure correspondence")
+		}
+	}
+	restored := before.CloneRaw()
+	owner.aggregate, owner.repository.aggregate = &restored, &restored
+	owner.controller, err = NewRuntimeController(owner.repository)
+	if err != nil {
+		t.Fatal(err)
+	}
 	terminal := implementationWorkPrivatePipeline(t, runtimecontract.RuntimeImplementationWorkPurposeTerminal, []string{"target.txt"}, owner)
 	if terminal.SemanticPlanning.HistoryCount() != 17 || terminal.SemanticPlanning.HistoryArchive == nil || len(terminal.SemanticPlanning.HistoryArchive.Segments) != 1 || len(terminal.SemanticPlanning.History) != 1 {
 		t.Fatal("17th retirement failed to roll over complete history")

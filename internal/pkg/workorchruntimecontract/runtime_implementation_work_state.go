@@ -176,7 +176,7 @@ func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinition
 	}
 	seenChoices := map[string]bool{}
 	for _, choice := range ledger.PurposeChoices {
-		if choice.Purpose != RuntimeImplementationWorkPurposeEffect && choice.Purpose != RuntimeImplementationWorkPurposeTerminal || seenChoices[choice.SemanticManifestHash] {
+		if choice.Purpose != RuntimeImplementationWorkPurposeEffect && choice.Purpose != RuntimeImplementationWorkPurposeTerminal && choice.Purpose != RuntimeImplementationWorkPurposeIncomplete && choice.Purpose != RuntimeImplementationWorkPurposeInconclusive || seenChoices[choice.SemanticManifestHash] {
 			return fmt.Errorf("implementation purpose choice is invalid or duplicated")
 		}
 		seenChoices[choice.SemanticManifestHash] = true
@@ -212,6 +212,18 @@ func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinition
 			choiceScopeSources := RuntimeImplementationWorkScopeSources{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: work.Scope.Request.AuthoritySnapshotID, Seed: facts.DefinitionSeed, Focuses: facts.DefinitionFocuses, Profiles: facts.Activation.ExecutionContract.ProfileContracts, CoverageWorkItemID: work.Scope.Request.CoverageWorkItemID, ManifestBinding: work.Scope.Request.ManifestBinding, InputRevision: work.Scope.Request.InputRevision}
 			if err := validateRuntimeWorkScopeInSession(work.Scope.Request, choiceScopeSources, semanticSession); err != nil {
 				return err
+			}
+			validated, err := validateRuntimeSemanticPlanManifestInSession(*snapshot.Manifest, semanticSession)
+			if err != nil {
+				return err
+			}
+			if err := validateRuntimeSemanticPlanDocumentAgainstValidatedManifest(*snapshot.CoverageOrderDocument, validated); err != nil {
+				return err
+			}
+			if failure := RuntimeImplementationWorkObservationFailure(choice, snapshot.CoverageOrderDocument.ImplementationIntent); failure != nil {
+				if facts.Failure == nil || facts.Failure.Class != failure.Class || facts.Failure.Code != failure.Code || facts.Failure.Signature != failure.Signature || facts.Failure.Message != failure.Message || !runtimeRawEqual(facts.Failure.OriginalDiagnostic, failure.OriginalDiagnostic) {
+					return fmt.Errorf("implementation observation lacks its original failure authority")
+				}
 			}
 			matches++
 		}
@@ -253,6 +265,13 @@ func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinition
 			outstanding++
 		}
 		if round.WorkingBinding != nil {
+			intent, err := resolveRuntimeImplementationWorkIntentInSession(round, semantic, semanticSession)
+			if err != nil {
+				return err
+			}
+			if !sameImplementationIntentBinding(intent, round.WorkingBinding.IntentBinding) {
+				return fmt.Errorf("working intent differs from unique accepted purpose source")
+			}
 			if err := ValidateRuntimeImplementationWorkingBindingSemanticSource(round, semantic); err != nil {
 				return err
 			}

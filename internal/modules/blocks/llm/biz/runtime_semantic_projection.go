@@ -55,18 +55,19 @@ type runtimeSemanticManifestProjection struct {
 // 工作 C3 只投影完整有界 vocabulary 与 exact owner scope；不携带 receipt、预算权限或原始诊断。
 // policy 为 immutable Profile 声明，scope 只为提议约束，不是工作/终验 dispatch authority。
 type runtimeSemanticImplementationWorkProjection struct {
-	InputRevision           *runtimecontract.RuntimeValidationInputRevision `json:"inputRevision,omitempty"`
-	CoverageWorkItemID      common.CoverageWorkItemID                       `json:"coverageWorkItemId"`
-	PurposeChoiceOnly       bool                                            `json:"purposeChoiceOnly"`
-	EffectAvailable         bool                                            `json:"effectAvailable"`
-	RoundHash               string                                          `json:"roundHash"`
-	Ordinal                 int                                             `json:"ordinal"`
-	PrecedingReceiptSetHash string                                          `json:"precedingReceiptSetHash,omitempty"`
-	PolicyHash              string                                          `json:"policyHash"`
-	Policy                  runtimecontract.RuntimeImplementationWorkPolicy `json:"policy"`
-	Scope                   runtimeSemanticImplementationScopeProjection    `json:"scope"`
-	ExcludedTargetRefs      []string                                        `json:"excludedTargetRefs,omitempty"`
-	TerminalEvidenceCredit  bool                                            `json:"terminalEvidenceCredit"`
+	PreviousRound           *runtimecontract.RuntimeImplementationRoundReviewSource `json:"previousRound,omitempty"`
+	InputRevision           *runtimecontract.RuntimeValidationInputRevision         `json:"inputRevision,omitempty"`
+	CoverageWorkItemID      common.CoverageWorkItemID                               `json:"coverageWorkItemId"`
+	PurposeChoiceOnly       bool                                                    `json:"purposeChoiceOnly"`
+	EffectAvailable         bool                                                    `json:"effectAvailable"`
+	RoundHash               string                                                  `json:"roundHash"`
+	Ordinal                 int                                                     `json:"ordinal"`
+	PrecedingReceiptSetHash string                                                  `json:"precedingReceiptSetHash,omitempty"`
+	PolicyHash              string                                                  `json:"policyHash"`
+	Policy                  runtimecontract.RuntimeImplementationWorkPolicy         `json:"policy"`
+	Scope                   runtimeSemanticImplementationScopeProjection            `json:"scope"`
+	ExcludedTargetRefs      []string                                                `json:"excludedTargetRefs,omitempty"`
+	TerminalEvidenceCredit  bool                                                    `json:"terminalEvidenceCredit"`
 }
 
 type runtimeSemanticImplementationScopeProjection struct {
@@ -95,6 +96,7 @@ func runtimeSemanticImplementationWorkForProvider(work *runtimecontract.RuntimeS
 	}
 	selection := work.Scope.Selection
 	return &runtimeSemanticImplementationWorkProjection{
+		PreviousRound:      work.PreviousRound.Clone(),
 		CoverageWorkItemID: work.Scope.Request.CoverageWorkItemID,
 		InputRevision:      work.Scope.Request.InputRevision.Clone(),
 		PurposeChoiceOnly:  work.PurposeChoiceOnly, EffectAvailable: work.EffectAvailable,

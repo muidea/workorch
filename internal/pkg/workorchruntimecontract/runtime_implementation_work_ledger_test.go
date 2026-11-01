@@ -14,6 +14,11 @@ func implementationWorkLedgerFixture(t *testing.T) (RuntimeImplementationWorkLed
 	seed, focuses, profiles := definitionImplementationWorkFixture(t)
 	sources := RuntimeImplementationWorkLedgerSources{WorkspaceID: "ws-1", RunID: "run-1", StartupInputHash: "startup-1", Seed: seed, Focuses: focuses, Profiles: profiles, MaxRecords: 16}
 	observation := workScopeObservationFixture(t)
+	observation.Content = &RuntimeImplementationWorkContent{ProtocolRef: RuntimeImplementationWorkContentV1, ManifestRevision: observation.Selection.ObservedRevision}
+	for _, target := range observation.Selection.TargetRefs {
+		observation.Content.Snapshots = append(observation.Content.Snapshots, workContentSnapshot(target, "original implementation content"))
+	}
+
 	r := RuntimeImplementationWorkRound{WorkspaceID: sources.WorkspaceID, RunID: sources.RunID, StartupInputHash: sources.StartupInputHash, DefinitionSeedHash: seed.Hash,
 		CoverageWorkItemID: "cwi-1", PolicyHash: StableRuntimeImplementationWorkPolicyHash(observation.Request.Policy), Ordinal: 1,
 		ScopeRequest: observation.Request, ScopeObservation: &observation}
@@ -29,6 +34,7 @@ func implementationWorkLedgerFixture(t *testing.T) (RuntimeImplementationWorkLed
 		RequiredEvidenceKinds: []string{EvidenceKindStateChange}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, DeclarationRef: "definition/dodItem/dod-1"}.Normalized()
 	binding := RuntimeImplementationWorkingBinding{SemanticManifestHash: "semantic-1", LogicalRequestID: "semantic-request-1", BindingGeneration: 1,
 		Proposals: []RuntimeSemanticProofProposal{proposal}, OwnerCatalog: catalog, CatalogObservation: catalogObservation}
+	binding.IntentBinding = &RuntimeImplementationWorkIntentBinding{Source: RuntimeImplementationWorkPurposeChoice{CoverageWorkItemID: r.CoverageWorkItemID, ScopeRequestID: r.ScopeRequest.RequestID, SemanticManifestHash: "original-purpose-manifest", LogicalRequestID: "original-purpose-request", DocumentHash: "original-purpose-document", Purpose: RuntimeImplementationWorkPurposeEffect}, Intent: &RuntimeImplementationIntent{DeclarationRef: proposal.DeclarationRef, ContentHash: observation.Content.Hash(), RemainingWork: "implement original behavior", Reason: "current behavior is incomplete", RequirementReviews: []RuntimeImplementationRequirementReview{{RequirementRef: proposal.DeclarationRef, WorkRequired: true}}, SelectedRequirementRefs: []string{proposal.DeclarationRef}}}
 	binding.SemanticGenerationID = StableRuntimeSemanticGenerationID(binding.SemanticManifestHash, binding.LogicalRequestID)
 	binding.Feasibilities = []RuntimeSemanticProofFeasibility{{SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: binding.SemanticManifestHash, DefinitionSeedHash: seed.Hash,
 		CoverageWorkItemID: "cwi-1", ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: RuntimeModuleFile,
@@ -357,6 +363,7 @@ func TestImplementationWorkSameCWIRoundRequiresDurableReceiptAndFreshScope(t *te
 	second.ScopeObservation.Observation.ContentHash = second.ScopeObservation.Selection.SnapshotID
 	second.ScopeObservation.Observation.Dependencies[0].Revision = "tree-2"
 	second.ScopeObservation.Observation.ObservationID = StableRuntimePrerequisiteObservationID(second.ScopeObservation.Observation)
+	second.ScopeObservation.Content.ManifestRevision = "tree-2"
 	second.WorkingBinding = nil
 	rehashImplementationWorkRound(&second)
 	ledger.Rounds = append(ledger.Rounds, second)

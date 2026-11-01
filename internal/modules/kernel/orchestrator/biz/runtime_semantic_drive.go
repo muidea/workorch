@@ -601,6 +601,10 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 		if gapErr == nil {
 			admission := runtimecontract.EvaluateRuntimeDefinitionGapAdmission(*ledger.Manifest, *session.ExpectedDocument, gap)
 			if !admission.Admitted() {
+				if admission.Code == "implementation_work_exhausted_review_missing" {
+					diagnostic := runtimecontract.RuntimeOriginalDiagnosticFromDefinitionGap(gap)
+					return m.failRuntimeSemanticContract(ctx, aggregate, admission.Code, admission.Message, &diagnostic)
+				}
 				if admission.Code == "semantic_request_contract_conflict" {
 					diagnostic := runtimecontract.RuntimeOriginalDiagnosticFromDefinitionGap(gap)
 					return m.failRuntimeSemanticContract(ctx, aggregate, admission.Code, admission.Message, &diagnostic)

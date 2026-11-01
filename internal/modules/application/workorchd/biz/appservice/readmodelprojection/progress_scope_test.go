@@ -154,3 +154,32 @@ func TestRuntimeProgressTerminalAcknowledgementsRequireExactIdentity(t *testing.
 		t.Fatal("cross-run ACK became completion")
 	}
 }
+
+func TestRuntimeImplementationIntentReviewIsReadOnlyAndFocusScoped(t *testing.T) {
+	intent := &runtimecontract.RuntimeImplementationIntent{RemainingWork: "finish original A", PreviousRoundReview: &runtimecontract.RuntimeImplementationRoundReview{DispatchID: "dispatch-1", ReceiptSetHash: "receipts-1", Outcome: "diverged", Reason: "owner changed B, A remains unimplemented"}}
+	state := runtimecontract.RuntimeStateRecord{
+		Facts:              runtimecontract.RuntimeFacts{Focus: runtimecontract.CoverageFocus{CoverageWorkItemIDs: []common.CoverageWorkItemID{"a"}}},
+		ImplementationWork: runtimecontract.RuntimeImplementationWorkLedger{Rounds: []runtimecontract.RuntimeImplementationWorkRound{{CoverageWorkItemID: "a", ScopeRequest: runtimecontract.RuntimeImplementationWorkScopeRequest{Policy: runtimecontract.RuntimeImplementationWorkPolicy{MaxRoundsPerCWI: 8}}}, {CoverageWorkItemID: "b"}}},
+		SemanticPlanning:   runtimecontract.RuntimeSemanticPlanningLedger{History: []runtimecontract.RuntimeSemanticPlanningGeneration{{Snapshot: runtimecontract.RuntimeSemanticPlanningLedger{Manifest: &runtimecontract.RuntimeSemanticPlanManifest{ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{ImplementationWork: &runtimecontract.RuntimeSemanticImplementationWork{PurposeChoiceOnly: true, Scope: runtimecontract.RuntimeImplementationWorkScopeObservation{Request: runtimecontract.RuntimeImplementationWorkScopeRequest{CoverageWorkItemID: "a"}}}}}}, CoverageOrderDocument: &runtimecontract.RuntimeSemanticPlanDocument{ImplementationIntent: intent}}}}},
+	}
+	before, _ := json.Marshal(state)
+	progress := mapRuntimeProgress(state)
+	w := progress.ImplementationWork
+	if w.CurrentIntent != intent.RemainingWork || w.LastIntentReview == nil || w.LastIntentReview.Outcome != "diverged" || w.WorkRoundsUsed != 1 || w.WorkRoundsLimit != 8 || progress.SatisfiedCWICount != 0 {
+		t.Fatalf("intent/credit/focus projection mismatch: %+v", w)
+	}
+	for _, fragment := range []string{"current CWI a work budget 1/8", "finish original A", "intent review: diverged"} {
+		if !strings.Contains(runtimeProgressSummary(&progress), fragment) {
+			t.Fatal("summary lost intent/review/budget", fragment)
+		}
+	}
+	clone := projectioncontract.CloneRuntimeProgress(&progress)
+	clone.ImplementationWork.LastIntentReview.Reason = "changed"
+	if progress.ImplementationWork.LastIntentReview.Reason == "changed" {
+		t.Fatal("projection review clone aliases")
+	}
+	after, _ := json.Marshal(state)
+	if string(before) != string(after) {
+		t.Fatal("projection changes source authority")
+	}
+}

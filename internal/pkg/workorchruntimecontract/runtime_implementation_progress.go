@@ -51,12 +51,28 @@ func validateRuntimeImplementationProgress(d RuntimeSemanticPlanDocument, m Runt
 			gaps[review.RequirementRef] = true
 		}
 	}
+	if i.PreviousRoundReview != nil && i.PreviousRoundReview.Outcome == "inconclusive" && d.ImplementationPurpose != RuntimeImplementationWorkPurposeInconclusive {
+		return fmt.Errorf("inconclusive previous work requires an explicit inconclusive observation")
+	}
 	if d.ImplementationPurpose == RuntimeImplementationWorkPurposeTerminal {
-		if len(gaps) != 0 || len(i.SelectedRequirementRefs) != 0 {
+		if len(gaps) != 0 || len(i.SelectedRequirementRefs) != 0 || (i.PreviousRoundReview != nil && i.PreviousRoundReview.Outcome != "addressed") {
 			return fmt.Errorf("terminal proof purpose contradicts proposed remaining implementation")
 		}
 		return nil
 	}
+	if d.ImplementationPurpose == RuntimeImplementationWorkPurposeIncomplete {
+		if w.EffectAvailable || len(gaps) == 0 || len(i.SelectedRequirementRefs) != 0 {
+			return fmt.Errorf("incomplete observation requires exhausted work budget and original gaps without effect selection")
+		}
+		return nil
+	}
+	if d.ImplementationPurpose == RuntimeImplementationWorkPurposeInconclusive {
+		if len(i.SelectedRequirementRefs) != 0 {
+			return fmt.Errorf("inconclusive observation cannot select implementation effects")
+		}
+		return nil
+	}
+
 	if d.ImplementationPurpose != RuntimeImplementationWorkPurposeEffect || len(i.SelectedRequirementRefs) == 0 {
 		return fmt.Errorf("implementation effect requires a selected original implementation gap")
 	}
@@ -72,7 +88,7 @@ func validateRuntimeImplementationProgress(d RuntimeSemanticPlanDocument, m Runt
 
 // This grammar mirrors the deterministic owner checks. The model selects only
 // semantic booleans/remaining work; exact original identities are code-derived.
-func addRuntimeImplementationProgressSchema(schema, intent map[string]any, refs []string) {
+func addRuntimeImplementationProgressSchema(schema, intent map[string]any, refs []string, work *RuntimeSemanticImplementationWork) {
 	fields := intent["properties"].(map[string]any)
 	review := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"requirementRef", "workRequired"}, "properties": map[string]any{"requirementRef": map[string]any{"type": "string", "enum": refs}, "workRequired": map[string]any{"type": "boolean"}}}
 	positions := make([]any, len(refs))
@@ -82,16 +98,36 @@ func addRuntimeImplementationProgressSchema(schema, intent map[string]any, refs 
 	fields["requirementReviews"] = map[string]any{"type": "array", "minItems": len(refs), "maxItems": len(refs), "items": review, "prefixItems": positions}
 	fields["selectedRequirementRefs"] = map[string]any{"type": "array", "maxItems": len(refs), "uniqueItems": true, "items": map[string]any{"type": "string", "enum": refs}}
 	intent["required"] = append(intent["required"].([]string), "requirementReviews")
+	if p := work.PreviousRound; p != nil {
+		fields["previousRoundReview"] = map[string]any{"type": "object", "additionalProperties": false, "required": []string{"dispatchId", "receiptSetHash", "outcome", "reason"}, "properties": map[string]any{
+			"dispatchId": map[string]any{"const": p.DispatchID}, "receiptSetHash": map[string]any{"const": p.ReceiptSetHash}, "outcome": map[string]any{"enum": []string{"addressed", "partial", "diverged", "inconclusive"}}, "reason": map[string]any{"type": "string", "minLength": 1, "maxLength": 2048},
+		}}
+		intent["required"] = append(intent["required"].([]string), "previousRoundReview")
+	}
 	allOf, _ := schema["allOf"].([]any)
-	for _, purpose := range []RuntimeImplementationWorkPurpose{RuntimeImplementationWorkPurposeEffect, RuntimeImplementationWorkPurposeTerminal} {
+	for _, purpose := range []RuntimeImplementationWorkPurpose{RuntimeImplementationWorkPurposeEffect, RuntimeImplementationWorkPurposeTerminal, RuntimeImplementationWorkPurposeIncomplete, RuntimeImplementationWorkPurposeInconclusive} {
 		constraints := map[string]any{}
 		required := []string{"requirementReviews"}
 		if purpose == RuntimeImplementationWorkPurposeEffect {
 			required = append(required, "selectedRequirementRefs")
 			constraints["selectedRequirementRefs"] = map[string]any{"minItems": 1}
-		} else {
+			if work.PreviousRound != nil {
+				constraints["previousRoundReview"] = map[string]any{"properties": map[string]any{"outcome": map[string]any{"enum": []string{"addressed", "partial", "diverged"}}}}
+			}
+		} else if purpose == RuntimeImplementationWorkPurposeTerminal {
 			constraints["selectedRequirementRefs"] = map[string]any{"maxItems": 0}
 			constraints["requirementReviews"] = map[string]any{"items": map[string]any{"properties": map[string]any{"workRequired": map[string]any{"const": false}}}}
+			if work.PreviousRound != nil {
+				constraints["previousRoundReview"] = map[string]any{"properties": map[string]any{"outcome": map[string]any{"const": "addressed"}}}
+			}
+		} else {
+			constraints["selectedRequirementRefs"] = map[string]any{"maxItems": 0}
+			if purpose == RuntimeImplementationWorkPurposeIncomplete {
+				if work.PreviousRound != nil {
+					constraints["previousRoundReview"] = map[string]any{"properties": map[string]any{"outcome": map[string]any{"enum": []string{"addressed", "partial", "diverged"}}}}
+				}
+				constraints["requirementReviews"] = map[string]any{"contains": map[string]any{"required": []string{"workRequired"}, "properties": map[string]any{"workRequired": map[string]any{"const": true}}}}
+			}
 		}
 		allOf = append(allOf, map[string]any{"if": map[string]any{"required": []string{"implementationPurpose"}, "properties": map[string]any{"implementationPurpose": map[string]any{"const": purpose}}}, "then": map[string]any{"properties": map[string]any{"implementationIntent": map[string]any{"required": required, "properties": constraints}}}})
 	}
@@ -100,6 +136,14 @@ func addRuntimeImplementationProgressSchema(schema, intent map[string]any, refs 
 			"if":   map[string]any{"required": []string{"implementationIntent"}, "properties": map[string]any{"implementationIntent": map[string]any{"required": []string{"selectedRequirementRefs"}, "properties": map[string]any{"selectedRequirementRefs": map[string]any{"contains": map[string]any{"const": ref}}}}}},
 			"then": map[string]any{"properties": map[string]any{"implementationIntent": map[string]any{"properties": map[string]any{"requirementReviews": map[string]any{"contains": map[string]any{"required": []string{"requirementRef", "workRequired"}, "properties": map[string]any{"requirementRef": map[string]any{"const": ref}, "workRequired": map[string]any{"const": true}}}}}}}},
 		})
+	}
+	if work.PreviousRound != nil {
+		retained := []any{}
+		for _, ref := range work.PreviousRound.IntentBinding.Intent.SelectedRequirementRefs {
+			retained = append(retained, map[string]any{"properties": map[string]any{"requirementReviews": map[string]any{"contains": map[string]any{"required": []string{"requirementRef", "workRequired"}, "properties": map[string]any{"requirementRef": map[string]any{"const": ref}, "workRequired": map[string]any{"const": true}}}}}})
+			retained = append(retained, map[string]any{"if": map[string]any{"required": []string{"selectedRequirementRefs"}, "properties": map[string]any{"selectedRequirementRefs": map[string]any{"minItems": 1}}}, "then": map[string]any{"properties": map[string]any{"selectedRequirementRefs": map[string]any{"contains": map[string]any{"const": ref}}}}})
+		}
+		allOf = append(allOf, map[string]any{"if": map[string]any{"properties": map[string]any{"implementationIntent": map[string]any{"properties": map[string]any{"previousRoundReview": map[string]any{"properties": map[string]any{"outcome": map[string]any{"enum": []string{"partial", "diverged"}}}}}}}}, "then": map[string]any{"properties": map[string]any{"implementationIntent": map[string]any{"allOf": retained}}}})
 	}
 	schema["allOf"] = allOf
 }

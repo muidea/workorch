@@ -307,6 +307,34 @@ type RecordApprovalResolutionCommand struct { Data ApprovalResolutionFact }
 	}
 }
 
+func TestImplementationIntentReviewOutcomeDoesNotPermitSiblingAuthority(t *testing.T) {
+	for _, fields := range []string{"Outcome string", "Outcome string; State string", "Outcome string; TargetState string"} {
+		t.Run(fields, func(t *testing.T) {
+			root := newEmptyVerificationRepository(t)
+			for path, source := range map[string]string{
+				"internal/pkg/workorchruntimecontract/review.go":     "package workorchruntimecontract\ntype RuntimeImplementationRoundReview struct { " + fields + " }\n",
+				"internal/modules/blocks/llm/pkg/events/messages.go": "package events\nimport contract \"github.com/muidea/workorch/internal/pkg/workorchruntimecontract\"\ntype RequestRuntimeCandidateCommand struct { PreviousReview contract.RuntimeImplementationRoundReview }\n",
+			} {
+				file := filepath.Join(root, path)
+				if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(file, []byte(source), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := verifyCrossOwnerCommandContracts(root)
+			if fields == "Outcome string" {
+				if err != nil {
+					t.Fatal("immutable review rejected", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "RequestRuntimeCandidateCommand") {
+				t.Fatalf("review must not authorize a requested transition: %v", err)
+			}
+		})
+	}
+}
+
 func TestPreparationDiagnosticStageIsObservationButTargetStateStaysForbidden(t *testing.T) {
 	for _, fields := range []string{"Stage string", "Stage string; State string", "Stage string; TargetStage string", "Stage string; DesiredState string"} {
 		t.Run(fields, func(t *testing.T) {

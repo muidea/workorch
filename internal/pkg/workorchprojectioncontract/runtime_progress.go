@@ -46,12 +46,17 @@ type RuntimeProgress struct {
 // Counts persisted Runtime facts only. In particular, an owner-local physical
 // effect or saved receipt not admitted to Runtime cannot be inferred here.
 type RuntimeImplementationProgress struct {
-	ReservedRounds      int `json:"reservedRounds"`
-	CompletedRounds     int `json:"completedRounds"`
-	CommittedReceipts   int `json:"committedReceipts"`
-	UnknownExecutions   int `json:"unknownExecutions"`
-	SemanticGenerations int `json:"semanticGenerations"`
-	ArchivedSegments    int `json:"archivedSegments"`
+	CurrentWorkItemID   string                                            `json:"currentWorkItemId,omitempty"`
+	CurrentIntent       string                                            `json:"currentIntent,omitempty"`
+	LastIntentReview    *runtimecontract.RuntimeImplementationRoundReview `json:"lastIntentReview,omitempty"`
+	WorkRoundsUsed      int                                               `json:"workRoundsUsed"`
+	WorkRoundsLimit     int                                               `json:"workRoundsLimit"`
+	ReservedRounds      int                                               `json:"reservedRounds"`
+	CompletedRounds     int                                               `json:"completedRounds"`
+	CommittedReceipts   int                                               `json:"committedReceipts"`
+	UnknownExecutions   int                                               `json:"unknownExecutions"`
+	SemanticGenerations int                                               `json:"semanticGenerations"`
+	ArchivedSegments    int                                               `json:"archivedSegments"`
 }
 
 type RuntimeEvidenceCounts struct {
@@ -93,6 +98,10 @@ func CloneRuntimeProgress(item *RuntimeProgress) *RuntimeProgress {
 	ret := *item
 	if item.ImplementationWork != nil {
 		value := *item.ImplementationWork
+		if value.LastIntentReview != nil {
+			copy := *value.LastIntentReview
+			value.LastIntentReview = &copy
+		}
 		ret.ImplementationWork = &value
 	}
 	ret.TerminalAcknowledgedOwners = append([]string(nil), item.TerminalAcknowledgedOwners...)

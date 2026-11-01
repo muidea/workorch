@@ -34,6 +34,10 @@ func (c *authorityComponent) observeRuntimeDefinitionGap(ctx context.Context, wo
 		}
 		return RuntimeAggregate{}, fmt.Errorf("%w: Runtime already has a different Definition clarification", common.ErrConflict)
 	}
+	if aggregate.SemanticPlanning.Manifest != nil && runtimecontract.RuntimeDefinitionGapConflictsWithImplementationObservation(*aggregate.SemanticPlanning.Manifest, observation.GapKind) {
+		return RuntimeAggregate{}, fmt.Errorf("%w: implementation_work_exhausted_review_missing", common.ErrConflict)
+	}
+
 	definition := aggregate.Definition.Normalized()
 	if observation.WorkspaceID != workspaceID || observation.RunID != runID || observation.DefinitionRevision != definition.Revision ||
 		observation.StartupInputHash != definition.StartupInputHash || observation.AuthoritySnapshotID != aggregate.Decision.AuthoritySnapshot.ID ||

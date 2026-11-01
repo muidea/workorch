@@ -796,6 +796,9 @@ func validateRuntimeCandidateManifestRawCanonical(manifest RuntimeCandidateContr
 	}
 	if manifest.ImplementationWorkingBinding != nil {
 		binding := manifest.ImplementationWorkingBinding
+		if binding.IntentBinding == nil || binding.IntentBinding.Intent == nil {
+			return runtimeValidatedCandidateManifest{}, fmt.Errorf("implementation manifest lacks accepted work intent")
+		}
 		if binding.Hash != StableRuntimeImplementationWorkingBindingHash(*binding) || manifest.State != ConvergenceStateNeedStateChange || len(manifest.Bindings) != 0 || manifest.RepairPurpose != "" || manifest.RepairClosureID != "" || len(manifest.RequiredOperationSequence) != manifest.MaxOperationCount {
 			return runtimeValidatedCandidateManifest{}, fmt.Errorf("invalid implementation working manifest commitment")
 		}

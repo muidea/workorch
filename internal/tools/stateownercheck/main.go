@@ -153,6 +153,9 @@ var observedCommandCarrierFields = map[string]bool{
 // when only one immutable observation inside a shared DTO is state-like; a
 // newly added sibling State field then fails closed until separately audited.
 var observedStateCarrierFields = map[string]bool{
+	// Review is a semantic proposal about a completed work intent. SM-2 alone
+	// decides its successor; this field never carries requested owner state.
+	"internal/pkg/workorchruntimecontract:RuntimeImplementationRoundReview|Outcome": true,
 	// Owner-selected source completeness is an immutable observation, never a requested Runtime transition.
 	"internal/pkg/workorchruntimecontract:RuntimeValidationGenerationContext|Outcome":           true,
 	"internal/modules/kernel/workspace/pkg/models:DefinitionSpecificationRequestIdentity|Phase": true,

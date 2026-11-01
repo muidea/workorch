@@ -54,7 +54,7 @@ func projectImplementationPurpose(a *RuntimeAggregate) (bool, error) {
 		round := runtimecontract.RuntimeImplementationWorkRound{WorkspaceID: a.Facts.WorkspaceID, RunID: a.Facts.RunID, StartupInputHash: a.Definition.StartupInputHash, DefinitionSeedHash: a.Facts.DefinitionSeed.Hash, CoverageWorkItemID: choice.CoverageWorkItemID, PolicyHash: runtimecontract.StableRuntimeImplementationWorkPolicyHash(preview.Request.Policy), Ordinal: ordinal, PrecedingReceiptSetHash: preceding, ScopeRequest: preview.Request, ScopeObservation: preview.Observation}
 		round.Hash = runtimecontract.StableRuntimeImplementationWorkRoundHash(round)
 		a.ImplementationWork.Rounds = append(a.ImplementationWork.Rounds, round)
-	} else if choice.Purpose != runtimecontract.RuntimeImplementationWorkPurposeTerminal {
+	} else if choice.Purpose != runtimecontract.RuntimeImplementationWorkPurposeTerminal && choice.Purpose != runtimecontract.RuntimeImplementationWorkPurposeIncomplete && choice.Purpose != runtimecontract.RuntimeImplementationWorkPurposeInconclusive {
 		return false, common.ErrConflict
 	}
 	a.ImplementationWork.PurposeChoices = append(a.ImplementationWork.PurposeChoices, choice)
@@ -73,6 +73,12 @@ func projectImplementationPurpose(a *RuntimeAggregate) (bool, error) {
 	} else {
 		a.SemanticPlanning = appended
 	}
+	if failure := runtimecontract.RuntimeImplementationWorkObservationFailure(choice, ledger.CoverageOrderDocument.ImplementationIntent); failure != nil {
+		if err := replaceRuntimeFailureAuthority(&a.Facts, *failure, runtimeFailureAuthorityRetire, nil); err != nil {
+			return false, err
+		}
+	}
+
 	return true, nil
 }
 
@@ -130,7 +136,12 @@ func (c *planningTransactionComponent) sealImplementationWorkingBinding(ctx cont
 		return RuntimeAggregate{}, common.ErrConflict
 	}
 	work := ledger.Manifest.ProofObligations[0].ImplementationWork
+	intent, err := runtimecontract.ResolveRuntimeImplementationWorkIntent(round, a.SemanticPlanning)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
 	binding := runtimecontract.RuntimeImplementationWorkingBinding{
+		IntentBinding:        intent,
 		InputRevision:        round.ScopeRequest.InputRevision.Clone(),
 		SemanticManifestHash: ledger.Manifest.Hash, LogicalRequestID: batch.RequestLogicalID,
 		BindingGeneration: uint64(round.Ordinal), Proposals: ledger.Document.Proposals, Feasibilities: ledger.Feasibilities,
@@ -176,7 +187,6 @@ func (c *planningTransactionComponent) sealImplementationWorkingBinding(ctx cont
 	a.SemanticPlanning = ledger
 	// The sole reducer will project a state-change output from this private
 	// working commitment; terminal DefinitionFocus and reconciliation stay intact.
-	var err error
 	a.Facts, a.Decision, err = reduceRuntimeAggregateWithDirective(a, a.Facts, nil)
 	if err != nil {
 		return RuntimeAggregate{}, err

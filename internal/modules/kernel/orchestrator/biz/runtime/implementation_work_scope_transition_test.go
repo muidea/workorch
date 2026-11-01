@@ -620,9 +620,20 @@ func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.Run
 		work := obligation.ImplementationWork
 		intent := &runtimecontract.RuntimeImplementationIntent{DeclarationRef: obligation.DeclarationRef, ContentHash: work.Scope.Content.Hash(), RemainingWork: "scripted minimal original requirement work or independent verification", Reason: "compare exact current content with original obligation"}
 		for _, ref := range runtimecontract.RuntimeImplementationRequirementRefs(manifest, *work, obligation.DeclarationRef) {
-			intent.RequirementReviews = append(intent.RequirementReviews, runtimecontract.RuntimeImplementationRequirementReview{RequirementRef: ref, WorkRequired: purpose == runtimecontract.RuntimeImplementationWorkPurposeEffect})
+			intent.RequirementReviews = append(intent.RequirementReviews, runtimecontract.RuntimeImplementationRequirementReview{RequirementRef: ref, WorkRequired: purpose == runtimecontract.RuntimeImplementationWorkPurposeEffect || purpose == runtimecontract.RuntimeImplementationWorkPurposeIncomplete})
 			if purpose == runtimecontract.RuntimeImplementationWorkPurposeEffect {
 				intent.SelectedRequirementRefs = append(intent.SelectedRequirementRefs, ref)
+			}
+		}
+		if p := work.PreviousRound; p != nil {
+			intent.PreviousRoundReview = &runtimecontract.RuntimeImplementationRoundReview{DispatchID: p.DispatchID, ReceiptSetHash: p.ReceiptSetHash, Outcome: "addressed", Reason: "fixture actual effect implements the preceding bounded task"}
+			if purpose == runtimecontract.RuntimeImplementationWorkPurposeIncomplete {
+				intent.PreviousRoundReview.Outcome = "partial"
+				intent.PreviousRoundReview.Reason = "receipt is accepted but original implementation remains incomplete"
+			}
+			if purpose == runtimecontract.RuntimeImplementationWorkPurposeInconclusive {
+				intent.PreviousRoundReview.Outcome = "inconclusive"
+				intent.PreviousRoundReview.Reason = "current contents do not establish preceding intent completion"
 			}
 		}
 		document.ImplementationIntent = intent

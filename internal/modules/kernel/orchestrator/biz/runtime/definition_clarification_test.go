@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -115,5 +116,22 @@ func TestRuntimeDefinitionClarificationUsesDedicatedSM2SM3Transaction(t *testing
 	})
 	if !errors.Is(err, common.ErrConflict) || repository.aggregate.StateRevision != boundRevision {
 		t.Fatalf("conflicting gap mutated state: revision=%d err=%v", repository.aggregate.StateRevision, err)
+	}
+}
+
+func TestDefinitionGapPrivateAdmissionRejectsExhaustedImplementationAmbiguity(t *testing.T) {
+	controller, repository, aggregate := newSemanticPlanningController(t)
+	observation := runtimeDefinitionGapObservationForAggregate(t, repository, aggregate)
+	observation.GapKind = runtimecontract.RuntimeDefinitionGapSemanticAmbiguity
+	observation.OriginalDiagnostic.OriginalCode = string(observation.GapKind)
+	observation.OriginalDiagnostic.OriginalMessage = "implementation still incomplete but no work allowance remains"
+	observation.ObservationID = runtimecontract.StableRuntimeDefinitionGapObservationID(observation)
+	// This unit fixture isolates the independent private admission fence; the
+	// pure contract and real eight-round tests prove the complete manifest path.
+	repository.aggregate.SemanticPlanning.Manifest = &runtimecontract.RuntimeSemanticPlanManifest{ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{ImplementationWork: &runtimecontract.RuntimeSemanticImplementationWork{PurposeChoiceOnly: true, EffectAvailable: false}}}}
+	before := repository.saves
+	_, err := controller.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{Kind: RuntimeInternalEventDefinitionGapObserved, Scope: RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{DefinitionGap: &observation}})
+	if !errors.Is(err, common.ErrConflict) || !strings.Contains(err.Error(), "implementation_work_exhausted_review_missing") || repository.saves != before || repository.aggregate.DefinitionClarification != nil {
+		t.Fatalf("exhaustion persisted Definition governance: %v", err)
 	}
 }

@@ -54,21 +54,22 @@ type runtimeCandidateActivationProjection struct {
 // correction intentionally live in C4 so they cannot pollute the stable
 // prefix or obscure the current focus.
 type runtimeCandidateAuthorityProjection struct {
-	ValidationGenerationContexts []runtimeValidationGenerationContextProjection    `json:"validationGenerationContexts,omitempty"`
-	WorkspaceID                  common.WorkspaceID                                `json:"workspaceId"`
-	RunID                        common.RunID                                      `json:"runId"`
-	DefinitionRevision           string                                            `json:"definitionRevision"`
-	EvidenceRevision             string                                            `json:"evidenceRevision"`
-	Focus                        runtimecontract.CoverageFocus                     `json:"focus"`
-	RequiredState                runtimecontract.ConvergenceState                  `json:"requiredState"`
-	RequiredEffectScopes         []runtimecontract.RuntimeEffectScope              `json:"requiredEffectScopes,omitempty"`
-	RequiredEvidenceKinds        []string                                          `json:"requiredEvidenceKinds,omitempty"`
-	RepairDirective              *runtimeCandidateRepairAuthorityProjection        `json:"repairDirective,omitempty"`
-	AllowedEvidenceRefs          []string                                          `json:"allowedAcceptedEvidenceRefs,omitempty"`
-	ValidationProofPreparations  []runtimeSemanticNativeCheckAttestationProjection `json:"validationProofPreparations,omitempty"`
-	Resources                    runtimeCandidateAuthorityResourceProjection       `json:"resources"`
-	TargetSelectionInstruction   string                                            `json:"targetSelectionInstruction,omitempty"`
-	Activation                   runtimeCandidateActivationProjection              `json:"activation"`
+	ImplementationIntent         *runtimecontract.RuntimeImplementationWorkIntentBinding `json:"implementationIntent,omitempty"`
+	ValidationGenerationContexts []runtimeValidationGenerationContextProjection          `json:"validationGenerationContexts,omitempty"`
+	WorkspaceID                  common.WorkspaceID                                      `json:"workspaceId"`
+	RunID                        common.RunID                                            `json:"runId"`
+	DefinitionRevision           string                                                  `json:"definitionRevision"`
+	EvidenceRevision             string                                                  `json:"evidenceRevision"`
+	Focus                        runtimecontract.CoverageFocus                           `json:"focus"`
+	RequiredState                runtimecontract.ConvergenceState                        `json:"requiredState"`
+	RequiredEffectScopes         []runtimecontract.RuntimeEffectScope                    `json:"requiredEffectScopes,omitempty"`
+	RequiredEvidenceKinds        []string                                                `json:"requiredEvidenceKinds,omitempty"`
+	RepairDirective              *runtimeCandidateRepairAuthorityProjection              `json:"repairDirective,omitempty"`
+	AllowedEvidenceRefs          []string                                                `json:"allowedAcceptedEvidenceRefs,omitempty"`
+	ValidationProofPreparations  []runtimeSemanticNativeCheckAttestationProjection       `json:"validationProofPreparations,omitempty"`
+	Resources                    runtimeCandidateAuthorityResourceProjection             `json:"resources"`
+	TargetSelectionInstruction   string                                                  `json:"targetSelectionInstruction,omitempty"`
+	Activation                   runtimeCandidateActivationProjection                    `json:"activation"`
 }
 
 // runtimeCandidateExecutionTailProjection is C4: bounded current failure,
@@ -233,7 +234,12 @@ func runtimeCandidateAuthorityContextProjection(context runtimecontract.RuntimeC
 	}.Normalized()
 	// Continuation is retry/history information and belongs exclusively to C4.
 	activation.Continuation = nil
+	var intent *runtimecontract.RuntimeImplementationWorkIntentBinding
+	if manifest.ImplementationWorkingBinding != nil {
+		intent = manifest.ImplementationWorkingBinding.IntentBinding.Clone()
+	}
 	return runtimeCandidateAuthorityProjection{
+		ImplementationIntent:         intent,
 		WorkspaceID:                  context.WorkspaceID,
 		RunID:                        context.RunID,
 		DefinitionRevision:           context.DefinitionRevision,

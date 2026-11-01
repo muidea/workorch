@@ -32,17 +32,12 @@ func SemanticWorkContext(a RuntimeAggregate, m contract.RuntimeSemanticPlanManif
 			return nil, fmt.Errorf("semantic work prior round is incomplete")
 		}
 		round := contract.RuntimeSemanticWorkRound{Ordinal: r.Ordinal, DispatchID: r.DispatchID, ReceiptSetHash: r.CompletedReceiptSetHash}
-		for _, generation := range a.SemanticPlanning.AllHistory() {
-			snapshot := generation.Snapshot
-			if snapshot.Manifest == nil || snapshot.CoverageOrderDocument == nil {
-				continue
-			}
-			for _, obligation := range snapshot.Manifest.ProofObligations {
-				if prior := obligation.ImplementationWork; prior != nil && prior.PurposeChoiceOnly && prior.Scope.Request.RequestID == r.ScopeRequest.RequestID {
-					round.Intent = snapshot.CoverageOrderDocument.ImplementationIntent.Clone()
-				}
-			}
+		intent, err := contract.ResolveRuntimeImplementationWorkIntent(r, a.SemanticPlanning)
+		if err != nil {
+			return nil, err
 		}
+		round.Intent = intent.Intent.Clone()
+
 		for _, d := range a.CompletedDispatches {
 			if d.ID != r.DispatchID {
 				continue
@@ -58,15 +53,23 @@ func SemanticWorkContext(a RuntimeAggregate, m contract.RuntimeSemanticPlanManif
 		}
 		ret.PriorRounds = append(ret.PriorRounds, round)
 	}
-	for _, g := range a.SemanticPlanning.AllHistory() {
-		if g.Snapshot.Manifest == nil || g.Snapshot.CoverageOrderDocument == nil {
-			continue
-		}
-		for _, o := range g.Snapshot.Manifest.ProofObligations {
-			if o.ImplementationWork != nil && o.ImplementationWork.Scope.Request.RequestID == work.Scope.Request.RequestID && g.Snapshot.CoverageOrderDocument.ImplementationIntent != nil {
-				ret.Intent = g.Snapshot.CoverageOrderDocument.ImplementationIntent.Clone()
+	if !work.PurposeChoiceOnly {
+		matches := 0
+		for _, r := range a.ImplementationWork.Rounds {
+			if r.ScopeRequest.RequestID != work.Scope.Request.RequestID {
+				continue
 			}
+			intent, err := contract.ResolveRuntimeImplementationWorkIntent(r, a.SemanticPlanning)
+			if err != nil {
+				return nil, err
+			}
+			ret.Intent = intent.Intent.Clone()
+			matches++
+		}
+		if matches != 1 {
+			return nil, fmt.Errorf("work context requires unique accepted current intent")
 		}
 	}
+
 	return ret, ret.Validate(m)
 }

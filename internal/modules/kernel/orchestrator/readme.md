@@ -1607,7 +1607,7 @@ Found 或普通 response 均不授 effect/evidence/完成；驱动必须重读 R
 原 unknown/预算门禁。工作 unknown 的同一失败 CAS 保留原 owner diagnostic（阶段、受限引用、bytes/hash），终态投影不得
 将它替换为推测底层原因。SM-1 不变、不复活 failed；SM-2 仅消费最终可信事实。
 
-工作 scope 新增可选版本化 `implementation-work-content/v1` exact 原文观察。生产 File adapter 在完整 scope target set
+工作 scope 使用唯一当前 `implementation-work-content/v1` exact 原文观察，内容是必需输入。生产 File adapter 在完整 scope target set
 中读取有界完整正文，并再次真实读 manifest 核对原 revision；容量 128 KiB、缺失/二进制/截断或漂移显式拒绝。
 完整内容随原 scope private event/CAS 冻结，不借修订/重启重读另一个输入。旧封存 scope 不原地升级。
 `SemanticWorkContext` 从原同 CWI 完整 round、sealed dispatch/execution、可信 receipt/version 边和历史原用途理由编译 priorRounds，
@@ -1672,3 +1672,40 @@ Recovery and same-contract correction preserve exact source identity and budget 
 transaction: its current ledger contract explicitly identifies the order as provider-authored. Local compilation must not
 fabricate that provenance, usage, session or accepted document. Removing this call requires a separate explicit compiler
 origin and complete lineage contract; this change does not silently bypass that transaction.
+
+### Intent-bound implementation and honest exhaustion
+
+The existing accepted purpose generation is the unique original source of a working intent. The private working binding
+retains its complete `RuntimeImplementationWorkIntentBinding` (original request/manifest/document/scope identities and
+exact intent). Recovery joins complete semantic history, including archived generations; missing, duplicate, foreign,
+stale or rehashed different preimages cannot replace that source. The same binding is committed by the candidate manifest,
+required output, sealed dispatch and round hashes. Operations receives it in protected volatile C3. Post-render removal,
+replacement or duplicate authority sections fail before a physical provider call; C0-C2 never contain the intent.
+
+The next existing purpose transaction also reviews the preceding completed round, without another per-file model call.
+Its `previousRound` supplies the original intent, affected complete before-content (or prospective absence), dispatch and
+receipt-set identities. Fresh complete after-content and trusted target receipts retain their existing sources. The typed
+`previousRoundReview` is mandatory and distinguishes `addressed`, `partial`, `diverged` and `inconclusive`; it is a semantic
+proposal rather than owner-proven semantic correctness. Partial/diverged original gaps cannot disappear or be silently
+replaced in the next effect selection. Receipt acceptance remains a physical fact, never a review, validation or CWI credit.
+
+The purpose grammar separates truthful observations from permission to work. While effect allowance remains,
+`implementation_effect` reserves only one existing bounded round. With no proposed gaps, `terminal_proof` requests the
+original independent validation path; it does not assert project completion. At exhausted allowance,
+`implementation_incomplete` retains truthful original gaps and creates `implementation_work_budget_exhausted` failure
+through the existing reducer and delivery chain, without reserving work. `implementation_inconclusive` selects no effects
+and closes as `implementation_work_review_inconclusive`; it cannot claim addressed work. Both preserve the accepted original
+semantic document. Exhausted-purpose `semantic_ambiguity` is rejected as `implementation_work_exhausted_review_missing`
+at pure admission, private persistence and ticket I/O; it cannot instruct users to alter Goal merely to resolve this internal
+conflict. Genuine alternatives/prerequisite gaps retain their existing admission rules.
+
+SM-2 validates sources, consumes observations and seals existing failure authority atomically. SM-3 preserves the bound
+intent and exact review identities in existing transactions. SM-4 only re-drives those persisted transactions and delivers
+the judged outcome; SM-1 ownership and lifecycle states are unchanged. Ordinary validation, exact repair, all-of CWI
+convergence and Result/Workspace/Run ACK remain mandatory for success. Original round/target, provider, capability and repair
+budgets are unchanged. Existing Runs are never backfilled, migrated, unlocked or granted new rounds.
+
+Progress projections expose current intent, last review and focus-scoped round allowance separately from physical receipts,
+ordinary validation and CWI satisfaction. Their clones are detached and confer no authority. Complete content capacity stays
+128KiB with explicit refusal beyond the boundary; provider ceilings remain independently enforced. No truncation, global
+business-context sharing, profile version switch or domain-specific semantic heuristic is added.

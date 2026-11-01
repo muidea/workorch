@@ -90,6 +90,9 @@ func referenceWorkRoundCatalogSession(r RuntimeImplementationWorkRound) error {
 }
 
 func referenceWorkingBindingCatalogSession(b RuntimeImplementationWorkingBinding, r RuntimeImplementationWorkRound) error {
+	if err := b.IntentBinding.ValidateForRound(r); err != nil {
+		return err
+	}
 	for _, ref := range []string{b.SemanticGenerationID, b.SemanticManifestHash, b.LogicalRequestID} {
 		if !implementationWorkExactRef(ref) {
 			return fmt.Errorf("implementation working binding requires exact semantic request identity")

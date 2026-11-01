@@ -174,6 +174,12 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 		providerRequest.ContextBudget.CachePlan.StablePrefixHash = wantPrefix
 	}
 	populateRuntimeCandidateContextBudget(providerRequest.ContextBudget, providerRequest.PromptContext)
+	if err := validateRuntimeCandidateWorkIntentIntegrity(manifest, providerRequest.PromptContext); err != nil {
+		providerRequest.ContextBudget.ContextGateAction = "fail_fast"
+		providerRequest.ContextBudget.ContextGateReason = "runtime_context_integrity_failed"
+		providerRequest.ContextBudget.BudgetFailureClass = "context_integrity"
+		return providerRequest, err
+	}
 	if err := validateRuntimeCandidateContextIntegrity(definitionContext, candidateContext, request.CandidateAttempt, request.CandidateCorrectionObservation, providerRequest.ContextBudget, providerRequest.PromptContext); err != nil {
 		providerRequest.ContextBudget.ContextGateAction = "fail_fast"
 		providerRequest.ContextBudget.ContextGateReason = "runtime_context_integrity_failed"
@@ -264,6 +270,36 @@ func validateRuntimeCandidateManifestSupportingFacts(
 				return fmt.Errorf("admissibility snapshot %q is missing", snapshotRef)
 			}
 		}
+	}
+	return nil
+}
+
+func validateRuntimeCandidateWorkIntentIntegrity(manifest runtimecontract.RuntimeCandidateContractManifest, prompt *llmmodels.PromptContext) error {
+	var expected *runtimecontract.RuntimeImplementationWorkIntentBinding
+	if manifest.ImplementationWorkingBinding != nil {
+		expected = manifest.ImplementationWorkingBinding.IntentBinding
+		if expected == nil || expected.Intent == nil {
+			return fmt.Errorf("P2.implementation_intent: missing sealed working intent")
+		}
+	}
+	if prompt == nil {
+		return fmt.Errorf("P2.implementation_intent: missing prompt")
+	}
+	matches := 0
+	for _, section := range prompt.Sections {
+		if promptSectionGroup(section.ID) != "C3" {
+			continue
+		}
+		var actual struct {
+			Context runtimeCandidateAuthorityProjection `json:"context"`
+		}
+		if json.Unmarshal([]byte(section.Content), &actual) != nil || !reflect.DeepEqual(expected, actual.Context.ImplementationIntent) {
+			return fmt.Errorf("P2.implementation_intent: rendered intent differs from sealed original")
+		}
+		matches++
+	}
+	if matches != 1 {
+		return fmt.Errorf("P2.implementation_intent: missing or duplicate authority section")
 	}
 	return nil
 }

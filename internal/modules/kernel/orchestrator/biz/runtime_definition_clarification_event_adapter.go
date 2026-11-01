@@ -66,6 +66,9 @@ func (m *Biz) prepareRuntimeDefinitionClarificationRequest(ctx context.Context, 
 	if state.Request != nil {
 		return aggregate, nil
 	}
+	if aggregate.SemanticPlanning.Manifest != nil && runtimecontract.RuntimeDefinitionGapConflictsWithImplementationObservation(*aggregate.SemanticPlanning.Manifest, state.Observation.GapKind) {
+		return runtime.RuntimeAggregate{}, fmt.Errorf("%w: implementation_work_exhausted_review_missing", common.ErrConflict)
+	}
 	dispatch := state.Dispatch.Clone()
 	command, err := runtimeDefinitionClarificationCommand(dispatch)
 	if err != nil {

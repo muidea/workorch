@@ -120,6 +120,14 @@ func runtimeProgressSummary(runtime *projectioncontract.RuntimeProgress) string 
 	if work := runtime.ImplementationWork; work != nil {
 		parts = append(parts, fmt.Sprintf("implementation: rounds completed %d/%d | Runtime receipts %d | unknown executions %d | semantic generations %d (archived segments %d); work is not validation credit", work.CompletedRounds, work.ReservedRounds, work.CommittedReceipts, work.UnknownExecutions, work.SemanticGenerations, work.ArchivedSegments))
 	}
+	if work := runtime.ImplementationWork; work != nil && work.CurrentWorkItemID != "" {
+		parts = append(parts, fmt.Sprintf("current CWI %s work budget %d/%d | intent: %s", work.CurrentWorkItemID, work.WorkRoundsUsed, work.WorkRoundsLimit, work.CurrentIntent))
+		if work.LastIntentReview != nil {
+			parts = append(parts, "intent review: "+string(work.LastIntentReview.Outcome)+" | "+work.LastIntentReview.Reason)
+		} else {
+			parts = append(parts, "intent review: not established")
+		}
+	}
 	if len(runtime.TerminalAcknowledgedOwners) > 0 {
 		parts = append(parts, "terminal ACK: "+strings.Join(runtime.TerminalAcknowledgedOwners, ","))
 	}

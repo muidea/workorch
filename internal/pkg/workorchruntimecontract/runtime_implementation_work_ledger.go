@@ -32,6 +32,9 @@ type RuntimeImplementationWorkPurpose string
 const (
 	RuntimeImplementationWorkPurposeEffect   RuntimeImplementationWorkPurpose = "implementation_effect"
 	RuntimeImplementationWorkPurposeTerminal RuntimeImplementationWorkPurpose = "terminal_proof"
+	// These are observations, never effect permissions or terminal credit.
+	RuntimeImplementationWorkPurposeIncomplete   RuntimeImplementationWorkPurpose = "implementation_incomplete"
+	RuntimeImplementationWorkPurposeInconclusive RuntimeImplementationWorkPurpose = "implementation_inconclusive"
 )
 
 // RuntimeImplementationWorkPurposeChoice 只引用原 accepted semantic order，不复制 next action。
@@ -92,6 +95,7 @@ type RuntimeImplementationWorkRound struct {
 // consumer must seal it through the semantic proposal/owner feasibility private
 // transaction and copy its hash into the candidate manifest and dispatch.
 type RuntimeImplementationWorkingBinding struct {
+	IntentBinding        *RuntimeImplementationWorkIntentBinding
 	InputRevision        *RuntimeValidationInputRevision `json:",omitempty"`
 	SemanticGenerationID string
 	BindingGeneration    uint64
@@ -156,6 +160,7 @@ func (r RuntimeImplementationWorkRound) Clone() RuntimeImplementationWorkRound {
 }
 
 func (b RuntimeImplementationWorkingBinding) Clone() RuntimeImplementationWorkingBinding {
+	b.IntentBinding = b.IntentBinding.Clone()
 	b.InputRevision = b.InputRevision.Clone()
 	b.Proposals = cloneRuntimeStateRawSlice(b.Proposals, cloneRuntimeSemanticProofProposalRaw)
 	b.Feasibilities = cloneRuntimeStateRawSlice(b.Feasibilities, cloneRuntimeSemanticProofFeasibilityRaw)
@@ -290,6 +295,9 @@ func (b RuntimeImplementationWorkingBinding) ValidateForRound(r RuntimeImplement
 }
 
 func (b RuntimeImplementationWorkingBinding) validateForRoundInSemanticSession(r RuntimeImplementationWorkRound, session *runtimeSemanticValidationSession) error {
+	if err := b.IntentBinding.ValidateForRound(r); err != nil {
+		return err
+	}
 	for _, ref := range []string{b.SemanticGenerationID, b.SemanticManifestHash, b.LogicalRequestID} {
 		if !implementationWorkExactRef(ref) {
 			return fmt.Errorf("implementation working binding requires exact semantic request identity")

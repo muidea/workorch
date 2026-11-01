@@ -127,6 +127,31 @@ func runtimeImplementationProgress(state runtimecontract.RuntimeStateRecord) *pr
 		return nil
 	}
 	ret := &projectioncontract.RuntimeImplementationProgress{ReservedRounds: len(state.ImplementationWork.Rounds), SemanticGenerations: state.SemanticPlanning.HistoryCount()}
+	if len(state.Facts.Focus.CoverageWorkItemIDs) == 1 {
+		ret.CurrentWorkItemID = string(state.Facts.Focus.CoverageWorkItemIDs[0])
+	}
+	for _, focus := range state.Facts.DefinitionFocuses {
+		if len(focus.CoverageWorkItemIDs) == 1 && string(focus.CoverageWorkItemIDs[0]) == ret.CurrentWorkItemID && focus.ImplementationWorkPolicy != nil {
+			ret.WorkRoundsLimit = focus.ImplementationWorkPolicy.MaxRoundsPerCWI
+		}
+	}
+	// Read complete accepted purpose history, including archived generations.
+	for _, generation := range state.SemanticPlanning.AllHistory() {
+		s := generation.Snapshot
+		if s.Manifest == nil || s.CoverageOrderDocument == nil || len(s.Manifest.ProofObligations) != 1 {
+			continue
+		}
+		w := s.Manifest.ProofObligations[0].ImplementationWork
+		if w == nil || !w.PurposeChoiceOnly || string(w.Scope.Request.CoverageWorkItemID) != ret.CurrentWorkItemID || s.CoverageOrderDocument.ImplementationIntent == nil {
+			continue
+		}
+		i := s.CoverageOrderDocument.ImplementationIntent
+		ret.CurrentIntent = i.RemainingWork
+		if i.PreviousRoundReview != nil {
+			copy := *i.PreviousRoundReview
+			ret.LastIntentReview = &copy
+		}
+	}
 	if archive := state.SemanticPlanning.HistoryArchive; archive != nil {
 		ret.ArchivedSegments = len(archive.Segments)
 	}
@@ -135,6 +160,10 @@ func runtimeImplementationProgress(state runtimecontract.RuntimeStateRecord) *pr
 		dispatches = append(dispatches, *state.ActiveDispatch)
 	}
 	for _, round := range state.ImplementationWork.Rounds {
+		if ret.CurrentWorkItemID != "" && string(round.CoverageWorkItemID) == ret.CurrentWorkItemID {
+			ret.WorkRoundsUsed++
+			ret.WorkRoundsLimit = round.ScopeRequest.Policy.MaxRoundsPerCWI
+		}
 		if round.CompletedReceiptSetHash != "" {
 			ret.CompletedRounds++
 		}

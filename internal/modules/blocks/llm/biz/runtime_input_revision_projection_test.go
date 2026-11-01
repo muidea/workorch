@@ -53,7 +53,7 @@ func TestRuntimeInputRevisionCompleteC3StablePrefixAndClosedPurpose(t *testing.T
 				var choice struct {
 					Enum []string `json:"enum"`
 				}
-				if err := json.Unmarshal(schema.Properties["implementationPurpose"], &choice); err != nil || !reflect.DeepEqual(choice.Enum, []string{string(runtimecontract.RuntimeImplementationWorkPurposeEffect)}) {
+				if err := json.Unmarshal(schema.Properties["implementationPurpose"], &choice); err != nil || !reflect.DeepEqual(choice.Enum, []string{string(runtimecontract.RuntimeImplementationWorkPurposeEffect), string(runtimecontract.RuntimeImplementationWorkPurposeInconclusive)}) {
 					t.Fatal("input revision permits unchanged terminal branch", err)
 				}
 			}

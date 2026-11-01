@@ -1939,10 +1939,11 @@ func validateRuntimeSemanticPlanDocumentAgainstValidatedManifestUncached(d Runti
 		return err
 	}
 	if purposeWork != nil {
-		if purposeWork.Scope.Request.InputRevision != nil && d.ImplementationPurpose != RuntimeImplementationWorkPurposeEffect {
+		if purposeWork.Scope.Request.InputRevision != nil && d.ImplementationPurpose == RuntimeImplementationWorkPurposeTerminal {
 			return fmt.Errorf("rejected input requires a real bounded revision before fresh review")
 		}
-		if d.PlanStep != RuntimeSemanticPlanStepCoverageOrder || (d.ImplementationPurpose != RuntimeImplementationWorkPurposeTerminal && (d.ImplementationPurpose != RuntimeImplementationWorkPurposeEffect || !purposeWork.EffectAvailable)) {
+		allowed := d.ImplementationPurpose == RuntimeImplementationWorkPurposeTerminal || d.ImplementationPurpose == RuntimeImplementationWorkPurposeInconclusive || (d.ImplementationPurpose == RuntimeImplementationWorkPurposeIncomplete && !purposeWork.EffectAvailable) || (d.ImplementationPurpose == RuntimeImplementationWorkPurposeEffect && purposeWork.EffectAvailable)
+		if d.PlanStep != RuntimeSemanticPlanStepCoverageOrder || !allowed {
 			return fmt.Errorf("implementation purpose document exceeds sealed purpose vocabulary")
 		}
 	} else if d.ImplementationPurpose != "" {

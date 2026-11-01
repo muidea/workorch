@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -84,5 +85,35 @@ func TestImplementationWorkContentAndIntentAreExactOriginalInputs(t *testing.T) 
 	bad.Snapshots[0].ContentState = SnapshotContentStateTruncated
 	if bad.Validate(w.Scope) == nil {
 		t.Fatal("partial body accepted as complete")
+	}
+}
+
+func TestImplementationWorkContentCapacityPreservesExactBytes(t *testing.T) {
+	for _, count := range []int{1, 4} {
+		for _, delta := range []int{-1, 0, 1} {
+			total := RuntimeImplementationWorkContentMaxBytes + delta
+			scope := RuntimeImplementationWorkScopeObservation{Selection: RuntimeTargetSelection{ObservedRevision: "fixed-tree"}}
+			content := RuntimeImplementationWorkContent{ProtocolRef: RuntimeImplementationWorkContentV1, ManifestRevision: "fixed-tree"}
+			remaining := total
+			for n := range count {
+				size := remaining / (count - n)
+				remaining -= size
+				target := fmt.Sprintf("target-%d", n)
+				scope.Selection.TargetRefs = append(scope.Selection.TargetRefs, target)
+				content.Snapshots = append(content.Snapshots, workContentSnapshot(target, strings.Repeat("x", size)))
+			}
+			err := content.Validate(scope)
+			if (err == nil) != (delta <= 0) {
+				t.Fatalf("capacity count=%d bytes=%d: %v", count, total, err)
+			}
+			raw, _ := json.Marshal(content)
+			var restored RuntimeImplementationWorkContent
+			if json.Unmarshal(raw, &restored) != nil || restored.Hash() != content.Hash() {
+				t.Fatal("capacity boundary lost exact original bytes")
+			}
+			if len(restored.Snapshots[0].Content) != len(content.Snapshots[0].Content) {
+				t.Fatal("capacity error silently truncated original")
+			}
+		}
 	}
 }

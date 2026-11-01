@@ -22,12 +22,14 @@ type RuntimeSemanticImplementationWork struct {
 	Scope                   RuntimeImplementationWorkScopeObservation
 	MutationInputCatalogs   []RuntimeOperationAdmissibility
 	ExcludedTargetRefs      []string
+	PreviousRound           *RuntimeImplementationRoundReviewSource
 }
 
 func (w RuntimeSemanticImplementationWork) Clone() RuntimeSemanticImplementationWork {
 	w.Scope = w.Scope.Clone()
 	w.MutationInputCatalogs = cloneRuntimeStateRawSlice(w.MutationInputCatalogs, cloneRuntimeOperationAdmissibilityRaw)
 	w.ExcludedTargetRefs = slices.Clone(w.ExcludedTargetRefs)
+	w.PreviousRound = w.PreviousRound.Clone()
 	return w
 }
 
@@ -43,8 +45,17 @@ func (w RuntimeSemanticImplementationWork) validateInSemanticSession(session *ru
 	if w.Scope.Content == nil {
 		return fmt.Errorf("implementation progress requires complete current content before a semantic request")
 	}
-	if w.Scope.Request.InputRevision != nil && w.PurposeChoiceOnly && !w.EffectAvailable {
-		return fmt.Errorf("input revision cannot bypass exhausted original effect rounds")
+	if w.PurposeChoiceOnly && w.Ordinal > 1 && w.PreviousRound == nil {
+		return fmt.Errorf("implementation purpose requires preceding original round review source")
+	}
+	if w.PreviousRound != nil {
+		if err := w.PreviousRound.validate(); err != nil {
+			return err
+		}
+		p := w.PreviousRound
+		if !w.PurposeChoiceOnly || p.Ordinal != w.Ordinal-1 || p.DispatchID == "" || p.ReceiptSetHash != w.PrecedingReceiptSetHash || p.IntentBinding == nil || p.IntentBinding.Intent == nil || p.IntentBinding.Source.CoverageWorkItemID != w.Scope.Request.CoverageWorkItemID {
+			return fmt.Errorf("implementation review source differs from preceding original round")
+		}
 	}
 	maxOrdinal := w.Scope.Request.Policy.MaxRoundsPerCWI
 	if w.PurposeChoiceOnly {
@@ -179,6 +190,7 @@ func compileRuntimeWorkPurposeInSession(workspace common.WorkspaceID, run common
 		return RuntimeSemanticPlanManifest{}, fmt.Errorf("implementation purpose requires complete fresh scope preview")
 	}
 	ordinal, preceding := 1, ""
+	var previous *RuntimeImplementationRoundReviewSource
 	for _, prior := range rounds {
 		if prior.CoverageWorkItemID != preview.Request.CoverageWorkItemID {
 			continue
@@ -187,6 +199,11 @@ func compileRuntimeWorkPurposeInSession(workspace common.WorkspaceID, run common
 			return RuntimeSemanticPlanManifest{}, fmt.Errorf("implementation purpose cannot bypass incomplete prior work")
 		}
 		ordinal, preceding = prior.Ordinal+1, prior.CompletedReceiptSetHash
+		var err error
+		previous, err = implementationRoundReviewSource(prior)
+		if err != nil {
+			return RuntimeSemanticPlanManifest{}, err
+		}
 	}
 	// 复用词汇编译器的来源校验；这个局部 value 从不入账、从不授 dispatch。
 	vocabularySource := RuntimeImplementationWorkRound{WorkspaceID: workspace, RunID: run, StartupInputHash: definition.StartupInputHash, DefinitionSeedHash: seed.Hash, CoverageWorkItemID: preview.Request.CoverageWorkItemID, PolicyHash: StableRuntimeImplementationWorkPolicyHash(preview.Request.Policy), Ordinal: 1, ScopeRequest: preview.Request.Clone(), ScopeObservation: preview.Observation}
@@ -198,6 +215,7 @@ func compileRuntimeWorkPurposeInSession(workspace common.WorkspaceID, run common
 	work := manifest.ProofObligations[0].ImplementationWork
 	work.PurposeChoiceOnly, work.EffectAvailable = true, ordinal <= preview.Request.Policy.MaxRoundsPerCWI
 	work.Ordinal, work.PrecedingReceiptSetHash = ordinal, preceding
+	work.PreviousRound = previous
 	work.RoundHash = implementationWorkRawHash("implementation-purpose-preview:", preview)
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
 	if _, err := validateRuntimeSemanticPlanManifestInSession(manifest, session); err != nil {

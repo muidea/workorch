@@ -12,7 +12,9 @@ func TestImplementationWorkProspectiveTargetParametersUseFinalPolicy(t *testing.
 	catalog.SelectorRefs = []string{"work-scope"}
 	catalog.OperationVariants = []RuntimeOperationAdmissibilityVariant{{Kind: RuntimeBlockKindPatchApply, VariantID: "file_write", AllowedTargetPolicies: []RuntimeOperationTargetPolicy{RuntimeOperationTargetPolicyProspectiveOwnerTarget}, SelectorRefs: catalog.SelectorRefs, ConstraintRefs: catalog.ConstraintRefs}}
 	catalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	ledger, _ := implementationWorkLedgerFixture(t)
 	binding := RuntimeImplementationWorkingBinding{
+		IntentBinding:      ledger.Rounds[0].WorkingBinding.IntentBinding.Clone(),
 		OwnerCatalog:       catalog,
 		CatalogObservation: RuntimePrerequisiteObservation{ObservationID: "work-catalog-observation"},
 		Proposals:          []RuntimeSemanticProofProposal{{OperationKind: RuntimeBlockKindPatchApply, OperationVariantID: "file_write", Target: RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyProspectiveOwnerTarget, OwnerSelectorRefs: []string{"work-scope"}, ProspectiveConstraintRefs: catalog.ConstraintRefs, ProspectiveTargetRefs: []string{"new.txt"}}}},
@@ -58,8 +60,10 @@ func TestImplementationWorkMixedKindsKeepIndependentTargetPreimages(t *testing.T
 	catalog.TargetParameterBindings = append(catalog.TargetParameterBindings, patchPreimages)
 	catalog = catalog.Normalized()
 	catalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	ledger, _ := implementationWorkLedgerFixture(t)
 	binding := RuntimeImplementationWorkingBinding{
-		OwnerCatalog: catalog, CatalogObservation: RuntimePrerequisiteObservation{ObservationID: "work-catalog-observation"},
+		IntentBinding: ledger.Rounds[0].WorkingBinding.IntentBinding.Clone(),
+		OwnerCatalog:  catalog, CatalogObservation: RuntimePrerequisiteObservation{ObservationID: "work-catalog-observation"},
 		Proposals: []RuntimeSemanticProofProposal{
 			{OperationKind: StepKindFileEdit, Target: RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerScopeTargetRefs: []string{"session.txt"}}},
 			{OperationKind: RuntimeBlockKindPatchApply, OperationVariantID: "text_replace", Target: RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerScopeTargetRefs: []string{"session_manager.txt"}}},
@@ -103,7 +107,9 @@ func TestImplementationWorkTargetParametersFollowFinalKindTarget(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			ledger, _ := implementationWorkLedgerFixture(t)
 			binding := RuntimeImplementationWorkingBinding{
+				IntentBinding:      ledger.Rounds[0].WorkingBinding.IntentBinding.Clone(),
 				OwnerCatalog:       owner.OperationAdmissibilities[0],
 				CatalogObservation: RuntimePrerequisiteObservation{ObservationID: "work-catalog-observation"},
 				Proposals:          []RuntimeSemanticProofProposal{{OperationKind: kind, Target: RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerScopeTargetRefs: []string{"session.txt"}}}},

@@ -59,6 +59,7 @@ type RuntimeImplementationIntent struct {
 	Reason                  string                                   `json:"reason"`
 	RequirementReviews      []RuntimeImplementationRequirementReview `json:"requirementReviews,omitempty"`
 	SelectedRequirementRefs []string                                 `json:"selectedRequirementRefs,omitempty"`
+	PreviousRoundReview     *RuntimeImplementationRoundReview        `json:"previousRoundReview,omitempty"`
 }
 
 func (i *RuntimeImplementationIntent) Clone() *RuntimeImplementationIntent {
@@ -68,6 +69,10 @@ func (i *RuntimeImplementationIntent) Clone() *RuntimeImplementationIntent {
 	v := *i
 	v.RequirementReviews = slices.Clone(i.RequirementReviews)
 	v.SelectedRequirementRefs = slices.Clone(i.SelectedRequirementRefs)
+	if i.PreviousRoundReview != nil {
+		copy := *i.PreviousRoundReview
+		v.PreviousRoundReview = &copy
+	}
 	return &v
 }
 func validateRuntimeImplementationIntent(i *RuntimeImplementationIntent, w *RuntimeSemanticImplementationWork, declaration string) error {
@@ -80,7 +85,7 @@ func validateRuntimeImplementationIntent(i *RuntimeImplementationIntent, w *Runt
 	if i == nil || i.DeclarationRef != declaration || i.ContentHash != w.Scope.Content.Hash() || strings.TrimSpace(i.RemainingWork) == "" || strings.TrimSpace(i.Reason) == "" || len(i.RemainingWork) > 2048 || len(i.Reason) > 2048 {
 		return fmt.Errorf("implementation purpose requires exact obligation/content and bounded remaining-work explanation")
 	}
-	return nil
+	return validateImplementationRoundReview(i, w)
 }
 
 // Work context is a projection, not another completion ledger. PriorRounds is
@@ -143,6 +148,15 @@ func (c *RuntimeSemanticWorkContext) Validate(m RuntimeSemanticPlanManifest) err
 	}
 	if c == nil || !reflect.DeepEqual(c.Content, work.Scope.Content) || len(c.PriorRounds) != work.Ordinal-1 {
 		return fmt.Errorf("semantic work context missing exact source or complete prior rounds")
+	}
+	if p := work.PreviousRound; p != nil {
+		if len(c.PriorRounds) == 0 || p.IntentBinding == nil {
+			return fmt.Errorf("missing preceding round context")
+		}
+		r := c.PriorRounds[len(c.PriorRounds)-1]
+		if r.Ordinal != p.Ordinal || r.DispatchID != p.DispatchID || r.ReceiptSetHash != p.ReceiptSetHash || !reflect.DeepEqual(r.Intent, p.IntentBinding.Intent) {
+			return fmt.Errorf("semantic work review differs from complete preceding round context")
+		}
 	}
 	for i, r := range c.PriorRounds {
 		if r.Ordinal != i+1 || r.DispatchID == "" || r.ReceiptSetHash == "" || len(r.Targets) == 0 || len(r.Targets) > work.Scope.Request.Policy.MaxTargetsPerRound {

@@ -247,6 +247,18 @@ func validateRuntimeSemanticPayloadFields(payload []byte) error {
 		if err := json.Unmarshal(raw, &intent); err != nil {
 			return &RuntimeCandidatePayloadDiagnostic{Path: "$.implementationIntent", Actual: "non_object", Cause: err}
 		}
+		if err := validateRuntimeSemanticObjectFields("$.implementationIntent", intent, []string{"declarationRef", "contentHash", "remainingWork", "reason", "requirementReviews", "selectedRequirementRefs", "previousRoundReview"}, []string{"declarationRef", "contentHash", "remainingWork", "reason"}); err != nil {
+			return err
+		}
+		if rawReview, exists := intent["previousRoundReview"]; exists {
+			var review map[string]json.RawMessage
+			if err := json.Unmarshal(rawReview, &review); err != nil || review == nil {
+				return fmt.Errorf("previous implementation review must be an object")
+			}
+			if err := validateRuntimeSemanticObjectFields("$.implementationIntent.previousRoundReview", review, []string{"dispatchId", "receiptSetHash", "outcome", "reason"}, []string{"dispatchId", "receiptSetHash", "outcome", "reason"}); err != nil {
+				return err
+			}
+		}
 		if rawReviews, exists := intent["requirementReviews"]; exists {
 			var reviews []json.RawMessage
 			if err := json.Unmarshal(rawReviews, &reviews); err != nil {
@@ -647,7 +659,10 @@ func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifes
 				}
 				if work.EffectAvailable {
 					purposes = append(purposes, string(RuntimeImplementationWorkPurposeEffect))
+				} else {
+					purposes = append(purposes, string(RuntimeImplementationWorkPurposeIncomplete))
 				}
+				purposes = append(purposes, string(RuntimeImplementationWorkPurposeInconclusive))
 				properties["implementationPurpose"] = map[string]any{"type": "string", "enum": purposes}
 				normalRequired = append(normalRequired, "implementationPurpose")
 				if work.Scope.Content != nil {
@@ -655,7 +670,7 @@ func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifes
 					{
 						intent := properties["implementationIntent"].(map[string]any)
 						refs := RuntimeImplementationRequirementRefs(manifest, *work, obligation.DeclarationRef)
-						addRuntimeImplementationProgressSchema(schema, intent, refs)
+						addRuntimeImplementationProgressSchema(schema, intent, refs, work)
 					}
 					normalRequired = append(normalRequired, "implementationIntent")
 				}
