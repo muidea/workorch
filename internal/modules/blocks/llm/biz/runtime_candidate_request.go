@@ -35,6 +35,9 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 	if err := runtimecontract.ValidateRuntimeCandidateContractManifestForSealedDecision(manifest, request.Decision); err != nil {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate contract manifest: %w", err)
 	}
+	if _, err := runtimecontract.ProjectRuntimeCandidateWorkContent(candidateContext, manifest); err != nil {
+		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate work source: %w", err)
+	}
 	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
 	if err != nil {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate wire contract: %w", err)
@@ -174,6 +177,9 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 		providerRequest.ContextBudget.CachePlan.StablePrefixHash = wantPrefix
 	}
 	populateRuntimeCandidateContextBudget(providerRequest.ContextBudget, providerRequest.PromptContext)
+	if err := validateRuntimeCandidateWorkContentIntegrity(candidateContext, manifest, providerRequest.PromptContext); err != nil {
+		return llmmodels.ProviderRequest{}, err
+	}
 	if err := validateRuntimeCandidateWorkIntentIntegrity(manifest, providerRequest.PromptContext); err != nil {
 		providerRequest.ContextBudget.ContextGateAction = "fail_fast"
 		providerRequest.ContextBudget.ContextGateReason = "runtime_context_integrity_failed"

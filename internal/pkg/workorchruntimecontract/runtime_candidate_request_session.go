@@ -391,6 +391,7 @@ func StableRuntimeCandidateRequestCorrectionHash(observation *RuntimeCandidateCo
 			}
 			writeHashString(h, string(value.ViolationKind))
 			writeHashRuntimeCandidateParameterEntryEncodings(h, value.ParameterEntryEncodings)
+			writeHashRuntimeCandidateRequiredOperations(h, value.RequiredOperations)
 			writeHashRuntimeCandidateParameterCardinality(h, value.ParameterCardinality)
 			writeHashRuntimeCandidateOperationSetViolation(h, value.OperationSetViolation)
 			writeHashString(h, value.ConstraintRef)
@@ -418,6 +419,7 @@ func StableRuntimeCandidateRequestCorrectionHash(observation *RuntimeCandidateCo
 			writeHashString(h, value.AlternativeShapeHash)
 			writeHashString(h, value.ConstraintRef)
 			writeHashRuntimeCandidateParameterEntryEncodings(h, value.ParameterEntryEncodings)
+			writeHashRuntimeCandidateRequiredOperations(h, value.RequiredOperations)
 			writeHashRuntimeCandidateParameterCardinality(h, value.ParameterCardinality)
 			writeHashRuntimeCandidateOperationSetViolation(h, value.OperationSetViolation)
 		}

@@ -1426,3 +1426,56 @@ func assertStringSliceContains(t *testing.T, values []string, want string) {
 	}
 	t.Fatalf("list %+v missing %q", values, want)
 }
+
+func TestGoalTemplateBindsOwnerReceiptToFormalSourceWithoutProjectPrivateReads(t *testing.T) {
+	templates, err := loadEmbeddedTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := findEmbeddedTemplateByID(templates, "software-dev")
+	if item == nil {
+		t.Fatal("missing profile")
+	}
+	raw, err := json.Marshal(item.ContextHints["templateProofBindings"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var proof struct {
+		Bindings []struct {
+			CandidateItemRef string `json:"candidateItemRef"`
+			Text             string `json:"text"`
+			Assertions       []struct {
+				Ref                string `json:"ref"`
+				Kind               string `json:"kind"`
+				ConsumptionPoint   string `json:"consumptionPoint"`
+				ReceiptSourceScope string `json:"receiptSourceScope"`
+				ReceiptSourceID    string `json:"receiptSourceId"`
+				OwnerModuleID      string `json:"ownerModuleId"`
+				Choices            []struct {
+					Kind    string `json:"kind"`
+					Variant string `json:"variantId"`
+				} `json:"receiptOperationChoices"`
+			} `json:"lineageAssertions"`
+		} `json:"bindings"`
+	}
+	if json.Unmarshal(raw, &proof) != nil {
+		t.Fatal("invalid template binding")
+	}
+	matches := 0
+	for _, b := range proof.Bindings {
+		if b.CandidateItemRef != "derived-dod:template:000001" {
+			continue
+		}
+		matches++
+		if b.Text != "目标（Goal）对应的需求能力已实现，并与验收范围保持一致" || len(b.Assertions) != 1 {
+			t.Fatal("goal source binding drift")
+		}
+		a := b.Assertions[0]
+		if a.Kind != "terminal_owner_operation_receipt" || a.ConsumptionPoint != "post_terminal_delivery" || a.ReceiptSourceScope != "deliverable" || a.ReceiptSourceID != "source_change" || a.OwnerModuleID != "blocks/file" || len(a.Choices) != 4 {
+			t.Fatal("goal receipt disconnected from actual formal owner source")
+		}
+	}
+	if matches != 1 {
+		t.Fatal("goal receipt source missing or duplicated")
+	}
+}

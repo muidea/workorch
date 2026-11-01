@@ -1739,3 +1739,20 @@ modify receipt history nor revive failed Runs.
 
 
 长任务中的前置条件失效记录保留原追加因果顺序，不能按签名排序。前置条件已经 pending 时，后继 owner 回执的 resource changes 仍保全于原索引；CAS 禁止重排、改写或删除既有记录。合法资源回退的 fresh observation 仅能依真实 owner receipt 的完整来源匹配恢复，不能复活 retired observation 或忽略更晚的 stale 事实。该索引不提供 validation 或终态 credit。
+
+### 冻结工作正文与必需操作缺项
+
+SM-2/SM-3 的 current working reservation 是 operations 输入正文的唯一来源：`CandidateWorkContent`
+从原 `ScopeObservation.Content` 及 accepted purpose preimage 编译 detached `RuntimeCandidateContext.ImplementationWorkContent`。
+SM-4 重驱复用冻结输入，不重新读取文件替换正文。LLM 在渲染前核对完整 content hash、bytes/SHA256、complete 状态和
+唯一目标，再仅将 manifest 必需目标的完整正文及有 owner prospective 声明的 absent targets 放入 C4。缺失、漂移、跨来源
+或渲染后删改为 context-integrity 失败，在 provider I/O 前拒绝；正文不改变 C0～C2，也不授 receipt/validation credit。
+
+严格 decoder 对缺失必需槽位输出 `required_operations_missing`：原文 SHA256/bytes、manifest hash、完整 missingRefs 以及
+所有 retained operation 值 hash。SM-3 可封存 `supply_required_operations` 的一次纠错 witness；LLM 端独立核对该集合为原
+manifest 的精确补集。attempt1 必须补齐全部缺项、保留所有已有 operation 值，并重新通过完整 admission 和 owner gates。
+不由代码生成语义参数，不接纳空数组为 no-op，不借补项增加目标、替换原选择或增加第三次尝试。未知/重复槽位保持严格拒绝。
+回执、预算和 CWI 不因 correction grant 发生 credit；失败终态仍按原 Result→Workspace→Run ACK 链交付。
+
+回归落点：`runtime/candidate_required_operations_test.go`、`runtime/implementation_work_scope_transition_test.go`、
+共享 `runtime_candidate_required_operations_test.go` 以及 LLM 的正文 render gate 测试。

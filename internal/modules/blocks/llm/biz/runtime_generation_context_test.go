@@ -266,3 +266,16 @@ func TestRuntimeGenerationContextIntegrityRejectsLostForgedAndForeignSource(t *t
 		})
 	}
 }
+
+func TestReadyValidationBindingRetainsGenerationContextForRevision(t *testing.T) {
+	source := "actual production behavior\n"
+	c := &runtimecontract.RuntimeValidationGenerationContext{Version: runtimecontract.RuntimeValidationGenerationContextVersion, ContractRef: "owner/revision-source", ObservedRevision: "r1", Outcome: runtimecontract.RuntimeValidationGenerationContextComplete, Files: []runtimecontract.RuntimeValidationInputReviewFile{{TargetRef: "production.go", Content: source, ContentHash: runtimecontract.RuntimeValidationInputContentHash(source)}}}
+	catalogs := []runtimecontract.RuntimeOperationAdmissibility{{PrerequisiteID: "catalog", OwnerModuleID: runtimecontract.RuntimeModuleShell, ObservedRevision: "r1", ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{ID: "recipe", GenerationContext: c, ProofRequirementBindings: []runtimecontract.RuntimeValidationProofRequirementBinding{{CoverageWorkItemID: "cwi", RequirementHash: "original-requirement"}}}}}}
+	projected := runtimeValidationGenerationContexts([]common.CoverageWorkItemID{"cwi"}, nil, catalogs)
+	if len(projected) != 1 || projected[0].Context.Files[0].Content != source || len(projected[0].RequirementHashes) != 1 {
+		t.Fatal("ready input lost dependency source for revision")
+	}
+	if len(runtimeValidationGenerationContexts([]common.CoverageWorkItemID{"foreign"}, nil, catalogs)) != 0 {
+		t.Fatal("borrowed neighboring requirement source")
+	}
+}

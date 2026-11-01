@@ -76,6 +76,7 @@ type runtimeCandidateAuthorityProjection struct {
 // evidence and retry context. It never changes C0-C2 and never carries raw
 // provider payloads.
 type runtimeCandidateExecutionTailProjection struct {
+	ImplementationWorkContent *runtimecontract.RuntimeCandidateWorkContent           `json:"implementationWorkContent,omitempty"`
 	Attempt                   int                                                    `json:"candidateAttempt"`
 	Retry                     *runtimeCandidateRetryProjection                       `json:"retry,omitempty"`
 	Failure                   *runtimeCandidateProviderSafeFailureProjection         `json:"failure,omitempty"`
@@ -535,7 +536,9 @@ func buildRuntimeCandidateExecutionTailProjection(
 	if context.RepairDirective != nil && context.RepairDirective.CurrentFailure != nil {
 		failure = context.RepairDirective.CurrentFailure
 	}
+	content, _ := runtimecontract.ProjectRuntimeCandidateWorkContent(context, manifest)
 	return runtimeCandidateExecutionTailProjection{
+		ImplementationWorkContent: content,
 		Attempt:                   attempt,
 		Retry:                     runtimeCandidateRetryForManifest(attempt, previousFailure, manifest, correction),
 		Failure:                   runtimeProviderSafeFailure(failure),

@@ -55,6 +55,7 @@ const (
 // hashes are required for operation-level differences and intentionally omit
 // operation IDs and display-only summary parameters.
 type RuntimeCandidateCorrectionWitness struct {
+	RequiredOperations      *RuntimeCandidateRequiredOperationsViolation   `json:",omitempty"`
 	ParameterCardinality    *RuntimeCandidateParameterCardinalityViolation `json:",omitempty"`
 	Dimension               RuntimeCandidateCorrectionWitnessDimension
 	OperationKind           string
@@ -78,6 +79,7 @@ func (w RuntimeCandidateCorrectionWitness) Normalized() RuntimeCandidateCorrecti
 	w.AlternativeShapeHash = strings.TrimSpace(w.AlternativeShapeHash)
 	w.ConstraintRef = strings.TrimSpace(w.ConstraintRef)
 	w.ParameterEntryEncodings = cloneRuntimeCandidateParameterEntryEncodings(w.ParameterEntryEncodings)
+	w.RequiredOperations = w.RequiredOperations.Clone()
 	w.ParameterCardinality = w.ParameterCardinality.Clone()
 	w.OperationSetViolation = w.OperationSetViolation.Clone()
 	return w
@@ -94,7 +96,17 @@ func (w RuntimeCandidateCorrectionWitness) Validate() error {
 	if w.Dimension != RuntimeCandidateCorrectionWitnessParameterCardinality && w.ParameterCardinality != nil {
 		return fmt.Errorf("unrelated correction witness carries parameter cardinality")
 	}
+	if w.Dimension != RuntimeCandidateCorrectionWitnessRequiredOperations && w.RequiredOperations != nil {
+		return fmt.Errorf("unrelated correction carries required operation omission")
+	}
 	switch w.Dimension {
+	case RuntimeCandidateCorrectionWitnessRequiredOperations:
+		if w.Path != "$.operations" || w.OperationKind != "" || w.RejectedValue != "required_slots_missing" || w.AlternativeValue != "all_required_slots_present" || w.RejectedShapeHash != "" || w.AlternativeShapeHash != "" {
+			return fmt.Errorf("invalid required operation correction witness")
+		}
+		if err := w.RequiredOperations.Validate(); err != nil {
+			return err
+		}
 	case RuntimeCandidateCorrectionWitnessParameterCardinality:
 		if w.OperationKind != "" || w.Path != "$.operations" || w.RejectedValue != RuntimeCandidateParameterNamesRepeated || w.AlternativeValue != RuntimeCandidateParameterNamesUnique || w.RejectedShapeHash != "" || w.AlternativeShapeHash != "" || w.ConstraintRef != "" {
 			return fmt.Errorf("invalid parameter cardinality witness")

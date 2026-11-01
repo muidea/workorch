@@ -77,6 +77,18 @@ func TestConjunctiveInputPreparationReviewAndIdentity(t *testing.T) {
 	if len(surfaces) != 1 || surfaces[0].Validate() != nil || len(surfaces[0].ProofRequirementBindings) != 1 {
 		t.Fatalf("complete source input unavailable: %+v", surfaces)
 	}
+	if surfaces[0].GenerationContext == nil || surfaces[0].GenerationContext.Outcome != runtimecontract.RuntimeValidationGenerationContextComplete {
+		t.Fatal("ready input lost implementation dependency context")
+	}
+	foundSource := false
+	for _, source := range surfaces[0].GenerationContext.Files {
+		if source.TargetRef == "delivery/value.go" {
+			foundSource = source.Content == "package delivery\nfunc Compute(v int) int{return v+7}\n"
+		}
+	}
+	if !foundSource {
+		t.Fatal("revision context lacks exact implementation bytes")
+	}
 	binding := surfaces[0].ProofRequirementBindings[0]
 	if binding.InputReview == nil || len(binding.InputReview.Files) != 2 || binding.InputReview.ProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocol || binding.InputReview.ScopeContractRef != shellConjunctiveReviewScopeContractRef || binding.InputReview.ValidateAgainstBinding(binding) != nil {
 		t.Fatal("complete source input review lost member/scope identity")

@@ -117,8 +117,8 @@ func (s RuntimeValidationSurface) Clone() RuntimeValidationSurface {
 func (s RuntimeValidationSurface) Validate() error {
 	raw := s
 	if s.GenerationContext != nil {
-		if len(s.ProofRequirementPreparations) == 0 {
-			return fmt.Errorf("generation context requires a validation preparation")
+		if len(s.ProofRequirementPreparations) == 0 && len(s.ProofRequirementBindings) == 0 {
+			return fmt.Errorf("generation context requires an exact validation preparation or binding")
 		}
 		if err := s.GenerationContext.Validate(s.GenerationContext.ObservedRevision); err != nil {
 			return err

@@ -255,6 +255,9 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 			IdempotencyClass: runtimemodel.RuntimeOperationIdempotencyAtMostOnce,
 			InputSchemaHash:  schemaHash,
 		}
+		if len(bindings) != 0 && shellValidationInputReviewRequired(recipe.AdapterRef) {
+			surface.GenerationContext = shellValidationGenerationContext(workspaceDirectory, binding.Manifest, catalogObservedRevision)
+		}
 		for _, preparation := range preparations {
 			if preparation.ContentContractRef != "" && preparation.TargetRef != "" {
 				surface.GenerationContext = shellValidationGenerationContext(workspaceDirectory, binding.Manifest, catalogObservedRevision)

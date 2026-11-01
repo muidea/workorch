@@ -112,7 +112,14 @@ func (o RuntimeCandidateCorrectionObservation) Validate() error {
 	if diagnostic.ViolationKind != RuntimeCandidatePayloadViolationParameterCardinality && diagnostic.ParameterCardinality != nil {
 		return fmt.Errorf("unrelated diagnostic carries parameter cardinality")
 	}
+	if diagnostic.ViolationKind != RuntimeCandidatePayloadViolationRequiredOperations && diagnostic.RequiredOperations != nil {
+		return fmt.Errorf("unrelated diagnostic carries required operation omission")
+	}
 	switch diagnostic.ViolationKind {
+	case RuntimeCandidatePayloadViolationRequiredOperations:
+		if !diagnostic.RequiredOperations.MatchesDiagnostic(&diagnostic) || !RuntimeCandidateCorrectionObjectivesEqual(diagnostic.Objectives, []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionSupplyRequiredOperations}) || diagnostic.ParameterCardinality != nil || diagnostic.OperationSetViolation != nil || len(diagnostic.ParameterEntryEncodings) != 0 {
+			return fmt.Errorf("invalid required operation omission diagnostic")
+		}
 	case RuntimeCandidatePayloadViolationParameterCardinality:
 		if diagnostic.ParameterCardinality.Validate() != nil || !diagnostic.ParameterCardinality.MatchesDiagnostic(&diagnostic) || !RuntimeCandidateCorrectionObjectivesEqual(diagnostic.Objectives, []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionConsolidateParameters}) || len(diagnostic.ParameterEntryEncodings) != 0 || diagnostic.OperationSetViolation != nil {
 			return fmt.Errorf("invalid parameter cardinality diagnostic")
@@ -130,6 +137,9 @@ func (o RuntimeCandidateCorrectionObservation) Validate() error {
 		}
 	default:
 		return fmt.Errorf("runtime candidate correction diagnostic has unsupported violation kind %q", diagnostic.ViolationKind)
+	}
+	if runtimeCandidateCorrectionHasObjective(diagnostic.Objectives, RuntimeCandidateCorrectionSupplyRequiredOperations) && diagnostic.ViolationKind != RuntimeCandidatePayloadViolationRequiredOperations {
+		return fmt.Errorf("required operation objective lacks exact omission facts")
 	}
 	if runtimeCandidateCorrectionHasObjective(diagnostic.Objectives, RuntimeCandidateCorrectionConsolidateParameters) && diagnostic.ViolationKind != RuntimeCandidatePayloadViolationParameterCardinality {
 		return fmt.Errorf("parameter consolidation objective requires exact cardinality facts")
@@ -201,6 +211,7 @@ func (o RuntimeCandidateCorrectionObservation) Validate() error {
 			RuntimeCandidateCorrectionSatisfyDependency,
 			RuntimeCandidateCorrectionSelectEvidenceBinding,
 			RuntimeCandidateCorrectionReencodeParameterEntries,
+			RuntimeCandidateCorrectionSupplyRequiredOperations,
 			RuntimeCandidateCorrectionConsolidateParameters,
 			RuntimeCandidateCorrectionConformOwnerConstraint,
 			RuntimeCandidateCorrectionSatisfyOperationValueRule,
@@ -243,6 +254,7 @@ func StableRuntimeCandidateSealedCorrectionHash(manifestHash string, objectives 
 	writeHashString(h, witnessValue.AlternativeShapeHash)
 	writeHashString(h, witnessValue.ConstraintRef)
 	writeHashRuntimeCandidateParameterEntryEncodings(h, witnessValue.ParameterEntryEncodings)
+	writeHashRuntimeCandidateRequiredOperations(h, witnessValue.RequiredOperations)
 	writeHashRuntimeCandidateParameterCardinality(h, witnessValue.ParameterCardinality)
 	writeHashRuntimeCandidateOperationSetViolation(h, witnessValue.OperationSetViolation)
 	return hex.EncodeToString(h.Sum(nil))

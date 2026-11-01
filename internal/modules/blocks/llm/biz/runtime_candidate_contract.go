@@ -166,6 +166,7 @@ type runtimeCandidateCorrectionInputProjection struct {
 }
 
 type runtimeCandidateCorrectionWitnessProjection struct {
+	RequiredOperations      *runtimecontract.RuntimeCandidateRequiredOperationsViolation   `json:"requiredOperations,omitempty"`
 	ParameterCardinality    *runtimecontract.RuntimeCandidateParameterCardinalityViolation `json:"parameterCardinality,omitempty"`
 	Dimension               runtimecontract.RuntimeCandidateCorrectionWitnessDimension     `json:"dimension"`
 	OperationKind           string                                                         `json:"operationKind,omitempty"`
@@ -772,7 +773,12 @@ func runtimeCandidateRetryForManifest(attempt int, observation *runtimecontract.
 	if manifest.Hash != "" {
 		instruction += " Re-read outputContract.structuredOutputInstruction and schema in the C3 current runtime authority for sealed manifest hash " + manifest.Hash + "; they are the only source of allowed fields, kinds, variants, parameters, targets, coverage and dependencies."
 	}
-	if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessParameterCardinality {
+	if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessRequiredOperations && runtimecontract.ValidateRuntimeCandidateRequiredOperations(manifest, input.Witness.RequiredOperations) != nil {
+		return nil
+	}
+	if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessRequiredOperations {
+		instruction += " The previous complete document omitted required operation slots. Return one complete candidate supplying every missingRefs slot from this same manifest. Preserve every retained operation and its exact parameter, target and binding values. Add only missing slots; never invent extra targets, kinds, slots or effects. Use implementationWorkContent in C4 as the exact before-content for edits. This is the sole same-contract correction, not execution or acceptance credit."
+	} else if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessParameterCardinality {
 		instruction += " The previous document repeated declared parameter names. Re-emit one complete document with exactly one typed entry for each observed parameter name in every operation. Consolidate all intended changes for each repeated parameter using the exact C3 owner input. Only values of the listed repeated names may change; retain every other parameter value, operation position, required slot, kind, variant, target and binding. Never drop intended edits by selecting first/last duplicate, split operations or add parameters. This structural correction grants no execution or acceptance credit."
 	} else if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessParameterEntryEncoding {
 		instruction += " The previous candidate encoded manifest-declared logical parameters as sibling keys inside another parameters[] entry. Re-emit a fresh complete document: every listed logical parameter must be its own parameters[] item containing exactly name plus the listed typed wireValueField. Keep the container parameter as its own item; do not place logical parameter names beside its value field. Re-generate values from C3 authority and do not copy this diagnostic as output data."
@@ -800,6 +806,7 @@ func runtimeCandidateRetryForManifest(attempt int, observation *runtimecontract.
 			RejectedValue: witness.RejectedValue, AlternativeValue: witness.AlternativeValue,
 			RejectedShapeHash: witness.RejectedShapeHash, AlternativeShapeHash: witness.AlternativeShapeHash,
 			ConstraintRef:           witness.ConstraintRef,
+			RequiredOperations:      witness.RequiredOperations.Clone(),
 			ParameterCardinality:    witness.ParameterCardinality.Clone(),
 			ParameterEntryEncodings: runtimeCandidateParameterEntryEncodingProjections(witness.ParameterEntryEncodings),
 			OperationSetViolation:   witness.OperationSetViolation.Clone(),

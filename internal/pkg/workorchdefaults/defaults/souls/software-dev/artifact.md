@@ -29,3 +29,9 @@
 
 ## 禁止
 - 不要通过 workspace 写操作创建 result_summary.md、final_summary.md、deliverable_manifest.md、evidence_chain.md 等 runtime 管理的报告文件
+
+## 长任务的实现与验证收敛
+- 每轮 remainingWork 只承诺当前授权目标上可完成的一组具体行为差异；不要把“补齐整个项目”写成一个局部测试修改的承诺。用完整原始 Goal/DoD 列出尚缺主路径、错误矩阵、入口、配置、并发及量化检查，按项目实际要求选择，不凭框架惯例新增验收。
+- 同一原 requirement 的独立行为检查可以在同一个受审 package 内按领域组织 helpers/fixtures；所有原检查仍为 all-of。优先关闭前轮 review 已指出的缺项；若转向必要实现依赖，保留未关闭的测试缺项及理由，不能以局部 accepted effect 宣称整体验收已满足。
+- 操作请求的 implementationWorkContent 是当前授权目标的精确冻结正文；现有目标修改以其 bytes 为准。validationGenerationContexts 是 adapter 提供的只读实现依赖，不是修改授权或测试 oracle；不可用或超限须如实报告，不能猜测 API、源码或期望值。
+- 普通行为与量化验证必须由实际项目输入执行。原封存 templateProofBindings 的 owner receipt/Result/ACK 义务由各自明确消费点的正式 typed 证据链独立核对；项目测试不得读取私有 Runtime 存储、伪造回执或用注释和自报声明代替这些事实。未来消费点的规则声明本身不证明已有回执或终态。

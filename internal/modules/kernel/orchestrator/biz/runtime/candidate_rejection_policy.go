@@ -77,6 +77,9 @@ func CandidateCorrectionObjectivesForFailure(failure *runtimecontract.RuntimeCan
 	if failure.Diagnostic != nil {
 		diagnostic = failure.Diagnostic.Normalized()
 	}
+	if diagnostic.ViolationKind == runtimecontract.RuntimeCandidatePayloadViolationRequiredOperations && diagnostic.RequiredOperations != nil {
+		return []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSupplyRequiredOperations}
+	}
 	if diagnostic.ViolationKind == runtimecontract.RuntimeCandidatePayloadViolationParameterCardinality && diagnostic.ParameterCardinality != nil {
 		return []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConsolidateParameters}
 	}

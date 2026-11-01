@@ -36,6 +36,8 @@ type RuntimeCandidateContext struct {
 	Capabilities              RuntimeCapabilities
 	Resources                 RuntimeResourceFacts
 	Activation                RuntimeActivationContext
+	// Frozen source input only; never receipt or execution authority.
+	ImplementationWorkContent *RuntimeImplementationWorkContent
 }
 
 func RuntimeCandidateContextFromFacts(facts RuntimeFacts) RuntimeCandidateContext {
@@ -121,6 +123,7 @@ func (c RuntimeCandidateContext) Normalized() RuntimeCandidateContext {
 	c.Capabilities = facts.Capabilities
 	c.Resources = facts.Resources
 	c.Activation = facts.Activation
+	c.ImplementationWorkContent = c.ImplementationWorkContent.Clone()
 	return c
 }
 
@@ -186,6 +189,7 @@ type RuntimeCandidateFailure struct {
 // of a schema or semantic candidate rejection. It is a pure value DTO: no
 // action selection, aggregate mutation, EventHub, or I/O belongs here.
 type RuntimeCandidateFailureDiagnostic struct {
+	RequiredOperations      *RuntimeCandidateRequiredOperationsViolation      `json:"requiredOperations,omitempty"`
 	ParameterCardinality    *RuntimeCandidateParameterCardinalityViolation    `json:"parameterCardinality,omitempty"`
 	OperationID             string                                            `json:"operationId,omitempty"`
 	Path                    string                                            `json:"path,omitempty"`
@@ -240,6 +244,7 @@ func (d RuntimeCandidateFailureDiagnostic) Normalized() RuntimeCandidateFailureD
 	d.Actual = strings.TrimSpace(d.Actual)
 	d.ViolationKind = RuntimeCandidatePayloadViolationKind(strings.TrimSpace(string(d.ViolationKind)))
 	d.ParameterEntryEncodings = cloneRuntimeCandidateParameterEntryEncodings(d.ParameterEntryEncodings)
+	d.RequiredOperations = d.RequiredOperations.Clone()
 	d.ParameterCardinality = d.ParameterCardinality.Clone()
 	d.OperationSetViolation = d.OperationSetViolation.Clone()
 	d.ConstraintRef = strings.TrimSpace(d.ConstraintRef)

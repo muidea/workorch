@@ -242,6 +242,30 @@ func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 		t.Fatal("Workspace 未释放 Run 或修改确认 startup")
 	}
 	implementationWorkFullflowAssertDocuments(t, first.RuntimeState)
+	// The public flow must cross the strict omission rejection and recover by
+	// one same-manifest attempt, before real File effects and ordinary validation.
+	omissions := 0
+	for _, rejected := range first.RuntimeState.CandidateAttempts {
+		if rejected.Failure == nil || rejected.Failure.Diagnostic == nil || rejected.Failure.Diagnostic.RequiredOperations == nil {
+			continue
+		}
+		omissions++
+		if rejected.Attempt != 0 || rejected.DispatchID != "" || rejected.Correction == nil || rejected.Correction.Witness == nil || rejected.Correction.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessRequiredOperations || rejected.Failure.Diagnostic.RequiredOperations.DocumentBytes != 17 {
+			t.Fatal("omission gained dispatch or lost bounded correction")
+		}
+		found := false
+		for _, accepted := range first.RuntimeState.CandidateAttempts {
+			if accepted.Attempt == 1 && accepted.State == runtimecontract.RuntimeCandidateAttemptStateAccepted && accepted.AuthorityContractID == rejected.AuthorityContractID && accepted.ManifestHash == rejected.ManifestHash {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("public omission did not produce exact same-contract accepted correction")
+		}
+	}
+	if omissions != 1 {
+		t.Fatalf("public flow did not exercise one strict operation omission: %d", omissions)
+	}
 	commitRef := implementationWorkFullflowAssertOutcome(t, first.RuntimeState, provider, directory)
 	results, err := repos.Results.ListByRun(ctx, first.ID)
 	if err != nil || len(results) != 1 || results[0].State != common.ResultStateAccepted || results[0].RuntimeCloseout == nil {
@@ -519,16 +543,17 @@ operations = ["responses"]
 }
 
 type implementationWorkFullflowProvider struct {
-	authoring      emptyDirectoryProvider
-	mu             sync.Mutex
-	calls          []string
-	failures       []string
-	workCWI        common.CoverageWorkItemID
-	workOrdinal    int
-	exhaustWork    bool
-	reviewedInputs map[string]string
-	criteria       map[common.CoverageWorkItemID]string
-	inputCriteria  map[string]string
+	authoring        emptyDirectoryProvider
+	mu               sync.Mutex
+	calls            []string
+	failures         []string
+	workCWI          common.CoverageWorkItemID
+	workOrdinal      int
+	exhaustWork      bool
+	reviewedInputs   map[string]string
+	criteria         map[common.CoverageWorkItemID]string
+	inputCriteria    map[string]string
+	omissionInjected bool
 }
 
 type implementationWorkFullflowProviderSnapshot struct {
@@ -583,7 +608,36 @@ func (p *implementationWorkFullflowProvider) serveHTTP(w http.ResponseWriter, r 
 	if authority["planStep"] != nil {
 		payload, kind, err = p.semantic(authority)
 	} else {
-		payload, kind, err = p.candidate(authority)
+		var c3 struct {
+			Intent *runtimecontract.RuntimeImplementationWorkIntentBinding `json:"implementationIntent"`
+		}
+		_ = json.Unmarshal(authority["context"], &c3)
+		if c3.Intent != nil {
+			var source *runtimecontract.RuntimeCandidateWorkContent
+			attempt := -1
+			for _, line := range strings.Split(string(request.Input), "\n") {
+				var tail struct {
+					Attempt *int                                         `json:"candidateAttempt"`
+					Source  *runtimecontract.RuntimeCandidateWorkContent `json:"implementationWorkContent"`
+				}
+				if json.Unmarshal([]byte(line), &tail) == nil && tail.Attempt != nil {
+					source = tail.Source
+					attempt = *tail.Attempt
+				}
+			}
+			if c3.Intent.Intent == nil || source == nil || source.ContentHash != c3.Intent.Intent.ContentHash || source.ScopeRequestID != c3.Intent.Source.ScopeRequestID || len(source.Snapshots) != 1 || source.Snapshots[0].TargetRef != "internal/logic/logic.go" || source.Snapshots[0].ContentHash != runtimecontract.RuntimeValidationInputContentHash(source.Snapshots[0].Content) {
+				err = fmt.Errorf("operations request lost exact selected frozen work bytes")
+				kind = "runtime/frozen_source_missing"
+			} else if !p.exhaustWork && !p.omissionInjected && attempt == 0 {
+				p.omissionInjected = true
+				payload = []byte(`{"operations":[]}`)
+				kind = "runtime/missing_required_operation"
+			} else {
+				payload, kind, err = p.candidate(authority)
+			}
+		} else {
+			payload, kind, err = p.candidate(authority)
+		}
 	}
 	p.calls = append(p.calls, kind)
 	if err != nil {

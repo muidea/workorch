@@ -725,6 +725,9 @@ func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.Run
 		if aggregate.ImplementationWork.Rounds[priorRounds].WorkingBinding == nil || aggregate.Decision.RequiredOutput.ImplementationWorkBindingHash == "" || aggregate.Facts.Coverage[0].CurrentBindingRef != nil || len(aggregate.Facts.Evidence.Accepted) != priorEvidence {
 			t.Fatal("working seal did not preserve no-credit purpose")
 		}
+		if len(stopAtProof) > 1 && stopAtProof[1] {
+			return aggregate
+		}
 		candidateManifest, err := BuildRuntimeCandidateContractManifestForAggregate(aggregate)
 		if err != nil {
 			t.Fatal(err)

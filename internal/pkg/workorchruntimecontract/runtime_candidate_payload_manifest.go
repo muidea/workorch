@@ -17,6 +17,7 @@ import (
 // aggregate state and does not choose retry/action; SM-3 classifies it after
 // the LLM owner returns the error.
 type RuntimeCandidatePayloadDiagnostic struct {
+	RequiredOperations      *RuntimeCandidateRequiredOperationsViolation
 	Path                    string
 	Actual                  string
 	Allowed                 []string
@@ -73,6 +74,7 @@ func RuntimeCandidateFailureDiagnosticFromPayloadDiagnostic(value *RuntimeCandid
 		return nil
 	}
 	return (&RuntimeCandidateFailureDiagnostic{
+		RequiredOperations:      value.RequiredOperations.Clone(),
 		Path:                    value.Path,
 		Actual:                  value.Actual,
 		Allowed:                 append([]string(nil), value.Allowed...),
@@ -130,6 +132,16 @@ func DecodeRuntimeCandidatePayloadWithManifest(manifest RuntimeCandidateContract
 	}
 	derived, err := DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
 	if err != nil {
+		var d *RuntimeCandidatePayloadDiagnostic
+		if errors.As(err, &d) && d.RequiredOperations != nil {
+			if runtimeCandidateCardinalityUniqueObjectKeys(payload) {
+				d.RequiredOperations.DocumentSHA256 = cardinalitySHA(payload)
+				d.RequiredOperations.DocumentBytes = len(payload)
+			} else {
+				d.RequiredOperations = nil
+				d.ViolationKind = ""
+			}
+		}
 		return candidate, runtimeCandidatePayloadDiagnosticWithSelectedWireRule(err, selectedWireRules)
 	}
 	if err := ValidateRuntimeCandidateAgainstManifest(manifest, derived); err != nil {
@@ -549,13 +561,17 @@ func DeriveRuntimeCandidateOperationAuthority(manifest RuntimeCandidateContractM
 		operation.ID = slot.operationID
 		operations[index] = operation
 	}
+	missing := &RuntimeCandidateRequiredOperationsViolation{ManifestHash: manifest.Hash}
 	for _, requirement := range manifest.RequiredOperationSequence {
 		if _, found := seenRequired[requirement.RequirementID]; !found {
-			return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{
-				Path: "$.operations", Actual: "missing_required_operation_" + requirement.RequirementID,
-				Required: runtimeCandidateRequiredOperationRefs(manifest.RequiredOperationSequence),
-			}
+			missing.MissingRefs = append(missing.MissingRefs, requirement.RequirementID)
 		}
+	}
+	if len(missing.MissingRefs) > 0 {
+		for _, op := range operations {
+			missing.Retained = append(missing.Retained, RuntimeCandidateRetainedOperation{RequiredOperationRef: op.RequiredOperationRef, ValueHash: requiredOperationValueHash(op)})
+		}
+		return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.operations", Actual: "missing_required_operation_" + missing.MissingRefs[0], Required: runtimeCandidateRequiredOperationRefs(manifest.RequiredOperationSequence), ViolationKind: RuntimeCandidatePayloadViolationRequiredOperations, RequiredOperations: missing}
 	}
 	semanticSlots := make(map[string]int, len(operations))
 	// Required sequence slots are manifest authority and may intentionally carry

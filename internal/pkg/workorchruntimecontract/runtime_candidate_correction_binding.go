@@ -170,6 +170,8 @@ func validateRuntimeCandidateCorrectionObjectiveWitnessCompatibility(objectives 
 	}
 	compatible := false
 	switch witness.Dimension {
+	case RuntimeCandidateCorrectionWitnessRequiredOperations:
+		compatible = len(objectives) == 1 && objectives[0] == RuntimeCandidateCorrectionSupplyRequiredOperations
 	case RuntimeCandidateCorrectionWitnessParameterCardinality:
 		compatible = len(objectives) == 1 && objectives[0] == RuntimeCandidateCorrectionConsolidateParameters
 	case RuntimeCandidateCorrectionWitnessParameterEntryEncoding:
@@ -281,6 +283,10 @@ func validateRuntimeCandidateCorrectionWitnessAgainstObservation(observation Run
 		return fmt.Errorf("runtime candidate correction witness rejected shape %q differs from observation %q", witness.RejectedShapeHash, diagnostic.RejectedShapeHash)
 	}
 	switch witness.Dimension {
+	case RuntimeCandidateCorrectionWitnessRequiredOperations:
+		if observation.Code != "candidate_schema_invalid" || diagnostic.ViolationKind != RuntimeCandidatePayloadViolationRequiredOperations || !reflect.DeepEqual(diagnostic.RequiredOperations, witness.RequiredOperations) {
+			return fmt.Errorf("required operations witness differs from exact rejection")
+		}
 	case RuntimeCandidateCorrectionWitnessParameterCardinality:
 		if observation.Code != "candidate_schema_invalid" || diagnostic.ViolationKind != RuntimeCandidatePayloadViolationParameterCardinality || !sameRuntimeCandidateParameterCardinality(diagnostic.ParameterCardinality, witness.ParameterCardinality) || !witness.ParameterCardinality.MatchesDiagnostic(&diagnostic) {
 			return fmt.Errorf("parameter cardinality witness differs from exact observation")

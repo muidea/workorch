@@ -1264,6 +1264,42 @@
         "protocolRef": "workorch.template-source-proof/v1",
         "bindings": [
           {
+            "candidateItemRef": "derived-dod:template:000001",
+            "text": "目标（Goal）对应的需求能力已实现，并与验收范围保持一致",
+            "profileId": "software-dev",
+            "lineageAssertions": [
+              {
+                "ref": "template-goal-source-owner-receipt",
+                "kind": "terminal_owner_operation_receipt",
+                "consumptionPoint": "post_terminal_delivery",
+                "terminalContractRef": "runtime/terminal-receipt-proof",
+                "receiptSourceScope": "deliverable",
+                "receiptSourceId": "source_change",
+                "ownerModuleId": "blocks/file",
+                "requiredEffectScope": "workspace_durable",
+                "receiptChoiceContractRef": "runtime/terminal-receipt-choice/v1",
+                "receiptOperationChoices": [
+                  {
+                    "kind": "file/write",
+                    "variantId": ""
+                  },
+                  {
+                    "kind": "patch/apply",
+                    "variantId": "file_write"
+                  },
+                  {
+                    "kind": "patch/apply",
+                    "variantId": "text_replace"
+                  },
+                  {
+                    "kind": "patch/apply",
+                    "variantId": "unified_diff"
+                  }
+                ]
+              }
+            ]
+          },
+          {
             "candidateItemRef": "derived-dod:template:000003",
             "text": "代码和配置变更保持最小且与目标直接相关，并提供 capability-owner receipt 可追溯的 state_change 证据",
             "profileId": "software-dev",

@@ -567,3 +567,10 @@ The context is shared across the surface's checks and bound to the owner catalog
 obligation checks are preserved from the exact requested requirement. These observations supply implementation context
 for generation; they neither prove behavior nor change the independent review scope, native identity or create-only
 input rules. Existing input replacement and review-conflict retry remain unauthorized by this observation alone.
+
+### Ready 输入的修订依赖
+
+需要独立 input review 的 recipe 在已发布 exact proof binding 后，仍提供当前 owner revision 的完整 generation context，
+而非仅在 prospective preparation 时提供。选择和 bytes/SHA256 校验沿 Shell adapter 合同执行；unavailable/over_capacity
+保留明确状态且不发布部分正文。该上下文供 LLM 修订测试输入，不赋予 mutation authority 或行为/回执 credit。
+Profile/template 中的正式 owner receipt/Result/ACK 规则由其既定 Runtime 消费点核对，项目 native test 不读取私有 owner 存储。

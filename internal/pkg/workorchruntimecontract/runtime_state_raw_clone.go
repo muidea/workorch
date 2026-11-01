@@ -710,6 +710,7 @@ func cloneRuntimeCandidateCorrectionDirectiveRaw(in RuntimeCandidateCorrectionDi
 
 func cloneRuntimeCandidateCorrectionWitnessRaw(in RuntimeCandidateCorrectionWitness) RuntimeCandidateCorrectionWitness {
 	out := in
+	out.RequiredOperations = in.RequiredOperations.Clone()
 	out.ParameterCardinality = in.ParameterCardinality.Clone()
 	out.ParameterEntryEncodings = cloneRuntimeStateRawSlice(in.ParameterEntryEncodings, func(item RuntimeCandidateParameterEntryEncodingViolation) RuntimeCandidateParameterEntryEncodingViolation {
 		cloned := item
@@ -746,6 +747,7 @@ func cloneRuntimeCandidateFailureRaw(in RuntimeCandidateFailure) RuntimeCandidat
 
 func cloneRuntimeCandidateFailureDiagnosticRaw(in RuntimeCandidateFailureDiagnostic) RuntimeCandidateFailureDiagnostic {
 	out := in
+	out.RequiredOperations = in.RequiredOperations.Clone()
 	out.ParameterCardinality = in.ParameterCardinality.Clone()
 	out.WireRule = cloneRuntimeStateRawPointer(in.WireRule, func(item RuntimeCandidateWireRuleIdentity) RuntimeCandidateWireRuleIdentity { return item })
 	out.Allowed = cloneRuntimeStateRawSlice(in.Allowed, func(item string) string { return item })

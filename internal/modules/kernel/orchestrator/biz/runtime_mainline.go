@@ -72,6 +72,11 @@ func (m *Biz) requestAndSealRuntimeCandidate(
 			Signature: "runtime-candidate-manifest-invalid", Message: manifestErr.Error(),
 		})
 	}
+	content, contentErr := runtime.CandidateWorkContent(aggregate, manifest)
+	if contentErr != nil {
+		return m.runtimeRecordFailure(ctx, aggregate, runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_context_integrity", Signature: "runtime-context-integrity", Message: contentErr.Error()})
+	}
+	candidateContext.ImplementationWorkContent = content
 	if candidateAttempt == 1 {
 		if err := runtime.ValidatePersistedCandidateCorrection(aggregate, manifest); err != nil {
 			return m.runtimeRecordFailure(ctx, aggregate, runtimecontract.FailureFact{

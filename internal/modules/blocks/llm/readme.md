@@ -329,3 +329,14 @@ Regressions: `runtime_semantic_shared_work_test.go` covers exact expansion, inli
 stable C1/C2, and concurrent unrelated projects. `runtime_implementation_progress_test.go` tests original-set
 coverage and purpose consistency; owner tests exercise real File rounds with per-event CAS/reload. These deterministic
 checks do not establish upstream cached-token gains or model semantic sufficiency; both still need deployment observation.
+
+### 工作正文与验证修订输入
+
+operations 的 frozen implementation source 通过 typed `RuntimeCandidateContext.ImplementationWorkContent` 到达。
+渲染前独立验证 accepted intent 的 content hash 和完整 source bytes，C4 仅携带当前 required target 正文/有来源的 absent
+声明；render gate 再逐值核对 C4，超限沿既有显式拒绝路径处理，不截断或把 hash 当作正文。C0～C2/stable prefix 不变。
+必需槽位缺项使用共享 `required_operations_missing` fact 和同 manifest 的一次 `required_operations` witness；C4 说明只补
+missingRefs、冻结 retained 值，模型重新输出完整文档。Block 只核对事实与调用合同，不选择 retry 或执行 action。
+
+owner validation surface 的 generation context 在 preparation 和 ready binding 两种状态均可按当前 CWI 投影，用于后续
+输入修订；其实现正文是只读依赖，不是修改权限、oracle、receipt 或验收 credit。同一 requirement hash 在一条 surface 内去重。

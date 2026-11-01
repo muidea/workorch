@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"slices"
 	"sort"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -43,10 +44,16 @@ func runtimeValidationGenerationContexts(ids []common.CoverageWorkItemID, target
 				}
 				hashes = append(hashes, p.RequirementHash)
 			}
+			for _, binding := range surface.ProofRequirementBindings {
+				if selected[binding.CoverageWorkItemID] {
+					hashes = append(hashes, binding.RequirementHash)
+				}
+			}
 			if len(hashes) == 0 {
 				continue
 			}
 			sort.Strings(hashes)
+			hashes = slices.Compact(hashes)
 			result = append(result, runtimeValidationGenerationContextProjection{OwnerModuleID: catalog.OwnerModuleID, CatalogSnapshotID: catalog.SnapshotID, ValidationRecipeID: surface.ID, RequirementHashes: hashes, Context: surface.GenerationContext.Clone()})
 		}
 	}
