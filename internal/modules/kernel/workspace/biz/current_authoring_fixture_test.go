@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -33,19 +34,24 @@ func completeTestSpecification(r workspace.DefinitionAuthoringRecord, permit str
 	if review == nil {
 		return r.CompleteSpecification(permit, p, review, failure, ds...)
 	}
+	if review.Status != workspace.GoalReviewPass && len(review.Issues) == 0 {
+		review.Issues = []workspace.GoalSpecificationReviewIssue{{Class: workspace.AuthoringIssueClarification, Detail: "synthetic unresolved criterion", RequirementIDs: append([]string{}, review.RequirementIDs...), EvidenceRefs: append([]string{}, review.EvidenceRefs...)}}
+	}
 	raw, err := json.Marshal(struct {
 		Review struct {
+			Issues         []workspace.GoalSpecificationReviewIssue `json:",omitempty"`
 			Status         string
 			Reason         string
 			EvidenceRefs   []string
 			RequirementIDs []string
 		} `json:"review"`
 	}{Review: struct {
+		Issues         []workspace.GoalSpecificationReviewIssue `json:",omitempty"`
 		Status         string
 		Reason         string
 		EvidenceRefs   []string
 		RequirementIDs []string
-	}{review.Status, review.Reason, append([]string{}, review.EvidenceRefs...), append([]string{}, review.RequirementIDs...)}})
+	}{review.Issues, review.Status, review.Reason, append([]string{}, review.EvidenceRefs...), append([]string{}, review.RequirementIDs...)}})
 	if err != nil {
 		return workspace.DefinitionAuthoringRecord{}, err
 	}
@@ -67,23 +73,41 @@ func derivationTestAudit(t *testing.T, p *workspace.DefinitionDerivedAcceptance)
 
 func reviewTestAudit(t *testing.T, review *workspace.GoalSpecificationCompletenessReview) *workspace.DefinitionAuthoringSuccessByteAudit {
 	t.Helper()
+	if review.Status != workspace.GoalReviewPass && len(review.Issues) == 0 {
+		review.Issues = []workspace.GoalSpecificationReviewIssue{{Class: workspace.AuthoringIssueClarification, Detail: "synthetic unresolved criterion", RequirementIDs: append([]string{}, review.RequirementIDs...), EvidenceRefs: append([]string{}, review.EvidenceRefs...)}}
+	}
 	raw, err := json.Marshal(struct {
 		Review struct {
+			Issues         []workspace.GoalSpecificationReviewIssue `json:",omitempty"`
 			Status         string
 			Reason         string
 			EvidenceRefs   []string
 			RequirementIDs []string
 		} `json:"review"`
 	}{Review: struct {
+		Issues         []workspace.GoalSpecificationReviewIssue `json:",omitempty"`
 		Status         string
 		Reason         string
 		EvidenceRefs   []string
 		RequirementIDs []string
-	}{review.Status, review.Reason, append([]string{}, review.EvidenceRefs...), append([]string{}, review.RequirementIDs...)}})
+	}{review.Issues, review.Status, review.Reason, append([]string{}, review.EvidenceRefs...), append([]string{}, review.RequirementIDs...)}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(raw)
 	o := workspace.DefinitionProviderObservation{Content: raw, ObservedBytes: uint64(len(raw)), SHA256: hex.EncodeToString(sum[:]), Observed: true, Complete: true, Saved: true}
 	return &workspace.DefinitionAuthoringSuccessByteAudit{Document: o, Wire: o.Clone()}
+}
+
+// Construct a synthetic unreserved stage; never used by production recovery.
+func resetUnreservedSpecificationFixture(t *testing.T, owners *fileDefinitionAdmissionOwners, current *workspace.Workspace, kind string) {
+	t.Helper()
+	if kind == "" {
+		current.DefinitionAuthoring.SpecificationRequests = nil
+	} else {
+		current.DefinitionAuthoring.SpecificationRequests = current.DefinitionAuthoring.SpecificationRequests[:1]
+	}
+	if err := owners.repositories.Workspaces.CompareAndSwap(context.Background(), current, current.Revision); err != nil {
+		t.Fatal(err)
+	}
 }

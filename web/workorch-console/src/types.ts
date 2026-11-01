@@ -107,7 +107,7 @@ export type DefinitionAuthoringView = {
   admissionViolationCode?: string;
   admissionOffendingRefs?: string[];
   startupInputHash?: string;
-  requests?: { requestId?: string; providerBindingHash?: string; proposalHash?: string; phase: string; reviewKind?: string; state: string; failureCode?: string; permitId?: string; diagnostic?: AuthoringDiagnosticMetadata }[];
+  requests?: { previousProposalHash?: string; feedbackHash?: string; requestId?: string; providerBindingHash?: string; proposalHash?: string; phase: string; reviewKind?: string; state: string; failureCode?: string; permitId?: string; diagnostic?: AuthoringDiagnosticMetadata }[];
   proposal?: {
     goalText: string;
     version?: number;
@@ -121,7 +121,12 @@ export type DefinitionAuthoringView = {
     proposalHash?: string;
     specificationHash?: string;
     derivationPermitId: string;
-    reviews?: { kind: string; status: string; reason?: string; specificationHash: string; evidenceRefs?: string[]; requirementIds?: string[] }[];
+    reviewsSettled?: boolean;
+    revisionDisposition?: string;
+    previousProposalHash?: string;
+    feedbackHash?: string;
+    designDecisions?: { candidateItemRef: string; decision: string; verificationBasis: string }[];
+    reviews?: { kind: string; status: string; reason?: string; specificationHash: string; evidenceRefs?: string[]; requirementIds?: string[]; issues?: { class: string; detail: string; requirementIds: string[]; evidenceRefs: string[] }[] }[];
     verifications?: { id: string; obligationId: string; declaration: string; status: string; profileId?: string; evidenceRequirementId?: string; scope?: string }[];
     executionProofMappings?: { contractRef: string; consumerItemRef: string; ruleRef: string; sourceItemRef: string; consumerGoalText?: string }[];
     requiredEvidencePurposes?: { contractRef: string; historicalItemRef: string; acceptanceItemRef: string; historicalProfileId?: string; historicalDeliverableId?: string; historicalProfileHash?: string; historicalText?: string }[];

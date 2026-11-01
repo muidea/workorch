@@ -31,20 +31,12 @@ func (r DefinitionAuthoringRecord) confirmableSpecification(derivationPermitID, 
 	if proposalHash == "" {
 		return DefinitionDerivationRequest{}, GoalSpecification{}, fmt.Errorf("authoring confirmation requires exact proposal hash")
 	}
-	var proposal *GoalSpecification
-	for _, request := range r.SpecificationRequests {
-		if request.DerivationPermitID != derivationPermitID || request.Phase != DefinitionSpecificationProposal {
-			continue
-		}
-		if request.FailureCode != "" || request.Proposal == nil || request.Proposal.ContentHash() != proposalHash || proposal != nil {
-			return DefinitionDerivationRequest{}, GoalSpecification{}, fmt.Errorf("authoring confirmation proposal history is unresolved or ambiguous")
-		}
-		value := request.Proposal.Clone()
-		proposal = &value
+	latest := r.LatestSpecificationRequest(derivationPermitID)
+	if latest == nil || latest.Proposal == nil || latest.FailureCode != "" || latest.Proposal.ContentHash() != proposalHash {
+		return DefinitionDerivationRequest{}, GoalSpecification{}, fmt.Errorf("authoring confirmation requires latest completed proposal")
 	}
-	if proposal == nil {
-		return DefinitionDerivationRequest{}, GoalSpecification{}, fmt.Errorf("authoring confirmation has no completed proposal")
-	}
+	value := latest.Proposal.Clone()
+	proposal := &value
 	for _, kind := range goalReviewKinds {
 		var review *GoalSpecificationCompletenessReview
 		for _, request := range r.SpecificationRequests {

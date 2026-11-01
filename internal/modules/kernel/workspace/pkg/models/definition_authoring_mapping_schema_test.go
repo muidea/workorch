@@ -67,6 +67,8 @@ func TestSealedMappingDecoderRejectsEachMissingNullCaseAndWrongTypeField(t *test
 	mapping.ExecutionProofMappings = []GoalExecutionProofMapping{{ContractRef: "runtime/dod-source-execution-proof", ConsumerItemRef: "consumer", RuleRef: "rule", SourceItemRef: "source"}}
 	mapping.EvidencePurposeMappings = []GoalEvidencePurposeMapping{{ContractRef: "runtime/cross-cwi-evidence-purpose", HistoricalItemRef: "history", AcceptanceItemRef: "current"}}
 	mapping.ProfileAcceptanceSelections = []DefinitionProfileAcceptanceSelection{{SourceRef: "profile", AcceptanceItemRef: "item"}}
+	mapping.DesignDecisions = []GoalSpecificationDesignDecision{{CandidateItemRef: "item", Decision: "decision", VerificationBasis: "basis"}}
+	mapping.IssueResolutions = []DefinitionAuthoringIssueResolution{{IssueRef: "issue", Change: "changed"}}
 	mapping.GoalRequirement.ResourceIDs = []string{"resource"}
 	mapping.Dimensions[0].ResourceIDs = []string{"resource"}
 	for index := range mapping.Requirements {

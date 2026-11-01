@@ -98,10 +98,8 @@ class Fixture:
                         fixture.validate_source_consumers(payload)
                         declaration = {"Declaration": "绑定已发布的 software-dev 逐条验收能力声明，尚未执行。", "Status": "DECLARED", "ProfileID": "software-dev", "EvidenceRequirementID": "*", "Scope": "dodItem"}
                         result = {"mapping": {
-                            "Protocol": "workorch.authoring.sealed-ref-mapping/v1", "InputHash": payload["inputHash"], "TemplateSnapshotHash": payload["templateHash"], "ResourceSnapshotHash": payload["resourceSnapshotHash"],
-                            "GoalRequirement": {"DimensionRef": "all", "ResourceIDs": []}, "Dimensions": [{"Ref": "all", "ResourceIDs": []}],
-                            "Requirements": [{"Ref": item["CandidateItemRef"], "DimensionRef": "all", "SourceItemRefs": [item["CandidateItemRef"]], "ResourceIDs": [], "Text": item["Text"]} for item in items],
-                            "Obligations": [{"CandidateItemRef": item["CandidateItemRef"], "RequirementRef": item["CandidateItemRef"], "Verification": declaration} for item in items],
+                            "Obligations": [{"CandidateItemRef": item["CandidateItemRef"], "Verification": declaration} for item in items],
+                            "ProfileAcceptanceSelections": fixture_profile_selections(payload),
                         }}
                     else:
                         kind = "review/" + payload["kind"]
@@ -112,10 +110,7 @@ class Fixture:
                         result = {"review": {"Kind": payload["kind"], "Status": "PASS", "SpecificationHash": payload["proposalHash"], "Reason": "逐条对照固定源承诺，exact Goal、required 与 all_of 原文及声明绑定保留；这是确定性 fixture，不代替人工语义评审。", "EvidenceRefs": [payload["goal"]["CandidateItemRef"]], "RequirementIDs": payload["requiredRequirementIDs"]}}
                     if kind == "derive":
                         result = {"AdditionalItems": result["AdditionalItems"]}
-                    elif kind == "proposal":
-                        for field in ("Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash"):
-                            del result["mapping"][field]
-                    else:
+                    elif kind != "proposal":
                         del result["review"]["Kind"]
                         del result["review"]["SpecificationHash"]
                     fixture.calls.append(kind)
@@ -138,6 +133,20 @@ class Fixture:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join()
+
+
+def fixture_profile_selections(payload):
+    # This fixture's source_change obligation belongs to the explicit template
+    # acceptance for minimal, Goal-related owner-receipted changes.
+    expected = 'profile/software-dev/deliverable/source_change'
+    selections = []
+    for requirement in payload.get('requiredEvidencePurposes', []):
+        source = requirement['source']['HistoricalItemRef']
+        acceptance = 'derived-dod:template:000003'
+        require(source == expected and acceptance in requirement['eligibleAcceptanceItemRefs'],
+                'fixture cannot semantically select an unknown Profile obligation')
+        selections.append({'SourceRef': source, 'AcceptanceItemRef': acceptance})
+    return selections
 
 
 def source_verification_options(payload):
@@ -184,11 +193,20 @@ def validate_source_consumers(payload):
 def validate_owner_bound_ledger(record):
     ledger = record['DefinitionAuthoring']
     derives, requests = ledger['DerivationRequests'], ledger['SpecificationRequests']
-    require(len(derives) == 1 and len(requests) == 7, 'unexpected provider ledger cardinality')
+    require(len(derives) == 1 and 1 <= len(requests) <= 14, 'unexpected provider ledger cardinality')
+    proposals = [item for item in requests if item['Phase'] == 'proposal']
+    require(1 <= len(proposals) <= 2, 'proposal exceeded one corrective successor')
+    critics = [(item['ProposalHash'], item['ReviewKind']) for item in requests if item['Phase'] == 'critic']
+    require(len(critics) == len(set(critics)), 'same candidate critic was resampled')
+    if len(proposals) == 2:
+        require(proposals[1].get('PreviousProposalHash') and proposals[1].get('FeedbackHash'), 'revision lost exact owner feedback identity')
     for request in [*derives, *requests]:
         require(request['WireContractRef'] == 'workorch.authoring.owner-bound' and
                 request['WireContractHash'].startswith('authoring-wire-sha256:'), 'wire identity not sealed')
         audit = request.get('ReviewAudit') or request.get('SuccessAudit')
+        if request.get('FailureCode'):
+            require(audit is None and request.get('Proposal') is None and request.get('Review') is None, 'failure claims successful output')
+            continue
         require(audit is not None, 'successful transaction lost original document')
         document = audit['Document']
         raw = base64.b64decode(document['Content'], validate=True)
@@ -198,9 +216,10 @@ def validate_owner_bound_ledger(record):
         if 'AdditionalItems' in value:
             require(set(value) == {'AdditionalItems'}, 'derive echoed owner identity')
         elif 'mapping' in value:
-            require(not {'Protocol', 'InputHash', 'TemplateSnapshotHash', 'ResourceSnapshotHash'} & set(value['mapping']), 'mapping echoed owner identity')
+            require(not {'Protocol', 'InputHash', 'TemplateSnapshotHash', 'ResourceSnapshotHash', 'GoalRequirement', 'Dimensions', 'Requirements'} & set(value['mapping']), 'mapping echoed owner identity')
         else:
-            require(set(value['review']) == {'Status', 'Reason', 'EvidenceRefs', 'RequirementIDs'}, 'review echoed owner identity')
+            require(set(value['review']) <= {'Status', 'Reason', 'EvidenceRefs', 'RequirementIDs', 'Issues'} and {'Status', 'Reason', 'EvidenceRefs', 'RequirementIDs'} <= set(value['review']), 'review echoed owner identity')
+            require((value['review']['Status'] == 'PASS' and not value['review'].get('Issues')) or (value['review']['Status'] != 'PASS' and bool(value['review'].get('Issues'))), 'review issue/status mismatch')
 
 
 def compilation_settled(view):
@@ -209,7 +228,7 @@ def compilation_settled(view):
     if view["state"] in ("failed", "preparation_failed"):
         return True
     reviews = view.get("proposal", {}).get("reviews", [])
-    return view["state"] in ("ready_to_confirm", "review_blocked") and len(reviews) == len(KINDS) and {review["kind"] for review in reviews} == set(KINDS)
+    return view["state"] in ("ready_to_confirm", "review_blocked") and view.get("proposal", {}).get("reviewsSettled") is True and view.get("proposal", {}).get("revisionDisposition") != "correction_pending" and len(reviews) == len(KINDS) and {review["kind"] for review in reviews} == set(KINDS)
 
 
 def validate_candidate(view, source):

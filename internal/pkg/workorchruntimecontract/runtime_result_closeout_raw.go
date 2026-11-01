@@ -28,6 +28,7 @@ func (c RuntimeResultCloseout) CloneRaw() RuntimeResultCloseout {
 		})
 		value.AcceptedEvidenceRefs = cloneRuntimeStateRawSlice(value.AcceptedEvidenceRefs, func(item string) string { return item })
 		value.SourceObligations = cloneRuntimeStateRawSlice(value.SourceObligations, func(item RuntimeSourceObligationOutcome) RuntimeSourceObligationOutcome {
+			item.Check.ProjectDesigns = cloneRuntimeStateRawSlice(item.Check.ProjectDesigns, func(d RuntimeSourceProjectDesign) RuntimeSourceProjectDesign { return d })
 			item.AcceptedEvidenceRefs = cloneRuntimeStateRawSlice(item.AcceptedEvidenceRefs, func(ref string) string { return ref })
 			item.CurrentBindingRef = cloneRuntimeStateRawPointer(item.CurrentBindingRef, func(ref RuntimeCWIBindingRef) RuntimeCWIBindingRef { return ref })
 			return item

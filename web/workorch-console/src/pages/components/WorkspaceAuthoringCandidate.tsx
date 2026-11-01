@@ -128,7 +128,7 @@ export function WorkspaceAuthoringCandidate({ workspaceId, onClose, onOpenConfir
     <Button type="primary" disabled={!canGenerate} loading={busy} onClick={() => void generate()}>{view?.state === 'preparation_failed' ? '显式恢复前置准备' : '生成已保存输入的合同候选'}</Button>
   </Space>}>
     <Space direction="vertical" style={{ width: '100%' }}>
-      <Alert type="info" message="本页只读已保存输入，生成是独立显式动作；不会创建或保存修订、确认合同、准入或启动 Run。关闭／刷新丢弃页面内状态，不取消服务端事务；结果由服务端 owner 保存。" />
+      <Alert type="info" message="本页只读已保存输入，生成是独立显式动作；生成包含六审及至多一次根据完整反馈的有界修订，不修改已保存输入；不会确认合同、准入或启动 Run。关闭／刷新丢弃页面内状态，不取消服务端事务；结果由服务端 owner 保存。" />
       {failure && <Alert type="error" message={failure} description="结果以 owner 回读为准；不会自动重发或换身份。输入冲突时请核对新版本后再显式操作。" />}
       {accepted && <Alert type="info" message="任务已受理，不等于生成成功；下方为 owner 实际持久状态。" />}
       {observingPreparation && <Alert type="info" message="正在观察前置准备恢复；15 秒仅为旧诊断观察窗，不是编译超时。" />}
@@ -154,6 +154,7 @@ export function WorkspaceAuthoringCandidate({ workspaceId, onClose, onOpenConfir
         {view.state === 'outcome_unresolved' && <Alert type="warning" message="已 reserve 请求结果未决，只能查询原事实；不会再次物理调用 provider。" />}
         {view.preparationDiagnostics?.map(item => <AuthoringPreparationFailure key={item.diagnosticId} diagnostic={item} />)}
         {view.requests?.map(item => <div key={item.permitId}>{item.phase} · {item.reviewKind} · {item.state} · request {item.requestId} · permit {item.permitId}<div>配置绑定：{item.providerBindingHash}；proposal：{item.proposalHash || '非审查阶段'}</div>
+          {item.previousProposalHash && <div>修订来源：{item.previousProposalHash}；反馈：{item.feedbackHash}</div>}
           {item.state === 'failed' && <AuthoringDiagnosticDetails workspaceId={view.workspaceId} permitId={item.permitId || ''} phase={item.phase} failureCode={item.failureCode} diagnostic={item.diagnostic} />}
         </div>)}
         {view.proposal && <AuthoringCandidateProposal proposal={view.proposal} />}

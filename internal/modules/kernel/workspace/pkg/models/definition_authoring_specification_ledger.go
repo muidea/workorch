@@ -146,23 +146,25 @@ func (d DefinitionAuthoringDiagnostic) Validate() error {
 // A specification request records a single possible physical call. Neither a
 // reserved request nor a completed review grants admission.
 type DefinitionAuthoringSpecificationRequest struct {
-	WireContractRef     string                               `json:",omitempty"`
-	WireContractHash    string                               `json:",omitempty"`
-	ReviewAudit         *DefinitionAuthoringSuccessByteAudit `json:",omitempty"`
-	RequestID           string
-	DerivationPermitID  string
-	Phase               DefinitionSpecificationPhase
-	ReviewKind          string
-	ProposalHash        string
-	ProviderBindingHash string
-	PermitID            string
-	Proposal            *GoalSpecification
-	Mapping             *DefinitionAuthoringMapping
-	SuccessAudit        *DefinitionAuthoringSuccessByteAudit
-	CompletionIdentity  string
-	Review              *GoalSpecificationCompletenessReview
-	FailureCode         string
-	Diagnostic          *DefinitionAuthoringDiagnostic
+	PreviousProposalHash string                               `json:",omitempty"`
+	FeedbackHash         string                               `json:",omitempty"`
+	WireContractRef      string                               `json:",omitempty"`
+	WireContractHash     string                               `json:",omitempty"`
+	ReviewAudit          *DefinitionAuthoringSuccessByteAudit `json:",omitempty"`
+	RequestID            string
+	DerivationPermitID   string
+	Phase                DefinitionSpecificationPhase
+	ReviewKind           string
+	ProposalHash         string
+	ProviderBindingHash  string
+	PermitID             string
+	Proposal             *GoalSpecification
+	Mapping              *DefinitionAuthoringMapping
+	SuccessAudit         *DefinitionAuthoringSuccessByteAudit
+	CompletionIdentity   string
+	Review               *GoalSpecificationCompletenessReview
+	FailureCode          string
+	Diagnostic           *DefinitionAuthoringDiagnostic
 }
 
 func (r DefinitionAuthoringSpecificationRequest) Clone() DefinitionAuthoringSpecificationRequest {
@@ -184,6 +186,7 @@ func (r DefinitionAuthoringSpecificationRequest) Clone() DefinitionAuthoringSpec
 	}
 	if r.Review != nil {
 		review := *r.Review
+		review.Issues = cloneReviewIssues(review.Issues)
 		review.EvidenceRefs = append([]string(nil), review.EvidenceRefs...)
 		review.RequirementIDs = append([]string(nil), review.RequirementIDs...)
 		r.Review = &review
@@ -200,6 +203,9 @@ func (r DefinitionAuthoringSpecificationRequest) ExpectedPermitID() string {
 	writeDefinitionHash(h, "workspace-authoring-specification-permit-v1", r.RequestID, r.DerivationPermitID, string(r.Phase), r.ReviewKind, r.ProposalHash, r.ProviderBindingHash)
 
 	writeDefinitionHash(h, r.WireContractRef, r.WireContractHash)
+	if r.PreviousProposalHash != "" || r.FeedbackHash != "" {
+		writeDefinitionHash(h, r.PreviousProposalHash, r.FeedbackHash)
+	}
 
 	return "authoring-spec-permit-sha256:" + hex.EncodeToString(h.Sum(nil))
 }
@@ -265,11 +271,11 @@ func (r DefinitionAuthoringSpecificationRequest) validate(view bool) error {
 	}
 	switch r.Phase {
 	case DefinitionSpecificationProposal:
-		if r.ReviewKind != "" || r.ProposalHash != "" {
+		if r.ReviewKind != "" || r.ProposalHash != "" || (r.PreviousProposalHash == "") != (r.FeedbackHash == "") || len(r.PreviousProposalHash) > 256 || len(r.FeedbackHash) > 256 {
 			return fmt.Errorf("authoring proposal cannot claim a review or proposal hash")
 		}
 	case DefinitionSpecificationCritic:
-		if !GoalSpecificationReviewKind(r.ReviewKind) || r.ProposalHash == "" || len(r.ProposalHash) > 256 {
+		if r.PreviousProposalHash != "" || r.FeedbackHash != "" || !GoalSpecificationReviewKind(r.ReviewKind) || r.ProposalHash == "" || len(r.ProposalHash) > 256 {
 			return fmt.Errorf("authoring critic requires exact proposal identity")
 		}
 	default:
@@ -313,7 +319,14 @@ func validateAuthoringSpecificationRequestsMode(record DefinitionAuthoringRecord
 	}
 	completedProposals := map[string]completedProposal{}
 	contexts := map[string]authoringSpecificationContext{}
-	for _, request := range record.SpecificationRequests {
+	for index, request := range record.SpecificationRequests {
+		if request.Phase == DefinitionSpecificationProposal {
+			prefix := record
+			prefix.SpecificationRequests = record.SpecificationRequests[:index]
+			if err := prefix.validateSpecificationSuccessor(request); err != nil {
+				return err
+			}
+		}
 		if err := request.validate(view); err != nil {
 			return err
 		}
@@ -337,8 +350,15 @@ func validateAuthoringSpecificationRequestsMode(record DefinitionAuthoringRecord
 			}
 		}
 		key := request.DerivationPermitID + "\x00" + string(request.Phase) + "\x00" + request.ReviewKind
+		if request.Phase == DefinitionSpecificationCritic {
+			key += "\x00" + request.ProposalHash
+		}
 		attempts[key]++
-		if attempts[key] > DefinitionAuthoringSpecificationAttemptLimit {
+		limit := DefinitionAuthoringSpecificationAttemptLimit
+		if request.Phase == DefinitionSpecificationCritic {
+			limit = 1
+		}
+		if attempts[key] > limit {
 			return fmt.Errorf("authoring specification phase attempt budget exceeded")
 		}
 		if request.Phase == DefinitionSpecificationProposal {
@@ -465,14 +485,23 @@ func (r DefinitionAuthoringRecord) ReserveSpecification(request DefinitionAuthor
 	}
 	attempts := 0
 	for _, previous := range r.SpecificationRequests {
-		if previous.DerivationPermitID == request.DerivationPermitID && previous.Phase == request.Phase && previous.ReviewKind == request.ReviewKind {
+		if previous.DerivationPermitID == request.DerivationPermitID && previous.Phase == request.Phase && previous.ReviewKind == request.ReviewKind && (request.Phase == DefinitionSpecificationProposal || previous.ProposalHash == request.ProposalHash) {
 			attempts++
 		}
 	}
-	if attempts >= DefinitionAuthoringSpecificationAttemptLimit {
-		return DefinitionAuthoringRecord{}, DefinitionAuthoringSpecificationRequest{}, false, &DefinitionAuthoringBudgetRefusalError{Stage: preparationStageForSpecification(request.Phase), RequestID: request.RequestID, Budget: "attempt", Limit: DefinitionAuthoringSpecificationAttemptLimit, Cause: fmt.Errorf("authoring specification phase attempt budget exhausted")}
+	limit := DefinitionAuthoringSpecificationAttemptLimit
+	if request.Phase == DefinitionSpecificationCritic {
+		limit = 1
 	}
-	if request.Phase == DefinitionSpecificationCritic && r.completedSpecificationProposal(request.DerivationPermitID, request.ProposalHash) == nil {
+	if attempts >= limit {
+		return DefinitionAuthoringRecord{}, DefinitionAuthoringSpecificationRequest{}, false, &DefinitionAuthoringBudgetRefusalError{Stage: preparationStageForSpecification(request.Phase), RequestID: request.RequestID, Budget: "attempt", Limit: uint32(limit), Cause: fmt.Errorf("authoring specification phase attempt budget exhausted")}
+	}
+	if request.Phase == DefinitionSpecificationProposal {
+		if err := r.validateSpecificationSuccessor(request); err != nil {
+			return DefinitionAuthoringRecord{}, request, false, err
+		}
+	}
+	if request.Phase == DefinitionSpecificationCritic && (r.completedSpecificationProposal(request.DerivationPermitID, request.ProposalHash) == nil || r.LatestSpecificationRequest(request.DerivationPermitID).Proposal == nil || r.LatestSpecificationRequest(request.DerivationPermitID).Proposal.ContentHash() != request.ProposalHash) {
 		return DefinitionAuthoringRecord{}, request, false, fmt.Errorf("authoring critic requires completed proposal")
 	}
 	next := r.Clone()

@@ -32,19 +32,24 @@ func completeTestSpecification(r workspace.DefinitionAuthoringRecord, permit str
 	if review == nil {
 		return r.CompleteSpecification(permit, p, review, failure, ds...)
 	}
+	if review.Status != workspace.GoalReviewPass && len(review.Issues) == 0 {
+		review.Issues = []workspace.GoalSpecificationReviewIssue{{Class: workspace.AuthoringIssueClarification, Detail: "synthetic unresolved criterion", RequirementIDs: append([]string{}, review.RequirementIDs...), EvidenceRefs: append([]string{}, review.EvidenceRefs...)}}
+	}
 	raw, err := json.Marshal(struct {
 		Review struct {
+			Issues         []workspace.GoalSpecificationReviewIssue `json:",omitempty"`
 			Status         string
 			Reason         string
 			EvidenceRefs   []string
 			RequirementIDs []string
 		} `json:"review"`
 	}{Review: struct {
+		Issues         []workspace.GoalSpecificationReviewIssue `json:",omitempty"`
 		Status         string
 		Reason         string
 		EvidenceRefs   []string
 		RequirementIDs []string
-	}{review.Status, review.Reason, review.EvidenceRefs, review.RequirementIDs}})
+	}{review.Issues, review.Status, review.Reason, review.EvidenceRefs, review.RequirementIDs}})
 	if err != nil {
 		return workspace.DefinitionAuthoringRecord{}, err
 	}

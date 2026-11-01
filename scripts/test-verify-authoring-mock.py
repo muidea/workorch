@@ -95,12 +95,12 @@ class AuthoringMockTest(unittest.TestCase):
         for field in ('Protocol', 'InputHash', 'TemplateSnapshotHash', 'ResourceSnapshotHash'):
             self.assertNotIn(field, mapping)
         refs = [item['CandidateItemRef'] for item in value['candidateAcceptance']]
-        self.assertEqual([r['SourceItemRefs'] for r in mapping['Requirements']], [[ref] for ref in refs])
         self.assertEqual([o['CandidateItemRef'] for o in mapping['Obligations']], refs)
-        self.assertEqual(mapping['GoalRequirement'], {'DimensionRef': 'all', 'ResourceIDs': []})
+        for field in ('GoalRequirement', 'Dimensions', 'Requirements'):
+            self.assertNotIn(field, mapping)
         self.assertNotIn(value['goal']['CandidateItemRef'], refs)
         for row in mapping['Obligations']:
-            self.assertEqual(set(row), {'CandidateItemRef', 'RequirementRef', 'Verification'})
+            self.assertEqual(set(row), {'CandidateItemRef', 'Verification'})
             verification = row['Verification']
             self.assertEqual(verification['Status'], 'UNVERIFIED')
             self.assertTrue(verification['ProfileID'] == verification['EvidenceRequirementID'] == verification['Scope'] == '')

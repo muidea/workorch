@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -68,17 +69,33 @@ func testAuthoringProductionOwners(t *testing.T, confirm bool) {
 	if ready.Authoring.State != "ready_to_confirm" || p == nil || p.GoalText != goal || len(p.Reviews) != 6 || len(p.Dimensions) == 0 || len(p.Requirements) == 0 || len(p.Obligations) == 0 {
 		t.Fatalf("incomplete production candidate: %+v", ready.Authoring)
 	}
-	for _, text := range append([]string{goal}, criteria...) {
+	exactGoal := false
+	for _, requirement := range p.Requirements {
+		exactGoal = exactGoal || requirement.Text == goal && requirement.Required && reflect.DeepEqual(requirement.SourceItemRefs, []string{workspace.DefinitionAuthoringGoalItemRef})
+	}
+	if !exactGoal {
+		t.Fatal("independent original Goal missing")
+	}
+	for _, text := range criteria {
 		found := false
-		for _, requirement := range p.Requirements {
-			if requirement.Text == text && requirement.Required {
-				found = true
+		for _, item := range p.Items {
+			if item.Text != text {
+				continue
+			}
+			for _, obligation := range p.Obligations {
+				if obligation.Text != text || !slices.Contains(obligation.DoDItemRefs, item.Ref) {
+					continue
+				}
+				for _, requirement := range p.Requirements {
+					found = found || requirement.ID == obligation.RequirementID && requirement.Required && slices.Contains(requirement.SourceItemRefs, item.Ref)
+				}
 			}
 		}
 		if !found {
-			t.Fatalf("original required commitment missing: %q", text)
+			t.Fatalf("original required commitment missing from exact source/obligation graph: %q", text)
 		}
 	}
+
 	for _, v := range p.Verifications {
 		if v.Status != workspace.GoalVerificationDeclared || v.ObligationID == "" || v.EvidenceRequirementID == "" || v.ProfileID == "" {
 			t.Fatalf("invalid declaration: %+v", v)

@@ -3,6 +3,7 @@ package workorchruntimecontract
 import (
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -13,6 +14,7 @@ import (
 // RuntimeSourceObligationCheck 将同一 CWI 上每项源义务的验证声明分开标识。
 // 一个共同 operation 可以提供多项证明，但不能让 A 的检查冒充 B。
 type RuntimeSourceObligationCheck struct {
+	ProjectDesigns []RuntimeSourceProjectDesign `json:",omitempty"`
 	InventoryHash  string
 	ObligationID   string
 	RequirementID  string
@@ -23,7 +25,11 @@ type RuntimeSourceObligationCheck struct {
 }
 
 func CloneRuntimeSourceObligationChecks(values []RuntimeSourceObligationCheck) []RuntimeSourceObligationCheck {
-	return slices.Clone(values)
+	out := slices.Clone(values)
+	for i := range out {
+		out[i].ProjectDesigns = slices.Clone(out[i].ProjectDesigns)
+	}
+	return out
 }
 
 func StableRuntimeSourceObligationCheckRef(definitionRevision string, coverageID common.CoverageWorkItemID, value RuntimeSourceObligationCheck) string {
@@ -37,6 +43,7 @@ func StableRuntimeSourceObligationCheckRef(definitionRevision string, coverageID
 	writeHashString(h, value.VerificationID)
 	writeHashString(h, value.Criterion)
 	writeHashString(h, value.Declaration)
+	writeRuntimeProjectDesignsHash(h, value.ProjectDesigns)
 	return "workorch-obligation-check-" + hex.EncodeToString(h.Sum(nil))
 }
 
@@ -50,7 +57,7 @@ func ValidateRuntimeSourceObligationChecks(definitionRevision string, coverageID
 		if !runtimeSourceIdentity(value.InventoryHash, 256) || !runtimeSourceIdentity(value.ObligationID, 128) ||
 			!runtimeSourceIdentity(value.RequirementID, 128) || !runtimeSourceIdentity(value.VerificationID, 128) ||
 			strings.TrimSpace(value.Criterion) == "" || len(value.Criterion) > 4096 ||
-			strings.TrimSpace(value.Declaration) == "" || len(value.Declaration) > 4096 ||
+			strings.TrimSpace(value.Declaration) == "" || len(value.Declaration) > 4096 || !validRuntimeProjectDesigns(value.ProjectDesigns) ||
 			value.CheckRef != StableRuntimeSourceObligationCheckRef(definitionRevision, coverageID, value) ||
 			seen[value.VerificationID] || (n > 0 && value.VerificationID <= last) {
 			return fmt.Errorf("runtime source obligation check %q has invalid exact source identity", value.VerificationID)
@@ -113,7 +120,8 @@ func compileRuntimeSourceObligationChecksValidated(inventory RuntimeSourceObliga
 				continue
 			}
 			check := RuntimeSourceObligationCheck{
-				InventoryHash: inventory.Hash, ObligationID: obligation.ID, RequirementID: obligation.RequirementID,
+				ProjectDesigns: slices.Clone(verification.ProjectDesigns),
+				InventoryHash:  inventory.Hash, ObligationID: obligation.ID, RequirementID: obligation.RequirementID,
 				VerificationID: verification.ID, Criterion: obligation.Text, Declaration: verification.Declaration,
 			}
 			check.CheckRef = StableRuntimeSourceObligationCheckRef(inventory.DefinitionRevision, item.ID, check)
@@ -136,7 +144,7 @@ func compileRuntimeSourceObligationChecksValidated(inventory RuntimeSourceObliga
 }
 
 func sameRuntimeSourceObligationChecks(left, right []RuntimeSourceObligationCheck) bool {
-	return slices.Equal(left, right)
+	return slices.EqualFunc(left, right, func(a, b RuntimeSourceObligationCheck) bool { return reflect.DeepEqual(a, b) })
 }
 
 // ValidateRuntimeSourceObligationSeed 重新编译完整源图，不能用自洽 hash 掩盖遗漏的 B。
@@ -191,6 +199,7 @@ func writeRuntimeSourceObligationChecksHash(h hashStringWriter, values []Runtime
 		writeHashString(h, value.VerificationID)
 		writeHashString(h, value.Criterion)
 		writeHashString(h, value.Declaration)
+		writeRuntimeProjectDesignsHash(h, value.ProjectDesigns)
 		writeHashString(h, value.CheckRef)
 	}
 }

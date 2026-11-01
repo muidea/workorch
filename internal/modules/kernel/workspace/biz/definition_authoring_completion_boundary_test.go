@@ -29,6 +29,7 @@ func reserveAuthoringProposalForCompletion(t *testing.T, owners *fileDefinitionA
 			break
 		}
 	}
+	resetUnreservedSpecificationFixture(t, owners, current, "")
 	reserve := workspaceevents.ReserveAuthoringSpecificationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "proposal"), WorkspaceID: id, InputHash: confirmation.InputHash, DerivationPermitID: confirmation.DerivationPermitID, RequestID: "independent-completion", ProviderBindingHash: "provider"}
 	reserved, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecReserve: &reserve})
 	if err != nil || reserved.AuthoringSpecification == nil || reserved.AuthoringSpecification.FreshPermitID == "" {
@@ -238,7 +239,10 @@ func TestAuthoringMultiErrorMappingFailureReevaluatesDeterministicallyAfterReope
 			before, command := reserveAuthoringProposalForCompletion(t, owners, "ws-multifault-mapping")
 			switch variant {
 			case "unused-dimensions":
-				command.Mapping.Dimensions = append(command.Mapping.Dimensions, workspace.DefinitionAuthoringDimensionMapping{Ref: "unused-b", ResourceIDs: []string{}}, workspace.DefinitionAuthoringDimensionMapping{Ref: "unused-a", ResourceIDs: []string{}})
+				command.Mapping.Obligations[0].CandidateItemRef = "unknown-b"
+				command.Mapping.Obligations[1].CandidateItemRef = "unknown-a"
+				command.Mapping.Obligations[0].RequirementRef = ""
+				command.Mapping.Obligations[1].RequirementRef = ""
 			case "invalid-verifications":
 				for i := range command.Mapping.Obligations {
 					command.Mapping.Obligations[i].Verification.Status = "INVALID"

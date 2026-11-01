@@ -26,7 +26,7 @@ func Mapping(d workspace.DefinitionDerivationRequest, verification workspace.Def
 		m.Requirements = append(m.Requirements, workspace.DefinitionAuthoringRequirementMapping{Ref: ref, DimensionRef: "all", SourceItemRefs: []string{ref}, ResourceIDs: []string{}, Text: item.Text})
 		m.Obligations = append(m.Obligations, workspace.DefinitionAuthoringObligationMapping{CandidateItemRef: ref, RequirementRef: ref, Verification: verification})
 	}
-	return m, nil
+	return workspace.BindAuthoringSourceGroups(d, m)
 }
 func Audit(m workspace.DefinitionAuthoringMapping) (workspace.DefinitionAuthoringSuccessByteAudit, error) {
 	payload, err := json.Marshal(struct {

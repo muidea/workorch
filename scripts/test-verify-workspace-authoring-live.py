@@ -28,6 +28,21 @@ def ready_view():
 
 
 class AuthoringLiveContractTest(unittest.TestCase):
+    def test_waits_for_all_reviews_and_bounded_correction(self):
+        view = ready_view()
+        view['state'] = 'review_blocked'
+        proposal = view['proposal']
+        self.assertFalse(live.authoring_observation_settled(view))
+        proposal['reviewsSettled'] = True
+        proposal['revisionDisposition'] = 'correction_pending'
+        self.assertFalse(live.authoring_observation_settled(view))
+        proposal['revisionDisposition'] = 'exhausted'
+        self.assertTrue(live.authoring_observation_settled(view))
+        proposal['reviews'].pop()
+        self.assertFalse(live.authoring_observation_settled(view))
+        view['state'] = 'failed'
+        self.assertTrue(live.authoring_observation_settled(view))
+
     def test_owner_selection_uses_nested_target_and_rejects_request_shape(self):
         self.assertIsNone(live.workspace_selection({}))
         for effort in ('', 'none', 'high'):

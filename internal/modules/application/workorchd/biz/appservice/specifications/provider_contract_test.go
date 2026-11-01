@@ -71,7 +71,10 @@ func TestAuthoringBuilderMappingHTTPOutputContract(t *testing.T) {
 						}
 					}
 					encoded, _ := json.Marshal(body["input"])
-					requiredField := "SourceItemRefs"
+					requiredField := "CandidateItemRef"
+					if command.name == "review" {
+						requiredField = "SourceItemRefs"
+					}
 					if command.name == "derivation" {
 						requiredField = "AdditionalItems"
 					}

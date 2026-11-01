@@ -3,6 +3,7 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -145,13 +146,14 @@ type runtimeSemanticValidationProofRequirementProjection struct {
 }
 
 type runtimeSemanticSourceObligationCheckProjection struct {
-	InventoryHash  string `json:"inventoryHash"`
-	ObligationID   string `json:"obligationId"`
-	RequirementID  string `json:"requirementId"`
-	VerificationID string `json:"verificationId"`
-	Criterion      string `json:"criterion"`
-	Declaration    string `json:"declaration"`
-	CheckRef       string `json:"checkRef"`
+	ProjectDesigns []runtimecontract.RuntimeSourceProjectDesign `json:"projectDesigns,omitempty"`
+	InventoryHash  string                                       `json:"inventoryHash"`
+	ObligationID   string                                       `json:"obligationId"`
+	RequirementID  string                                       `json:"requirementId"`
+	VerificationID string                                       `json:"verificationId"`
+	Criterion      string                                       `json:"criterion"`
+	Declaration    string                                       `json:"declaration"`
+	CheckRef       string                                       `json:"checkRef"`
 }
 
 func runtimeSemanticSourceObligationChecksForProvider(values []runtimecontract.RuntimeSourceObligationCheck) []runtimeSemanticSourceObligationCheckProjection {
@@ -161,7 +163,8 @@ func runtimeSemanticSourceObligationChecksForProvider(values []runtimecontract.R
 	ret := make([]runtimeSemanticSourceObligationCheckProjection, 0, len(values))
 	for _, value := range values {
 		ret = append(ret, runtimeSemanticSourceObligationCheckProjection{
-			InventoryHash: value.InventoryHash, ObligationID: value.ObligationID, RequirementID: value.RequirementID,
+			ProjectDesigns: slices.Clone(value.ProjectDesigns),
+			InventoryHash:  value.InventoryHash, ObligationID: value.ObligationID, RequirementID: value.RequirementID,
 			VerificationID: value.VerificationID, Criterion: value.Criterion, Declaration: value.Declaration, CheckRef: value.CheckRef,
 		})
 	}

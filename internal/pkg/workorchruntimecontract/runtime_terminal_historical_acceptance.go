@@ -73,7 +73,7 @@ func runtimeTerminalHistoricalSourceCheck(source RuntimeStateRecord, coverage Ru
 	for _, value := range endpoints.Acceptance.SourceObligationChecks {
 		comparison := value
 		comparison.CheckRef = original.CheckRef
-		if comparison == original && value.CheckRef != original.CheckRef {
+		if reflect.DeepEqual(comparison, original) && value.CheckRef != original.CheckRef {
 			check, matches = value, matches+1
 		}
 	}

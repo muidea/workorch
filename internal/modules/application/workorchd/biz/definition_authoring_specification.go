@@ -57,28 +57,54 @@ func (b *Biz) compileAuthoringSpecificationBound(ctx context.Context, id common.
 	if derivation == nil {
 		return workspace.GoalSpecification{}, fmt.Errorf("%w: derived acceptance must be persisted before specification", common.ErrConflict)
 	}
-	// A complete replay does not consult mutable provider configuration.
-	if specification, complete, replayErr := compiledAuthoringSpecification(record, *derivation); replayErr != nil || complete {
-		return specification, replayErr
-	}
-	proposalRequest := workspace.DefinitionAuthoringSpecificationRequest{RequestID: "proposal/" + derivation.PermitID, DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationProposal}
-	outcome, err := b.prepareAuthoringSpecification(ctx, id, record, proposalRequest, *derivation, nil)
-	if err != nil {
-		return workspace.GoalSpecification{}, err
-	}
-	proposal := outcome.Proposal.Clone()
-	for _, kind := range specifications.ReviewKinds() {
-		request := workspace.DefinitionAuthoringSpecificationRequest{RequestID: "review/" + kind + "/" + derivation.PermitID, DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationCritic, ReviewKind: kind, ProposalHash: proposal.ContentHash()}
-		outcome, err := b.prepareAuthoringSpecification(ctx, id, record, request, *derivation, &proposal)
+
+	for {
+		current, err := b.QueryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: id, InputHash: record.InputHash})
+		if err != nil || current.Record == nil {
+			if err == nil {
+				err = common.ErrConflict
+			}
+			return workspace.GoalSpecification{}, err
+		}
+		record, err = current.Record.Model()
 		if err != nil {
 			return workspace.GoalSpecification{}, err
 		}
-		proposal.Reviews = append(proposal.Reviews, *outcome.Review)
+		reviewed, complete, err := compiledAuthoringSpecification(record, *derivation)
+		if err != nil {
+			return reviewed, err
+		}
+		latest := record.LatestSpecificationRequest(derivation.PermitID)
+		request := workspace.DefinitionAuthoringSpecificationRequest{RequestID: workspace.SpecificationRequestID(derivation.PermitID, "", "", ""), DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationProposal}
+		if complete {
+			if latest.PreviousProposalHash != "" {
+				return reviewed, nil
+			}
+			feedback, feedbackErr := record.SpecificationFeedback(derivation.PermitID, reviewed.ContentHash())
+			if feedbackErr != nil {
+				return reviewed, nil
+			}
+			request.PreviousProposalHash, request.FeedbackHash = feedback.PreviousProposalHash, feedback.ContentHash()
+			request.RequestID = workspace.SpecificationRequestID(derivation.PermitID, "", "", request.FeedbackHash)
+		} else if latest != nil {
+			request = *latest
+		}
+		outcome, err := b.prepareAuthoringSpecification(ctx, id, record, request, *derivation, nil)
+		if err != nil {
+			return workspace.GoalSpecification{}, err
+		}
+		proposal := outcome.Proposal.Clone()
+		for _, kind := range specifications.ReviewKinds() {
+			reviewID := workspace.SpecificationRequestID(derivation.PermitID, kind, proposal.ContentHash(), "")
+			q := workspace.DefinitionAuthoringSpecificationRequest{RequestID: reviewID, DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationCritic, ReviewKind: kind, ProposalHash: proposal.ContentHash()}
+			settled, err := b.prepareAuthoringSpecification(ctx, id, record, q, *derivation, &proposal)
+			if err != nil {
+				return workspace.GoalSpecification{}, err
+			}
+			proposal.Reviews = append(proposal.Reviews, *settled.Review)
+		}
+		// Only persisted owner feedback can authorize a corrective successor.
 	}
-	if err := workspace.ValidateAuthoringSpecification(derivation.Input, &derivation.Template, *derivation.Proposal, derivation.Resources, proposal); err != nil {
-		return workspace.GoalSpecification{}, err
-	}
-	return proposal, nil
 }
 
 func compiledAuthoringSpecification(record workspace.DefinitionAuthoringRecord, derivation workspace.DefinitionDerivationRequest) (workspace.GoalSpecification, bool, error) {
@@ -106,9 +132,6 @@ func compiledAuthoringSpecification(record workspace.DefinitionAuthoringRecord, 
 		if request.Phase != workspace.DefinitionSpecificationProposal {
 			continue
 		}
-		if proposal != nil {
-			return workspace.GoalSpecification{}, true, common.ErrConflict
-		}
 		copy := request.Proposal.Clone()
 		proposal = &copy
 	}
@@ -120,7 +143,7 @@ func compiledAuthoringSpecification(record workspace.DefinitionAuthoringRecord, 
 	for _, kind := range specifications.ReviewKinds() {
 		var matched *workspace.GoalSpecificationCompletenessReview
 		for _, request := range record.SpecificationRequests {
-			if request.DerivationPermitID != derivation.PermitID || request.Phase != workspace.DefinitionSpecificationCritic || request.ReviewKind != kind {
+			if request.DerivationPermitID != derivation.PermitID || request.Phase != workspace.DefinitionSpecificationCritic || request.ReviewKind != kind || request.ProposalHash != proposalHash {
 				continue
 			}
 			if request.ProposalHash != proposalHash || request.FailureCode != "" || request.Review == nil || matched != nil {
@@ -192,7 +215,7 @@ func (b *Biz) prepareAuthoringSpecification(ctx context.Context, id common.Works
 		return request, replayErr
 	}
 	for _, previous := range record.SpecificationRequests {
-		if previous.DerivationPermitID == request.DerivationPermitID && previous.Phase == request.Phase && previous.ReviewKind == request.ReviewKind && previous.ProposalHash == request.ProposalHash {
+		if previous.DerivationPermitID == request.DerivationPermitID && previous.Phase == request.Phase && previous.ReviewKind == request.ReviewKind && previous.ProposalHash == request.ProposalHash && previous.PreviousProposalHash == request.PreviousProposalHash && previous.FeedbackHash == request.FeedbackHash {
 			return authoringSpecificationOutcome(previous)
 		}
 	}
@@ -230,7 +253,16 @@ func (b *Biz) prepareAuthoringSpecification(ctx context.Context, id common.Works
 	request.WireContractHash = workspace.AuthoringWireHash(request.WireContractRef, phase)
 	var command llmevents.CompleteProviderCommand
 	if proposal == nil {
-		command, err = specifications.AuthoringProposalCommand(derivation, configuration.DefaultChat)
+		if request.PreviousProposalHash == "" {
+			command, err = specifications.AuthoringProposalCommand(derivation, configuration.DefaultChat)
+		} else {
+			feedback, feedbackErr := record.SpecificationFeedback(derivation.PermitID, request.PreviousProposalHash)
+			previous := record.LatestSpecificationRequest(derivation.PermitID)
+			if feedbackErr != nil || feedback.ContentHash() != request.FeedbackHash || previous == nil || previous.Proposal == nil {
+				return request, common.ErrConflict
+			}
+			command, err = specifications.AuthoringRevisionCommand(derivation, *previous.Proposal, feedback, configuration.DefaultChat)
+		}
 	} else {
 		unreviewed := proposal.Clone()
 		unreviewed.Reviews = nil
@@ -247,7 +279,7 @@ func (b *Biz) completeAuthoringSpecification(ctx context.Context, id common.Work
 	if err := ctx.Err(); err != nil {
 		return request, err
 	}
-	reserve := workspaceevents.ReserveAuthoringSpecificationCommand{WireContractRef: request.WireContractRef, WireContractHash: request.WireContractHash, WorkspaceID: id, InputHash: inputHash, RequestID: request.RequestID, DerivationPermitID: request.DerivationPermitID, ReviewKind: request.ReviewKind, ProposalHash: request.ProposalHash, ProviderBindingHash: request.ProviderBindingHash}
+	reserve := workspaceevents.ReserveAuthoringSpecificationCommand{PreviousProposalHash: request.PreviousProposalHash, FeedbackHash: request.FeedbackHash, WireContractRef: request.WireContractRef, WireContractHash: request.WireContractHash, WorkspaceID: id, InputHash: inputHash, RequestID: request.RequestID, DerivationPermitID: request.DerivationPermitID, ReviewKind: request.ReviewKind, ProposalHash: request.ProposalHash, ProviderBindingHash: request.ProviderBindingHash}
 	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceAuthoringSpecificationReserve, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, reserve)
 	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspaceAuthoringSpecificationReserve, eventcontract.LaneScope{WorkspaceID: string(id)}))
 	result := b.SendEvent(ev)

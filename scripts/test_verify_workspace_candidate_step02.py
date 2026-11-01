@@ -27,6 +27,15 @@ class Step02VerifierTest(unittest.TestCase):
                      'mergedRequiredConsumers': [] if kind is None else [{'Kind': kind, 'ConsumptionPoint': 'post_terminal_delivery', 'TerminalContractRef': 'terminal-v1'}]}
                     for i, (ref, kind) in enumerate(expected.items())]}
 
+    def test_fixture_profile_selection_is_exact_and_rejects_unknown_sources(self):
+        requirement = {'source': {'HistoricalItemRef': 'profile/software-dev/deliverable/source_change'},
+                       'eligibleAcceptanceItemRefs': ['derived-dod:template:000003']}
+        self.assertEqual(step02.fixture_profile_selections({'requiredEvidencePurposes': [requirement]}),
+                         [{'SourceRef': requirement['source']['HistoricalItemRef'], 'AcceptanceItemRef': 'derived-dod:template:000003'}])
+        requirement['source']['HistoricalItemRef'] = 'unknown'
+        with self.assertRaises(RuntimeError):
+            step02.fixture_profile_selections({'requiredEvidencePurposes': [requirement]})
+
     def test_consumers_apply_to_source_even_with_multiple_declaration_choices(self):
         payload = self.source_payload()
         before = copy.deepcopy(payload)
@@ -48,10 +57,14 @@ class Step02VerifierTest(unittest.TestCase):
                 step02.validate_source_consumers(bad)
 
     def test_review_blocked_is_not_settled_until_all_six_critics_finish(self):
-        view = {"state": "review_blocked", "proposal": {"reviews": []}}
+        view = {"state": "review_blocked", "proposal": {"reviewsSettled": True, "reviews": []}}
         for kind in step02.KINDS:
             self.assertFalse(step02.compilation_settled(view))
             view["proposal"]["reviews"].append({"kind": kind, "status": "FAIL"})
+        self.assertTrue(step02.compilation_settled(view))
+        view["proposal"]["revisionDisposition"] = "correction_pending"
+        self.assertFalse(step02.compilation_settled(view))
+        view["proposal"]["revisionDisposition"] = "exhausted"
         self.assertTrue(step02.compilation_settled(view))
         view["proposal"]["reviews"][-1]["kind"] = step02.KINDS[0]
         self.assertFalse(step02.compilation_settled(view))

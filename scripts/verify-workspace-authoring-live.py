@@ -21,6 +21,18 @@ def require_zero_runs(response):
         raise RuntimeError("创作、编译或确认阶段出现未显式启动的 Run")
 
 
+def authoring_observation_settled(view):
+    state = view.get('state')
+    if state == 'review_blocked':
+        proposal = view.get('proposal') or {}
+        kinds = {review.get('kind') for review in proposal.get('reviews', [])}
+        expected = {'dimension_coverage', 'negative_path', 'regression', 'resource_environment', 'traceability', 'verifier_feasibility'}
+        return (proposal.get('reviewsSettled') is True and kinds == expected
+                and len(proposal.get('reviews', [])) == 6
+                and proposal.get('revisionDisposition') != 'correction_pending')
+    return state in ('ready_to_confirm', 'failed', 'preparation_failed', 'clarification_required', 'admitted', 'confirming', 'admitting')
+
+
 def require_ready_proposal(view):
     if view.get("state") != "ready_to_confirm" or view.get("templateCurrent") is not True:
         raise RuntimeError("未得到当前模板下可确认规格；保留草稿供诊断")
@@ -244,7 +256,7 @@ def verify(request, journal, timeout, confirm):
                 'expectedTemplateSnapshotHash': view['templateSnapshotHash'],
             })['authoring']
         deadline = time.monotonic() + timeout
-        while view['state'] not in ('ready_to_confirm', 'review_blocked', 'failed', 'preparation_failed', 'clarification_required', 'admitted', 'confirming', 'admitting'):
+        while not authoring_observation_settled(view):
             if time.monotonic() >= deadline:
                 raise RuntimeError('编译超时或结果未决；保留原身份，不自动重发 provider')
             time.sleep(2)

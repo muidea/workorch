@@ -24,13 +24,19 @@ func TestAuthoringMappingProviderSchemaIsClosedAndDTOAligned(t *testing.T) {
 	for n := 0; n < typ.NumField(); n++ {
 		f := typ.Field(n)
 		switch f.Name {
-		case "Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash":
+		case "Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash", "GoalRequirement", "Dimensions", "Requirements":
 			continue
+		}
+		if f.Name == "Obligations" {
+			f.Type = reflect.TypeOf([]struct {
+				CandidateItemRef string
+				Verification     workspace.DefinitionAuthoringVerificationMapping
+			}{})
 		}
 		fields = append(fields, f)
 	}
 	checkSchemaDTO(t, mapping, reflect.StructOf(fields))
-	for _, name := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash"} {
+	for _, name := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash", "GoalRequirement", "Dimensions", "Requirements"} {
 		if _, ok := mapping["properties"].(map[string]any)[name]; ok {
 			t.Fatal("provider receives owner field", name)
 		}

@@ -149,16 +149,33 @@ type DefinitionAuthoringVerification struct {
 	Scope                 string `json:"scope,omitempty"`
 }
 
+type DefinitionAuthoringReviewIssue struct {
+	Class          string   `json:"class"`
+	Detail         string   `json:"detail"`
+	RequirementIDs []string `json:"requirementIds"`
+	EvidenceRefs   []string `json:"evidenceRefs"`
+}
+type DefinitionAuthoringDesignDecision struct {
+	CandidateItemRef  string `json:"candidateItemRef"`
+	Decision          string `json:"decision"`
+	VerificationBasis string `json:"verificationBasis"`
+}
 type DefinitionAuthoringReview struct {
-	Kind              string   `json:"kind"`
-	Status            string   `json:"status"`
-	Reason            string   `json:"reason,omitempty"`
-	EvidenceRefs      []string `json:"evidenceRefs,omitempty"`
-	RequirementIDs    []string `json:"requirementIds,omitempty"`
-	SpecificationHash string   `json:"specificationHash"`
+	Issues            []DefinitionAuthoringReviewIssue `json:"issues,omitempty"`
+	Kind              string                           `json:"kind"`
+	Status            string                           `json:"status"`
+	Reason            string                           `json:"reason,omitempty"`
+	EvidenceRefs      []string                         `json:"evidenceRefs,omitempty"`
+	RequirementIDs    []string                         `json:"requirementIds,omitempty"`
+	SpecificationHash string                           `json:"specificationHash"`
 }
 
 type DefinitionAuthoringProposal struct {
+	DesignDecisions          []DefinitionAuthoringDesignDecision         `json:"designDecisions,omitempty"`
+	ReviewsSettled           bool                                        `json:"reviewsSettled"`
+	PreviousProposalHash     string                                      `json:"previousProposalHash,omitempty"`
+	FeedbackHash             string                                      `json:"feedbackHash,omitempty"`
+	RevisionDisposition      string                                      `json:"revisionDisposition,omitempty"`
 	RequiredEvidencePurposes []DefinitionAuthoringEvidencePurposeMapping `json:"requiredEvidencePurposes,omitempty"`
 	GoalText                 string                                      `json:"goalText"`
 	Version                  uint32                                      `json:"version"`
@@ -221,15 +238,17 @@ type DefinitionAuthoringEvidencePurposeMapping struct {
 }
 
 type DefinitionAuthoringRequestState struct {
-	RequestID           string                                 `json:"requestId"`
-	ProviderBindingHash string                                 `json:"providerBindingHash"`
-	ProposalHash        string                                 `json:"proposalHash,omitempty"`
-	PermitID            string                                 `json:"permitId"`
-	Phase               string                                 `json:"phase"`
-	ReviewKind          string                                 `json:"reviewKind,omitempty"`
-	State               string                                 `json:"state"`
-	FailureCode         string                                 `json:"failureCode,omitempty"`
-	Diagnostic          *DefinitionAuthoringDiagnosticMetadata `json:"diagnostic,omitempty"`
+	PreviousProposalHash string                                 `json:"previousProposalHash,omitempty"`
+	FeedbackHash         string                                 `json:"feedbackHash,omitempty"`
+	RequestID            string                                 `json:"requestId"`
+	ProviderBindingHash  string                                 `json:"providerBindingHash"`
+	ProposalHash         string                                 `json:"proposalHash,omitempty"`
+	PermitID             string                                 `json:"permitId"`
+	Phase                string                                 `json:"phase"`
+	ReviewKind           string                                 `json:"reviewKind,omitempty"`
+	State                string                                 `json:"state"`
+	FailureCode          string                                 `json:"failureCode,omitempty"`
+	Diagnostic           *DefinitionAuthoringDiagnosticMetadata `json:"diagnostic,omitempty"`
 }
 
 // DefinitionAuthoringView is a bounded management read model, not a submitted

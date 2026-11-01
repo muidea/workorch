@@ -24,6 +24,7 @@ var (
 	reviewShape  = objectShape(map[string]documentShape{
 		"Kind": stringShape, "Status": stringShape, "SpecificationHash": stringShape,
 		"Reason": stringShape, "EvidenceRefs": stringsShape, "RequirementIDs": stringsShape,
+		"Issues": optionalShape(arrayShape(objectShape(map[string]documentShape{"Class": stringShape, "Detail": stringShape, "RequirementIDs": stringsShape, "EvidenceRefs": stringsShape}))),
 	})
 	proposalShape = objectShape(map[string]documentShape{"specification": objectShape(map[string]documentShape{
 		"Version": uintShape, "GoalItemRef": stringShape, "GoalTextHash": stringShape,
@@ -44,6 +45,7 @@ var (
 			"ID": stringShape, "ObligationID": stringShape, "Declaration": stringShape, "Status": stringShape,
 			"ProfileID": stringShape, "EvidenceRequirementID": stringShape, "Scope": stringShape,
 		})),
+		"DesignDecisions":        optionalShape(arrayShape(objectShape(map[string]documentShape{"CandidateItemRef": stringShape, "Decision": stringShape, "VerificationBasis": stringShape}))),
 		"Reviews":                arrayShape(reviewShape),
 		"ExecutionProofMappings": optionalShape(arrayShape(objectShape(map[string]documentShape{"ContractRef": stringShape, "ConsumerItemRef": stringShape, "RuleRef": stringShape, "SourceItemRef": stringShape, "ConsumerGoalText": optionalShape(stringShape)}))),
 		"EvidencePurposeMappings": optionalShape(arrayShape(objectShape(map[string]documentShape{"ContractRef": stringShape, "HistoricalItemRef": stringShape, "AcceptanceItemRef": stringShape,

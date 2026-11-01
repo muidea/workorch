@@ -5,7 +5,6 @@ import (
 	"slices"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governanceports"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/specifications"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/definitionadmission"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
@@ -161,6 +160,7 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 					state = "completed"
 				}
 				requestState := workorchmanagementcontract.DefinitionAuthoringRequestState{PermitID: request.PermitID, Phase: string(request.Phase), ReviewKind: request.ReviewKind, State: state, FailureCode: request.FailureCode}
+				requestState.PreviousProposalHash, requestState.FeedbackHash = request.PreviousProposalHash, request.FeedbackHash
 				requestState.Diagnostic = authoringDiagnosticMetadata(request.Diagnostic)
 				requestState.RequestID, requestState.ProviderBindingHash, requestState.ProposalHash = request.RequestID, request.ProviderBindingHash, request.ProposalHash
 				result.Requests = append(result.Requests, requestState)
@@ -190,6 +190,15 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 					proposal.Obligations = append(proposal.Obligations, workorchmanagementcontract.DefinitionAuthoringObligation{ID: obligation.ID, RequirementID: obligation.RequirementID, DoDItemRefs: slices.Clone(obligation.DoDItemRefs), Text: obligation.Text})
 				}
 				proposal.ProposalHash = spec.ContentHash()
+				latest := record.LatestSpecificationRequest(derivation.PermitID)
+				for _, source := range record.SpecificationRequests {
+					if source.Proposal != nil && source.Proposal.ContentHash() == proposal.ProposalHash {
+						proposal.PreviousProposalHash, proposal.FeedbackHash = source.PreviousProposalHash, source.FeedbackHash
+					}
+				}
+				for _, decision := range spec.DesignDecisions {
+					proposal.DesignDecisions = append(proposal.DesignDecisions, workorchmanagementcontract.DefinitionAuthoringDesignDecision{CandidateItemRef: decision.CandidateItemRef, Decision: decision.Decision, VerificationBasis: decision.VerificationBasis})
+				}
 				for n := range proposal.RequiredEvidencePurposes {
 					for _, m := range spec.EvidencePurposeMappings {
 						if m.HistoricalItemRef == proposal.RequiredEvidencePurposes[n].HistoricalItemRef {
@@ -229,21 +238,33 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 					if review.Status != workspace.GoalReviewPass {
 						reviewBlocked = true
 					}
-					proposal.Reviews = append(proposal.Reviews, workorchmanagementcontract.DefinitionAuthoringReview{Kind: review.Kind, Status: review.Status, Reason: review.Reason, EvidenceRefs: review.EvidenceRefs, RequirementIDs: review.RequirementIDs, SpecificationHash: review.SpecificationHash})
+					reviewView := workorchmanagementcontract.DefinitionAuthoringReview{Kind: review.Kind, Status: review.Status, Reason: review.Reason, EvidenceRefs: slices.Clone(review.EvidenceRefs), RequirementIDs: slices.Clone(review.RequirementIDs), SpecificationHash: review.SpecificationHash}
+					for _, issue := range review.Issues {
+						reviewView.Issues = append(reviewView.Issues, workorchmanagementcontract.DefinitionAuthoringReviewIssue{Class: issue.Class, Detail: issue.Detail, RequirementIDs: slices.Clone(issue.RequirementIDs), EvidenceRefs: slices.Clone(issue.EvidenceRefs)})
+					}
+					proposal.Reviews = append(proposal.Reviews, reviewView)
 				}
 				if reviewed, complete, reviewErr := compiledAuthoringSpecification(*record, *derivation); reviewErr == nil && complete {
+					proposal.ReviewsSettled = true
 					proposal.SpecificationHash = reviewed.AdmissionHash()
 					if _, _, confirmErr := record.ConfirmableSpecificationView(derivation.PermitID, proposal.ProposalHash); confirmErr == nil && authoringViewVerificationApplicable(*derivation, reviewed, items) {
 						result.State = "ready_to_confirm"
 					} else {
 						result.State = "review_blocked"
+						proposal.RevisionDisposition = "blocked"
+						if latest != nil && latest.PreviousProposalHash != "" {
+							proposal.RevisionDisposition = "exhausted"
+						} else if _, feedbackErr := record.SpecificationFeedback(derivation.PermitID, proposal.ProposalHash); feedbackErr == nil {
+							result.State = "reviewing"
+							proposal.RevisionDisposition = "correction_pending"
+						}
 					}
 				} else if reviewFailed {
 					result.State = "failed"
 				} else if reviewUnresolved {
 					result.State = "outcome_unresolved"
 				} else if reviewBlocked {
-					result.State = "review_blocked"
+					result.State = "reviewing"
 				} else if reviewErr != nil {
 					result.State = "outcome_unresolved"
 				}
@@ -260,6 +281,9 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 		}
 	}
 	if derivation != nil && derivation.Proposal != nil {
+		if latest := record.LatestSpecificationRequest(derivation.PermitID); latest != nil && latest.FailureCode != "" {
+			result.State = "failed"
+		}
 		for _, request := range record.SpecificationRequests {
 			if request.DerivationPermitID == derivation.PermitID && request.FailureCode == "" && request.Proposal == nil && request.Review == nil {
 				result.State = "outcome_unresolved"
@@ -309,48 +333,7 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 }
 
 func authoringPreparationDiagnosticCurrent(record workspace.DefinitionAuthoringRecord, derivation *workspace.DefinitionDerivationRequest, diagnostic workspace.DefinitionAuthoringPreparationDiagnostic) bool {
-	if diagnostic.InputHash != record.InputHash || diagnostic.TemplateSnapshotHash != record.TemplateSnapshotHash {
-		return false
-	}
-	for _, request := range record.DerivationRequests {
-		if request.Input.InputHash() == record.InputHash && workspace.WorkspaceTemplateSnapshotHash(&request.Template) == record.TemplateSnapshotHash && request.Proposal == nil && request.FailureCode == "" {
-			return false
-		}
-	}
-	if derivation == nil {
-		return diagnostic.Stage == workspace.DefinitionAuthoringPreparationDerivation && diagnostic.TargetRequestID == "derive/"+record.InputHash
-	}
-	if derivation.Proposal == nil || derivation.FailureCode != "" || diagnostic.DerivationPermitID != derivation.PermitID {
-		return false
-	}
-	var proposal *workspace.GoalSpecification
-	for _, request := range record.SpecificationRequests {
-		if request.DerivationPermitID != derivation.PermitID {
-			continue
-		}
-		if request.FailureCode != "" || request.Proposal == nil && request.Review == nil {
-			return false
-		}
-		if request.Proposal != nil {
-			proposal = request.Proposal
-		}
-	}
-	if proposal == nil {
-		return diagnostic.Stage == workspace.DefinitionAuthoringPreparationProposal && diagnostic.TargetRequestID == "proposal/"+derivation.PermitID
-	}
-	for _, kind := range specifications.ReviewKinds() {
-		completed := false
-		for _, request := range record.SpecificationRequests {
-			if request.DerivationPermitID == derivation.PermitID && request.ReviewKind == kind && request.ProposalHash == proposal.ContentHash() && request.Review != nil {
-				completed = true
-				break
-			}
-		}
-		if !completed {
-			return diagnostic.Stage == workspace.DefinitionAuthoringPreparationReview && diagnostic.ReviewKind == kind && diagnostic.ProposalHash == proposal.ContentHash() && diagnostic.TargetRequestID == "review/"+kind+"/"+derivation.PermitID
-		}
-	}
-	return false
+	return record.PreparationDiagnosticCurrent(derivation, diagnostic)
 }
 
 func authoringPreparationDiagnosticMetadata(d workspace.DefinitionAuthoringPreparationDiagnostic, current bool) workorchmanagementcontract.DefinitionAuthoringPreparationDiagnosticMetadata {

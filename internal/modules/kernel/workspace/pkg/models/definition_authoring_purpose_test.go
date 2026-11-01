@@ -53,9 +53,15 @@ func purposeSemanticAudit(t *testing.T, m DefinitionAuthoringMapping) Definition
 	body, _ := json.Marshal(m)
 	var fields map[string]json.RawMessage
 	_ = json.Unmarshal(body, &fields)
-	for _, k := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash"} {
+	for _, k := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash", "GoalRequirement", "Dimensions", "Requirements"} {
 		delete(fields, k)
 	}
+	var rows []map[string]json.RawMessage
+	_ = json.Unmarshal(fields["Obligations"], &rows)
+	for _, row := range rows {
+		delete(row, "RequirementRef")
+	}
+	fields["Obligations"], _ = json.Marshal(rows)
 	raw, _ := json.Marshal(map[string]any{"mapping": fields})
 	return semanticAudit(raw)
 }

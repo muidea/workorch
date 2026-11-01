@@ -216,6 +216,9 @@ def authoring_response(prompt):
             review = _review(request)
             review['review'].pop('Kind')
             review['review'].pop('SpecificationHash')
+            if review['review']['Status'] != 'PASS':
+                review['review']['Issues'] = [{'Class': 'capability_unavailable' if review['review']['Status'] == 'UNKNOWN' else 'source_conflict',
+                    'Detail': review['review']['Reason'], 'RequirementIDs': list(review['review']['RequirementIDs']), 'EvidenceRefs': list(review['review']['EvidenceRefs'])}]
             return review
         items = _candidates(request)
         _text(request['goal']['CandidateItemRef'])
@@ -223,28 +226,15 @@ def authoring_response(prompt):
         if not isinstance(request['expectedResources'], list):
             raise AuthoringMockError('封存资源必须为列表')
         binding = _binding(request)
-        mapping = {'Protocol': 'workorch.authoring.sealed-ref-mapping/v1',
-                   'InputHash': _text(request['inputHash']),
-                   'TemplateSnapshotHash': _text(request['templateHash']),
-                   'ResourceSnapshotHash': _text(request['resourceSnapshotHash']),
-                   'GoalRequirement': {'DimensionRef': 'all', 'ResourceIDs': []},
-                   'Dimensions': [{'Ref': 'all', 'ResourceIDs': []}],
-                   'Requirements': [], 'Obligations': []}
+        mapping = {'Obligations': []}
         for index, item in enumerate(items):
             ref = item['CandidateItemRef']
-            requirement = f'item-{index}'
-            mapping['Requirements'].append({'Ref': requirement, 'DimensionRef': 'all',
-                                            'SourceItemRefs': [ref], 'ResourceIDs': [],
-                                            'Text': '封存候选分组：' + ref})
             verification = {'Declaration': '按封存 Profile 验证' if binding else '请求未提供可信 Profile 声明',
                             'Status': 'DECLARED' if binding else 'UNVERIFIED',
                             'ProfileID': '', 'EvidenceRequirementID': '', 'Scope': ''}
             if binding:
                 verification.update(ProfileID=binding[0], EvidenceRequirementID=binding[1], Scope=binding[2])
-            mapping['Obligations'].append({'CandidateItemRef': ref, 'RequirementRef': requirement,
-                                          'Verification': verification})
-        for field in ('Protocol', 'InputHash', 'TemplateSnapshotHash', 'ResourceSnapshotHash'):
-            del mapping[field]
+            mapping['Obligations'].append({'CandidateItemRef': ref, 'Verification': verification})
         return {'mapping': mapping}
     except (KeyError, TypeError, json.JSONDecodeError) as error:
         raise AuthoringMockError('创作 mock 输入合同无效') from error

@@ -32,7 +32,7 @@ func runtimeSourceObligationProviderFixture(t *testing.T) llmmodels.RuntimeCandi
 			{ID: "B", RequirementID: "requirement", DoDItemRefs: []string{"dod"}, Text: " B 独立判据\t "},
 		},
 		Verifications: []runtimecontract.RuntimeSourceVerification{
-			{ID: "verify-A", ObligationID: "A", Declaration: " 验证 A\n ", ProfileID: "profile", EvidenceRequirementID: "dod-001", Scope: "dodItem"},
+			{ProjectDesigns: []runtimecontract.RuntimeSourceProjectDesign{{CandidateItemRef: "dod", Decision: " Original project rule\r\n", VerificationBasis: " Independent expected outcome\t "}}, ID: "verify-A", ObligationID: "A", Declaration: " 验证 A\n ", ProfileID: "profile", EvidenceRequirementID: "dod-001", Scope: "dodItem"},
 			{ID: "verify-B", ObligationID: "B", Declaration: " 验证 B\t ", ProfileID: "profile", EvidenceRequirementID: "dod-001", Scope: "dodItem"},
 		},
 	}).WithHash()
@@ -102,6 +102,9 @@ func TestRuntimeSourceObligationProviderPreservesExactC1AndC3(t *testing.T) {
 		t.Fatal(err)
 	}
 	requirement := authority.Manifest.ProofObligations[0].ValidationProofRequirement
+	if len(requirement.SourceObligationChecks[0].ProjectDesigns) != 1 || requirement.SourceObligationChecks[0].ProjectDesigns[0].Decision != " Original project rule\r\n" || requirement.SourceObligationChecks[0].ProjectDesigns[0].VerificationBasis != " Independent expected outcome\t " {
+		t.Fatal("C3 lost exact project design")
+	}
 	want := request.SemanticManifest.ProofObligations[0].ValidationProofRequirement
 	if !reflect.DeepEqual(requirement.SourceObligationChecks, runtimeSemanticSourceObligationChecksForProvider(want.SourceObligationChecks)) || len(requirement.RequiredCheckRefs) != 3 {
 		t.Fatal("C3 lost independent A/B criteria, declarations or all_of checks")

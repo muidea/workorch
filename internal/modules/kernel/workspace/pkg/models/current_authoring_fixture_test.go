@@ -31,19 +31,24 @@ func completeTestSpecification(r DefinitionAuthoringRecord, permit string, p *Go
 	if review == nil {
 		return r.CompleteSpecification(permit, p, review, failure, ds...)
 	}
+	if review.Status != GoalReviewPass && len(review.Issues) == 0 {
+		review.Issues = []GoalSpecificationReviewIssue{{Class: AuthoringIssueClarification, Detail: "synthetic unresolved criterion", RequirementIDs: append([]string{}, review.RequirementIDs...), EvidenceRefs: append([]string{}, review.EvidenceRefs...)}}
+	}
 	raw, err := json.Marshal(struct {
 		Review struct {
+			Issues         []GoalSpecificationReviewIssue `json:",omitempty"`
 			Status         string
 			Reason         string
 			EvidenceRefs   []string
 			RequirementIDs []string
 		} `json:"review"`
 	}{Review: struct {
+		Issues         []GoalSpecificationReviewIssue `json:",omitempty"`
 		Status         string
 		Reason         string
 		EvidenceRefs   []string
 		RequirementIDs []string
-	}{review.Status, review.Reason, append([]string{}, review.EvidenceRefs...), append([]string{}, review.RequirementIDs...)}})
+	}{review.Issues, review.Status, review.Reason, append([]string{}, review.EvidenceRefs...), append([]string{}, review.RequirementIDs...)}})
 	if err != nil {
 		return DefinitionAuthoringRecord{}, err
 	}
@@ -53,5 +58,5 @@ func completeTestSpecification(r DefinitionAuthoringRecord, permit string, p *Go
 }
 
 func decodeCurrentMappingFixture(payload []byte) (DefinitionAuthoringMapping, error) {
-	return DecodeAuthoringMappingFor(DefinitionDerivationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "derive")}, payload)
+	return decodeDefinitionAuthoringMappingShape(payload, authoringSemanticMappingShape())
 }

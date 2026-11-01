@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 const RuntimeSourceObligationInventorySchemaCurrent = "workorch.runtime_source_obligation_inventory/v1"
@@ -70,7 +71,14 @@ type RuntimeSourceObligation struct {
 	Text          string
 }
 
+type RuntimeSourceProjectDesign struct {
+	CandidateItemRef  string
+	Decision          string
+	VerificationBasis string
+}
+
 type RuntimeSourceVerification struct {
+	ProjectDesigns        []RuntimeSourceProjectDesign `json:",omitempty"`
 	ID                    string
 	ObligationID          string
 	Declaration           string
@@ -95,6 +103,9 @@ func (i RuntimeSourceObligationInventory) Clone() RuntimeSourceObligationInvento
 		i.Obligations[n].DoDItemRefs = slices.Clone(i.Obligations[n].DoDItemRefs)
 	}
 	i.Verifications = slices.Clone(i.Verifications)
+	for n := range i.Verifications {
+		i.Verifications[n].ProjectDesigns = slices.Clone(i.Verifications[n].ProjectDesigns)
+	}
 	return i
 }
 
@@ -111,6 +122,11 @@ func (i RuntimeSourceObligationInventory) WithHash() RuntimeSourceObligationInve
 	sort.Slice(i.Obligations, func(a, b int) bool { return i.Obligations[a].ID < i.Obligations[b].ID })
 	for n := range i.Obligations {
 		sort.Strings(i.Obligations[n].DoDItemRefs)
+	}
+	for n := range i.Verifications {
+		sort.Slice(i.Verifications[n].ProjectDesigns, func(a, b int) bool {
+			return i.Verifications[n].ProjectDesigns[a].CandidateItemRef < i.Verifications[n].ProjectDesigns[b].CandidateItemRef
+		})
 	}
 	sort.Slice(i.Verifications, func(a, b int) bool { return i.Verifications[a].ID < i.Verifications[b].ID })
 	sort.Slice(i.ExecutionProofMappings, func(a, b int) bool {
@@ -175,6 +191,7 @@ func StableRuntimeSourceObligationInventoryHash(i RuntimeSourceObligationInvento
 		writeHashString(h, verification.ProfileID)
 		writeHashString(h, verification.EvidenceRequirementID)
 		writeHashString(h, verification.Scope)
+		writeRuntimeProjectDesignsHash(h, verification.ProjectDesigns)
 	}
 	if len(i.ExecutionProofMappings) != 0 {
 		writeHashString(h, RuntimeDoDSourceExecutionProof)
@@ -322,10 +339,21 @@ func (i RuntimeSourceObligationInventory) Validate() error {
 	verificationIDs, verified := make(map[string]bool), make(map[string]bool)
 	for _, verification := range i.Verifications {
 		if !claimIdentity(verification.ID, 128) || verificationIDs[verification.ID] || !obligations[verification.ObligationID] ||
-			strings.TrimSpace(verification.Declaration) == "" || len(verification.Declaration) > 4096 ||
+			!validRuntimeProjectDesigns(verification.ProjectDesigns) || strings.TrimSpace(verification.Declaration) == "" || len(verification.Declaration) > 4096 ||
 			!runtimeSourceIdentity(verification.ProfileID, 128) || !runtimeSourceIdentity(verification.EvidenceRequirementID, 128) ||
 			!runtimeSourceIdentity(verification.Scope, 128) {
 			return fmt.Errorf("runtime source obligation inventory has invalid verification %q", verification.ID)
+		}
+		for _, design := range verification.ProjectDesigns {
+			bound := false
+			for _, obligation := range i.Obligations {
+				if obligation.ID == verification.ObligationID {
+					bound = slices.Contains(obligation.DoDItemRefs, design.CandidateItemRef)
+				}
+			}
+			if !bound {
+				return fmt.Errorf("runtime source verification design outside obligation source")
+			}
 		}
 		verificationIDs[verification.ID], verified[verification.ObligationID] = true, true
 	}
@@ -361,4 +389,36 @@ func runtimeSourceRefs(refs []string, limit int, allowEmpty bool, exists func(st
 		seen[ref] = true
 	}
 	return true
+}
+
+func validRuntimeProjectDesigns(designs []RuntimeSourceProjectDesign) bool {
+	if len(designs) > 512 {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, d := range designs {
+		if !runtimeSourceIdentity(d.CandidateItemRef, 1024) || seen[d.CandidateItemRef] {
+			return false
+		}
+		seen[d.CandidateItemRef] = true
+		for _, text := range []string{d.Decision, d.VerificationBasis} {
+			if strings.TrimSpace(text) == "" || len(text) > 4096 || !utf8.ValidString(text) || strings.ContainsRune(text, 0) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func writeRuntimeProjectDesignsHash(h hashStringWriter, designs []RuntimeSourceProjectDesign) {
+	if len(designs) == 0 {
+		return
+	}
+	writeHashString(h, "runtime-project-designs")
+	writeHashString(h, fmt.Sprint(len(designs)))
+	for _, d := range designs {
+		writeHashString(h, d.CandidateItemRef)
+		writeHashString(h, d.Decision)
+		writeHashString(h, d.VerificationBasis)
+	}
 }

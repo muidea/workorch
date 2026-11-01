@@ -81,7 +81,15 @@ func (r DefinitionAuthoringRecord) CurrentAuthoringSummary() (state, failurePhas
 				case reviewUnresolved:
 					state = "outcome_unresolved"
 				case reviewBlocked:
-					state = "review_blocked"
+					if reviewCount == len(goalReviewKinds) {
+						state = "review_blocked"
+						latest := r.LatestSpecificationRequest(derivation.PermitID)
+						if latest != nil && latest.PreviousProposalHash == "" {
+							if _, err := r.SpecificationFeedback(derivation.PermitID, proposalHash); err == nil {
+								state = "reviewing"
+							}
+						}
+					}
 				default:
 					if !hasCurrentPreparationDiagnostic(r, derivation) {
 						if _, _, err := r.ConfirmableSpecification(derivation.PermitID, proposalHash); err == nil {
@@ -127,6 +135,10 @@ func hasCurrentPreparationDiagnostic(record DefinitionAuthoringRecord, derivatio
 	return false
 }
 
+func (record DefinitionAuthoringRecord) PreparationDiagnosticCurrent(derivation *DefinitionDerivationRequest, diagnostic DefinitionAuthoringPreparationDiagnostic) bool {
+	return preparationDiagnosticCurrentForSummary(record, derivation, diagnostic)
+}
+
 func preparationDiagnosticCurrentForSummary(record DefinitionAuthoringRecord, derivation *DefinitionDerivationRequest, diagnostic DefinitionAuthoringPreparationDiagnostic) bool {
 	if diagnostic.InputHash != record.InputHash || diagnostic.TemplateSnapshotHash != record.TemplateSnapshotHash {
 		return false
@@ -155,7 +167,7 @@ func preparationDiagnosticCurrentForSummary(record DefinitionAuthoringRecord, de
 		}
 	}
 	if proposal == nil {
-		return diagnostic.Stage == DefinitionAuthoringPreparationProposal && diagnostic.TargetRequestID == "proposal/"+derivation.PermitID
+		return diagnostic.Stage == DefinitionAuthoringPreparationProposal && diagnostic.TargetRequestID == SpecificationRequestID(derivation.PermitID, "", "", "")
 	}
 	proposalHash := proposal.ContentHash()
 	for _, kind := range goalReviewKinds {
@@ -167,7 +179,14 @@ func preparationDiagnosticCurrentForSummary(record DefinitionAuthoringRecord, de
 			}
 		}
 		if !completed {
-			return diagnostic.Stage == DefinitionAuthoringPreparationReview && diagnostic.ReviewKind == kind && diagnostic.ProposalHash == proposalHash && diagnostic.TargetRequestID == "review/"+kind+"/"+derivation.PermitID
+			return diagnostic.Stage == DefinitionAuthoringPreparationReview && diagnostic.ReviewKind == kind && diagnostic.ProposalHash == proposalHash && diagnostic.TargetRequestID == SpecificationRequestID(derivation.PermitID, kind, proposalHash, "")
+		}
+	}
+	latest := record.LatestSpecificationRequest(derivation.PermitID)
+	if latest != nil && latest.PreviousProposalHash == "" {
+		feedback, err := record.SpecificationFeedback(derivation.PermitID, proposalHash)
+		if err == nil {
+			return diagnostic.Stage == DefinitionAuthoringPreparationProposal && diagnostic.TargetRequestID == SpecificationRequestID(derivation.PermitID, "", "", feedback.ContentHash())
 		}
 	}
 	return false

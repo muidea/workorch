@@ -66,7 +66,7 @@ func TestTerminalHistoricalAcceptancePreservesBothSourcesAndOriginalChecks(t *te
 		for _, original := range source.Facts.DefinitionSeed.CoverageItems {
 			if original.ID == "history" {
 				for _, check := range original.SourceObligationChecks {
-					found = found || check == outcome.Check
+					found = found || reflect.DeepEqual(check, outcome.Check)
 				}
 			}
 		}

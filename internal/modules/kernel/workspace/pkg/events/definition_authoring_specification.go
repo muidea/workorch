@@ -12,15 +12,17 @@ const TopicWorkspaceAuthoringSpecificationReserve = "/workspace/definition-autho
 const TopicWorkspaceAuthoringSpecificationComplete = "/workspace/definition-authoring/specification/complete"
 
 type ReserveAuthoringSpecificationCommand struct {
-	WorkspaceID         common.WorkspaceID
-	InputHash           string
-	WireContractRef     string `json:",omitempty"`
-	WireContractHash    string `json:",omitempty"`
-	RequestID           string
-	DerivationPermitID  string
-	ReviewKind          string
-	ProposalHash        string
-	ProviderBindingHash string
+	PreviousProposalHash string
+	FeedbackHash         string
+	WorkspaceID          common.WorkspaceID
+	InputHash            string
+	WireContractRef      string `json:",omitempty"`
+	WireContractHash     string `json:",omitempty"`
+	RequestID            string
+	DerivationPermitID   string
+	ReviewKind           string
+	ProposalHash         string
+	ProviderBindingHash  string
 }
 
 func (c ReserveAuthoringSpecificationCommand) Request() workspace.DefinitionAuthoringSpecificationRequest {
@@ -28,7 +30,7 @@ func (c ReserveAuthoringSpecificationCommand) Request() workspace.DefinitionAuth
 	if c.ReviewKind != "" {
 		phase = workspace.DefinitionSpecificationCritic
 	}
-	return workspace.DefinitionAuthoringSpecificationRequest{WireContractRef: c.WireContractRef, WireContractHash: c.WireContractHash, RequestID: c.RequestID, DerivationPermitID: c.DerivationPermitID, Phase: phase, ReviewKind: c.ReviewKind, ProposalHash: c.ProposalHash, ProviderBindingHash: c.ProviderBindingHash}
+	return workspace.DefinitionAuthoringSpecificationRequest{PreviousProposalHash: c.PreviousProposalHash, FeedbackHash: c.FeedbackHash, WireContractRef: c.WireContractRef, WireContractHash: c.WireContractHash, RequestID: c.RequestID, DerivationPermitID: c.DerivationPermitID, Phase: phase, ReviewKind: c.ReviewKind, ProposalHash: c.ProposalHash, ProviderBindingHash: c.ProviderBindingHash}
 }
 
 func (c ReserveAuthoringSpecificationCommand) Validate() error {

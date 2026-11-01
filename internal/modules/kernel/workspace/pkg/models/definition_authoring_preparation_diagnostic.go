@@ -329,9 +329,10 @@ func (r DefinitionAuthoringRecord) validatePreparationTarget(d DefinitionAuthori
 			phase := DefinitionSpecificationProposal
 			if d.Stage == DefinitionAuthoringPreparationReview {
 				phase = DefinitionSpecificationCritic
+				attemptLimit = 1
 			}
 			for _, request := range r.SpecificationRequests {
-				if request.DerivationPermitID == d.DerivationPermitID && request.Phase == phase && request.ReviewKind == d.ReviewKind {
+				if request.DerivationPermitID == d.DerivationPermitID && request.Phase == phase && request.ReviewKind == d.ReviewKind && (phase != DefinitionSpecificationCritic || request.ProposalHash == d.ProposalHash) {
 					attempts++
 				}
 			}

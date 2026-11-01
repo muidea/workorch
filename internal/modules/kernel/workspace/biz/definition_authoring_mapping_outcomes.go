@@ -60,6 +60,9 @@ func validateAuthoringMappingOutcomes(record workspacemodel.DefinitionAuthoringR
 		}
 		s, semanticErr := workspacemodel.CompileDefinitionAuthoringMapping(*d, m)
 		if semanticErr == nil {
+			semanticErr = record.ValidateSpecificationRevisionCandidate(r.PermitID, m, s)
+		}
+		if semanticErr == nil {
 			semanticErr = validateAuthoringVerificationAgainstSealedTemplate(workspacemodel.WorkspaceTemplateSnapshotHash(&d.Template), *d, s)
 		}
 		if semanticErr == nil {

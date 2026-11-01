@@ -22,9 +22,15 @@ func semanticMappingFixture(t *testing.T, d DefinitionDerivationRequest) (Defini
 	raw, _ := json.Marshal(m)
 	var body map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &body)
-	for _, k := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash"} {
+	for _, k := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash", "GoalRequirement", "Dimensions", "Requirements"} {
 		delete(body, k)
 	}
+	var rows []map[string]json.RawMessage
+	_ = json.Unmarshal(body["Obligations"], &rows)
+	for _, row := range rows {
+		delete(row, "RequirementRef")
+	}
+	body["Obligations"], _ = json.Marshal(rows)
 	payload, _ := json.Marshal(map[string]any{"mapping": body})
 	return m, semanticAudit(payload)
 }

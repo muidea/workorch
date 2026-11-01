@@ -139,6 +139,11 @@ func TestAuthoringSpecificationConcurrentReserveUsesOneFreshPermit(t *testing.T)
 			owners := openFileDefinitionAdmissionOwners(t, t.TempDir())
 			defer owners.close()
 			confirmation := seedReviewedAuthoringConfirmation(t, owners, "ws-reserve-competition")
+			fixture, fixtureErr := owners.repositories.Workspaces.Get(ctx, confirmation.WorkspaceID)
+			if fixtureErr != nil {
+				t.Fatal(fixtureErr)
+			}
+			resetUnreservedSpecificationFixture(t, owners, fixture, kind)
 			cmd := workspaceevents.ReserveAuthoringSpecificationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, func() string {
 				if kind == "" {
 					return "proposal"
@@ -186,7 +191,12 @@ func TestAuthoringSpecificationConcurrentReserveUsesOneFreshPermit(t *testing.T)
 				t.Fatalf("fresh permit 数=%d", fresh)
 			}
 			current, err := owners.repositories.Workspaces.Get(ctx, cmd.WorkspaceID)
-			if err != nil || len(current.DefinitionAuthoring.SpecificationRequests) != 8 {
+			if err != nil || len(current.DefinitionAuthoring.SpecificationRequests) != func() int {
+				if kind == "" {
+					return 1
+				}
+				return 2
+			}() {
 				t.Fatal("竞争留下额外请求")
 			}
 			revision := current.Revision
@@ -220,6 +230,7 @@ func TestAuthoringRevisionFencesHistoricalSpecificationCompletion(t *testing.T) 
 					break
 				}
 			}
+			resetUnreservedSpecificationFixture(t, owners, current, kind)
 			cmd := workspaceevents.ReserveAuthoringSpecificationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, func() string {
 				if kind == "" {
 					return "proposal"

@@ -308,7 +308,7 @@ func TestPreparationDiagnosticSpecificationScopeConfigDriftAndReview(t *testing.
 	if _, _, _, err := r.RecordPreparationDiagnostic(d); err == nil {
 		t.Fatal("review has no exact proposal")
 	}
-	for n := 0; n < DefinitionAuthoringSpecificationAttemptLimit; n++ {
+	for n := 0; n < 1; n++ {
 		req := DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, GoalReviewTraceability), RequestID: fmt.Sprintf("review-%d", n), DerivationPermitID: d.DerivationPermitID, Phase: DefinitionSpecificationCritic, ReviewKind: GoalReviewTraceability, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"}
 		r, _, _, err = r.ReserveSpecification(req)
 		if err != nil {

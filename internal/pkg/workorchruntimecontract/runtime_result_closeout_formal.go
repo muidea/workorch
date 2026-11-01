@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -72,6 +73,7 @@ type RuntimeSourceObligationOutcome struct {
 
 // 源义务结论只投影同一 SM-2 CWI 的独立 all_of 检查，不形成第二份闭包账本。
 func (o RuntimeSourceObligationOutcome) Normalized() RuntimeSourceObligationOutcome {
+	o.Check.ProjectDesigns = slices.Clone(o.Check.ProjectDesigns)
 	o.AcceptedEvidenceRefs = normalizeStrings(o.AcceptedEvidenceRefs)
 	if o.CurrentBindingRef != nil {
 		ref := o.CurrentBindingRef.Clone()

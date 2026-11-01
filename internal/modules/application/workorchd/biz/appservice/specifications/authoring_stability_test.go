@@ -152,6 +152,9 @@ func TestAuthoringStabilityReplaysOriginalDocumentsWithoutChangingFailureOrCover
 			}
 			for _, status := range []string{workspace.GoalReviewPass, workspace.GoalReviewFail, workspace.GoalReviewUnknown} {
 				review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: status, Reason: "逐项独立判断，保留原结论和依据", SpecificationHash: p.ContentHash(), EvidenceRefs: []string{p.GoalItemRef}, RequirementIDs: ids}
+				if status != workspace.GoalReviewPass {
+					review.Issues = []workspace.GoalSpecificationReviewIssue{{Class: workspace.AuthoringIssueClarification, Detail: "synthetic unresolved criterion", RequirementIDs: ids, EvidenceRefs: review.EvidenceRefs}}
+				}
 				raw, err := json.Marshal(struct {
 					Review workspace.GoalSpecificationCompletenessReview `json:"review"`
 				}{review})

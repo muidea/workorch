@@ -91,3 +91,80 @@ func TestRuntimeSourceObligationInventoryRejectsMissingDuplicateAndWrongSource(t
 		})
 	}
 }
+
+func TestRuntimeProjectDesignHashesExactChecksAndRejectsIncompleteOrChangedBasis(t *testing.T) {
+	inventory := sourceObligationInventoryFixture()
+	original := inventory.Clone()
+	inventory.Verifications[0].ProjectDesigns = []RuntimeSourceProjectDesign{{CandidateItemRef: inventory.Obligations[0].DoDItemRefs[0], Decision: " Fixed project rule\r\n", VerificationBasis: " Independent assertion\t "}}
+	inventory = inventory.WithHash()
+	if inventory.Validate() != nil || inventory.Hash == original.Hash {
+		t.Fatal("design not bound to exact inventory")
+	}
+	item := RuntimeCoverageItem{ID: "cwi", SourceScope: "dodItem", SourceID: "dod-001", TargetText: "共同判据"}
+	checks, err := CompileRuntimeSourceObligationChecks(inventory, item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(checks) != 2 || !reflect.DeepEqual(checks[0].ProjectDesigns, inventory.Verifications[0].ProjectDesigns) {
+		t.Fatal("per-obligation input review lost design")
+	}
+	for _, bad := range []string{"", " ", "bad\x00", string([]byte{0xff})} {
+		changed := inventory.Clone()
+		changed.Verifications[0].ProjectDesigns[0].VerificationBasis = bad
+		changed = changed.WithHash()
+		if changed.Validate() == nil {
+			t.Fatal("incomplete/invalid design accepted")
+		}
+	}
+	changed := CloneRuntimeSourceObligationChecks(checks)[0]
+	changed.ProjectDesigns[0].VerificationBasis += "changed"
+	if changed.CheckRef == StableRuntimeSourceObligationCheckRef(inventory.DefinitionRevision, item.ID, changed) || ValidateRuntimeSourceObligationChecks(inventory.DefinitionRevision, item.ID, []RuntimeSourceObligationCheck{changed}) == nil {
+		t.Fatal("changed design retained original check identity")
+	}
+}
+
+func TestRuntimeSourceProjectDesignsRetainEverySourceAndDetachClones(t *testing.T) {
+	inventory := sourceObligationInventoryFixture()
+	source := inventory.Sources[1]
+	for _, v := range inventory.Sources {
+		if v.SourceScope == "dodItem" {
+			source = v
+			break
+		}
+	}
+	source.CandidateItemRef = "second-source"
+	source.ItemRef = "second-formal"
+	source.SourceID = "dod-002"
+	inventory.Sources = append(inventory.Sources, source)
+	inventory.Requirements[0].SourceItemRefs = append(inventory.Requirements[0].SourceItemRefs, source.CandidateItemRef)
+	for n := range inventory.Obligations {
+		inventory.Obligations[n].DoDItemRefs = append(inventory.Obligations[n].DoDItemRefs, source.CandidateItemRef)
+	}
+	first := inventory.Obligations[0].DoDItemRefs[0]
+	inventory.Verifications[0].ProjectDesigns = []RuntimeSourceProjectDesign{{CandidateItemRef: first, Decision: " first rule\r\n", VerificationBasis: "first assertion"}, {CandidateItemRef: source.CandidateItemRef, Decision: "second rule", VerificationBasis: " second assertion\t "}}
+	inventory = inventory.WithHash()
+	if err := inventory.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	checks, err := CompileRuntimeSourceObligationChecks(inventory, RuntimeCoverageItem{ID: "cwi", SourceScope: "dodItem", SourceID: "dod-001", TargetText: "共同判据"})
+	if err != nil || len(checks[0].ProjectDesigns) != 2 || !reflect.DeepEqual(checks[0].ProjectDesigns, inventory.Verifications[0].ProjectDesigns) {
+		t.Fatal("source designs lost", err)
+	}
+	detached := CloneRuntimeSourceObligationChecks(checks)
+	detached[0].ProjectDesigns[0].Decision = "changed"
+	if checks[0].ProjectDesigns[0].Decision == "changed" || inventory.Verifications[0].ProjectDesigns[0].Decision == "changed" {
+		t.Fatal("design clone aliases sealed input")
+	}
+	for _, ref := range []string{"foreign", first} {
+		bad := inventory.Clone()
+		if ref == first {
+			bad.Verifications[0].ProjectDesigns = append(bad.Verifications[0].ProjectDesigns, bad.Verifications[0].ProjectDesigns[0])
+		} else {
+			bad.Verifications[0].ProjectDesigns[0].CandidateItemRef = ref
+		}
+		bad = bad.WithHash()
+		if bad.Validate() == nil {
+			t.Fatal("foreign/duplicate design source admitted")
+		}
+	}
+}

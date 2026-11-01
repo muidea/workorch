@@ -44,7 +44,7 @@ func TestAuthoringHTTPCurrentProposalRoundTripAndSemanticRejects(t *testing.T) {
 				proposal := mapping.Clone()
 				switch scenario {
 				case "resource_chapter_as_source":
-					proposal.Requirements[0].SourceItemRefs = append(proposal.Requirements[0].SourceItemRefs, "prd.md#2.5")
+					proposal.Obligations[0].CandidateItemRef = "prd.md#2.5"
 				case "unverified_claims_binding":
 					proposal.Obligations[0].Verification.ProfileID, proposal.Obligations[0].Verification.EvidenceRequirementID, proposal.Obligations[0].Verification.Scope = "invented", "*", "dodItem"
 				}
@@ -57,10 +57,10 @@ func TestAuthoringHTTPCurrentProposalRoundTripAndSemanticRejects(t *testing.T) {
 				payload = testkit.OwnerBoundFixtureDocument(payload)
 				if scenario == "wrong_source_kind" {
 					// 来源由 owner 编译；provider 连自报同名字段也不能混入当前 wire。
-					payload = []byte(strings.Replace(string(payload), `"SourceItemRefs":`, `"SourceKind":"DERIVED","SourceItemRefs":`, 1))
+					payload = []byte(strings.Replace(string(payload), `"CandidateItemRef":`, `"SourceKind":"DERIVED","CandidateItemRef":`, 1))
 				}
 				if scenario == "wrong_field_case" {
-					payload = []byte(strings.Replace(string(payload), `"GoalRequirement"`, `"goalrequirement"`, 1))
+					payload = []byte(strings.Replace(string(payload), `"CandidateItemRef"`, `"candidateitemref"`, 1))
 				}
 				calls := 0
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

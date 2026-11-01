@@ -48,7 +48,7 @@ class EncodingTest(unittest.TestCase):
                 }]})])
 
     def test_nonstream_and_stream_preserve_same_derivation_identity(self):
-        prompt = '### C3.derivation-input\n' + json.dumps({'outputShape': {'AuthoringInputHash': 'exact', 'TemplateSnapshotHash': 'sealed'}})
+        prompt = '### C3.derivation-input\n' + json.dumps({'outputShape': {'AdditionalItems': []}})
         statuses, _, body = self.call({'input': prompt})
         self.assertEqual(statuses, [200])
         expected = json.loads(json.loads(body)['output_text'])
@@ -69,7 +69,8 @@ class EncodingTest(unittest.TestCase):
         self.assertEqual(statuses, [200])
         document = json.loads(body)['output_text']
         self.assertEqual(set(json.loads(document)), {'mapping'})
-        self.assertEqual(json.loads(document)['mapping']['Protocol'], 'workorch.authoring.sealed-ref-mapping/v1')
+        self.assertEqual(set(json.loads(document)['mapping']), {'Obligations'})
+        self.assertEqual(json.loads(document)['mapping']['Obligations'][0]['CandidateItemRef'], 'derived-dod:user:000001')
         statuses, _, body = self.call({'input': prompt, 'stream': True})
         self.assertEqual(statuses, [200])
         events = [json.loads(line.removeprefix('data: ')) for line in body.decode().splitlines() if line.startswith('data: ')]

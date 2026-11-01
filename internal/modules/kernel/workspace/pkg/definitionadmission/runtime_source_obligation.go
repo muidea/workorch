@@ -77,7 +77,17 @@ func CompileRuntimeSourceObligationInventory(candidate workspacemodel.Definition
 		if verification.Status != workspacemodel.GoalVerificationDeclared || !SpecificationVerificationApplies(spec, verification, candidate.DoDInputs, candidate.RuntimeProfileContracts) {
 			return nil, fmt.Errorf("runtime source obligation verification %q is not exact and applicable", verification.ID)
 		}
-		inventory.Verifications = append(inventory.Verifications, runtimecontract.RuntimeSourceVerification{
+		var designs []runtimecontract.RuntimeSourceProjectDesign
+		for _, o := range spec.Obligations {
+			if o.ID == verification.ObligationID {
+				for _, d := range spec.DesignDecisions {
+					if slices.Contains(o.DoDItemRefs, d.CandidateItemRef) {
+						designs = append(designs, runtimecontract.RuntimeSourceProjectDesign{CandidateItemRef: d.CandidateItemRef, Decision: d.Decision, VerificationBasis: d.VerificationBasis})
+					}
+				}
+			}
+		}
+		inventory.Verifications = append(inventory.Verifications, runtimecontract.RuntimeSourceVerification{ProjectDesigns: designs,
 			ID: verification.ID, ObligationID: verification.ObligationID, Declaration: verification.Declaration,
 			ProfileID: verification.ProfileID, EvidenceRequirementID: verification.EvidenceRequirementID, Scope: verification.Scope,
 		})

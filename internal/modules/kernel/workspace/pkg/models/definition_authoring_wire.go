@@ -14,7 +14,7 @@ import (
 const DefinitionAuthoringOwnerBound = "workorch.authoring.owner-bound"
 
 const authoringDeriveSemanticSchema = `{"type":"object","additionalProperties":false,"required":["AdditionalItems"],"properties":{"AdditionalItems":{"type":"array","maxItems":128,"items":{"type":"string"}}}}`
-const authoringReviewSemanticSchema = `{"type":"object","additionalProperties":false,"required":["review"],"properties":{"review":{"type":"object","additionalProperties":false,"required":["Status","Reason","EvidenceRefs","RequirementIDs"],"properties":{"Status":{"type":"string","enum":["PASS","FAIL","UNKNOWN"]},"Reason":{"type":"string"},"EvidenceRefs":{"type":"array","items":{"type":"string"}},"RequirementIDs":{"type":"array","items":{"type":"string"}}}}}}`
+const authoringReviewSemanticSchema = `{"type":"object","additionalProperties":false,"required":["review"],"properties":{"review":{"type":"object","additionalProperties":false,"required":["Status","Reason","EvidenceRefs","RequirementIDs"],"properties":{"Status":{"type":"string","enum":["PASS","FAIL","UNKNOWN"]},"Reason":{"type":"string"},"EvidenceRefs":{"type":"array","items":{"type":"string"}},"RequirementIDs":{"type":"array","items":{"type":"string"}},"Issues":{"type":"array","maxItems":32,"items":{"type":"object","additionalProperties":false,"required":["Class","Detail","RequirementIDs","EvidenceRefs"],"properties":{"Class":{"type":"string","enum":["coverage_gap","design_gap","verification_gap","source_conflict","user_clarification","capability_unavailable"]},"Detail":{"type":"string"},"RequirementIDs":{"type":"array","items":{"type":"string"}},"EvidenceRefs":{"type":"array","items":{"type":"string"}}}}}},"allOf":[{"if":{"properties":{"Status":{"const":"PASS"}}},"then":{"properties":{"Issues":{"maxItems":0}}},"else":{"required":["Issues"],"properties":{"Issues":{"minItems":1}}}}]}}}`
 
 func AuthoringWireSchema(ref, phase string) (string, error) {
 	if !OwnerBoundAuthoringWire(ref) {
@@ -34,7 +34,7 @@ func AuthoringWireSchema(ref, phase string) (string, error) {
 
 		fields["ProfileAcceptanceSelections"] = map[string]any{"type": "array", "maxItems": 512, "items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"SourceRef", "AcceptanceItemRef"}, "properties": map[string]any{"SourceRef": map[string]any{"type": "string"}, "AcceptanceItemRef": map[string]any{"type": "string"}}}}
 
-		for _, k := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash"} {
+		for _, k := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash", "GoalRequirement", "Dimensions", "Requirements"} {
 			delete(fields, k)
 		}
 		required := []any{}
@@ -44,6 +44,9 @@ func AuthoringWireSchema(ref, phase string) (string, error) {
 			}
 		}
 		mapping["required"] = required
+		obligation := fields["Obligations"].(map[string]any)["items"].(map[string]any)
+		delete(obligation["properties"].(map[string]any), "RequirementRef")
+		obligation["required"] = []string{"CandidateItemRef", "Verification"}
 		data, err := json.Marshal(schema)
 		return string(data), err
 	default:
@@ -87,7 +90,7 @@ func DecodeAuthoringMappingFor(d DefinitionDerivationRequest, payload []byte) (D
 	m.InputHash = d.Input.InputHash()
 	m.TemplateSnapshotHash = WorkspaceTemplateSnapshotHash(&d.Template)
 	m.ResourceSnapshotHash = d.ResourceSnapshotHash
-	return m, nil
+	return BindAuthoringSourceGroups(d, m)
 }
 func decodeAuthoringSemantic(payload []byte, shape mappingShape, out any) error {
 	if len(payload) == 0 || len(payload) > DefinitionAuthoringDiagnosticDocumentLimit || !utf8.Valid(payload) {
@@ -132,17 +135,23 @@ func DecodeOwnerBoundReview(r DefinitionAuthoringSpecificationRequest, payload [
 	}
 	var body struct {
 		Review struct {
+			Issues         []GoalSpecificationReviewIssue
 			Status         string
 			Reason         string
 			EvidenceRefs   []string
 			RequirementIDs []string
 		} `json:"review"`
 	}
-	shape := mappingObject(map[string]mappingShape{"review": mappingObject(map[string]mappingShape{"Status": mappingString, "Reason": mappingString, "EvidenceRefs": mappingStrings, "RequirementIDs": mappingStrings})})
+	issueShape := mappingArray(mappingObject(map[string]mappingShape{"Class": mappingString, "Detail": mappingString, "RequirementIDs": mappingStrings, "EvidenceRefs": mappingStrings}))
+	issueShape.optional = true
+	shape := mappingObject(map[string]mappingShape{"review": mappingObject(map[string]mappingShape{"Issues": issueShape, "Status": mappingString, "Reason": mappingString, "EvidenceRefs": mappingStrings, "RequirementIDs": mappingStrings})})
 	if err := decodeAuthoringSemantic(payload, shape, &body); err != nil {
 		return GoalSpecificationCompletenessReview{}, err
 	}
-	return GoalSpecificationCompletenessReview{Kind: r.ReviewKind, SpecificationHash: r.ProposalHash, Status: body.Review.Status, Reason: body.Review.Reason, EvidenceRefs: append([]string(nil), body.Review.EvidenceRefs...), RequirementIDs: append([]string(nil), body.Review.RequirementIDs...)}, nil
+	if body.Review.Status != GoalReviewPass && len(body.Review.Issues) == 0 {
+		return GoalSpecificationCompletenessReview{}, fmt.Errorf("nonpassing authoring review requires classified issues")
+	}
+	return GoalSpecificationCompletenessReview{Issues: body.Review.Issues, Kind: r.ReviewKind, SpecificationHash: r.ProposalHash, Status: body.Review.Status, Reason: body.Review.Reason, EvidenceRefs: append([]string(nil), body.Review.EvidenceRefs...), RequirementIDs: append([]string(nil), body.Review.RequirementIDs...)}, nil
 }
 func validateOwnerBoundDerivationAudit(r DefinitionDerivationRequest, view bool) error {
 
@@ -183,9 +192,17 @@ func authoringSemanticMappingShape() mappingShape {
 	shape.optional = true
 	fields["ProfileAcceptanceSelections"] = shape
 
-	for _, k := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash"} {
+	for _, k := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash", "GoalRequirement", "Dimensions", "Requirements"} {
 		delete(fields, k)
 	}
 
+	obligations := fields["Obligations"]
+	childFields := map[string]mappingShape{}
+	for k, v := range obligations.item.fields {
+		if k != "RequirementRef" {
+			childFields[k] = v
+		}
+	}
+	fields["Obligations"] = mappingArray(mappingObject(childFields))
 	return mappingObject(map[string]mappingShape{"mapping": mappingObject(fields)})
 }

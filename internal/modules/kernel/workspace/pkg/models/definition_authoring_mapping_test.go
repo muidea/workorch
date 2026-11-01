@@ -59,6 +59,10 @@ func mappingFixtureForDerivation(t testing.TB, d DefinitionDerivationRequest) De
 			m.Requirements = append(m.Requirements, req)
 		}
 	}
+	m, err = BindAuthoringSourceGroups(d, m)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return m
 }
 func mappingAuditFixture(t testing.TB, m DefinitionAuthoringMapping) DefinitionAuthoringSuccessByteAudit {
@@ -73,9 +77,15 @@ func mappingAuditFixture(t testing.TB, m DefinitionAuthoringMapping) DefinitionA
 	if err := json.Unmarshal(payload, &body); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash"} {
+	for _, key := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash", "GoalRequirement", "Dimensions", "Requirements"} {
 		delete(body["mapping"], key)
 	}
+	var rows []map[string]json.RawMessage
+	_ = json.Unmarshal(body["mapping"]["Obligations"], &rows)
+	for _, row := range rows {
+		delete(row, "RequirementRef")
+	}
+	body["mapping"]["Obligations"], _ = json.Marshal(rows)
 	payload, err = json.Marshal(body)
 	if err != nil {
 		t.Fatal(err)
@@ -219,7 +229,7 @@ func TestSealedMappingClosedFramingAndShape(t *testing.T) {
 	tests := map[string][]byte{
 		"trailing NUL": []byte(valid + "\x00"), "trailing vertical tab": []byte(valid + "\v"), "trailing form feed": []byte(valid + "\f"), "trailing unicode whitespace": []byte(valid + " "),
 		"old canonical shape": []byte(`{"specification":{}}`), "array root": []byte(`[]`), "scalar": []byte(`true`), "multiple root": []byte(valid + valid), "trailing": []byte(valid + " extra"), "fence": []byte("```json\n" + valid + "\n```"), "UTF8": append([]byte(valid), 0xff), "oversize": []byte(strings.Repeat(" ", DefinitionAuthoringDiagnosticDocumentLimit) + valid),
-		"missing": []byte(strings.Replace(valid, `"DimensionRef":"whole",`, "", 1)), "case": []byte(strings.Replace(valid, `"DimensionRef"`, `"dimensionref"`, 1)), "unknown": []byte(strings.Replace(valid, `"mapping":{`, `"mapping":{"Resources":[],`, 1)), "duplicate": []byte(strings.Replace(valid, `"mapping":{`, `"mapping":{"Protocol":"duplicate",`, 1)), "null": []byte(strings.Replace(valid, `"Dimensions":[`, `"Dimensions":null,"duplicate": [`, 1)), "surrogate": []byte(strings.Replace(valid, `"whole"`, `"\ud800"`, 1)),
+		"missing": []byte(strings.Replace(valid, `"Status":"UNVERIFIED",`, "", 1)), "case": []byte(strings.Replace(valid, `"Declaration"`, `"declaration"`, 1)), "unknown": []byte(strings.Replace(valid, `"mapping":{`, `"mapping":{"Resources":[],`, 1)), "duplicate": []byte(strings.Replace(valid, `"mapping":{`, `"mapping":{"Protocol":"duplicate",`, 1)), "null": []byte(strings.Replace(valid, `"Obligations":[`, `"Obligations":null,"duplicate": [`, 1)), "surrogate": []byte(strings.Replace(valid, `"UNVERIFIED"`, `"\ud800"`, 1)),
 	}
 	for name, payload := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -270,7 +280,7 @@ func TestSealedMappingLedgerRawReparseAndAuditIdentity(t *testing.T) {
 	}
 	// A valid other raw with a matching raw hash cannot authorize the original mapping.
 	other := m.Clone()
-	other.Requirements[0].Text = "another proposal"
+	other.Obligations[0].Verification.Declaration = "another proposal"
 	otherAudit := mappingAuditFixture(t, other)
 	if _, err := pending.CompleteSpecificationMapping(req.PermitID, m, otherAudit); err == nil {
 		t.Fatal("legal mapping + another complete raw accepted")

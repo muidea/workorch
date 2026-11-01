@@ -187,12 +187,12 @@ func TestAuthoringPreparationCurrentTracksNextUnreservedTargetOnly(t *testing.T)
 	}
 	kinds := specifications.ReviewKinds()
 	identity.Stage, identity.DerivationPermitID, identity.ProposalHash = workspace.DefinitionAuthoringPreparationReview, derivation.PermitID, proposal.ContentHash()
-	identity.ReviewKind, identity.TargetRequestID = kinds[1], "review/"+kinds[1]+"/"+derivation.PermitID
+	identity.ReviewKind, identity.TargetRequestID = kinds[1], workspace.SpecificationRequestID(derivation.PermitID, kinds[1], proposal.ContentHash(), "")
 	future := workspace.NewDefinitionAuthoringPreparationDiagnostic(identity, []byte("later review preparation failed"))
 	if authoringPreparationDiagnosticCurrent(record, &derivation, future) {
 		t.Fatal("future unreserved review was presented as current target")
 	}
-	identity.ReviewKind, identity.TargetRequestID = kinds[0], "review/"+kinds[0]+"/"+derivation.PermitID
+	identity.ReviewKind, identity.TargetRequestID = kinds[0], workspace.SpecificationRequestID(derivation.PermitID, kinds[0], proposal.ContentHash(), "")
 	current := workspace.NewDefinitionAuthoringPreparationDiagnostic(identity, []byte("next review preparation failed"))
 	if !authoringPreparationDiagnosticCurrent(record, &derivation, current) {
 		t.Fatal("next unreserved review preparation not current")

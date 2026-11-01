@@ -63,7 +63,7 @@ func TestAuthoringChecklistPreserves42ExtractedItemsAndReviewsEntireGoal(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 43 || len(spec.Obligations) != 43 || len(spec.Requirements) != 44 {
+	if len(items) != 43 || len(spec.Obligations) != 43 || len(spec.Requirements) != 4 {
 		t.Fatal("checklist collapsed into generic template obligations")
 	}
 	for _, item := range items {
@@ -86,7 +86,7 @@ func TestAuthoringChecklistPreserves42ExtractedItemsAndReviewsEntireGoal(t *test
 			RequiredRequirementIDs []string                          `json:"requiredRequirementIDs"`
 			Goal                   workspace.DefinitionCandidateItem `json:"goal"`
 		}
-		if err := json.Unmarshal(authoringTestPayload(t, command), &reviewInput); err != nil || len(reviewInput.RequiredRequirementIDs) != 44 || reviewInput.Goal.Text != input.GoalText {
+		if err := json.Unmarshal(authoringTestPayload(t, command), &reviewInput); err != nil || len(reviewInput.RequiredRequirementIDs) != len(spec.Requirements) || reviewInput.Goal.Text != input.GoalText {
 			t.Fatalf("%s lost original Goal or required scope: %v", kind, err)
 		}
 	}

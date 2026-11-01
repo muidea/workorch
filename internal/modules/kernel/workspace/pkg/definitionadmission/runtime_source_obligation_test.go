@@ -164,3 +164,30 @@ func TestCompileRuntimeSourceObligationsDoesNotInventSpecification(t *testing.T)
 		t.Fatalf("invented absent specification: %+v %v", inventory, err)
 	}
 }
+
+func TestConfirmedProjectDesignSurvivesAdmissionAndRuntimeSourceProjection(t *testing.T) {
+	candidate, _, _ := sourceObligationAdmissionFixture(t)
+	original := candidate.Clone()
+	candidate.Specification.DesignDecisions = []workspacemodel.GoalSpecificationDesignDecision{{CandidateItemRef: candidate.DoDInputs[0].CandidateItemRef, Decision: "  Explicit project rule\r\n", VerificationBasis: " Independent expected outcome\t "}}
+	for i := range candidate.Specification.Reviews {
+		candidate.Specification.Reviews[i].SpecificationHash = candidate.Specification.ContentHash()
+	}
+	candidate = candidate.WithHash()
+	candidate, startup, admission := sourceObligationSealFixture(candidate)
+	inventory, err := CompileRuntimeSourceObligationInventory(candidate, startup, admission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(original.GoalInput, candidate.GoalInput) || !reflect.DeepEqual(original.DoDInputs, candidate.DoDInputs) || len(inventory.Obligations) != len(original.Specification.Obligations) {
+		t.Fatal("project design expanded original acceptance")
+	}
+	for _, v := range inventory.Verifications {
+		if len(v.ProjectDesigns) != 1 || v.ProjectDesigns[0].Decision != candidate.Specification.DesignDecisions[0].Decision || v.ProjectDesigns[0].VerificationBasis != candidate.Specification.DesignDecisions[0].VerificationBasis {
+			t.Fatal("sealed design bytes lost")
+		}
+	}
+	replay, err := CompileRuntimeSourceObligationInventory(candidate.Clone(), startup.Clone(), admission)
+	if err != nil || !reflect.DeepEqual(inventory, replay) {
+		t.Fatal("immutable design replay drift", err)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/testkit"
 	"github.com/muidea/workorch/internal/pkg/common"
 
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
@@ -107,51 +108,65 @@ func TestAuthoringFileSpecificationBudgetExhaustionSurvivesRevisions(t *testing.
 			t.Fatal(err)
 		}
 		proposal := authoringOwnerProposal(t, current.DefinitionAuthoring.Input, template, derived)
-		for _, kind := range append([]string{""}, kinds...) {
-			for attempt := 0; attempt < workspace.DefinitionAuthoringSpecificationAttemptLimit; attempt++ {
-				cmd := workspaceevents.ReserveAuthoringSpecificationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, func() string {
-					if kind == "" {
-						return "proposal"
-					}
-					return kind
-				}()), WorkspaceID: id, InputHash: current.DefinitionAuthoring.InputHash, RequestID: fmt.Sprintf("spec-%d-%s-%d", revision, kind, attempt), DerivationPermitID: permit, ReviewKind: kind, ProviderBindingHash: "provider"}
-				if kind != "" {
-					cmd.ProposalHash = proposal.ContentHash()
+
+		var parentHash, feedbackHash string
+		var feedback workspace.DefinitionAuthoringFeedback
+		for generation := 0; generation < 2; generation++ {
+			cmd := workspaceevents.ReserveAuthoringSpecificationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "proposal"), WorkspaceID: id, InputHash: current.DefinitionAuthoring.InputHash, RequestID: fmt.Sprintf("spec-%d-%d", revision, generation), DerivationPermitID: permit, ProviderBindingHash: "provider", PreviousProposalHash: parentHash, FeedbackHash: feedbackHash}
+			reserved, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecReserve: &cmd})
+			if err != nil || reserved.AuthoringSpecification.FreshPermitID == "" {
+				t.Fatalf("proposal reserve: %v", err)
+			}
+			sealed, err := owners.repositories.Workspaces.Get(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			done := authoringOwnerCompletion(t, *sealed, reserved.AuthoringSpecification.FreshPermitID, proposal)
+			if generation == 1 {
+				done.Mapping.IssueResolutions = nil
+				for _, ref := range feedback.IssueRefs() {
+					done.Mapping.IssueResolutions = append(done.Mapping.IssueResolutions, workspace.DefinitionAuthoringIssueResolution{IssueRef: ref, Change: "Specify concrete bounded project design"})
 				}
-				reserved, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecReserve: &cmd})
-				if err != nil || reserved.AuthoringSpecification.FreshPermitID == "" {
-					t.Fatalf("预算内规格 reserve: %v", err)
-				}
-				done := workspaceevents.CompleteAuthoringSpecificationCommand{WorkspaceID: id, PermitID: reserved.AuthoringSpecification.FreshPermitID, FailureCode: "provider_failed"}
-				if kind == "" {
-					sealed, err := owners.repositories.Workspaces.Get(ctx, id)
-					if err != nil {
-						t.Fatal(err)
-					}
-					done = authoringOwnerCompletion(t, *sealed, done.PermitID, proposal)
-				}
-				if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecComplete: &done}); err != nil {
+				done.Mapping.DesignDecisions = []workspace.GoalSpecificationDesignDecision{{CandidateItemRef: done.Mapping.Obligations[0].CandidateItemRef, Decision: "Use a fixed deterministic rule", VerificationBasis: "Compare fixed input against independent expected output"}}
+				audit, err := testkit.Audit(*done.Mapping)
+				if err != nil {
 					t.Fatal(err)
 				}
+				done.SuccessAudit, done.Proposal = &audit, nil
 			}
-			denied := workspaceevents.ReserveAuthoringSpecificationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, func() string {
-				if kind == "" {
-					return "proposal"
+			settled, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecComplete: &done})
+			if err != nil || settled.AuthoringSpecification.Request.Proposal == nil {
+				t.Fatalf("proposal completion: %v", err)
+			}
+			proposal = settled.AuthoringSpecification.Request.Proposal.Clone()
+			for _, kind := range kinds {
+				cmd := workspaceevents.ReserveAuthoringSpecificationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, kind), WorkspaceID: id, InputHash: current.DefinitionAuthoring.InputHash, RequestID: fmt.Sprintf("review-%d-%d-%s", revision, generation, kind), DerivationPermitID: permit, ReviewKind: kind, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"}
+				reserved, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecReserve: &cmd})
+				if err != nil {
+					t.Fatal(err)
 				}
-				return kind
-			}()), WorkspaceID: id, InputHash: current.DefinitionAuthoring.InputHash, RequestID: fmt.Sprintf("third-%d-%s", revision, kind), DerivationPermitID: permit, ReviewKind: kind, ProviderBindingHash: "provider"}
-			if kind != "" {
-				denied.ProposalHash = proposal.ContentHash()
-			}
-			if transition, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecReserve: &denied}); err == nil {
-				t.Fatal("阶段 attempt 上限被新 RequestID 绕过")
-			} else {
-				var refusal *workspace.DefinitionAuthoringBudgetRefusalError
-				if !errors.As(err, &refusal) || transition.AuthoringSpecification != nil || refusal.RequestID != denied.RequestID {
-					t.Fatalf("阶段 no-permit refusal 不具体: %v", err)
+				review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewUnknown, SpecificationHash: proposal.ContentHash(), Reason: "Independent design gap", RequirementIDs: authoringRequiredRequirementIDs(t, proposal, kind), EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}}
+				review.Issues = []workspace.GoalSpecificationReviewIssue{{Class: workspace.AuthoringIssueDesign, Detail: "Concrete project decision missing", RequirementIDs: review.RequirementIDs, EvidenceRefs: review.EvidenceRefs}}
+				complete := workspaceevents.CompleteAuthoringSpecificationCommand{WorkspaceID: id, PermitID: reserved.AuthoringSpecification.FreshPermitID, Review: &review, SuccessAudit: reviewTestAudit(t, &review)}
+				if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecComplete: &complete}); err != nil {
+					t.Fatal(err)
+				}
+				cmd.RequestID += "/reroll"
+				if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecReserve: &cmd}); err == nil {
+					t.Fatal("same candidate review rerolled")
 				}
 			}
+			sealed, err = owners.repositories.Workspaces.Get(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			feedback, err = sealed.DefinitionAuthoring.SpecificationFeedback(permit, proposal.ContentHash())
+			if err != nil {
+				t.Fatal(err)
+			}
+			parentHash, feedbackHash = proposal.ContentHash(), feedback.ContentHash()
 		}
+
 		current, err = owners.repositories.Workspaces.Get(ctx, id)
 		if err != nil {
 			t.Fatal(err)

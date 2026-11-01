@@ -2,7 +2,7 @@ package testkit
 
 import "encoding/json"
 
-// OwnerBoundFixtureDocument renders a synthetic fixture for v2. This is never
+// OwnerBoundFixtureDocument renders a synthetic fixture for the current contract. This is never
 // used on real provider data or by a production decoder.
 func OwnerBoundFixtureDocument(payload []byte) []byte {
 	var document map[string]json.RawMessage
@@ -24,9 +24,19 @@ func OwnerBoundFixtureDocument(payload []byte) []byte {
 		if json.Unmarshal(raw, &body) != nil {
 			continue
 		}
-		for _, field := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash", "Kind", "SpecificationHash"} {
+		for _, field := range []string{"Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash", "Kind", "SpecificationHash", "GoalRequirement", "Dimensions", "Requirements"} {
 			if _, ok := body[field]; ok {
 				delete(body, field)
+				changed = true
+			}
+		}
+		if key == "mapping" {
+			var rows []map[string]json.RawMessage
+			if json.Unmarshal(body["Obligations"], &rows) == nil {
+				for _, row := range rows {
+					delete(row, "RequirementRef")
+				}
+				body["Obligations"], _ = json.Marshal(rows)
 				changed = true
 			}
 		}

@@ -2,6 +2,7 @@ package workorchruntimecontract
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"unicode"
@@ -277,7 +278,7 @@ func runtimeTerminalResultIndex(source RuntimeStateRecord, material RuntimeTermi
 					continue
 				}
 				for _, value := range outcome.SourceObligations {
-					if value.Check == check && value.CoverageState == RuntimeRequirementCovered && value.AssessmentState == RuntimeRequirementSatisfied {
+					if reflect.DeepEqual(value.Check, check) && value.CoverageState == RuntimeRequirementCovered && value.AssessmentState == RuntimeRequirementSatisfied {
 						sourceRefs, matches = value.AcceptedEvidenceRefs, matches+1
 					}
 				}

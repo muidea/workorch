@@ -72,6 +72,9 @@ func reduceAuthoringSpecification(o definitionSpecificationObservation, e defini
 				return definitionSpecificationTransition{}, common.ErrConflict
 			}
 			if semanticErr == nil {
+				semanticErr = record.ValidateSpecificationRevisionCandidate(cmd.PermitID, decoded, proposal)
+			}
+			if semanticErr == nil {
 				semanticErr = validateAuthoringVerificationAgainstSealedTemplate(workspace.WorkspaceTemplateSnapshotHash(&derivation.Template), *derivation, proposal)
 			}
 			if semanticErr != nil {

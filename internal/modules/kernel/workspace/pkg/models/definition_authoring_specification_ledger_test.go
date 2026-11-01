@@ -134,14 +134,14 @@ func TestDefinitionAuthoringSummaryUsesCurrentInputAndPendingPriority(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending, _, _, err := failed.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal-pending", DerivationPermitID: derivation.PermitID, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
-	if err != nil {
-		t.Fatal(err)
+	if _, _, _, err := failed.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal-pending", DerivationPermitID: derivation.PermitID, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}); err == nil {
+		t.Fatal("failed proposal authorized a random successor")
 	}
-	state, phase, code, _ := pending.CurrentAuthoringSummary()
-	if state != "outcome_unresolved" || phase != "" || code != "" {
-		t.Fatalf("pending permit did not outrank prior failure: %+v %q %q %q", pending, state, phase, code)
+	state, phase, code, _ := failed.CurrentAuthoringSummary()
+	if state != "failed" || phase != "proposal" || code != "invalid_proposal" {
+		t.Fatalf("known failure lost: %q %q %q", state, phase, code)
 	}
+
 }
 
 func TestDefinitionAuthoringSummaryMatchesSixReviewViewSemantics(t *testing.T) {
@@ -177,7 +177,7 @@ func TestDefinitionAuthoringSummaryMatchesSixReviewViewSemantics(t *testing.T) {
 			status = GoalReviewFail
 		}
 		wantState := "reviewing"
-		if status == GoalReviewFail || index > 0 {
+		if index == len(goalReviewKinds)-1 {
 			wantState = "review_blocked"
 		}
 		review := GoalSpecificationCompletenessReview{Kind: kind, Status: status, SpecificationHash: proposal.ContentHash(), Reason: "review", EvidenceRefs: []string{DefinitionAuthoringGoalItemRef}, RequirementIDs: currentRequiredRequirementIDsFixture(proposal)}
@@ -195,7 +195,8 @@ func TestDefinitionAuthoringSummaryMatchesSixReviewViewSemantics(t *testing.T) {
 	unknown := record.Clone()
 	last := len(unknown.SpecificationRequests) - 1
 	unknown.SpecificationRequests[last].Review.Status = GoalReviewUnknown
-	raw, _ := json.Marshal(map[string]any{"review": map[string]any{"Status": GoalReviewUnknown, "Reason": unknown.SpecificationRequests[last].Review.Reason, "EvidenceRefs": unknown.SpecificationRequests[last].Review.EvidenceRefs, "RequirementIDs": unknown.SpecificationRequests[last].Review.RequirementIDs}})
+	unknown.SpecificationRequests[last].Review.Issues = []GoalSpecificationReviewIssue{{Class: AuthoringIssueClarification, Detail: "synthetic unknown", RequirementIDs: unknown.SpecificationRequests[last].Review.RequirementIDs, EvidenceRefs: unknown.SpecificationRequests[last].Review.EvidenceRefs}}
+	raw, _ := json.Marshal(map[string]any{"review": map[string]any{"Issues": unknown.SpecificationRequests[last].Review.Issues, "Status": GoalReviewUnknown, "Reason": unknown.SpecificationRequests[last].Review.Reason, "EvidenceRefs": unknown.SpecificationRequests[last].Review.EvidenceRefs, "RequirementIDs": unknown.SpecificationRequests[last].Review.RequirementIDs}})
 	audit := semanticAudit(raw)
 	unknown.SpecificationRequests[last].ReviewAudit = &audit
 	if err := unknown.Validate(); err != nil {
@@ -280,7 +281,7 @@ func TestAuthoringSpecificationLedgerReservesAndReplaysWithoutSecondPermit(t *te
 	if err != nil || !fresh {
 		t.Fatalf("critic reserve: %v", err)
 	}
-	review := GoalSpecificationCompletenessReview{Kind: critic.ReviewKind, Status: GoalReviewUnknown, SpecificationHash: critic.ProposalHash}
+	review := GoalSpecificationCompletenessReview{Kind: critic.ReviewKind, Status: GoalReviewUnknown, SpecificationHash: critic.ProposalHash, Reason: "synthetic missing criterion", EvidenceRefs: []string{DefinitionAuthoringGoalItemRef}, RequirementIDs: currentRequiredRequirementIDsFixture(*completed.SpecificationRequests[0].Proposal)}
 	withCritic, err = completeTestSpecification(withCritic, criticPermit.PermitID, nil, &review, "")
 	if err != nil {
 		t.Fatal(err)
@@ -299,7 +300,7 @@ func TestAuthoringSpecificationLedgerReservesAndReplaysWithoutSecondPermit(t *te
 func TestAuthoringSpecificationBudgetSurvivesRevisionAndRequestIDChanges(t *testing.T) {
 	record, _ := authoringLedgerFixture(t)
 	permit := record.DerivationRequests[0].PermitID
-	for n := 0; n < DefinitionAuthoringSpecificationAttemptLimit; n++ {
+	for n := 0; n < 1; n++ {
 		var err error
 		record, _, _, err = record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{WireContractRef: DefinitionAuthoringOwnerBound, WireContractHash: AuthoringWireHash(DefinitionAuthoringOwnerBound, "proposal"), RequestID: "proposal-" + string(rune('a'+n)), DerivationPermitID: permit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
 		if err != nil {

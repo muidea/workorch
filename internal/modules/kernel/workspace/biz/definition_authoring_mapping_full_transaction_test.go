@@ -64,7 +64,7 @@ func TestAuthoringCurrentMappingFull37ConfirmsEligibleWithoutRunAfterReopen(t *t
 	}
 	derivation := current.DefinitionAuthoring.DerivationRequests[0]
 	mapping, audit, proposal, err := testkit.Proposal(derivation, workspace.DefinitionAuthoringVerificationMapping{Declaration: "按封存模板验证", Status: workspace.GoalVerificationDeclared, ProfileID: "generic", EvidenceRequirementID: "*", Scope: "dodItem"})
-	if err != nil || len(proposal.Obligations) != 37 || len(proposal.Verifications) != 37 || len(proposal.Requirements) != 38 {
+	if err != nil || len(proposal.Obligations) != 37 || len(proposal.Verifications) != 37 || len(proposal.Requirements) != 4 {
 		t.Fatalf("完整 current mapping 编译: %v", err)
 	}
 	reserveProposal := workspaceevents.ReserveAuthoringSpecificationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "proposal"), WorkspaceID: input.WorkspaceID, InputHash: input.InputHash(), RequestID: "proposal-full37", DerivationPermitID: derivation.PermitID, ProviderBindingHash: "provider"}

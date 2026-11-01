@@ -46,6 +46,22 @@ describe('STEP02 只读候选正式入口', () => {
     expect(screen.getByLabelText('独立审查明细').textContent).toContain('依据引用：source');
     forbidden();
   });
+  it('展示项目设计、分类问题及有界修订状态；观察不进行确认或启动', async () => {
+    const view = ready(); view.state = 'reviewing';
+    view.proposal!.designDecisions = [{ candidateItemRef: 'source', decision: '固定输入匹配规则', verificationBasis: '独立预期输出断言' }];
+    view.proposal!.revisionDisposition = 'correction_pending';
+    view.proposal!.reviewsSettled = true;
+    view.proposal!.reviews![0].status = 'UNKNOWN';
+    view.proposal!.reviews![0].issues = [{ class: 'design_gap', detail: '缺少明确判定依据', requirementIds: ['requirement'], evidenceRefs: ['source'] }];
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(view);
+    render(wrap('ws')); await act(async () => {});
+    expect(screen.getByLabelText('项目设计提案').textContent).toContain('固定输入匹配规则');
+    expect(screen.getByLabelText('项目设计提案').textContent).toContain('独立预期输出断言');
+    expect(screen.getByLabelText('独立审查明细').textContent).toContain('design_gap');
+    expect(screen.getByText(/正在根据具体问题进行一次有界修订/)).toBeTruthy();
+    expect(screen.queryByText(/候选已达到 ready_to_confirm/)).toBeNull();
+    forbidden();
+  });
   it('202只表示受理，草稿不被当成成功；观察只有GET', async () => {
     vi.useFakeTimers();
     vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValue({ ...draft(), compilationAccepted: true });

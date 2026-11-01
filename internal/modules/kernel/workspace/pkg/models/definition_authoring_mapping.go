@@ -12,8 +12,11 @@ import (
 
 const DefinitionAuthoringMappingProtocol = "workorch.authoring.sealed-ref-mapping/v1"
 
-// DefinitionAuthoringMapping 是唯一当前创作提案 wire；provider 仅提出分组与声明，不能改写封存来源事实。
+// DefinitionAuthoringMapping 是 owner 绑定并确定来源分组后的当前提案。
+// provider wire 仅提供声明、项目设计和用途选择，不能改写封存来源事实。
 type DefinitionAuthoringMapping struct {
+	IssueResolutions            []DefinitionAuthoringIssueResolution `json:",omitempty"`
+	DesignDecisions             []GoalSpecificationDesignDecision    `json:",omitempty"`
 	Protocol                    string
 	InputHash                   string
 	TemplateSnapshotHash        string
@@ -60,6 +63,8 @@ type DefinitionAuthoringVerificationMapping struct {
 }
 
 func (m DefinitionAuthoringMapping) Clone() DefinitionAuthoringMapping {
+	m.IssueResolutions = slices.Clone(m.IssueResolutions)
+	m.DesignDecisions = slices.Clone(m.DesignDecisions)
 	m.ProfileAcceptanceSelections = slices.Clone(m.ProfileAcceptanceSelections)
 	m.EvidencePurposeMappings = slices.Clone(m.EvidencePurposeMappings)
 	m.ExecutionProofMappings = slices.Clone(m.ExecutionProofMappings)
@@ -167,6 +172,7 @@ func CompileDefinitionAuthoringMapping(d DefinitionDerivationRequest, m Definiti
 		dimIDs[ref] = mappingCanonicalID("dimension", fields...)
 	}
 	spec := GoalSpecification{Version: GoalSpecificationVersionCurrent, GoalItemRef: DefinitionAuthoringGoalItemRef, GoalTextHash: StableDefinitionTextHash(c.goal.Text), Resources: c.resources, Dimensions: []GoalSpecificationDimension{}, Requirements: []GoalSpecificationRequirement{}, Obligations: []GoalSpecificationObligation{}, Verifications: []GoalSpecificationVerification{}, Reviews: []GoalSpecificationCompletenessReview{}}
+	spec.DesignDecisions = slices.Clone(m.DesignDecisions)
 	spec.ExecutionProofMappings = slices.Clone(m.ExecutionProofMappings)
 	spec.EvidencePurposeMappings, err = compileAuthoringEvidencePurposes(d, m, c.items)
 	if err != nil {

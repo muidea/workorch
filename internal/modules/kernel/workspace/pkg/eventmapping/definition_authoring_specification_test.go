@@ -10,6 +10,7 @@ import (
 
 func TestAuthoringDTOClonesPersistedProposalAndReviewWithoutRehashing(t *testing.T) {
 	record := authoringMappingFixture(t)
+	record.SpecificationRequests = nil
 	derivation := record.DerivationRequests[1]
 	items, err := derivation.Proposal.CandidateItems(derivation.Input, &derivation.Template)
 	if err != nil {
@@ -52,16 +53,16 @@ func TestAuthoringDTOClonesPersistedProposalAndReviewWithoutRehashing(t *testing
 	if err != nil || model.ValidateView() != nil || model.Validate() == nil || !reflect.DeepEqual(model, expected) {
 		t.Fatalf("proposal／review metadata 往返改变封存身份或冒充完整存储: %v", err)
 	}
-	if dto.SpecificationRequests[1].SuccessAudit.Document.Content != nil || dto.SpecificationRequests[1].SuccessAudit.Wire.Content != nil {
+	if dto.SpecificationRequests[0].SuccessAudit.Document.Content != nil || dto.SpecificationRequests[0].SuccessAudit.Wire.Content != nil {
 		t.Fatal("普通 typed DTO 泄漏成功原文")
 	}
 	clone := dto.Clone()
-	clone.SpecificationRequests[1].Proposal.Requirements[0].SourceItemRefs[0] = "changed"
-	clone.SpecificationRequests[1].Proposal.Obligations[0].DoDItemRefs[0] = "changed"
-	clone.SpecificationRequests[2].Review.RequirementIDs[0] = "changed"
-	model.SpecificationRequests[1].Proposal.Resources[0].SnapshotHash = "changed"
-	model.SpecificationRequests[1].Proposal.Verifications[0].Declaration = "changed"
-	model.SpecificationRequests[2].Review.EvidenceRefs[0] = "changed"
+	clone.SpecificationRequests[0].Proposal.Requirements[0].SourceItemRefs[0] = "changed"
+	clone.SpecificationRequests[0].Proposal.Obligations[0].DoDItemRefs[0] = "changed"
+	clone.SpecificationRequests[1].Review.RequirementIDs[0] = "changed"
+	model.SpecificationRequests[0].Proposal.Resources[0].SnapshotHash = "changed"
+	model.SpecificationRequests[0].Proposal.Verifications[0].Declaration = "changed"
+	model.SpecificationRequests[1].Review.EvidenceRefs[0] = "changed"
 	if !reflect.DeepEqual(dto, DefinitionAuthoringRecordDTO(record)) {
 		t.Fatal("DTO Clone 或 model 映射共享 proposal／review 嵌套字段")
 	}

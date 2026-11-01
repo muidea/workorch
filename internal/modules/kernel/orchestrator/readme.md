@@ -519,6 +519,13 @@ proposal 的同 CAS 退休/重载/duplicate/来源篡改及延迟 proposal/seal 
 
 ### 逐源义务与共同 CWI
 
+Workspace 精确确认的项目设计通过 source inventory verification 的 `ProjectDesigns`（逐项原 DoD 引用、设计及验证依据）
+进入逐源 `RuntimeSourceObligationCheck`，C1 原图、C3 输入审查和验证输入生成携带同一完整原文。
+inventory/check/requirement hash 绑定这些字段；缺一、空白、非法 UTF-8/NUL 或 source 重编译不一致均拒绝。
+设计不替代 Criterion/Declaration，不增加 CWI、binding、evidence credit、执行权限或预算。
+此变更只扩充 SM-2/SM-3 已有 immutable source 输入，SM-1、SM-4 transition、恢复与 ACK 权威不变。
+
+
 `evidence-applicability-dependencies/v2` 的历史 effect 用途见
 [Evidence Proof Purpose](../../../../docs/00-core/runtime/evidence-proof-purpose.md)。descriptor 发布 owner 用途资格，
 `RuntimeHistoricalEffectProofContractForDispatch` 从原普通 Definition dispatch 与 sealed all-of effect+validation binding

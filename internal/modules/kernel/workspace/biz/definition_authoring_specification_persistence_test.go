@@ -90,7 +90,7 @@ func TestAuthoringSpecificationPermitAndReviewSurviveFileReopen(t *testing.T) {
 	owners.close()
 	owners = openFileDefinitionAdmissionOwners(t, root)
 	defer owners.close()
-	review := workspace.GoalSpecificationCompletenessReview{Kind: workspace.GoalReviewTraceability, Status: workspace.GoalReviewUnknown, SpecificationHash: spec.ContentHash()}
+	review := workspace.GoalSpecificationCompletenessReview{Kind: workspace.GoalReviewTraceability, Status: workspace.GoalReviewUnknown, SpecificationHash: spec.ContentHash(), RequirementIDs: authoringRequiredRequirementIDs(t, spec, workspace.GoalReviewTraceability), EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, Reason: "missing concrete criterion"}
 	completeReview := workspaceevents.CompleteAuthoringSpecificationCommand{WorkspaceID: input.WorkspaceID, PermitID: critic.AuthoringSpecification.FreshPermitID, Review: &review, SuccessAudit: reviewTestAudit(t, &review)}
 	if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: input.WorkspaceID, AuthoringSpecComplete: &completeReview}); err != nil {
 		t.Fatal(err)

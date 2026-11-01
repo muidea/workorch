@@ -187,8 +187,15 @@ func TestAuthoringHTTPStep03TicketDeliveryRecovery(t *testing.T) {
 	}
 }
 
+func TestAuthoringHTTPBoundedFeedbackRevisionAndReopen(t *testing.T) {
+	for _, scenario := range []string{"feedback_corrected", "feedback_exhausted", "feedback_invalid"} {
+		t.Run(scenario, func(t *testing.T) { testAuthoringHTTPFileBackedScenario(t, scenario) })
+	}
+}
+
 func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 	ctx := context.Background()
+	feedbackScenario := strings.HasPrefix(scenario, "feedback_")
 	preparationWorkflow := strings.HasPrefix(scenario, "step04_workflow")
 	finalMCPFailure := strings.HasPrefix(scenario, "step04_workflow_final_mcp_")
 	largeCount := 0
@@ -457,11 +464,29 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 						t.Error("proposal permit not durable")
 						return
 					}
-				} else if len(record.SpecificationRequests) != 1 {
+				} else if len(record.SpecificationRequests) != 1 && !(feedbackScenario && len(record.SpecificationRequests) == 8) {
 					t.Error("proposal permit not durable")
 					return
 				}
 				mapping := authoringHTTPMapping(t, record)
+				if feedbackScenario && len(record.SpecificationRequests) == 8 {
+					first := record.SpecificationRequests[0].Proposal
+					feedback, err := record.SpecificationFeedback(record.DerivationRequests[0].PermitID, first.ContentHash())
+					if err != nil {
+						t.Error(err)
+						result.Set(nil, def.NewError(def.Unexpected, err.Error()))
+						return
+					}
+					sections := command.Request.PromptContext.Sections
+					if len(sections) != 3 || sections[2].ID != "C4.authoring-feedback" || !strings.Contains(sections[2].Content, feedback.ContentHash()) || !strings.Contains(sections[2].Content, feedback.IssueRefs()[0]) {
+						t.Error("revision lost exact complete feedback")
+					}
+					mapping.DesignDecisions = []workspace.GoalSpecificationDesignDecision{{CandidateItemRef: mapping.Obligations[0].CandidateItemRef, Decision: "Use exact equality for fixed input", VerificationBasis: "Independent expected output rejects altered input"}}
+					if scenario != "feedback_invalid" {
+						mapping.IssueResolutions = []workspace.DefinitionAuthoringIssueResolution{{IssueRef: feedback.IssueRefs()[0], Change: "Specified concrete equality decision and independent expected output"}}
+					}
+				}
+
 				payload, err = json.Marshal(struct {
 					Mapping workspace.DefinitionAuthoringMapping `json:"mapping"`
 				}{mapping})
@@ -470,7 +495,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 				}
 			default:
 				kind := strings.TrimPrefix(command.Request.Kind, "workspace/specification/review/")
-				proposal := record.SpecificationRequests[0].Proposal
+				proposal := record.LatestSpecificationRequest(record.DerivationRequests[0].PermitID).Proposal
 				if proposal == nil || len(record.SpecificationRequests) != int(physicalCalls.Load()) {
 					t.Error("critic permit not durable")
 					return
@@ -504,6 +529,20 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 					case "review_unknown":
 						review.Status = workspace.GoalReviewUnknown
 					}
+				}
+				if feedbackScenario && kind == workspace.GoalReviewDimensionCoverage && (len(record.SpecificationRequests) < 8 || scenario == "feedback_exhausted") {
+					review.Status = workspace.GoalReviewUnknown
+					review.Issues = []workspace.GoalSpecificationReviewIssue{{Class: workspace.AuthoringIssueDesign, Detail: "Concrete expected output decision missing", RequirementIDs: append([]string{}, review.RequirementIDs...), EvidenceRefs: append([]string{}, review.EvidenceRefs...)}}
+				}
+				if feedbackScenario {
+					for _, section := range command.Request.PromptContext.Sections {
+						if section.ID == "C4.authoring-feedback" {
+							t.Error("independent critic received previous feedback")
+						}
+					}
+				}
+				if review.Status != workspace.GoalReviewPass && len(review.Issues) == 0 {
+					review.Issues = []workspace.GoalSpecificationReviewIssue{{Class: workspace.AuthoringIssueClarification, Detail: "original acceptance requires user clarification", RequirementIDs: append([]string{}, review.RequirementIDs...), EvidenceRefs: append([]string{}, review.EvidenceRefs...)}}
 				}
 				payload, err = json.Marshal(struct {
 					Review workspace.GoalSpecificationCompletenessReview `json:"review"`
@@ -1184,6 +1223,63 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		return
 	}
 	ready := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
+	if feedbackScenario {
+		expected, calls := "ready_to_confirm", int32(15)
+		if scenario == "feedback_exhausted" {
+			expected = "review_blocked"
+		}
+		if scenario == "feedback_invalid" {
+			expected, calls = "failed", 9
+		}
+		if ready.State != expected || physicalCalls.Load() != calls {
+			t.Fatalf("feedback closure: state=%s calls=%d want=%s/%d", ready.State, physicalCalls.Load(), expected, calls)
+		}
+		stored, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if scenario == "feedback_invalid" {
+			q := stored.DefinitionAuthoring.SpecificationRequests[7]
+			if q.FailureCode != "invalid_proposal" || q.Diagnostic == nil || q.Diagnostic.ProviderDocument == nil {
+				t.Fatal("invalid correction not settled with original bytes")
+			}
+		} else {
+			if ready.Proposal.PreviousProposalHash != stored.DefinitionAuthoring.SpecificationRequests[0].Proposal.ContentHash() || !ready.Proposal.ReviewsSettled || len(ready.Proposal.DesignDecisions) != 1 {
+				t.Fatal("new candidate lineage/design lost")
+			}
+			for _, q := range stored.DefinitionAuthoring.SpecificationRequests[8:] {
+				if q.ProposalHash != ready.Proposal.ProposalHash {
+					t.Fatal("fresh review bound old candidate")
+				}
+			}
+		}
+		for range 2 {
+			closeOwners()
+			baseURL, routine, closeOwners = open()
+			recovered := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
+			if !reflect.DeepEqual(ready, recovered) {
+				t.Fatal("feedback outcome changed after file reopen")
+			}
+			before := physicalCalls.Load()
+			authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", compileRequest, http.StatusOK)
+			if physicalCalls.Load() != before {
+				t.Fatal("settled feedback was resampled after reopen")
+			}
+		}
+		if scenario == "feedback_corrected" {
+			confirmation := management.DefinitionAuthoringConfirm{InputHash: ready.InputHash, DerivationPermitID: ready.Proposal.DerivationPermitID, ProposalHash: ready.Proposal.ProposalHash, SpecificationHash: ready.Proposal.SpecificationHash, ExpectedWorkspaceRevision: ready.WorkspaceRevision}
+			stale := confirmation
+			stale.ProposalHash = stored.DefinitionAuthoring.SpecificationRequests[0].Proposal.ContentHash()
+			authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/confirm", stale, http.StatusConflict)
+			confirmed := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/confirm", confirmation, http.StatusOK)
+			if confirmed.State != "admitted" {
+				t.Fatalf("new exact candidate failed confirm: %s", confirmed.State)
+			}
+		}
+		assertNoRuns()
+		return
+	}
+
 	if realWorker {
 		deadline := time.Now().Add(30 * time.Second)
 		for ready.State != "ready_to_confirm" && time.Now().Before(deadline) {

@@ -607,7 +607,7 @@ Workspace 私有结算及生产 ingress 已有真实 Run owner EventHub 配对�
 - 模板读取返回 effective 内容及只读 `EffectiveSources`。父内容及拓扑参与派生快照身份；create/update 只能提交原始声明，不能自报 effective 来源。新 Start/Restart 在 owner mutation lock 内核对整个有效快照，既有 Run 不热替换；无父模板保留既有 snapshot hash 算法。
 - `DefinitionAdmissionCandidate.Specification` 是当前 typed 规格提案。资源、维度、需求来源、义务、exact Profile 验证声明和六类 completeness review 全部进入候选身份；审查绑定不含审查自身的 content hash，startup 的 `SpecificationHash` 绑定包含审查的 admission hash。
 - 独立 Goal requirement 必须唯一绑定 `GoalItemRef`、`USER_EXPLICIT` 与完整原 Goal 文本；它不是候选 DoD，不要求借用或补造 DoD obligation。仅 Required 且精确独立绑定的 Goal 沿用输入的 32 KiB 字节上限，普通 requirement 与 obligation 保持 4096 字节；不截断或扩大请求预算。非 exact、重复或混来源的无义务 requirement 仍阻断；各 DoD 的义务、验证声明、Profile 适用性和六份唯一 PASS 审查保持完整合取。Application 的六审请求携带同一 owner 派生的 `ExpectedResources` 和无 Reviews 的 immutable proposal；critic 只判断，不修改 proposal 或回显不属于 review wire 的资源字段。
-- authoring 仅采用当前 `workorch.authoring.owner-bound`。derive 仅返回 AdditionalItems，mapping 不回显 protocol/input/template/resource hash，review 不回显 kind/proposal hash；owner 从原 permit 封存身份构造 typed 结果，原 provider bytes 不重写。阶段 schema hash 进入持久 permit，成功 derive/review 必须保存原 document/wire 并在重开时重解码；普通 DTO 仅有 metadata。不接受历史 wire、空审计或旧字段回显，不迁移已有账本。提案采用顶层 `mapping`：provider 提出分组、来源与资源引用以及验证声明，owner 按封存 input／derivation 编译 canonical 规格。每个候选恰好属于一个分组并有一个 obligation，Goal 单独绑定；provider 不指定义务原文、SourceKind、Required、资源事实或 canonical IDs。成功 completion 必须从完整原文重新解码，与 typed mapping 精确相同，再重新编译验证 canonical proposal；原文与 wire 的 byte count／SHA256 进入 completion 身份，但不成为准入或执行权威。普通 DTO 仅带 metadata，受限 success-byte-audit query 才返回原 bytes；save／replay／archive／derivation／preparation／私有 reducer 与 CAS 前后像均反证 current/history 的原封存来源。
+- authoring 仅采用当前 `workorch.authoring.owner-bound`。derive 仅返回 AdditionalItems，mapping 不回显 protocol/input/template/resource hash，review 不回显 kind/proposal hash；owner 从原 permit 封存身份构造 typed 结果，原 provider bytes 不重写。阶段 schema hash 进入持久 permit，成功 derive/review 必须保存原 document/wire 并在重开时重解码；普通 DTO 仅有 metadata。不接受历史 wire、空审计或旧字段回显，不迁移已有账本。提案采用顶层 `mapping`：owner 按原来源种类及每组至多 32 条确定分组，provider 只提出逐原义务验证声明、必要项目设计及用途选择；GoalRequirement、Dimensions、Requirements 和 obligation RequirementRef 不在 provider wire 中。owner 按封存 input／derivation 编译 canonical 规格。每个候选恰好属于一个分组并有一个 obligation，Goal 单独绑定；provider 不指定义务原文、SourceKind、Required、资源事实或 canonical IDs。成功 completion 必须从完整原文重新解码，与 typed mapping 精确相同，再重新编译验证 canonical proposal；原文与 wire 的 byte count／SHA256 进入 completion 身份，但不成为准入或执行权威。普通 DTO 仅带 metadata，受限 success-byte-audit query 才返回原 bytes；save／replay／archive／derivation／preparation／私有 reducer 与 CAS 前后像均反证 current/history 的原封存来源。
 - provider 的 derive/proposal/review 文档仅接受当前封闭 wire 形状：所有字段必填、精确大小写，标量与数组不得为 null；未知／重复字段、多 root、超出 256 KiB／32 层、非法 UTF-8 与孤立 UTF-16 surrogate 均拒绝。不修复或重写原始输出；结构拒绝保留 field path／错误分类，owner 来源、声明、独立审查及精确确认仍独立校验。`SourceItemRefs`、`ResourceIDs` 与候选 `DoDItemRefs` 是分离的身份空间，资源路径／章节不能充当来源。`UNVERIFIED` 的三个 Profile 绑定字段必须为空，不能静默清空非法绑定再继续。
 - 六类审查分别覆盖维度、负路径、回归、资源环境、显式约束追踪和可验证性。`RequiredReviewRequirementIDs` 从 owner 编译规格派生每类应审的全部 Required IDs（含独立 Goal），Application 以 `requiredRequirementIDs` 提供给 critic。PASS 的 `RequirementIDs` 必须覆盖完整集合，合法 optional 项可额外审查但不能替代；缺少资源、负面路径或回归声明不是免审事实，不接受 N/A 或空范围自豁免。`goalSpecificationReviewContext` 在模型与持久 ledger 中反证覆盖，provider parser 同样尽早拒绝并保留 kind／缺失 ID；不补写 provider 结果。FAIL/UNKNOWN、缺必需资源、缺必需维度/义务、缺 DoD 映射或不匹配的 Profile 声明不能晋升。PASS 只是有来源的评审事实，不直接授予 Runtime evidence credit，也不证明任意自然语言目标的完整性。
 - 验证声明适用性必须逐项沿 `Verification → Obligation → DoDItemRefs → 正式 DoD sourceID → Profile(scope,id|*)` 反证；一个义务引用多个 DoD 时全部检查，不因同名 declaration 存在或另一个 DoD 命中而通过。正式候选引用中的 `:item:NNNNNN` 保留原序号；derived 引用按确认 after-image 的 user、template、generated 分组及组内原序号解析，不能使用准入 normalize 后的 slice 位置。`dod-001` 是 sourceID，不是 `cwi-001`；Profile bootstrap artifact 和其他 work unit 独立占用 CWI 序号。
@@ -616,6 +616,29 @@ Workspace 私有结算及生产 ingress 已有真实 Run owner EventHub 配对�
 - 确认 journal 遇模板／资源漂移保持阻塞，不新增 abandon／清 journal 协议。恢复原 exact snapshot 后，owner 重新核对原 input／permit／proposal／specification／configuration identity，沿 prepared→materialized after-image 幂等续写；任何冲突正式行仍阻塞、不得覆盖。prepared 必须匹配当前 Template snapshot；materialized 的 exact confirmation replay 不重新物化模板，但不等同于 activation eligible：准入和显式 Start 仍校验当前模板，资源绑定的 replay 每次仍向 File 重验。不得制造新 hash 绕过已准备事务。
 - Workspace 的 `pkg/definitionadmission.CompileRuntimeSourceObligationInventory` 只从 eligible exact candidate 与 startup/admission 身份投影完整来源图；保留原 Requirement、Obligation、Verification 正文及正式 item ref，不读取草稿、不授予 Runtime binding 或 credit。声明逐项反查封存 Profile 的完整适用贡献；`runtime_source_obligation_test.go` 固定共享 DoD、多源身份、原文、独立副本及 seal／声明漂移拒绝。Application 最终 bootstrap gate 从原 candidate 独立重编 inventory；自洽删 B 或删除整份 inventory 不能通过该前像反证。
 - nil Specification 保留既有候选与 startup hash。此合同约束提交的规格候选，不表示所有 Web/TUI 输入已自动经过完整 Goal Compiler；正式执行仍须通过 exact CWI、owner feasibility、sealed dispatch 和 SM-2 闭包。
+
+### 六审反馈与有界候选修订
+
+`AdditionalItems` 仅提取 Goal／资源中尚未由用户或模板逐项承接的原始验收；项目设计选择及其
+`VerificationBasis` 单独保存在 `DesignDecisions`，绑定唯一既有 candidate ref，并进入 proposal、六审和人工确认身份。
+它不增加 DoD/CWI，不更改原 Goal／验收、Profile、资源、预算或权限。分组是确定表示，不证明语义覆盖。
+
+非 PASS review 必须给出 typed `Issues`，分类为 coverage/design/verification gap、source conflict、user clarification
+或 capability unavailable，逐项引用同次审查的真实 requirement/evidence。PASS 不携带问题；原 review document/wire
+与诊断按 bytes 保全。仅完整六审、全部应审集合齐备且所有问题可在原范围内修正时，允许一个后继 proposal。
+后继 permit 绑定原 proposal 与 owner 从六份原审查计算的 feedback hash，`IssueResolutions` 必须完整回应原问题，
+并实际改变设计、验证或用途映射；解释、改分组和新 RequestID 不能单独取得重抽权。已知格式／语义失败、未决结果、
+六审未齐、全部 PASS、用户歧义或能力缺失均不授权修订。总请求预算不扩大，每候选每类 critic 只允许一次。
+
+后继必须重新完成六份独立审查，critic 不读取旧审查；原候选及审查不改写，旧确认不能确认后继。一次修订后仍不通过
+明确阻塞，不进行第三次生成。reservation、completion 及失败归档都走原 Workspace-private reducer/CAS；重开按原
+字节和 prefix ledger 重判，重复或竞争最多产生一个 fresh permit。`invalid_proposal` 包括合法 JSON 但缺响应或无真实改动，
+不能降格为 pending。准备诊断按同一当前目标身份判断，部分非 PASS 保持 reviewing，六审齐备且可修订时显示
+correction_pending，修订后仍阻塞显示 exhausted。Web 与 verifier 只观察这些 owner 结果。
+
+封存设计及依据沿 Runtime source inventory 和逐义务 check 原文投影，参与完整 hash 与 source 重编译。
+它们是项目上下文，不是执行事实。SM-1 不变；SM-2/SM-3 只消费原 exact immutable source，SM-4 仍从原 aggregate
+幂等恢复，不新增 transition、evidence credit、budget 或 profile 开关。
 
 ### 跨源 execution 证明映射
 

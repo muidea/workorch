@@ -72,7 +72,7 @@ Web 只在页面内存保留原 payload 和恢复提示；未收到完整创建�
 文档、wire 和 transport leaf 由 Workspace 受限诊断查询保留原 bytes／SHA256／观察完整性；原文不进入通用日志或 Runtime。
 三类 closed schema 全部计入请求预算，稳定合同放 C0，动态输入放 C3；native／prompt 共用严格本地校验且零 fallback。
 
-派生先展开 Goal／资源中未被具体承接的原验收主项，再补边界条件。proposal／review 共享由封存 Profile
+派生只提取 Goal／资源中未被具体承接的原验收主项，禁止在 AdditionalItems 增加新的设计流程或验收义务。proposal／review 共享由封存 Profile
 纯计算的逐候选 `sourceApplicableVerificationDeclarations`，复用 Workspace admission 的来源匹配和合并保留规则；
 `workorch.authoring.verification-context/v1` 每行绑定原 candidate ref 与正式来源 scope/id，
 `declarations` 仅列单个 Verification 可引用的身份；`mergedRequiredEvidenceKinds` 与
@@ -82,6 +82,14 @@ Web 只在页面内存保留原 payload 和恢复提示；未收到完整创建�
 事务仅使用 `workorch.authoring.owner-bound` 与当前阶段 schema hash；模型仅返回闭合语义结果，owner 从原 permit
 绑定 input/template/resource 及 critic kind/proposal 身份。成功阶段必须保全原始 document/wire，不补写 hash。
 不接受旧回显格式或缺失审计的账本；合同、阶段或 scope 漂移拒绝，不迁移、不重发原 permit。
+
+六审全部结算后，Application 只能从 Workspace owner 原 ledger 计算的 typed feedback 发起至多一次修订，
+绑定 `PreviousProposalHash` 与 `FeedbackHash`；完整原候选和六份原反馈仅进入修订 producer 的 C4。
+设计保存在独立 `DesignDecisions`，修订响应逐项绑定 IssueRef；owner 独立校验后才结算。
+随后六个 critic 各自只读新候选的共享 C1/C2 和当次 C3，不读原结论；新 hash 必须重新精确确认。
+原失败、未决、不完整六审、用户歧义或能力不可用不授权新候选；后继再次失败即停止，原预算不扩大。
+回读提供 reviewsSettled、问题分类、修订 lineage 和 disposition；不把中途非 PASS 当作六审终态。
+这些 Application 调用仅提交原 typed reserve/complete，不修改 Runtime SM-1～SM-4，不确认、不启动 Run。
 
 系统配置读模型保留 persisted 默认选择，并通过既有 LLM typed active-configuration query 单独投影当前进程
 `llm.active` 目标。owner 观察不可用时留空并保持 restart-pending，不以 persisted 值冒充生效模型，不输出密钥。

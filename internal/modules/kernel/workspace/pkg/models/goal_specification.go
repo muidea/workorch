@@ -42,6 +42,7 @@ type GoalSpecification struct {
 	Requirements            []GoalSpecificationRequirement
 	Obligations             []GoalSpecificationObligation
 	Verifications           []GoalSpecificationVerification
+	DesignDecisions         []GoalSpecificationDesignDecision `json:",omitempty"`
 	Reviews                 []GoalSpecificationCompletenessReview
 	ExecutionProofMappings  []GoalExecutionProofMapping  `json:",omitempty"`
 	EvidencePurposeMappings []GoalEvidencePurposeMapping `json:",omitempty"`
@@ -115,6 +116,7 @@ type GoalSpecificationVerification struct {
 }
 
 type GoalSpecificationCompletenessReview struct {
+	Issues            []GoalSpecificationReviewIssue `json:",omitempty"`
 	Kind              string
 	Status            string
 	SpecificationHash string
@@ -143,8 +145,10 @@ func (s GoalSpecification) Clone() GoalSpecification {
 		s.Obligations[i].DoDItemRefs = slices.Clone(s.Obligations[i].DoDItemRefs)
 	}
 	s.Verifications = slices.Clone(s.Verifications)
+	s.DesignDecisions = slices.Clone(s.DesignDecisions)
 	s.Reviews = slices.Clone(s.Reviews)
 	for i := range s.Reviews {
+		s.Reviews[i].Issues = cloneReviewIssues(s.Reviews[i].Issues)
 		s.Reviews[i].EvidenceRefs = slices.Clone(s.Reviews[i].EvidenceRefs)
 		s.Reviews[i].RequirementIDs = slices.Clone(s.Reviews[i].RequirementIDs)
 	}
@@ -153,6 +157,9 @@ func (s GoalSpecification) Clone() GoalSpecification {
 
 func (s GoalSpecification) Normalized() GoalSpecification {
 	s = s.Clone()
+	sort.Slice(s.DesignDecisions, func(i, j int) bool {
+		return s.DesignDecisions[i].CandidateItemRef < s.DesignDecisions[j].CandidateItemRef
+	})
 	s.GoalItemRef = strings.TrimSpace(s.GoalItemRef)
 	s.GoalTextHash = strings.TrimSpace(s.GoalTextHash)
 	for i := range s.Resources {
@@ -265,7 +272,10 @@ func (s GoalSpecification) ContentHash() string {
 	for _, v := range s.Verifications {
 		specHashFields(h, v.ID, v.ObligationID, v.Declaration, v.Status, v.ProfileID, v.EvidenceRequirementID, v.Scope)
 	}
-	// Empty opt-in extension preserves all existing specification hashes.
+	for _, d := range s.DesignDecisions {
+		specHashFields(h, "project-design", d.CandidateItemRef, d.Decision, d.VerificationBasis)
+	}
+	// Evidence extensions remain source-bound.
 	if len(s.ExecutionProofMappings) != 0 {
 		specHashFields(h, "runtime/dod-source-execution-proof", fmt.Sprint(len(s.ExecutionProofMappings)))
 		for _, mapping := range s.ExecutionProofMappings {
@@ -297,6 +307,11 @@ func (s GoalSpecification) AdmissionHash() string {
 		specHashFields(h, r.Kind, r.Status, r.SpecificationHash, r.Reason)
 		specHashFields(h, r.EvidenceRefs...)
 		specHashFields(h, r.RequirementIDs...)
+		for _, issue := range r.Issues {
+			specHashFields(h, issue.Class, issue.Detail)
+			specHashFields(h, issue.RequirementIDs...)
+			specHashFields(h, issue.EvidenceRefs...)
+		}
 	}
 	return "goal-specification-admission-sha256:" + hex.EncodeToString(h.Sum(nil))
 }
@@ -308,6 +323,9 @@ func (s GoalSpecification) Validate(goal DefinitionCandidateItem, dod []Definiti
 		return err
 	}
 	s = s.Normalized()
+	if err := validateDesignDecisions(s.DesignDecisions, dod); err != nil {
+		return err
+	}
 	if s.Version != GoalSpecificationVersionCurrent || s.GoalItemRef != goal.CandidateItemRef || s.GoalTextHash != StableDefinitionTextHash(goal.Text) {
 		return fmt.Errorf("goal specification version or exact Goal binding mismatch")
 	}
@@ -447,6 +465,9 @@ func (c goalSpecificationReviewContext) validate(r GoalSpecificationCompleteness
 	r.RequirementIDs = normalizedSpecRefs(r.RequirementIDs)
 	if !GoalSpecificationReviewKind(r.Kind) || r.SpecificationHash != c.contentHash || r.Status == "" || len(r.Reason) > 4096 || len(r.EvidenceRefs) > 64 || len(r.RequirementIDs) > 256 || !specRefsExist(r.EvidenceRefs, func(ref string) bool { return c.evidence[ref] }) || !specRefsExist(r.RequirementIDs, func(ref string) bool { _, ok := c.requirements[ref]; return ok }) {
 		return fmt.Errorf("goal specification review %q has invalid identity or provenance", r.Kind)
+	}
+	if err := c.validateIssues(r); err != nil {
+		return err
 	}
 	switch r.Status {
 	case GoalReviewPass:
