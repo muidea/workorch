@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -63,6 +64,7 @@ type validationInputReviewMainlineOptions struct {
 	ProtocolRef                        string
 	SourceObligations                  bool
 	DeliveryGuard                      bool
+	ReverseProofConsumerRefs           bool
 	TerminalMaterialGuards             bool
 	SnapshotInputSources               bool
 	TerminalSnapshot                   bool
@@ -312,7 +314,11 @@ func %s(t *testing.T) {
 	}
 	if strings.HasPrefix(mode, "input_revision") {
 		for _, target := range inputTargets {
-			initialFiles[target] = strings.Replace(initialFiles[target], `!="4"`, `!="5"`, 1)
+			if mode == "input_revision_omission" {
+				initialFiles[target] = strings.Replace(initialFiles[target], `strings.TrimSpace(string(out))!="4"`, `strings.TrimSpace(string(out))==""`, 1)
+			} else {
+				initialFiles[target] = strings.Replace(initialFiles[target], `!="4"`, `!="5"`, 1)
+			}
 		}
 	}
 	for ref, content := range initialFiles {
@@ -439,7 +445,7 @@ func %s(t *testing.T) {
 				conclusion := runtimecontract.RuntimeValidationInputConsistent
 				if strings.HasPrefix(mode, "input_revision") {
 					for _, file := range binding.InputReview.Files {
-						if strings.Contains(file.Content, `!="5"`) || mode == "input_revision_exhausted" {
+						if strings.Contains(file.Content, `!="5"`) || strings.Contains(file.Content, `strings.TrimSpace(string(out))==""`) || mode == "input_revision_exhausted" {
 							conclusion = runtimecontract.RuntimeValidationInputConflict
 						}
 					}
@@ -464,6 +470,9 @@ func %s(t *testing.T) {
 						finding := runtimecontract.RuntimeValidationInputCovered
 						if conclusion == runtimecontract.RuntimeValidationInputConflict {
 							finding = runtimecontract.RuntimeValidationInputConflicting
+							if mode == "input_revision_omission" {
+								finding = runtimecontract.RuntimeValidationInputMissing
+							}
 						} else if conclusion == runtimecontract.RuntimeValidationInputInconclusive {
 							finding = runtimecontract.RuntimeValidationInputUnknown
 						}
@@ -494,6 +503,9 @@ func %s(t *testing.T) {
 						}
 						for i := range item.Obligations {
 							item.Obligations[i].ProofConsumerRefs = runtimecontract.RuntimeValidationProofConsumerRefs(*binding.InputReview)
+							if options.ReverseProofConsumerRefs {
+								slices.Reverse(item.Obligations[i].ProofConsumerRefs)
+							}
 						}
 					}
 				}
@@ -542,7 +554,7 @@ func %s(t *testing.T) {
 				break
 			}
 			if strings.HasPrefix(mode, "input_revision") && command.CandidateManifest.ImplementationWorkingBinding != nil {
-				candidate = runtimeInputRevisionMainlineCandidate(command, inputTargets["cwi-2"])
+				candidate = runtimeInputRevisionMainlineCandidate(command, inputTargets["cwi-2"], mode)
 				break
 			}
 			oldText, newText := "return 2", "return 4"
@@ -915,7 +927,7 @@ func %s(t *testing.T) {
 		t.Fatal("review or ticket rewrote sealed startup definition")
 	}
 	submissionUnknown := cut == "after_assessment_submission"
-	success := (mode == "consistent" || mode == "clarify" || mode == "input_revision" || projectBehaviorRepair) && !submissionUnknown
+	success := (mode == "consistent" || mode == "clarify" || (mode == "input_revision" || mode == "input_revision_omission") || projectBehaviorRepair) && !submissionUnknown
 	if (completed.Decision.State == runtimecontract.ConvergenceStateComplete) != success {
 		for _, receipt := range completed.OperationReceipts {
 			if receipt.Outcome == runtimecontract.RuntimeOperationOutcomeRejected {
@@ -1001,7 +1013,11 @@ func %s(t *testing.T) {
 		content, err := os.ReadFile(filepath.Join(directory, ref))
 		expectedInput := initialFiles[ref]
 		if strings.HasPrefix(mode, "input_revision") && ref == inputTargets["cwi-2"] {
-			expectedInput = strings.Replace(expectedInput, `!="5"`, `!="4"`, 1)
+			if mode == "input_revision_omission" {
+				expectedInput = strings.Replace(expectedInput, `strings.TrimSpace(string(out))==""`, `strings.TrimSpace(string(out))!="4"`, 1)
+			} else {
+				expectedInput = strings.Replace(expectedInput, `!="5"`, `!="4"`, 1)
+			}
 		}
 		if err != nil || string(content) != expectedInput {
 			t.Fatal("review path rewrote existing input")

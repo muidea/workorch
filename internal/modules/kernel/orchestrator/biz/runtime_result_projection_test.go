@@ -599,6 +599,7 @@ func TestDeliverRuntimeTerminalRestartsAfterOwnerProjectionAcknowledgementLoss(t
 			if deliveryErr == nil {
 				t.Fatal("terminal owner acknowledgement loss unexpectedly succeeded")
 			}
+			assertRuntimeTerminalDeliveryDiagnostic(t, firstOrchestrator, aggregate, deliveryErr)
 			if !fired() {
 				t.Fatalf("injected owner acknowledgement loss was not reached: %v", deliveryErr)
 			}
@@ -1271,8 +1272,15 @@ func testTerminalResultPersistenceRestart(t *testing.T, feedbackVersion uint32) 
 	}
 	stopFirstResourceOwners := startTerminalDeliveryResourceOwners(t, ctx, firstHub, runs, workspaces, workspaces)
 	firstModule := newRuntimeProjectionTestModule(t, firstHub)
+	firstModule.evidence.ArtifactContinuations = filerepository.NewArtifactContinuationRepository(root + "/delivery-diagnostics")
 	if err := firstModule.deliverRuntimeTerminal(ctx, aggregate); err == nil {
 		t.Fatal("expected Result-persisted delivery interruption")
+	} else {
+		assertRuntimeTerminalDeliveryDiagnostic(t, firstModule, aggregate, err)
+		// Reopen the real file carrier independently; diagnostics survive
+		// process-local owner teardown without becoming recovery authority.
+		reopened := &Biz{evidence: RuntimeEvidenceRepositories{ArtifactContinuations: filerepository.NewArtifactContinuationRepository(root + "/delivery-diagnostics")}}
+		assertRuntimeTerminalDeliveryDiagnostic(t, reopened, aggregate, err)
 	}
 	if !interruptedRepo.fired {
 		t.Fatal("Result persistence crash point was not reached")

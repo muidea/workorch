@@ -231,10 +231,14 @@ func authoringSpecificationCommandFor(ref string, id common.WorkspaceID, target 
 	if len(payload)+len(contract) > maxDocumentBytes {
 		return llmevents.CompleteProviderCommand{}, fmt.Errorf("authoring request exceeds bounded context")
 	}
-	return llmevents.CompleteProviderCommand{Target: target, Request: llmevents.ProviderRequest{WorkspaceID: string(id), Model: target.ModelID, Kind: "workspace/specification/" + kind, Schema: schema, SchemaFormat: llmmodels.ProviderSchemaFormatJSONSchema, DialogLanguage: "zh-CN", PromptContext: &llmmodels.PromptContext{SchemaVersion: ref, MessageLayout: llmmodels.PromptMessageLayoutSectionsV1, Sections: []llmmodels.PromptSection{
+	command := llmevents.CompleteProviderCommand{Target: target, Request: llmevents.ProviderRequest{WorkspaceID: string(id), Model: target.ModelID, Kind: "workspace/specification/" + kind, Schema: schema, SchemaFormat: llmmodels.ProviderSchemaFormatJSONSchema, DialogLanguage: "zh-CN", PromptContext: &llmmodels.PromptContext{SchemaVersion: ref, MessageLayout: llmmodels.PromptMessageLayoutSectionsV1, Sections: []llmmodels.PromptSection{
 		{ID: "C0.specification-contract", Name: "规格编译合同", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, Content: contract},
 		{ID: "C3.specification-request", Name: "草稿与候选验收项", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 3, Content: string(payload)},
-	}}}}, nil
+	}}}}
+	if phase == "proposal" {
+		return partitionAuthoringProposal(command)
+	}
+	return command, nil
 }
 
 type authoringReviewInput struct {

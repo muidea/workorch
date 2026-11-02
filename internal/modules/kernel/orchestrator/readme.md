@@ -1165,6 +1165,19 @@ retirement 或治理 dependency。ticket 事实仍只供 exact subject 使用，
 
 当前一致性评审必需的[组合证明合同](../../../../docs/00-core/runtime/validation-proof-composition.md)：
 Definition requirement、owner subject、catalog、semantic manifest 与报告完整绑定同 CWI 原 lineage declarations。
+`proofConsumerRefs` 是无顺序语义的精确集合：逐 obligation 非空、无重复、无外来引用，逐 check 的并集仍须包含普通
+`validation_input` 与全部封存 lineage rules。校验不要求模型按字典排序，也不排序、补写或改写原报告；原顺序仍进入
+完整报告 hash、克隆与重载身份。缺失、冲突和无法判断仍保留原结论，不由集合格式接纳获得一致性或执行 credit。
+provider C3 的 `proofResponsibilities` 从原封存 consumption point 确定性派生：普通输入检查实际断言，execution
+规则映射原始回执职责，post-terminal 规则仅审准确职责／来源映射，不要求未来 receipt／Result／ACK 已存在。
+规则名称不补行为覆盖，原缺项／冲突仍阻止一致性。生成上下文的 `requiredCoverage` 逐 CWI／requirement 列出完整
+required checks，引用 C1 原判据与已供应的原来源声明／完整 owner corpus；不能以通用检查或自报覆盖代替。
+输入修订的 `inputCoverageRevisionTasks` 仅索引完整原 report 的 check／obligation，区分需保留的 covered 与仍需解决的
+missing／conflict／unknown，不复制长报告或重写 findings。原 input/report 仍完整传递；真实 changed receipt 后仍须
+新 subject 独立评审与普通 validation。两类投影均在 C3 完整反查，C0–C2 不携带瞬态内容，不新增验收权限或预算。
+`TestDriveRuntimeCompositeCoverageOmissionRevisionAndRecovery` 覆盖真实 File／Shell／Run／Result／Workspace owner 的
+遗漏→修订→新评审→验证及 document／retirement／receipt／binding／validation 响应恢复，原定义和 provider 消费不漂移。
+此规则仅统一 SM-3 报告准入与 schema；SM-2 一致性/feasibility/credit、SM-4 原事实重载、SM-1 生命周期不变。
 每个原准则／来源检查的 obligation 映射必须保留 ordinary `validation_input`，并完整引用该 CWI 的封存规则；
 自洽重算 hash 不能替代原 Definition 来源反证。SM-3 仍持久化有界完整报告，SM-2 仍必须先一致性／feasibility
 再 seal，并在 assessment 将实际普通证明与 execution guards 合取。未来 delivery 声明不是现存 ACK，
@@ -1469,6 +1482,14 @@ SM-4 唯一终态材料 compiler 规范化权威投影时必须另外保留原 `
   仅展示，不能据此选择 action；完整详情不能只剩被裁剪的通用摘要。
   当前只允许版本 5；缺失、旧版或未知版本均在 Run record、aggregate、initialize 和 Result material 入口 fail closed，
   不 fallback、不回填、不改写旧 Result/Run 归档。同版本 response loss、重启及 pending delivery replay 的内容与 hash 必须相同。
+- SM-4 交付错误以可解包的 owner／boundary／TerminalDeliveryID／material revision 标记传播；区分 owner command、
+  response decode 和 ACK private CAS，保留原 error identity。owner command 失败不表示 owner 尚未落盘。
+  同一 Orchestrator 的受限 opaque byte carrier 使用独立 `terminal-delivery-diagnostic/` logical key 保存完整诊断，
+  包含调用／观察 Runtime revision、同一 Run-owner 快照内的 Run revision、opaque Runtime revision、已读 ACK 和原错误 bytes；读取失败显式记录，不推断为零 ACK。
+  JSON 对错误 bytes 使用可逆 base64，载体保存完整 bytes／SHA256，普通日志仅新增关联元数据和受限 ref。
+  诊断写入遵守原 workspace deletion fence；保存失败显式报告，不能覆盖交付原错误、增加重试或改变恢复预算。
+  这些只读观察不是跨 owner 原子联合快照、durable-write 证明、SM authority 或验收 evidence；恢复不读取诊断来生成 ACK。
+  真实 owner 的写后响应丢失、文件载体重开与原 Error 解包回归覆盖该边界。生产 ACK 故障尚未复现时不虚构执行修复。
 - Workspace deletion只允许在 Run owner `draining` fence后排空既有 terminal delivery，包括为已封存终态首次固定 material seal；
   此时仍拒绝 caller material、SM-2/SM-3 推进与普通恢复。Orchestrator 独占自身 quiescence/purge private reducer，
   不终止 Run、不推进 Workspace deletion phase、不跨 owner 删除资源。
@@ -1625,7 +1646,7 @@ Found 或普通 response 均不授 effect/evidence/完成；驱动必须重读 R
 中逐目标读取完整正文，并再次真实读 manifest 核对原 revision；各目标保留 File owner 的读取容量，缺失/二进制/截断或漂移显式拒绝。累计 workspace 正文不再受另一个 128 KiB 总量门禁约束；provider context/token 容量仍独立拒绝，不能静默截断。
 完整内容随原 scope private event/CAS 冻结，不借修订/重启重读另一个输入。旧封存 scope 不原地升级。
 `SemanticWorkContext` 从原同 CWI 完整 round、sealed dispatch/execution、可信 receipt/version 边和历史原用途理由编译 priorRounds，
-不受通用 16 receipt history suffix 遗漏影响，不另设完成账本。真实内容及 priorRounds 只进入 C4；C0-C2 和稳定前缀不变。
+不受通用 16 receipt history suffix 遗漏影响，不另设完成账本。真实内容及 priorRounds 进入 semantic C3 shared work；C4 保留可信 receipt history 及闭合引用，C0-C2 和稳定前缀不变。
 
 内容绑定请求封存 `semantic/shared-work`，用途文档只增加最小 typed `implementationIntent`：原 declarationRef、
 exact contentHash、remainingWork、reason。schema、strict decoder、document hash/clone、compiler 与 owner admission 一致。
@@ -1767,6 +1788,19 @@ manifest 的精确补集。attempt1 必须补齐全部缺项、保留所有已�
 
 ### 精确 provider 输入与请求效率
 
+#### 阶段适用性与最小完整输入
+
+Orchestrator 依当前封存任务、scope 和可信来源编译 typed 输入，LLM owner 按对应阶段合同校验并渲染。
+完整 aggregate/owner 账本不默认成为每轮 provider 正文；适用成员、身份、权限与预算仍由所属 owner 计算。
+阶段投影必须区分必需、条件适用和不适用，不能将“不适用而省略”混同“必需内容缺失”。
+实施完整 scope/前轮因果、输入审查全文及全部合取责任、修复精确失败来源继续遵守现有门禁；改变这些门禁必须
+同步 producer、typed contract、LLM 投影/integrity、冻结输入、审计与恢复回归，不单独删字段或降级校验。
+
+需要且未变化的正文按精确请求内容复用；新投影只在合法新事务边界使用。SM-3 继续封存实际完整输入与来源，
+SM-4 只复用原冻结事务，SM-2 不从缓存或输入选择取得新 credit，SM-1 不变。相关规范见根目录 `AGENTS.md`
+及 [LLM 输入适用性合同](../../../../docs/00-core/llm-input-applicability.md)。这是持续收口约束，
+不是现有所有阶段已完成最小化的声明。
+
 SM-3 在物理提交前通过 LLM owner 预检冻结完整 ProviderRequest、原角色消息块、schema 与 cache key；配置凭据不进入载荷。
 原件存于 Orchestrator 受限 ArtifactContinuation，aggregate request session 仅保存 bytes/SHA256 索引。session CAS 前中断
 复用已保存原件；缺失、错域或损坏明确拒绝，不从新文件补造。SM-4 优先处理已持久 document-complete、terminal 或
@@ -1780,3 +1814,10 @@ native uncached tokens、费用及模型语义稳定性须独立验证。SM-1、
 
 回归入口：LLM `runtime_*refs_test.go`、`runtime_provider_input_test.go`、`runtime_request_metrics_test.go`；
 Orchestrator `runtime_provider_input_test.go`、`runtime_semantic_preflight_test.go`、runtime `semantic_planning_test.go`。
+
+
+LLM provider 适用性纯投影不改变完整 owner context：普通 order 排除 execution history；purpose/proof 保留其完整工作因果。
+operations 的 generation/preparation 仅属于封存 state-change task，InputRevision 依 exact recipe 保留原修订指令；
+证据/assessment 按当前 focus、CWI、允许引用及精确失败选择，不能以 recent-N 替代原因果。工作正文可精确引用
+同一 frozen request 的 C3 corpus，展开后的两个来源均独立校验。SM-3 仅 fresh 请求使用新分段/选择，SM-4 的原冻结
+消息、schema、cache key 和已发操作不重渲染；SM-1/SM-2、权限/预算、原验收、receipt/终态事实与三 ACK 不变。

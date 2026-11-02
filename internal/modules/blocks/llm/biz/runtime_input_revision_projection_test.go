@@ -40,7 +40,7 @@ func TestRuntimeInputRevisionCompleteC3StablePrefixAndClosedPurpose(t *testing.T
 			if !purpose {
 				projected = authority.Manifest.ProofObligations[0].ImplementationWork
 			}
-			if projected == nil || projected.InputRevision == nil || projected.TerminalEvidenceCredit || !reflect.DeepEqual(projected.InputRevision, request.SemanticManifest.ProofObligations[0].ImplementationWork.Scope.Request.InputRevision) {
+			if projected == nil || len(projected.InputCoverageRevisionTasks) != len(v.Report.Checks) || projected.InputRevision == nil || projected.TerminalEvidenceCredit || !reflect.DeepEqual(projected.InputRevision, request.SemanticManifest.ProofObligations[0].ImplementationWork.Scope.Request.InputRevision) {
 				t.Fatal("C3 lost exact original input/review or claimed credit")
 			}
 			if purpose {
@@ -58,6 +58,10 @@ func TestRuntimeInputRevisionCompleteC3StablePrefixAndClosedPurpose(t *testing.T
 				}
 			}
 
+			if !reflect.DeepEqual(projected.InputCoverageRevisionTasks[0].UnresolvedObligationIndexes, []int{0}) || projected.InputCoverageRevisionTasks[0].CheckIndex != 0 || projected.InputCoverageRevisionTasks[0].RequiredCheckRef != v.Report.Checks[0].RequiredCheckRef {
+				t.Fatal("coverage worklist lost original finding indexes")
+			}
+
 			v.Report.Checks[0].Reason = "The exact original input still lacks its behavioral assertion."
 			changed := runtimeSemanticWorkProviderRequestForTest(t, purpose, v)
 			after, err := runtimeSemanticPlanProviderRequest(changed)
@@ -71,6 +75,15 @@ func TestRuntimeInputRevisionCompleteC3StablePrefixAndClosedPurpose(t *testing.T
 			}
 			if provider.PromptContext.Sections[3].Content == after.PromptContext.Sections[3].Content {
 				t.Fatal("fresh findings omitted from C3")
+			}
+			projected.InputCoverageRevisionTasks = nil
+			corrupt, err := json.Marshal(authority)
+			if err != nil {
+				t.Fatal(err)
+			}
+			provider.PromptContext.Sections[3].Content = string(corrupt)
+			if validateRuntimeSemanticContextIntegrity(request.SemanticContext, request.SemanticManifest, 0, nil, nil, provider.ContextBudget, provider.PromptContext) == nil {
+				t.Fatal("lost coverage revision worklist passed exact C3 integrity")
 			}
 			projected.InputRevision.Report.Checks[0].Reason = "mutated projection"
 			if request.SemanticManifest.ProofObligations[0].ImplementationWork.Scope.Request.InputRevision.Report.Checks[0].Reason == "mutated projection" {

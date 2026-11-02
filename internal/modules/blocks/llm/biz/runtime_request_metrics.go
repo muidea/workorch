@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	models "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+	rc "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 // Byte accounting is an observation of the existing request, never a token
@@ -31,6 +32,14 @@ func runtimeProviderSectionMetrics(s models.PromptSection) models.ProviderCacheS
 	if json.Unmarshal([]byte(s.Content), &fields) != nil {
 		return m
 	}
+	switch s.ID {
+	case "C1.derivation-input", "C1.specification-source", "C1.specification-snapshot":
+		m.Applicability = "exact_unconfirmed_authoring_sources"
+	case "C2.specification-profiles":
+		m.Applicability = "source_applicable_authoring_declarations"
+	case "C3.specification-request":
+		m.Applicability = "current_authoring_task"
+	}
 	keys := make([]string, 0, len(fields))
 	allowed := runtimeMetricComponentNames(s.ID)
 	for key := range fields {
@@ -40,7 +49,7 @@ func runtimeProviderSectionMetrics(s models.PromptSection) models.ProviderCacheS
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		m.Components = append(m.Components, models.ProviderContextComponent{Path: key, Bytes: len(fields[key])})
+		m.Components = append(m.Components, models.ProviderContextComponent{Path: key, Bytes: len(fields[key]), Applicability: "included", Reason: "current_phase_input", Source: s.ID})
 	}
 	switch s.ID {
 	case "C1.goal-dod":
@@ -81,6 +90,10 @@ func runtimeMetricComponentNames(section string) map[string]bool {
 		for _, name := range []string{"decision", "transaction", "outputContract", "context"} {
 			ret[name] = true
 		}
+	case "C1.derivation-input", "C1.specification-source", "C1.specification-snapshot", "C2.specification-profiles", "C3.specification-request":
+		for _, name := range []string{"goal", "userRequirements", "templateRequirements", "candidateAcceptance", "inputHash", "templateHash", "resourceSnapshotHash", "resources", "expectedResources", "goalTextHash", "profiles", "sourceApplicableVerificationDeclarations", "profileSnapshotHashes", "requiredEvidencePurposes", "wireContractRef", "wireContractHash", "outputShape", "reviewEvidenceRefs", "proposalHash", "specification", "requiredRequirementIDs", "kind"} {
+			ret[name] = true
+		}
 	case "C2.capability-contract":
 		for _, name := range []string{"kinds", "capabilityKinds", "executionContract"} {
 			ret[name] = true
@@ -95,4 +108,67 @@ func runtimeMetricComponentNames(section string) map[string]bool {
 		}
 	}
 	return ret
+}
+
+// Selection metadata uses closed owner fields/reasons only. It neither logs
+// business keys/text nor claims that included observations passed acceptance.
+func runtimeProviderContextSectionMetrics(s models.PromptSection, prompt *models.PromptContext) models.ProviderCacheSectionHash {
+	m := runtimeProviderSectionMetrics(s)
+	add := func(path, source, reason string, present bool, value any) {
+		raw, _ := json.Marshal(value)
+		state, size := "included", len(raw)
+		if !present {
+			state, size = "excluded", 0
+		}
+		component := models.ProviderContextComponent{Path: path, Bytes: size, Applicability: state, Reason: reason, Source: source}
+		for i := range m.Components {
+			if m.Components[i].Path == path {
+				m.Components[i] = component
+				return
+			}
+		}
+		m.Components = append(m.Components, component)
+	}
+	switch s.ID {
+	case "C3.runtime-authority":
+		var p struct {
+			Context runtimeCandidateAuthorityProjection `json:"context"`
+		}
+		if json.Unmarshal([]byte(s.Content), &p) == nil {
+			work := p.Context.RequiredState == rc.ConvergenceStateNeedStateChange
+			reason := "sealed_state_change_source_and_dependencies"
+			if !work {
+				reason = "sealed_task_consumes_bindings_and_observations_not_generation"
+			}
+			corpusReason, preparationReason := reason, reason
+			if work && len(p.Context.ValidationGenerationContexts) == 0 {
+				corpusReason = "no_matching_owner_generation_declaration"
+			}
+			if work && len(p.Context.ValidationProofPreparations) == 0 {
+				preparationReason = "no_preparation_for_selected_prospective_targets"
+			}
+			add("context.validationGenerationContexts", "owner.operationAdmissibilities.validationSurfaces", corpusReason, len(p.Context.ValidationGenerationContexts) > 0, p.Context.ValidationGenerationContexts)
+			add("context.validationProofPreparations", "owner.focus.prospectiveTargets", preparationReason, len(p.Context.ValidationProofPreparations) > 0, p.Context.ValidationProofPreparations)
+			add("context.activation.memories", "owner.activation.memories", "explicit_activation_snapshot_no_stage_selector", len(p.Context.Activation.Memories) > 0, p.Context.Activation.Memories)
+		}
+	case "C4.semantic-tail":
+		var p runtimeSemanticTailProjection
+		if json.Unmarshal([]byte(s.Content), &p) == nil {
+			add("executionHistory", "owner.semantic.executionHistory", "work_and_proof_causal_receipts_ordering_excluded", p.ExecutionHistory.Hash != "", p.ExecutionHistory)
+		}
+	case "C4.execution-tail":
+		var tail runtimeCandidateExecutionTailProjection
+		if json.Unmarshal([]byte(s.Content), &tail) == nil {
+			m.LocalReferences = len(tail.WorkFileRefs)
+			if expandRuntimeCandidateWorkFiles(&tail, prompt) == nil {
+				tail.WorkFileRefs, tail.ReferenceRule = nil, ""
+				raw, _ := json.Marshal(tail)
+				m.ExpandedBytes = len(raw)
+			}
+			add("latestAcceptedEvidence", "owner.evidence.accepted", "current_focus_cwi_allowed_refs_or_failure", len(tail.AcceptedEvidence) > 0, tail.AcceptedEvidence)
+			add("latestRejectedEvidence", "owner.evidence.rejected", "current_focus_cwi_or_exact_failure_no_recent_cutoff", len(tail.RejectedEvidence) > 0, tail.RejectedEvidence)
+			add("recentAssessments", "owner.assessments", "current_focus_or_cwi", len(tail.Assessments) > 0, tail.Assessments)
+		}
+	}
+	return m
 }

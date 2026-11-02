@@ -63,8 +63,11 @@ type ContextBudget struct {
 // ContextSection is the audit-safe identity of one rendered prompt section.
 // SourceRefs are opaque identifiers only; they must not contain source content.
 type ContextComponent struct {
-	Path  string `json:"path"`
-	Bytes int    `json:"bytes"`
+	Applicability string `json:"applicability,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+	Source        string `json:"source,omitempty"`
+	Path          string `json:"path"`
+	Bytes         int    `json:"bytes"`
 }
 type ContextSection struct {
 	BodyBytes       int                `json:"bodyBytes,omitempty"`
@@ -136,14 +139,20 @@ func (v ContextBudget) Payload() workorcheventpayload.Payload {
 	if len(v.SectionHashes) > 0 {
 		sections := make([]workorcheventpayload.Value, 0, len(v.SectionHashes))
 		for _, section := range v.SectionHashes {
-			var paths []string
+			var paths, applicability, reasons, sources []string
 			var sizes []workorcheventpayload.Value
 			for _, c := range section.Components {
 				paths = append(paths, c.Path)
+				applicability = append(applicability, c.Applicability)
+				reasons = append(reasons, c.Reason)
+				sources = append(sources, c.Source)
 				sizes = append(sizes, workorcheventpayload.Value{Kind: workorcheventpayload.ValueInt, Int: int64(c.Bytes)})
 			}
 			sections = append(sections, workorcheventpayload.Value{Kind: workorcheventpayload.ValueObject, Object: workorcheventpayload.New(
 				workorcheventpayload.StringArrayField("componentPaths", paths),
+				workorcheventpayload.StringArrayField("componentApplicability", applicability),
+				workorcheventpayload.StringArrayField("componentReasons", reasons),
+				workorcheventpayload.StringArrayField("componentSources", sources),
 				workorcheventpayload.Field{Name: "componentBytes", Value: workorcheventpayload.Value{Kind: workorcheventpayload.ValueArray, Array: sizes}},
 				workorcheventpayload.IntField("bodyBytes", int64(section.BodyBytes)),
 				workorcheventpayload.IntField("expandedBytes", int64(section.ExpandedBytes)),

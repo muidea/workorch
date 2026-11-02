@@ -151,6 +151,7 @@ type ProviderContextBudget struct {
 }
 
 type ProviderCachePlan struct {
+	AuthorityBreakpointRequested    bool                         `json:"authorityBreakpointRequested,omitempty"`
 	WorkSnapshotBreakpointRequested bool                         `json:"workSnapshotBreakpointRequested,omitempty"`
 	SchemaVersion                   string                       `json:"schemaVersion,omitempty"`
 	Strategy                        string                       `json:"strategy,omitempty"`
@@ -170,8 +171,11 @@ type ProviderCachePlan struct {
 }
 
 type ProviderContextComponent struct {
-	Path  string `json:"path"`
-	Bytes int    `json:"bytes"`
+	Applicability string `json:"applicability,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+	Source        string `json:"source,omitempty"`
+	Path          string `json:"path"`
+	Bytes         int    `json:"bytes"`
 }
 
 type ProviderCacheSectionHash struct {

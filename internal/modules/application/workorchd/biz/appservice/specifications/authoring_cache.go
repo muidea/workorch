@@ -59,3 +59,46 @@ func partitionAuthoringReview(command llmevents.CompleteProviderCommand, input a
 		llmmodels.PromptSection{ID: "C3.specification-request", Name: "本次独立审查", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 3, Content: string(current)})
 	return command, nil
 }
+
+// Proposal inputs are complete persisted source data, shared unchanged by the
+// bounded revision. Feedback is added only in C4 by the revision command.
+func partitionAuthoringProposal(command llmevents.CompleteProviderCommand) (llmevents.CompleteProviderCommand, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(command.Request.PromptContext.Sections[1].Content), &fields); err != nil {
+		return command, err
+	}
+	source, contracts, phase := map[string]json.RawMessage{}, map[string]json.RawMessage{}, map[string]json.RawMessage{}
+	for key, value := range fields {
+		switch key {
+		case "goal", "candidateAcceptance", "inputHash", "templateHash", "resourceSnapshotHash", "resources", "expectedResources", "goalTextHash":
+			source[key] = value
+		case "profiles", "sourceApplicableVerificationDeclarations", "profileSnapshotHashes", "requiredEvidencePurposes":
+			contracts[key] = value
+		case "wireContractRef", "wireContractHash":
+			phase[key] = value
+		default:
+			return command, fmt.Errorf("unsupported proposal input field %q", key)
+		}
+	}
+	parts := []struct {
+		id, name string
+		fields   map[string]json.RawMessage
+	}{
+		{"C1.specification-source", "完整原始来源", source},
+		{"C2.specification-profiles", "适用能力声明", contracts},
+		{"C3.specification-request", "本次生成任务", phase},
+	}
+	command.Request.PromptContext.Sections = command.Request.PromptContext.Sections[:1]
+	for i, part := range parts {
+		body, err := json.Marshal(part.fields)
+		if err != nil {
+			return command, err
+		}
+		cacheability := "stable"
+		if i == 2 {
+			cacheability = "volatile"
+		}
+		command.Request.PromptContext.Sections = append(command.Request.PromptContext.Sections, llmmodels.PromptSection{ID: part.id, Name: part.name, Role: "user", Cacheability: cacheability, Protected: true, DisplayOrder: i + 1, Content: string(body)})
+	}
+	return command, nil
+}

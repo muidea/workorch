@@ -63,11 +63,11 @@ func TestAuthoringCommandsKeepSealedIdentitiesAndIndependentCriticContext(t *tes
 	if changedCommand.Request.PromptContext.Sections[0].Content != proposalCommand.Request.PromptContext.Sections[0].Content || changedCommand.Request.Schema != proposalCommand.Request.Schema || changedCommand.Request.PromptContext.Sections[1].Content == proposalCommand.Request.PromptContext.Sections[1].Content {
 		t.Fatal("dynamic input changed C0/schema or failed to change C3")
 	}
-	if len(proposalCommand.Request.PromptContext.Sections) != 2 {
+	if len(proposalCommand.Request.PromptContext.Sections) != 4 {
 		t.Fatal("proposal did not separate stable contract from volatile input")
 	}
 	stable := proposalCommand.Request.PromptContext.Sections[0]
-	volatile := proposalCommand.Request.PromptContext.Sections[1]
+	volatile := proposalCommand.Request.PromptContext.Sections[3]
 	for _, rule := range []string{"每项 Declaration 在两种状态下都必须是非空、非纯空白的具体说明", "尚未执行不是单独判为 UNVERIFIED 的理由", "Declaration 具体说明缺少何种能力或适用性依据", "不得为达到可确认状态伪造绑定", "最终合并仍有贡献"} {
 		if !strings.Contains(stable.Content, rule) {
 			t.Fatalf("proposal omitted declaration contract: %s", rule)
@@ -87,7 +87,7 @@ func TestAuthoringCommandsKeepSealedIdentitiesAndIndependentCriticContext(t *tes
 		Profiles            []runtimecontract.RuntimeProfileContract `json:"profiles"`
 		VerificationOptions []authoringCandidateVerificationOptions  `json:"sourceApplicableVerificationDeclarations"`
 	}
-	if err := json.Unmarshal([]byte(volatile.Content), &proposalPayload); err != nil {
+	if err := json.Unmarshal(authoringTestPayload(t, proposalCommand), &proposalPayload); err != nil {
 		t.Fatal(err)
 	}
 	if proposalPayload.Goal.Text != input.GoalText || proposalPayload.InputHash != input.InputHash() || proposalPayload.TemplateHash != workspace.WorkspaceTemplateSnapshotHash(&template) || len(proposalPayload.CandidateAcceptance) != 3 {
@@ -99,7 +99,7 @@ func TestAuthoringCommandsKeepSealedIdentitiesAndIndependentCriticContext(t *tes
 	if len(proposalPayload.VerificationOptions) != len(proposalPayload.CandidateAcceptance) || !reflect.DeepEqual(proposalPayload.VerificationOptions, mustAuthoringVerificationOptions(t, proposalPayload.CandidateAcceptance, proposalPayload.Profiles)) {
 		t.Fatal("proposal did not receive exact owner-derived declaration options")
 	}
-	if !strings.Contains(volatile.Content, `"resourceSnapshotHash":"`+derivation.ResourceSnapshotHash+`"`) {
+	if !strings.Contains(string(authoringTestPayload(t, proposalCommand)), `"resourceSnapshotHash":"`+derivation.ResourceSnapshotHash+`"`) {
 		t.Fatal("proposal omitted the sealed resource snapshot hash")
 	}
 	for _, item := range proposalPayload.CandidateAcceptance {
@@ -226,7 +226,7 @@ func TestResourceBoundAuthoringCommandsBindSameSnapshotAndRejectProviderResource
 		ResourceSnapshotHash string                                          `json:"resourceSnapshotHash"`
 		OutputShape          workspace.GoalSpecification                     `json:"outputShape"`
 	}
-	if err := json.Unmarshal([]byte(proposalCommand.Request.PromptContext.Sections[1].Content), &proposalPayload); err != nil || proposalPayload.ResourceSnapshotHash != derivation.ResourceSnapshotHash || len(proposalPayload.Resources) != 1 || proposalPayload.Resources[0].Content != content || len(proposalPayload.ExpectedResources) != 1 {
+	if err := json.Unmarshal(authoringTestPayload(t, proposalCommand), &proposalPayload); err != nil || proposalPayload.ResourceSnapshotHash != derivation.ResourceSnapshotHash || len(proposalPayload.Resources) != 1 || proposalPayload.Resources[0].Content != content || len(proposalPayload.ExpectedResources) != 1 {
 		t.Fatalf("proposal resource context changed: %+v %v", proposalPayload, err)
 	}
 	items, err := derived.CandidateItems(input, &template)

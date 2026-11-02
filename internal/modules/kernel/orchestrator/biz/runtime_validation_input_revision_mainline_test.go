@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	"reflect"
 	"testing"
 
@@ -60,8 +61,11 @@ func runtimeInputRevisionMainlineSemanticDocument(d *runtimecontract.RuntimeSema
 	}
 }
 
-func runtimeInputRevisionMainlineCandidate(c llmevents.RequestRuntimeCandidateCommand, target string) runtimecontract.RuntimeCandidate {
+func runtimeInputRevisionMainlineCandidate(c llmevents.RequestRuntimeCandidateCommand, target string, modes ...string) runtimecontract.RuntimeCandidate {
 	before, after := `!="5"`, `!="4"`
+	if len(modes) != 0 && modes[0] == "input_revision_omission" {
+		before, after = `strings.TrimSpace(string(out))==""`, `strings.TrimSpace(string(out))!="4"`
+	}
 	return runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{ID: "revise-input", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{target}, RequiredOperationRef: c.CandidateManifest.RequiredOperationSequence[0].RequirementID, Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &before}, {Name: "newText", String: &after}}}}}}}
 }
 
@@ -114,5 +118,20 @@ func assertRuntimeInputRevisionMainline(t *testing.T, a runtime.RuntimeAggregate
 	}
 	if !reflect.DeepEqual(r.ScopeRequest.InputRevision.Report, r.WorkingBinding.InputRevision.Report) {
 		t.Fatal("work lost rejected original report")
+	}
+}
+
+// Missing behavior assertions, original source conjuncts and future delivery
+// consumers use the same bounded revision lane as conflicts. The File effect
+// must precede a fresh subject/review and ordinary Shell validation.
+func TestDriveRuntimeCompositeCoverageOmissionRevisionAndRecovery(t *testing.T) {
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectConjunction, ValidationCount: 1, SourceObligations: true, DeliveryGuard: true, ReverseProofConsumerRefs: true}
+	baseline := runValidationInputReviewMainline(t, "input_revision_omission", "", options)
+	for _, cut := range []string{"after_review_document", "after_input_revision_retirement", "after_input_revision_receipt", "after_review_binding", "after_project_receipt"} {
+		t.Run(cut, func(t *testing.T) {
+			if got := runValidationInputReviewMainline(t, "input_revision_omission", cut, options); got != baseline {
+				t.Fatalf("recovery repeated provider calls: %d != %d", got, baseline)
+			}
+		})
 	}
 }

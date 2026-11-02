@@ -46,7 +46,7 @@ func buildProviderCachePlan(request llmmodels.ProviderRequest) llmmodels.Provide
 		if group != "" {
 			groupHashes[group] = append(groupHashes[group], sectionID+"\n"+hash)
 		}
-		metrics := runtimeProviderSectionMetrics(section)
+		metrics := runtimeProviderContextSectionMetrics(section, request.PromptContext)
 		sectionHashes = append(sectionHashes, llmmodels.ProviderCacheSectionHash{
 			BodyBytes: metrics.BodyBytes, ExpandedBytes: metrics.ExpandedBytes, LocalReferences: metrics.LocalReferences, Applicability: metrics.Applicability, Components: metrics.Components,
 			SectionID:          sectionID,
@@ -105,9 +105,17 @@ func buildProviderCachePlan(request llmmodels.ProviderRequest) llmmodels.Provide
 		messages := sectionMessages(request, false)
 		if len(request.FrozenSectionMessages) > 0 {
 			// Observe restored physical blocks rather than a newly rendered layout.
-			_ = json.Unmarshal(request.FrozenSectionMessages, &messages)
+			var frozen []responsesInputMessage
+			if json.Unmarshal(request.FrozenSectionMessages, &frozen) == nil {
+				messages = frozen
+			} else {
+				messages = nil
+			}
 		}
 		for _, message := range messages {
+			if message.Role == "user" && len(message.Content) > 0 && (strings.HasPrefix(message.Content[0].Text, "### C3.semantic-authority\n") || strings.HasPrefix(message.Content[0].Text, "### C3.runtime-authority\n")) && message.Content[len(message.Content)-1].PromptCacheBreakpoint != nil {
+				plan.AuthorityBreakpointRequested = true
+			}
 			if message.Role == "user" && len(message.Content) > 1 && message.Content[0].PromptCacheBreakpoint != nil {
 				plan.WorkSnapshotBreakpointRequested = true
 			}

@@ -76,6 +76,8 @@ type runtimeCandidateAuthorityProjection struct {
 // evidence and retry context. It never changes C0-C2 and never carries raw
 // provider payloads.
 type runtimeCandidateExecutionTailProjection struct {
+	WorkFileRefs              []runtimeCandidateWorkFileRef                          `json:"workFileRefs,omitempty"`
+	ReferenceRule             string                                                 `json:"referenceRule,omitempty"`
 	ImplementationWorkContent *runtimecontract.RuntimeCandidateWorkContent           `json:"implementationWorkContent,omitempty"`
 	Attempt                   int                                                    `json:"candidateAttempt"`
 	Retry                     *runtimeCandidateRetryProjection                       `json:"retry,omitempty"`
@@ -251,8 +253,8 @@ func runtimeCandidateAuthorityContextProjection(context runtimecontract.RuntimeC
 		RequiredEvidenceKinds:        append([]string(nil), context.RequiredEvidenceKinds...),
 		RepairDirective:              runtimeCandidateRepairAuthority(context.RepairDirective),
 		AllowedEvidenceRefs:          runtimecontract.AcceptedEvidenceRefsForFocus(facts),
-		ValidationProofPreparations:  runtimeCandidateValidationProofPreparations(context.Focus, context.Resources.OperationAdmissibilities),
-		ValidationGenerationContexts: runtimeValidationGenerationContexts(context.Focus.CoverageWorkItemIDs, context.Focus.ProspectiveTargetRefs, context.Resources.OperationAdmissibilities),
+		ValidationProofPreparations:  runtimeCandidateApplicablePreparations(context),
+		ValidationGenerationContexts: runtimeCandidateApplicableGenerationContexts(context, manifest),
 		Resources:                    resources,
 		TargetSelectionInstruction:   runtimeTargetSelectionInstruction(resources.TargetSelection, manifest.State),
 		Activation:                   activation,
@@ -543,9 +545,9 @@ func buildRuntimeCandidateExecutionTailProjection(
 		Retry:                     runtimeCandidateRetryForManifest(attempt, previousFailure, manifest, correction),
 		Failure:                   runtimeProviderSafeFailure(failure),
 		CurrentValidationFailure:  runtimeCurrentValidationFailure(context),
-		AcceptedEvidence:          runtimeProviderSafeEvidence(latestRuntimeEvidence(context.Evidence.Accepted)),
-		RejectedEvidence:          runtimeProviderSafeEvidence(latestRuntimeEvidence(context.Evidence.Rejected)),
-		Assessments:               runtimeProviderSafeAssessments(latestRuntimeAssessments(context.Assessments)),
+		AcceptedEvidence:          runtimeProviderSafeEvidence(runtimeCandidateRelevantEvidence(context, context.Evidence.Accepted)),
+		RejectedEvidence:          runtimeProviderSafeEvidence(runtimeCandidateRelevantEvidence(context, context.Evidence.Rejected)),
+		Assessments:               runtimeProviderSafeAssessments(runtimeCandidateRelevantAssessments(context)),
 		RejectedOperationShapes:   runtimeProviderSafeOperationShapes(context.RejectedOperationShapes),
 		NoProgressOperationShapes: runtimeProviderSafeOperationShapes(context.NoProgressOperationShapes),
 	}
@@ -670,30 +672,6 @@ func runtimeCandidateContinuationProjection(value runtimecontract.RuntimeContinu
 		return nil
 	}
 	return &value
-}
-
-const runtimeCandidateExecutionTailLimit = 4
-
-func latestRuntimeEvidence(values []runtimecontract.EvidenceFact) []runtimecontract.EvidenceFact {
-	if len(values) == 0 {
-		return nil
-	}
-	start := len(values) - runtimeCandidateExecutionTailLimit
-	if start < 0 {
-		start = 0
-	}
-	return append([]runtimecontract.EvidenceFact(nil), values[start:]...)
-}
-
-func latestRuntimeAssessments(values []runtimecontract.RuntimeAssessmentFact) []runtimecontract.RuntimeAssessmentFact {
-	if len(values) == 0 {
-		return nil
-	}
-	start := len(values) - runtimeCandidateExecutionTailLimit
-	if start < 0 {
-		start = 0
-	}
-	return append([]runtimecontract.RuntimeAssessmentFact(nil), values[start:]...)
 }
 
 func buildRuntimeCandidateLargeRefsProjection(context runtimecontract.RuntimeCandidateContext) runtimeCandidateLargeRefsProjection {

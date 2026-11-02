@@ -133,7 +133,9 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 			return llmmodels.ProviderRequest{}, err
 		}
 	}
-	executionTailJSON, err := json.Marshal(buildRuntimeCandidateExecutionTailProjection(candidateContext, request.CandidateAttempt, request.CandidateCorrectionObservation, manifest, request.CandidateCorrection))
+	executionTail := buildRuntimeCandidateExecutionTailProjection(candidateContext, request.CandidateAttempt, request.CandidateCorrectionObservation, manifest, request.CandidateCorrection)
+	compactRuntimeCandidateWorkFiles(&executionTail, runtimeCandidateApplicableGenerationContexts(candidateContext, manifest))
+	executionTailJSON, err := json.Marshal(executionTail)
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}
@@ -186,7 +188,7 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 		providerRequest.ContextBudget.BudgetFailureClass = "context_integrity"
 		return providerRequest, err
 	}
-	if err := validateRuntimeCandidateContextIntegrity(definitionContext, candidateContext, request.CandidateAttempt, request.CandidateCorrectionObservation, providerRequest.ContextBudget, providerRequest.PromptContext); err != nil {
+	if err := validateRuntimeCandidateContextIntegrity(definitionContext, candidateContext, manifest, request.CandidateAttempt, request.CandidateCorrectionObservation, providerRequest.ContextBudget, providerRequest.PromptContext); err != nil {
 		providerRequest.ContextBudget.ContextGateAction = "fail_fast"
 		providerRequest.ContextBudget.ContextGateReason = "runtime_context_integrity_failed"
 		providerRequest.ContextBudget.BudgetFailureClass = "context_integrity"
@@ -313,6 +315,7 @@ func validateRuntimeCandidateWorkIntentIntegrity(manifest runtimecontract.Runtim
 func validateRuntimeCandidateContextIntegrity(
 	definition runtimecontract.RuntimeDefinitionContext,
 	context runtimecontract.RuntimeCandidateContext,
+	manifest runtimecontract.RuntimeCandidateContractManifest,
 	attempt int,
 	previousFailure *runtimecontract.RuntimeCandidateCorrectionObservation,
 	budget *llmmodels.ProviderContextBudget,
@@ -333,14 +336,23 @@ func validateRuntimeCandidateContextIntegrity(
 	}
 	definition = definition.Normalized()
 	context = context.Normalized()
-	expectedPreparations := runtimeCandidateValidationProofPreparations(context.Focus, context.Resources.OperationAdmissibilities)
-	expectedContexts := runtimeValidationGenerationContexts(context.Focus.CoverageWorkItemIDs, context.Focus.ProspectiveTargetRefs, context.Resources.OperationAdmissibilities)
+	expectedPreparations := runtimeCandidateApplicablePreparations(context)
+	expectedContexts := runtimeCandidateApplicableGenerationContexts(context, manifest)
 	{
 		var actual struct {
 			Context runtimeCandidateAuthorityProjection `json:"context"`
 		}
 		if json.Unmarshal([]byte(contents["C3"]), &actual) != nil || !reflect.DeepEqual(actual.Context.ValidationProofPreparations, expectedPreparations) || !reflect.DeepEqual(actual.Context.ValidationGenerationContexts, expectedContexts) {
 			missing = append(missing, "P4.validation_preparation_context")
+		}
+	}
+	{
+		var tail runtimeCandidateExecutionTailProjection
+		if json.Unmarshal([]byte(contents["C4"]), &tail) != nil ||
+			!reflect.DeepEqual(tail.AcceptedEvidence, runtimeProviderSafeEvidence(runtimeCandidateRelevantEvidence(context, context.Evidence.Accepted))) ||
+			!reflect.DeepEqual(tail.RejectedEvidence, runtimeProviderSafeEvidence(runtimeCandidateRelevantEvidence(context, context.Evidence.Rejected))) ||
+			!reflect.DeepEqual(tail.Assessments, runtimeProviderSafeAssessments(runtimeCandidateRelevantAssessments(context))) {
+			missing = append(missing, "P4.causal_execution_tail")
 		}
 	}
 	{

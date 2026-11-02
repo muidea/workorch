@@ -40,7 +40,7 @@ func DerivationCommand(derivation workspace.DefinitionDerivationRequest, target 
 	}
 	return llmevents.CompleteProviderCommand{Target: target, Request: llmevents.ProviderRequest{WorkspaceID: string(derivation.Input.WorkspaceID), Model: target.ModelID, Kind: "workspace/specification/derive", Schema: schema, SchemaFormat: llmmodels.ProviderSchemaFormatJSONSchema, DialogLanguage: "zh-CN", PromptContext: &llmmodels.PromptContext{SchemaVersion: promptVersion, MessageLayout: llmmodels.PromptMessageLayoutSectionsV1, Sections: []llmmodels.PromptSection{
 		{ID: "C0.derivation-contract", Name: "验收派生合同", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, Content: contract},
-		{ID: "C3.derivation-input", Name: "创作输入", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 3, Content: string(payload)},
+		{ID: "C1.derivation-input", Name: "完整派生来源", Role: "user", Cacheability: "stable", Protected: true, DisplayOrder: 1, Content: string(payload)},
 	}}}}, nil
 }
 

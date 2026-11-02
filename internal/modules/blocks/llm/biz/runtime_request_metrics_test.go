@@ -2,7 +2,9 @@ package llm
 
 import (
 	"encoding/json"
+	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	models "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	rc "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	"strings"
 	"testing"
@@ -30,5 +32,22 @@ func TestRuntimeRequestMetricsMeasureLosslessReferencesAndKeepAuditDetached(t *t
 		if len(observed.Components) != 0 {
 			t.Fatal("arbitrary business key entered audit")
 		}
+	}
+}
+
+func TestRenderedApplicabilityAuditFitsActualEventIngress(t *testing.T) {
+	r := runtimeSemanticWorkProviderRequestForTest(t, true)
+	p, err := runtimeProviderRequest(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	budget := providerContextBudgetAudit(p.ContextBudget)
+	raw := (recordpayload.LLMUsagePayloadData{RequestID: "physical", LogicalRequestID: "logical", PhysicalCallID: "physical", WorkspaceID: "workspace", RunID: "run", ProviderID: "provider", APISurface: "responses", Model: "model", InputTokens: 100, OutputTokens: 1, TotalTokens: 101, ProviderSubmitted: true, ContextBudget: budget, CacheUsage: llmaudit.CacheUsage{CacheReadTokensKnown: true, CacheReadTokens: 0, Source: "provider_native"}}).EventPayload()
+	got := recordpayload.SanitizeAuditPayload(raw)
+	if truncated, _ := got.Bool("auditPayloadTruncated"); truncated {
+		t.Fatal("current closed selection audit exceeded Eventstream capacity")
+	}
+	if _, omitted := got.Field("auditPayloadOmittedReason"); omitted {
+		t.Fatal("selection audit unexpectedly omitted")
 	}
 }

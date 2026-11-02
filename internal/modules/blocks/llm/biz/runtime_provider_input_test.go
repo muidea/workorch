@@ -203,3 +203,56 @@ func TestFrozenInputRejectsForeignCorrectionBaseAndChangedWire(t *testing.T) {
 		})
 	}
 }
+
+func TestFrozenPhysicalLayoutSurvivesCurrentBreakpointOptimization(t *testing.T) {
+	r, p := frozenProviderFixture(t)
+	raw, _, err := freezeRuntimeProviderInput(r, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var frozen runtimeFrozenProviderInput
+	if err := json.Unmarshal(raw, &frozen); err != nil {
+		t.Fatal(err)
+	}
+	var messages []responsesInputMessage
+	if err := json.Unmarshal(frozen.Messages, &messages); err != nil {
+		t.Fatal(err)
+	}
+	// A persisted original layout may have one authority block and no C3 hint.
+	// This is the same current frozen-input contract, never a renderer selector.
+	messages[3].Content = []responsesInputContent{{Type: "input_text", Text: joinResponsesBlocks(messages[3].Content)}}
+	frozen.Messages, _ = json.Marshal(messages)
+	raw, _ = json.Marshal(frozen)
+	r.FrozenInput = raw
+	r.FrozenInputRef = &rc.RuntimeProviderInputRef{Hash: rc.RuntimeProviderInputHash(raw), Bytes: len(raw)}
+	restored, err := runtimeProviderRequestForSubmission(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(responsesWireInputForRequest(&restored), frozen.Messages) {
+		t.Fatal("restored input adopted new breakpoints")
+	}
+	if restored.ContextBudget.CachePlan.AuthorityBreakpointRequested || restored.ContextBudget.CachePlan.WorkSnapshotBreakpointRequested {
+		t.Fatal("restored audit claimed new hints")
+	}
+	r.BaseFrozenInput, r.BaseFrozenInputRef = raw, r.FrozenInputRef
+	e := r.ExpectedDocument.Clone()
+	e.CorrectionAttempt = 1
+	e.LogicalRequestID = "correction"
+	e.Hash = rc.StableRuntimeExpectedDocumentHash(e)
+	r.ExpectedDocument = &e
+	r.RequestIdentity.LogicalRequestID = e.LogicalRequestID
+	corrected, _, err := freezeRuntimeProviderInput(r, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result runtimeFrozenProviderInput
+	json.Unmarshal(corrected, &result)
+	var actual []responsesInputMessage
+	json.Unmarshal(result.Messages, &actual)
+	a, _ := json.Marshal(actual[:4])
+	b, _ := json.Marshal(messages[:4])
+	if !bytes.Equal(a, b) {
+		t.Fatal("correction replaced original physical layout")
+	}
+}

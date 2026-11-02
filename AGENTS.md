@@ -178,6 +178,17 @@ Core runtime must remain functionally neutral. Do not hard-code software develop
 
 Keep the provider-facing LLM cache prefix stable: long-lived system/schema/runtime contracts in `C0`, Goal/DoD definitions in `C1`, declarative capability/governance contracts in `C2`, volatile runtime details in `C3`–`C5`. Treat unexpected `stablePrefixHash` drift as a request rendering bug.
 
+### LLM 输入适用性与最小完整上下文
+
+- 所有模型阶段采用“当前任务所需的最小完整输入”。owner 保全完整事实，不代表每轮向模型展开全部事实；动态内容也不代表每轮必需或每轮变化。先按阶段、当前封存任务、scope 与来源判断适用性，再对适用内容做完整性校验。
+- 阶段适用性、精确成员选择、身份、来源、权限和预算由所属 owner 的 typed compiler/validator 确定，不交给模型猜测，不通过 prompt、文件名或领域关键词临时裁剪。每组输入明确用途、来源、完整范围、必需/条件适用/不适用条件及缺失处理；不新增独立上下文 authority、Profile 版本开关或通用恢复协议。
+- 模型处理只携带该阶段所需的原义务、当前选项、相关正文和因果事实。不适用内容在 provider 投影前排除；必需内容缺失、过期、歧义、损坏或超容量时按现有合同明确拒绝。省略不适用字段与丢失必需字段必须可区分，不能用空值或默认值掩盖缺失。
+- 输入审查保留被审输入、原判据及全部适用证明责任；实施保留当前合同要求的完整 scope 内容与前轮因果；修复保留精确失败来源及适用修复约束。不得为了缩短请求删掉仍适用的合取义务、必要依赖、真实失败或独立验证。现有强制字段在生产者、消费者与校验合同同步调整前仍须完整提供。
+- “需要且未变化”通过稳定布局、适用的 adapter 缓存边界或同请求内精确局部引用复用；“本阶段不需要”明确排除。正文引用必须在同一冻结请求内可无损展开并逐值验证，不能只传不可解析的 hash、摘要、占位符或过期文件。数据保真、受限存储和原始证据保全不因输入最小化而改变。
+- 缓存布局按内容变化频率分离可复用快照与本轮 intent、历史追加及纠正反馈；相同输入的重试应能复用适用前缀。C3 缓存不把动态事实变成 C0～C2 权威。修改仅作用于合法的新请求边界；已冻结输入、已发出操作、same-contract correction 及恢复保持原事务承诺，不重渲染或修改旧原件。
+- 字段收口必须同步 typed 输入、owner 投影、prompt/schema、parser/compiler、提交前及渲染后完整性门禁、冻结/纠正/恢复与审计；仅删除正文、修改 prompt 或保留全量必需门禁却隐藏字段不算完成。固定快照覆盖阶段正反例、真实缺项、不适用排除、精确展开、duplicate/stale/恢复及多 Workspace 隔离。
+- 效果同时核对阶段组件的实际/展开 bytes、native cached/uncached tokens 的 known/unknown、物理调用与预算成本、语义拒绝及真实实现/验收推进。bytes 不冒充 token，缺失缓存字段不当作命中 0，缓存比例或单次 PASS 不单独证明收口；不以清数据、放宽验收、无界重试或额外收费抽样获得表面收益。
+
 ### LLM 处理稳定性：后续开发与优化的核心约束
 
 所有涉及模型的阶段及其上下游组件必须遵守

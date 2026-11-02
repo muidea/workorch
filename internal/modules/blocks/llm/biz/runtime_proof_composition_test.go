@@ -44,6 +44,19 @@ func TestRuntimeProofCompositionV3IsExactProtectedC3Only(t *testing.T) {
 		t.Fatal(err)
 	}
 	reviews := projection.Manifest.ProofObligations[0].ValidationProofRequirement.InputReviews
+	for _, rule := range []string{"nonempty set of unique exact declared refs in any order", "Across every check's obligations", "never selectable alternatives"} {
+		if !strings.Contains(projection.OutputInstruction, rule) {
+			t.Fatalf("consumer-set instruction disagrees with unordered unique schema: %s", rule)
+		}
+	}
+	if len(reviews[0].ProofResponsibilities) != 4 || reviews[0].ProofResponsibilities[0].ConsumerRef != "validation_input" {
+		t.Fatal("code-derived consumer responsibilities missing")
+	}
+	for _, role := range reviews[0].ProofResponsibilities[1:] {
+		if role.ConsumptionPoint != "post_terminal_delivery" || !strings.Contains(role.ReviewResponsibility, "do not require a future receipt") {
+			t.Fatal("future facts requested as review prerequisites")
+		}
+	}
 	if !reflect.DeepEqual(reviews[0].RequiredProofConsumerRefs, runtimecontract.RuntimeValidationProofConsumerRefs(*binding.InputReview)) {
 		t.Fatal("mandatory consumers were left for the model to reconstruct")
 	}
@@ -106,7 +119,7 @@ func TestRuntimeProofCompositionRejectsChangedConsumerProjectionAndInstructions(
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
 	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
 	refreshSemanticProgressForTest(t, &request)
-	for _, name := range []string{"omitted", "invented", "instructions"} {
+	for _, name := range []string{"omitted", "invented", "instructions", "responsibilities"} {
 		t.Run(name, func(t *testing.T) {
 			provider, err := runtimeProviderRequest(request)
 			if err != nil {
@@ -117,6 +130,8 @@ func TestRuntimeProofCompositionRejectsChangedConsumerProjectionAndInstructions(
 				t.Fatal(err)
 			}
 			switch name {
+			case "responsibilities":
+				projection.Manifest.ProofObligations[0].ValidationProofRequirement.InputReviews[0].ProofResponsibilities = nil
 			case "omitted":
 				projection.Manifest.ProofObligations[0].ValidationProofRequirement.InputReviews[0].RequiredProofConsumerRefs = nil
 			case "invented":

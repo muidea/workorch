@@ -70,7 +70,7 @@ func buildRuntimeSemanticPrompt(request llmmodels.RuntimeCandidateRequest, prepa
 	tail := runtimeSemanticTailProjection{
 		WorkContext:         runtimeSemanticVisibleWorkContext(prepared.context, prepared.manifest),
 		CoverageProgress:    prepared.context.CoverageProgress,
-		ExecutionHistory:    prepared.context.ExecutionHistory,
+		ExecutionHistory:    runtimeSemanticVisibleHistory(prepared.context, prepared.manifest),
 		ExecutionBudget:     prepared.context.ExecutionBudget,
 		ExecutionFeedback:   prepared.context.ExecutionFeedback,
 		Attempt:             request.CandidateAttempt,

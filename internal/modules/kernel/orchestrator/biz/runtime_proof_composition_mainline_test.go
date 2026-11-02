@@ -23,3 +23,18 @@ func TestDriveRuntimeProofCompositionV3OwnerMainlineAndRestart(t *testing.T) {
 		t.Run(mode, func(t *testing.T) { runValidationInputReviewMainline(t, mode, "", options) })
 	}
 }
+
+func TestDriveRuntimeProofConsumerOrderOwnerMainlineAndRecovery(t *testing.T) {
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectConjunction, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, SourceObligations: true, DeliveryGuard: true, ReverseProofConsumerRefs: true}
+	baseline := runValidationInputReviewMainline(t, "consistent", "", options)
+	for _, cut := range []string{"after_review_document", "after_review_binding", "after_project_receipt"} {
+		t.Run(cut, func(t *testing.T) {
+			if calls := runValidationInputReviewMainline(t, "consistent", cut, options); calls != baseline {
+				t.Fatalf("unordered exact consumer recovery repeated provider consumption: %d != %d", calls, baseline)
+			}
+		})
+	}
+	for _, mode := range []string{"conflict", "omission"} {
+		t.Run(mode, func(t *testing.T) { runValidationInputReviewMainline(t, mode, "", options) })
+	}
+}

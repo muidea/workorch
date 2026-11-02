@@ -66,9 +66,16 @@ func llmContextBudgetSectionHashes(budget workorcheventpayload.Payload) []llmaud
 		localRefs, _ := section.Int64("localReferences")
 		applicability, _ := section.String("applicability")
 		paths, sizes := llmContextComponentArrays(section)
+		applicabilityRows, _ := section.StringSlice("componentApplicability")
+		reasons, _ := section.StringSlice("componentReasons")
+		sources, _ := section.StringSlice("componentSources")
 		var components []llmaudit.ContextComponent
 		for i, path := range paths {
-			components = append(components, llmaudit.ContextComponent{Path: path, Bytes: int(sizes[i].Int)})
+			component := llmaudit.ContextComponent{Path: path, Bytes: int(sizes[i].Int)}
+			if len(applicabilityRows) == len(paths) && len(reasons) == len(paths) && len(sources) == len(paths) {
+				component.Applicability, component.Reason, component.Source = applicabilityRows[i], reasons[i], sources[i]
+			}
+			components = append(components, component)
 		}
 		ret = append(ret, llmaudit.ContextSection{ID: id, Hash: hash, SizeBytes: int(size), SourceRefs: refs, BodyBytes: int(body), ExpandedBytes: int(expanded), LocalReferences: int(localRefs), Applicability: applicability, Components: components})
 	}

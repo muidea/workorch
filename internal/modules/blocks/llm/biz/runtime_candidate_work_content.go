@@ -23,7 +23,7 @@ func validateRuntimeCandidateWorkContentIntegrity(c contract.RuntimeCandidateCon
 			continue
 		}
 		var actual runtimeCandidateExecutionTailProjection
-		if json.Unmarshal([]byte(section.Content), &actual) != nil || !reflect.DeepEqual(actual.ImplementationWorkContent, expected) {
+		if json.Unmarshal([]byte(section.Content), &actual) != nil || expandRuntimeCandidateWorkFiles(&actual, prompt) != nil || !reflect.DeepEqual(actual.ImplementationWorkContent, expected) {
 			return fmt.Errorf("P4.implementation_work_content: rendered source differs from frozen scope")
 		}
 		count++

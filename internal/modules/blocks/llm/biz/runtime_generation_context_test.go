@@ -3,6 +3,7 @@ package llm
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -31,6 +32,9 @@ func TestRuntimePreparationContextIsOwnerNeutralScopedAndShared(t *testing.T) {
 			contexts := runtimeValidationGenerationContexts(focus.CoverageWorkItemIDs, focus.ProspectiveTargetRefs, catalogs)
 			if len(preparations) != 2 || len(contexts) != 1 || contexts[0].Context.Files[0].Content != raw || len(contexts[0].RequirementHashes) != 1 {
 				t.Fatal("exact source duplicated or omitted")
+			}
+			if len(contexts[0].RequiredCoverage) != 1 || (len(contexts[0].RequiredCoverage[0].RequiredCheckRefs) != 2 || !slices.Contains(contexts[0].RequiredCoverage[0].RequiredCheckRefs, source.CheckRef) || !slices.Contains(contexts[0].RequiredCoverage[0].RequiredCheckRefs, "check-2")) || !strings.Contains(contexts[0].CoverageInstruction, "entire original C1 Goal/DoD") {
+				t.Fatal("generation lacks complete exact coverage inventory")
 			}
 			for _, entry := range preparations {
 				if entry.OwnerModuleID != owner || entry.CoverageWorkItemID != p.CoverageWorkItemID || entry.RequirementHash != p.RequirementHash || entry.ContentRequirements != p.ContentRequirements {
@@ -80,10 +84,14 @@ func assertRuntimeSectionCacheWire(t *testing.T, request llmmodels.ProviderReque
 		t.Fatal("Runtime wire has no exact section identity")
 	}
 	for i, section := range request.PromptContext.Sections {
-		if messages[i].Content[0].Text != "### "+section.ID+"\n"+section.Content {
+		var joined strings.Builder
+		for _, block := range messages[i].Content {
+			joined.WriteString(block.Text)
+		}
+		if joined.String() != "### "+section.ID+"\n"+section.Content {
 			t.Fatal("wire changed protected section")
 		}
-		if (i == 2) != (messages[i].Content[0].PromptCacheBreakpoint != nil) {
+		if (i == 2 || i == 3) != (messages[i].Content[0].PromptCacheBreakpoint != nil) {
 			t.Fatal("breakpoint includes volatile authority or excludes stable contract")
 		}
 	}
@@ -211,11 +219,15 @@ func TestRuntimeGenerationContextIntegrityRejectsLostForgedAndForeignSource(t *t
 	}}
 	// This gate compares the rendered bytes to already-admitted typed facts;
 	// catalog/manifest admission is tested at the owner contract boundary.
-	for _, scenario := range []string{"unchanged", "missing", "changed bytes and hash", "foreign owner", "foreign requirement", "invented source"} {
+	for _, scenario := range []string{"unchanged", "missing", "changed bytes and hash", "foreign owner", "foreign requirement", "invented source", "lost coverage inventory", "changed coverage instruction"} {
 		t.Run(scenario, func(t *testing.T) {
 			actual := runtimeCandidateAuthorityContextProjection(context, runtimecontract.RuntimeCandidateContractManifest{})
 			expected := context
 			switch scenario {
+			case "lost coverage inventory":
+				actual.ValidationGenerationContexts[0].RequiredCoverage = nil
+			case "changed coverage instruction":
+				actual.ValidationGenerationContexts[0].CoverageInstruction = "Treat generic checks as full acceptance."
 			case "missing":
 				actual.ValidationGenerationContexts = nil
 			case "changed bytes and hash":
@@ -240,7 +252,7 @@ func TestRuntimeGenerationContextIntegrityRejectsLostForgedAndForeignSource(t *t
 			prompt.Sections = append([]llmmodels.PromptSection(nil), prompt.Sections...)
 			prompt.Sections[3].Content = string(data)
 			budget := *provider.ContextBudget
-			err = validateRuntimeCandidateContextIntegrity(semantic.SemanticContext.Definition, expected, 0, nil, &budget, &prompt)
+			err = validateRuntimeCandidateContextIntegrity(semantic.SemanticContext.Definition, expected, runtimecontract.RuntimeCandidateContractManifest{}, 0, nil, &budget, &prompt)
 			if (err == nil) != (scenario == "unchanged") {
 				t.Fatalf("integrity result for %s: %v", scenario, err)
 			}

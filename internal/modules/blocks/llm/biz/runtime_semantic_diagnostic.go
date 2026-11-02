@@ -10,7 +10,7 @@ type runtimeSemanticTailProjection struct {
 	WorkContextRef      string                                                `json:"workContextRef,omitempty"`
 	WorkContext         *runtimecontract.RuntimeSemanticWorkContext           `json:"workContext,omitempty"`
 	CoverageProgress    runtimecontract.RuntimeSemanticCoverageProgress       `json:"coverageProgress"`
-	ExecutionHistory    runtimecontract.RuntimeSemanticExecutionHistory       `json:"executionHistory"`
+	ExecutionHistory    runtimecontract.RuntimeSemanticExecutionHistory       `json:"executionHistory,omitzero"`
 	ExecutionBudget     runtimecontract.RuntimeSemanticExecutionBudget        `json:"executionBudget"`
 	ExecutionFeedback   []runtimecontract.RuntimeSemanticExecutionFeedback    `json:"executionFeedback,omitempty"`
 	Attempt             int                                                   `json:"attempt"`

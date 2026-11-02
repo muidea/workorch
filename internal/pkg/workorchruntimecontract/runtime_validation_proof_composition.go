@@ -2,7 +2,6 @@ package workorchruntimecontract
 
 import (
 	"fmt"
-	"reflect"
 	"slices"
 	"strings"
 )
@@ -48,13 +47,20 @@ func validateRuntimeValidationCompositionCheck(check RuntimeValidationInputCheck
 	used := make(map[string]bool, len(allowed))
 	for _, obligation := range check.Obligations {
 		refs := obligation.ProofConsumerRefs
-		if len(refs) == 0 || !reflect.DeepEqual(refs, normalizeStrings(refs)) {
-			return fmt.Errorf("composite obligation requires canonical exact proof consumers")
+		if len(refs) == 0 || len(refs) > len(allowed) {
+			return fmt.Errorf("composite obligation requires nonempty bounded proof consumers")
 		}
+		// Consumers are a set, as declared by the provider schema. Preserve the
+		// report's exact order for provenance/hash checks; do not sort or repair it.
+		seen := make(map[string]bool, len(refs))
 		for _, ref := range refs {
 			if ref == "" || ref != strings.TrimSpace(ref) || !slices.Contains(allowed, ref) {
 				return fmt.Errorf("composite obligation references an undeclared proof consumer")
 			}
+			if seen[ref] {
+				return fmt.Errorf("composite obligation repeats a proof consumer")
+			}
+			seen[ref] = true
 			used[ref] = true
 		}
 	}

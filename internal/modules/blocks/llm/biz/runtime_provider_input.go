@@ -73,6 +73,13 @@ func freezeRuntimeProviderInput(r models.RuntimeCandidateRequest, p models.Provi
 		}
 		baseCacheKey = base.CacheKey
 	}
+	if r.DocumentKind == rc.RuntimeProviderDocumentOperations {
+		// A correction joins old C3 with new C4. Resolve references against
+		// that actual composition, never against a discarded fresh projection.
+		if err := validateRuntimeCandidateWorkContentIntegrity(r.CandidateContext, r.CandidateManifest, p.PromptContext); err != nil {
+			return nil, nil, err
+		}
+	}
 	rendered := sectionMessages(p, false)
 	if baseMessages != nil {
 		if len(baseMessages) != len(p.PromptContext.Sections) {
@@ -90,6 +97,10 @@ func freezeRuntimeProviderInput(r models.RuntimeCandidateRequest, p models.Provi
 		cacheKey = baseCacheKey
 	}
 	p.Config = models.RedactedProviderConfig{}
+	// Audit the exact selected physical blocks, including a correction's
+	// original prefix, rather than the current renderer's hypothetical layout.
+	p.FrozenSectionMessages = append(json.RawMessage(nil), messages...)
+	p.FrozenCacheKey = cacheKey
 	attachProviderCachePlan(&p)
 	// The Runtime commitment and the physical rendered-prefix hash have
 	// distinct audit fields, just as in the original preflight renderer.

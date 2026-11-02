@@ -244,8 +244,9 @@ STEP02 的 derive/proposal/review 显式选择 `PromptContext.MessageLayout=sect
   `renderedStablePrefixHash` 绑定 C0～C2 实际消息、role 与断点；section hash/size 绑定完整原内容。
   稳定 key 绑定 Workspace、实际 provider/model、schema/格式、reasoning 与共享前缀；不包含时间、物理请求身份、
   review kind、endpoint 或凭据。不同 Workspace 即使模板/文本相同也隔离；同 Workspace 内容变化重新生成 key。
-- 新布局声明 `prompt_cache_key`、`prompt_cache_options.mode=explicit`，仅在最后一个连续共享 section 的
-  input_text 上设置显式断点。C3 不产生缓存写入声明，不更改 TTL，不补齐最小 token 数、不重试 unsupported 请求。
+- 新布局声明 `prompt_cache_key`、`prompt_cache_options.mode=explicit`，在最后一个连续共享 section 的
+  input_text 上设置显式断点。Runtime 新请求另按完整 content、workContext、C3 authority 设置可用边界，
+  连同稳定前缀最多四个；不更改 TTL，不补齐最小 token 数、不重试 unsupported 请求。
   这些是 Responses 缓存请求参数，不是上游支持、已写入或已命中的证明。网关可能剥离参数；实际路线和转发效果
   必须另行核对，不能仅凭本地 wire 或公共前缀相等宣称真实命中。
 - 每次调用独立持有预算/计划，不共享全局会话、结果、可变缓存或用量；缓存不减少物理调用、独立审查或预算记账。
@@ -255,6 +256,24 @@ STEP02 的 derive/proposal/review 显式选择 `PromptContext.MessageLayout=sect
   Web 对混合窗口标明“部分已知”，只有全部记录已知才显示窗口读取比例。历史正数仍可观察，历史无 presence 的零保持未知。
 
 ## 能力验收
+
+### 分阶段最小完整输入约束
+
+所有模型输入遵守根目录 `AGENTS.md` 的“LLM 输入适用性与最小完整上下文”。LLM owner 在完整 typed
+来源与当前封存任务上校验阶段适用性，再渲染适用的最小完整投影；不能直接把收到的完整 owner context 当作
+provider 必需正文。模型不选择适用字段，也不重算身份、权限、预算或集合完整性。
+
+需要且未变化的正文通过同请求精确局部引用、稳定布局和 adapter 合法缓存边界复用；不适用内容在渲染前明确排除。
+必需正文、原判据、全部适用合取责任和精确因果不得摘要、截断或只传不可展开的 hash。输入审查、实施、修复、
+评估与治理分别按当前任务消费自己的材料，不能因共享 envelope 或同一 CWI 就默认共享全部动态正文。
+
+适用性收口必须同时调整 typed 生产者/消费者、prompt/schema、compiler、冻结输入、correction/recovery、
+preflight/post-render integrity 与审计；未同步调整的现有强制字段继续按原合同完整提供。same-contract correction
+和恢复复用原冻结来源，不把新布局追溯应用到已保存请求。缓存 hint 不证明远端命中、语义充分或执行 credit。
+
+本节是持续开发与验收约束，不宣称现有通用 history/budget/progress 投影已完成按阶段拆分。具体阶段矩阵、
+适用/缺失/排除边界见 [LLM 输入适用性合同](../../../../docs/00-core/llm-input-applicability.md)；
+可执行合同与回归随代码维护，构建与测试不依赖本地 docs。
 
 | 维度 | 可执行证据 | 覆盖结论 |
 | --- | --- | --- |
@@ -338,8 +357,11 @@ operations 的 frozen implementation source 通过 typed `RuntimeCandidateContex
 必需槽位缺项使用共享 `required_operations_missing` fact 和同 manifest 的一次 `required_operations` witness；C4 说明只补
 missingRefs、冻结 retained 值，模型重新输出完整文档。Block 只核对事实与调用合同，不选择 retry 或执行 action。
 
-owner validation surface 的 generation context 在 preparation 和 ready binding 两种状态均可按当前 CWI 投影，用于后续
-输入修订；其实现正文是只读依赖，不是修改权限、oracle、receipt 或验收 credit。同一 requirement hash 在一条 surface 内去重。
+owner validation surface 的 generation context 在 preparation 和 ready binding 两种状态均保留可信来源。
+operations 仅 state-change 任务投影匹配 corpus：目标 preparation 或 exact InputRevision recipe 使用生成/修订指令，
+其余必要依赖只作完整只读观察。validation/assessment/governance/prerequisite candidate 不附加 generation 任务。
+proof planning/review 保留匹配 CWI 的完整 corpus，并使用观察指令；普通 coverage order 不携带 corpus 或 receipt history。
+这些投影不是修改权限、oracle、receipt 或验收 credit；原 owner 完整来源校验保持。
 
 ### 请求去重、冻结与物理复用边界
 
@@ -356,7 +378,17 @@ C3 中 input revision 与当前快照、generation context 中相同来源文件
 不再按可变内容重渲染。correction 仅换原合同允许的 C4/C5，复用原 C0–C3/schema/消息块/key。预检无物理调用身份；
 真实提交及 native usage 仍按原 logical/physical identity 关联。
 
-C3 workContext 完整结束处拆为两个原角色 input_text block，拼接文本逐字节保持，首块请求额外 explicit breakpoint。
+新 semantic C3 在完整 content、workContext 及完整 authority 末尾按适用情况分段，operations 在完整 C3 末尾请求断点；
+拼接文本逐字节保持原角色。C4 可用 workFileRefs 精确引用本请求 C3 的同 target/hash/bytes corpus 文件，
+render gate 先闭合展开，再分别对原 corpus 与 frozen work source 逐值反证；不同前像不共享。
 C0–C2 前缀隔离不变；requested hint 与 effective unknown 分开，不能据客户端断点声称网关已生效。section 统计记录
 body/expanded bytes、本地引用数及闭合组件字段 bytes，经原 usage/event/projection 链路展示，不导出任意业务 JSON key。
 不增加估算预算、跨 Workspace 字典或结果缓存。native tokens、费用和模型重复评测尚需部署验证。
+
+
+当前任务反馈按 focus/CWI、allowed evidence refs 或当前精确 failure 选择完整相关集合，去除任意最近四条窗口；
+原 causal validation failure 独立保留。rejected/no-progress shapes 已是 owner 当前 focus 反重放约束，继续完整提供。
+Memories 无 stage selector，保留原授权激活快照，不按内容关键词猜选。组件审计记录闭合组 included/excluded、reason/source、
+body/expanded bytes 与引用数，经 Eventstream/readmodel 保全；冻结/纠正按实际原物理块观察断点，不从新 renderer 推测。
+回归：`runtime_input_applicability_test.go`、`runtime_provider_input_test.go`、`provider_section_messages_test.go`、
+`runtime_request_metrics_test.go` 及 readmodel `llm_cache_audit_ingress_test.go`；真实 gateway 收益须另行部署观察。

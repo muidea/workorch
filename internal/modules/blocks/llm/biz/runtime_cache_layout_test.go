@@ -80,7 +80,7 @@ func assertRuntimeCacheLayoutOperations(t *testing.T, input llmmodels.RuntimeCan
 	broken.PromptContext = &prompt
 	prompt.Sections[3].Content = strings.Replace(prompt.Sections[3].Content, `"FocusRef":"context.focus"`, `"FocusRef":"other.focus"`, 1)
 	budget := *modern.ContextBudget
-	if validateRuntimeCandidateContextIntegrity(input.DefinitionContext, input.CandidateContext, 0, nil, &budget, &prompt) == nil {
+	if validateRuntimeCandidateContextIntegrity(input.DefinitionContext, input.CandidateContext, input.CandidateManifest, 0, nil, &budget, &prompt) == nil {
 		t.Fatal("foreign focus reference passed current-context guard")
 	}
 	limited := input

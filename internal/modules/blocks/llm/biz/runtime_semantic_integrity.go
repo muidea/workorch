@@ -70,7 +70,7 @@ func validateRuntimeSemanticContextIntegrity(context runtimecontract.RuntimeSema
 	}{
 		{"P2.semantic_coverage_progress", reflect.DeepEqual(tail.CoverageProgress, context.CoverageProgress)},
 		{"P1.semantic_execution_feedback", reflect.DeepEqual(tail.ExecutionFeedback, context.ExecutionFeedback)},
-		{"P3.semantic_execution_history", reflect.DeepEqual(tail.ExecutionHistory, context.ExecutionHistory)},
+		{"P3.semantic_execution_history", reflect.DeepEqual(tail.ExecutionHistory, runtimeSemanticVisibleHistory(context, manifest))},
 		{"P3.semantic_execution_budget", reflect.DeepEqual(tail.ExecutionBudget, context.ExecutionBudget)},
 		{"P4.semantic_work_context", reflect.DeepEqual(tail.WorkContext, expectedWorkContext)},
 	} {

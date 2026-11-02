@@ -53,9 +53,30 @@ func sectionMessages(request llmmodels.ProviderRequest, prefixOnly bool) []respo
 			role = "developer"
 		}
 		blocks := []responsesInputContent{{Type: "input_text", Text: "### " + section.ID + "\n" + section.Content}}
-		if section.ID == "C3.semantic-authority" && role == "user" {
-			if end := semanticWorkPrefixEnd(section.Content); end > 0 && end < len(section.Content) {
-				blocks = []responsesInputContent{{Type: "input_text", Text: "### " + section.ID + "\n" + section.Content[:end], PromptCacheBreakpoint: &responsesCacheBreakpoint{Mode: "explicit"}}, {Type: "input_text", Text: section.Content[end:]}}
+		if role == "user" && (section.ID == "C3.semantic-authority" || section.ID == "C3.runtime-authority") {
+			// At most three C3 boundaries plus C2: content, complete work, authority.
+			// New blocks concatenate exactly; old frozen messages are never rebuilt.
+			ends := []int{}
+			if section.ID == "C3.semantic-authority" {
+				if end := semanticContentPrefixEnd(section.Content); end > 0 {
+					ends = append(ends, end)
+				}
+				if end := semanticWorkPrefixEnd(section.Content); end > 0 && (len(ends) == 0 || end > ends[len(ends)-1]) {
+					ends = append(ends, end)
+				}
+			}
+			if len(ends) == 0 || ends[len(ends)-1] < len(section.Content) {
+				ends = append(ends, len(section.Content))
+			}
+			blocks = nil
+			begin := 0
+			for _, end := range ends {
+				text := section.Content[begin:end]
+				if begin == 0 {
+					text = "### " + section.ID + "\n" + text
+				}
+				blocks = append(blocks, responsesInputContent{Type: "input_text", Text: text, PromptCacheBreakpoint: &responsesCacheBreakpoint{Mode: "explicit"}})
+				begin = end
 			}
 		}
 		messages = append(messages, responsesInputMessage{Role: role, Content: blocks})
@@ -146,34 +167,48 @@ func responsesWireInputForRequest(request *llmmodels.ProviderRequest) json.RawMe
 	return wire
 }
 
-// The first block ends after the complete reusable work snapshot/history. The
-// concatenated text is byte-identical, and both blocks keep the user role.
-// This requests an adapter breakpoint, never asserts remote gateway support.
+// Return the exact complete work prefix; content has its own earlier boundary.
 func semanticWorkPrefixEnd(content string) int {
+	_, end := jsonFieldRange(content, "workContext")
+	return end
+}
+
+// jsonFieldRange returns offsets into the original JSON, not re-marshaled text.
+func jsonFieldRange(content, field string) (start, end int) {
 	d := json.NewDecoder(bytes.NewBufferString(content))
-	token, err := d.Token()
-	if err != nil || token != json.Delim('{') {
-		return 0
+	if token, err := d.Token(); err != nil || token != json.Delim('{') {
+		return 0, 0
 	}
-	end := 0
 	for d.More() {
 		key, err := d.Token()
 		if err != nil {
-			return 0
+			return 0, 0
 		}
 		var raw json.RawMessage
 		if d.Decode(&raw) != nil {
-			return 0
+			return 0, 0
 		}
-		if key == "workContext" && string(raw) != "null" {
-			end = int(d.InputOffset())
+		if key == field && string(raw) != "null" {
+			start, end = int(d.InputOffset())-len(raw), int(d.InputOffset())
 		}
 	}
-	if _, err = d.Token(); err != nil {
+	if _, err := d.Token(); err != nil {
+		return 0, 0
+	}
+	if _, err := d.Token(); err != io.EOF {
+		return 0, 0
+	}
+	return
+}
+
+func semanticContentPrefixEnd(content string) int {
+	start, end := jsonFieldRange(content, "workContext")
+	if end == 0 {
 		return 0
 	}
-	if _, err = d.Token(); err != io.EOF {
+	_, innerEnd := jsonFieldRange(content[start:end], "content")
+	if innerEnd == 0 {
 		return 0
 	}
-	return end
+	return start + innerEnd
 }

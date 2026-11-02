@@ -304,6 +304,12 @@ func sanitizeLLMContextBudgetAudit(input workorcheventpayload.Payload) workorche
 			paths, sizes := llmContextComponentArrays(section)
 			if len(paths) > 0 {
 				sectionFields = append(sectionFields, workorcheventpayload.StringArrayField("componentPaths", paths), workorcheventpayload.Field{Name: "componentBytes", Value: workorcheventpayload.Value{Kind: workorcheventpayload.ValueArray, Array: sizes}})
+				// Selection reasons are parallel scalar arrays at the same audit depth.
+				for _, name := range []string{"componentApplicability", "componentReasons", "componentSources"} {
+					if values, ok := section.StringSlice(name); ok && len(values) == len(paths) {
+						sectionFields = append(sectionFields, workorcheventpayload.StringArrayField(name, values))
+					}
+				}
 			}
 			sections = append(sections, workorcheventpayload.Value{Kind: workorcheventpayload.ValueObject, Object: workorcheventpayload.New(sectionFields...).Fields})
 		}

@@ -833,8 +833,14 @@ func providerContextBudgetAudit(budget *llmmodels.ProviderContextBudget) llmaudi
 		}
 		if budget.MessageLayout == llmmodels.PromptMessageLayoutSectionsV1 {
 			ret.CacheObservation.RequestedHints = "explicit_prefix_breakpoint"
+			if budget.CachePlan.AuthorityBreakpointRequested {
+				ret.CacheObservation.RequestedHints = "explicit_prefix_and_authority_breakpoints"
+			}
 			if budget.CachePlan.WorkSnapshotBreakpointRequested {
 				ret.CacheObservation.RequestedHints = "explicit_prefix_and_work_snapshot_breakpoints"
+				if budget.CachePlan.AuthorityBreakpointRequested {
+					ret.CacheObservation.RequestedHints = "explicit_prefix_work_snapshot_and_authority_breakpoints"
+				}
 			}
 		}
 
@@ -894,7 +900,7 @@ func boundedLLMAuditSections(values []llmmodels.ProviderCacheSectionHash) []llma
 		seen[id] = struct{}{}
 		var components []llmaudit.ContextComponent
 		for _, c := range value.Components {
-			components = append(components, llmaudit.ContextComponent{Path: c.Path, Bytes: c.Bytes})
+			components = append(components, llmaudit.ContextComponent{Path: c.Path, Bytes: c.Bytes, Applicability: c.Applicability, Reason: c.Reason, Source: c.Source})
 		}
 		ret = append(ret, llmaudit.ContextSection{
 			BodyBytes: value.BodyBytes, ExpandedBytes: value.ExpandedBytes, LocalReferences: value.LocalReferences, Applicability: value.Applicability, Components: components,

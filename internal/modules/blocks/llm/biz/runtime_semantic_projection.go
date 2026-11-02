@@ -56,20 +56,21 @@ type runtimeSemanticManifestProjection struct {
 // 工作 C3 只投影完整有界 vocabulary 与 exact owner scope；不携带 receipt、预算权限或原始诊断。
 // policy 为 immutable Profile 声明，scope 只为提议约束，不是工作/终验 dispatch authority。
 type runtimeSemanticImplementationWorkProjection struct {
-	PreviousRound           *runtimecontract.RuntimeImplementationRoundReviewSource `json:"previousRound,omitempty"`
-	InputRevision           *runtimecontract.RuntimeValidationInputRevision         `json:"inputRevision,omitempty"`
-	CoverageWorkItemID      common.CoverageWorkItemID                               `json:"coverageWorkItemId"`
-	PurposeChoiceOnly       bool                                                    `json:"purposeChoiceOnly"`
-	RepeatedWorkStates      int                                                     `json:"repeatedWorkStates"`
-	EffectAvailable         bool                                                    `json:"effectAvailable"`
-	RoundHash               string                                                  `json:"roundHash"`
-	Ordinal                 int                                                     `json:"ordinal"`
-	PrecedingReceiptSetHash string                                                  `json:"precedingReceiptSetHash,omitempty"`
-	PolicyHash              string                                                  `json:"policyHash"`
-	Policy                  runtimecontract.RuntimeImplementationWorkPolicy         `json:"policy"`
-	Scope                   runtimeSemanticImplementationScopeProjection            `json:"scope"`
-	ExcludedTargetRefs      []string                                                `json:"excludedTargetRefs,omitempty"`
-	TerminalEvidenceCredit  bool                                                    `json:"terminalEvidenceCredit"`
+	InputCoverageRevisionTasks []runtimeInputCoverageRevisionTask                      `json:"inputCoverageRevisionTasks,omitempty"`
+	PreviousRound              *runtimecontract.RuntimeImplementationRoundReviewSource `json:"previousRound,omitempty"`
+	InputRevision              *runtimecontract.RuntimeValidationInputRevision         `json:"inputRevision,omitempty"`
+	CoverageWorkItemID         common.CoverageWorkItemID                               `json:"coverageWorkItemId"`
+	PurposeChoiceOnly          bool                                                    `json:"purposeChoiceOnly"`
+	RepeatedWorkStates         int                                                     `json:"repeatedWorkStates"`
+	EffectAvailable            bool                                                    `json:"effectAvailable"`
+	RoundHash                  string                                                  `json:"roundHash"`
+	Ordinal                    int                                                     `json:"ordinal"`
+	PrecedingReceiptSetHash    string                                                  `json:"precedingReceiptSetHash,omitempty"`
+	PolicyHash                 string                                                  `json:"policyHash"`
+	Policy                     runtimecontract.RuntimeImplementationWorkPolicy         `json:"policy"`
+	Scope                      runtimeSemanticImplementationScopeProjection            `json:"scope"`
+	ExcludedTargetRefs         []string                                                `json:"excludedTargetRefs,omitempty"`
+	TerminalEvidenceCredit     bool                                                    `json:"terminalEvidenceCredit"`
 }
 
 type runtimeSemanticImplementationScopeProjection struct {
@@ -98,10 +99,11 @@ func runtimeSemanticImplementationWorkForProvider(work *runtimecontract.RuntimeS
 	}
 	selection := work.Scope.Selection
 	return &runtimeSemanticImplementationWorkProjection{
-		PreviousRound:      work.PreviousRound.Clone(),
-		CoverageWorkItemID: work.Scope.Request.CoverageWorkItemID,
-		InputRevision:      work.Scope.Request.InputRevision.Clone(),
-		PurposeChoiceOnly:  work.PurposeChoiceOnly, EffectAvailable: work.EffectAvailable, RepeatedWorkStates: work.RepeatedWorkStates,
+		InputCoverageRevisionTasks: runtimeInputCoverageRevisionTasks(work.Scope.Request.InputRevision),
+		PreviousRound:              work.PreviousRound.Clone(),
+		CoverageWorkItemID:         work.Scope.Request.CoverageWorkItemID,
+		InputRevision:              work.Scope.Request.InputRevision.Clone(),
+		PurposeChoiceOnly:          work.PurposeChoiceOnly, EffectAvailable: work.EffectAvailable, RepeatedWorkStates: work.RepeatedWorkStates,
 		RoundHash: work.RoundHash, Ordinal: work.Ordinal, PrecedingReceiptSetHash: work.PrecedingReceiptSetHash,
 		PolicyHash: work.PolicyHash, Policy: work.Scope.Request.Policy.Clone(),
 		ExcludedTargetRefs: append([]string(nil), work.ExcludedTargetRefs...),
@@ -173,6 +175,7 @@ func runtimeSemanticSourceObligationChecksForProvider(values []runtimecontract.R
 }
 
 type runtimeSemanticInputReviewProjection struct {
+	ProofResponsibilities []runtimeInputProofResponsibility `json:"proofResponsibilities"`
 	// Pure requirement projection, not a model conclusion or proof receipt.
 	RequiredProofConsumerRefs   []string                                                  `json:"requiredProofConsumerRefs,omitempty"`
 	OwnerModuleID               string                                                    `json:"ownerModuleId"`
@@ -350,6 +353,11 @@ func runtimeSemanticManifestForProvider(manifest runtimecontract.RuntimeSemantic
 	}
 	if step != runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
 		projection.ValidationGenerationContexts = runtimeValidationGenerationContexts(batchCoverageIDs, nil, append(append([]runtimecontract.RuntimeOperationAdmissibility(nil), manifest.OwnerCatalogs...), manifest.OwnerFactDependencyCatalogs...))
+		// Proof planning/review observes source; it is not the operation that
+		// prepares assertions. Retain full corpus for independent review/revision.
+		for i := range projection.ValidationGenerationContexts {
+			projection.ValidationGenerationContexts[i].CoverageInstruction = runtimeCorpusObservationInstruction
+		}
 		projection.AllowedOwnerModuleIDs = append([]string(nil), manifest.AllowedOwnerModuleIDs...)
 		projection.AllowedOperationKinds = append([]string(nil), manifest.AllowedOperationKinds...)
 		projection.AllowedTargetPolicies = append([]runtimecontract.RuntimeOperationTargetPolicy(nil), manifest.AllowedTargetPolicies...)

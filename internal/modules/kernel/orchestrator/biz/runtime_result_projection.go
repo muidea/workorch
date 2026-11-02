@@ -4,6 +4,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -17,17 +18,27 @@ import (
 )
 
 // deliverRuntimeTerminal 是唯一 SM-4 终态交付入口，先持久化不可变材料，再按 Result→Workspace→Run 投递。
-func (m *Biz) deliverRuntimeTerminal(ctx context.Context, aggregate runtime.RuntimeAggregate) error {
+func (m *Biz) deliverRuntimeTerminal(ctx context.Context, aggregate runtime.RuntimeAggregate) (deliveryErr error) {
+	boundary := "aggregate_validation"
+	defer func() {
+		if deliveryErr == nil {
+			return
+		}
+		deliveryErr = runtimeDeliveryBoundaryError(deliveryErr, string(ModuleID), boundary, aggregate)
+		m.archiveRuntimeTerminalDeliveryFailure(ctx, aggregate, deliveryErr)
+	}()
 	if m == nil || m.runtimeController == nil || (aggregate.Decision.Terminal == nil && aggregate.Termination == nil) {
 		return common.ErrInvalidArgument
 	}
 	if err := aggregate.Validate(); err != nil {
 		return fmt.Errorf("persisted Runtime terminal aggregate is invalid: %w", err)
 	}
+	boundary = "terminal_snapshot_observation"
 	proofs, err := m.observeRuntimeTerminalSnapshotProofs(ctx, aggregate)
 	if err != nil {
 		return err
 	}
+	boundary = "terminal_material_seal"
 	sealed, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 		Kind:     runtime.RuntimeInternalEventTerminalMaterialSealRequired,
 		Scope:    runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
@@ -40,6 +51,7 @@ func (m *Biz) deliverRuntimeTerminal(ctx context.Context, aggregate runtime.Runt
 	if aggregate.TerminalMaterialSeal == nil {
 		return fmt.Errorf("%w: terminal delivery has no original material seal", common.ErrConflict)
 	}
+	boundary = "terminal_request_validation"
 	request, err := terminalDeliveryRequest(aggregate)
 	if err != nil {
 		return err
@@ -59,6 +71,7 @@ func (m *Biz) deliverRuntimeTerminal(ctx context.Context, aggregate runtime.Runt
 		}
 	}
 	if !m.persistedDeliveryAcknowledged(ctx, aggregate, request.TerminalDeliveryID, runtimecontract.RuntimeDeliveryOwnerRun) {
+		boundary = "result_ack_identity_read"
 		resultID, found := m.persistedTerminalDeliveryResultID(ctx, aggregate, request.TerminalDeliveryID)
 		if !found {
 			return fmt.Errorf("%w: terminal Run delivery has no persisted Result-owner identity", common.ErrConflict)
@@ -136,7 +149,11 @@ func terminalDeliveryRequest(aggregate runtime.RuntimeAggregate) (orchestratorev
 	}, nil
 }
 
-func (m *Biz) deliverRuntimeResult(ctx context.Context, request orchestratorevents.RuntimeTerminalDeliveryRequestData, material resultevents.ResultMaterial) error {
+func (m *Biz) deliverRuntimeResult(ctx context.Context, request orchestratorevents.RuntimeTerminalDeliveryRequestData, material resultevents.ResultMaterial) (deliveryErr error) {
+	boundary := "owner_command"
+	defer func() {
+		deliveryErr = runtimeDeliveryRequestBoundaryError(deliveryErr, runtimecontract.RuntimeDeliveryOwnerResult, boundary, request)
+	}()
 	if m == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
@@ -153,6 +170,7 @@ func (m *Biz) deliverRuntimeResult(ctx context.Context, request orchestratoreven
 		}
 		return common.ErrInvalidArgument
 	}
+	boundary = "owner_response_decode"
 	data, resultErr := response.Get()
 	if resultErr != nil {
 		return resultErr
@@ -161,10 +179,15 @@ func (m *Biz) deliverRuntimeResult(ctx context.Context, request orchestratoreven
 	if !ok {
 		return common.ErrInvalidArgument
 	}
+	boundary = "acknowledgement_persist"
 	return m.recordRuntimeDeliveryAcknowledgement(ctx, ownerResult.DeliveryAck)
 }
 
-func (m *Biz) deliverRuntimeWorkspace(ctx context.Context, request orchestratorevents.RuntimeTerminalDeliveryRequestData) error {
+func (m *Biz) deliverRuntimeWorkspace(ctx context.Context, request orchestratorevents.RuntimeTerminalDeliveryRequestData) (deliveryErr error) {
+	boundary := "owner_command"
+	defer func() {
+		deliveryErr = runtimeDeliveryRequestBoundaryError(deliveryErr, runtimecontract.RuntimeDeliveryOwnerWorkspace, boundary, request)
+	}()
 	command := workspaceevents.RuntimeTerminalDeliveryFact{RuntimeTerminalDeliveryFact: runtimecontract.RuntimeTerminalDeliveryFact{RuntimeTerminalDeliveryIdentity: request.Identity(), SourceOwner: ModuleID, CausationID: request.CausationID}}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceFactTerminalDelivery, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	bindOwnerCommandLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceFactTerminalDelivery, "workspace", string(request.WorkspaceID), request.WorkspaceID, request.RunID)
@@ -175,6 +198,7 @@ func (m *Biz) deliverRuntimeWorkspace(ctx context.Context, request orchestratore
 		}
 		return common.ErrInvalidArgument
 	}
+	boundary = "owner_response_decode"
 	data, resultErr := response.Get()
 	if resultErr != nil {
 		return resultErr
@@ -183,10 +207,20 @@ func (m *Biz) deliverRuntimeWorkspace(ctx context.Context, request orchestratore
 	if !ok {
 		return common.ErrInvalidArgument
 	}
+	boundary = "acknowledgement_persist"
 	return m.recordRuntimeDeliveryAcknowledgement(ctx, ownerResult.DeliveryAck)
 }
 
-func (m *Biz) deliverRuntimeRun(ctx context.Context, request orchestratorevents.RuntimeTerminalDeliveryRequestData, resultID common.ResultID) error {
+func (m *Biz) deliverRuntimeRun(ctx context.Context, request orchestratorevents.RuntimeTerminalDeliveryRequestData, resultID common.ResultID) (deliveryErr error) {
+	boundary := "owner_command"
+	var ownerResponseError error
+	defer func() {
+		deliveryErr = runtimeDeliveryRequestBoundaryError(deliveryErr, runtimecontract.RuntimeDeliveryOwnerRun, boundary, request)
+		var detail *runtimeDeliveryBoundaryFailure
+		if errors.As(deliveryErr, &detail) && ownerResponseError != nil {
+			detail.responseError = ownerResponseError
+		}
+	}()
 	command := runevents.RuntimeTerminalDeliveryFact{
 		RuntimeTerminalDeliveryFact: runtimecontract.RuntimeTerminalDeliveryFact{RuntimeTerminalDeliveryIdentity: request.Identity(), SourceOwner: ModuleID, CausationID: request.CausationID},
 		ResultID:                    resultID,
@@ -194,10 +228,16 @@ func (m *Biz) deliverRuntimeRun(ctx context.Context, request orchestratorevents.
 	event := magicevent.NewEventWithContext(runevents.TopicRunFactTerminalDelivery, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunFactTerminalDelivery, "run", string(request.RunID), request.WorkspaceID, request.RunID)
 	response := m.EventHub().Send(event)
+	if response != nil && response.Error() == nil {
+		boundary = "owner_response_decode"
+	} else if response != nil {
+		ownerResponseError = response.Error()
+	}
 	ownerResult, err := runLifecycleCommandResponse(response, runevents.TopicRunFactTerminalDelivery)
 	if err != nil {
 		return err
 	}
+	boundary = "acknowledgement_persist"
 	return m.recordRuntimeDeliveryAcknowledgement(ctx, ownerResult.DeliveryAck)
 }
 

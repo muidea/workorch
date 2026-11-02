@@ -29,7 +29,7 @@ func TestCacheAuditSurvivesRealIngressAndProjection(t *testing.T) {
 					CacheObservation: llmaudit.CacheObservation{Renderer: "workorch.runtime_candidate_prompt/v2", MessageLayout: "section_messages/v1", Stage: "NeedStateChange", MetadataState: "complete", SourceSectionCount: 6, RecordedSectionCount: 6, RequestedHints: "explicit_prefix_breakpoint"},
 				}
 				for i := 0; i < 6; i++ {
-					budget.SectionHashes = append(budget.SectionHashes, llmaudit.ContextSection{ID: fmt.Sprintf("C%d", i), Hash: fmt.Sprintf("sha256:%s-%d", workspace, i), SizeBytes: 100 + i, BodyBytes: 90 + i, ExpandedBytes: 150 + i, LocalReferences: 2, Applicability: "current_request_authority", Components: []llmaudit.ContextComponent{{Path: "workContext", Bytes: 50}, {Path: "manifest", Bytes: 40}}, SourceRefs: []string{fmt.Sprintf("runtime://section/%d", i)}})
+					budget.SectionHashes = append(budget.SectionHashes, llmaudit.ContextSection{ID: fmt.Sprintf("C%d", i), Hash: fmt.Sprintf("sha256:%s-%d", workspace, i), SizeBytes: 100 + i, BodyBytes: 90 + i, ExpandedBytes: 150 + i, LocalReferences: 2, Applicability: "current_request_authority", Components: []llmaudit.ContextComponent{{Path: "workContext", Bytes: 50, Applicability: "included", Reason: "sealed_work_task", Source: "owner.workContext"}, {Path: "manifest", Bytes: 40, Applicability: "included", Reason: "sealed_task_contract", Source: "owner.manifest"}}, SourceRefs: []string{fmt.Sprintf("runtime://section/%d", i)}})
 				}
 				physical := "physical-" + workspace
 				// Populate every optional top-level field, including failureClass: the

@@ -75,12 +75,69 @@ func TestValidationProofCompositionExactMappingCloneReloadAndHash(t *testing.T) 
 	}
 }
 
+func TestValidationProofConsumersAreUnorderedWithoutRewritingReport(t *testing.T) {
+	_, binding, original := compositionFixture(t)
+	permutations := [][]string{
+		{"delivery", "rounds", RuntimeValidationInputConsumer},
+		{"delivery", RuntimeValidationInputConsumer, "rounds"},
+		{"rounds", "delivery", RuntimeValidationInputConsumer},
+		{"rounds", RuntimeValidationInputConsumer, "delivery"},
+		{RuntimeValidationInputConsumer, "delivery", "rounds"},
+		{RuntimeValidationInputConsumer, "rounds", "delivery"},
+	}
+	hashes := make(map[string]bool)
+	for _, refs := range permutations {
+		report := original.Clone()
+		report.Checks[0].Obligations[0].ProofConsumerRefs = slices.Clone(refs)
+		before, err := json.Marshal(report)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for range 2 { // Repeated admission and reload cannot mutate the report.
+			if err := report.ValidateAgainstBinding(binding); err != nil {
+				t.Fatalf("complete consumer set %v: %v", refs, err)
+			}
+			if err := report.ValidateCoverageCriteria(RuntimeCoverageItem{TargetText: original.Checks[0].Obligations[0].CriterionText}); err != nil {
+				t.Fatal(err)
+			}
+			loaded := RuntimeValidationInputReview{}
+			if err := json.Unmarshal(before, &loaded); err != nil || loaded.ValidateAgainstBinding(binding) != nil {
+				t.Fatalf("exact report reload: %v", err)
+			}
+			if !reflect.DeepEqual(loaded, report.Clone()) || !slices.Equal(loaded.Checks[0].Obligations[0].ProofConsumerRefs, refs) {
+				t.Fatal("report order was silently normalized")
+			}
+		}
+		after, _ := json.Marshal(report)
+		if string(before) != string(after) {
+			t.Fatal("admission changed original report bytes")
+		}
+		hash := StableRuntimeValidationInputReviewHash(report)
+		if hashes[hash] {
+			t.Fatal("distinct original report orders lost their exact provenance identity")
+		}
+		hashes[hash] = true
+		for _, finding := range []string{RuntimeValidationInputMissing, RuntimeValidationInputConflicting, RuntimeValidationInputUnknown} {
+			negative := report.Clone()
+			negative.Checks[0].Obligations[0].Finding = finding
+			negative.Checks[0].Conclusion = RuntimeValidationInputConflict
+			if finding == RuntimeValidationInputUnknown {
+				negative.Checks[0].Conclusion = RuntimeValidationInputInconclusive
+			}
+			if err := negative.ValidateAgainstBinding(binding); err != nil || RuntimeValidationInputReviewConclusion(negative) == RuntimeValidationInputConsistent {
+				t.Fatalf("structurally complete negative review changed meaning: %v", err)
+			}
+		}
+	}
+}
+
 func TestValidationProofCompositionRejectsMissingForeignAndLegacyMappings(t *testing.T) {
 	_, binding, report := compositionFixture(t)
 	before := report.Clone()
 	for name, refs := range map[string][]string{
 		"missing": nil, "lineage instead of behavior": {"delivery", "rounds"}, "missing required guard": {RuntimeValidationInputConsumer},
-		"foreign": {"foreign", RuntimeValidationInputConsumer}, "duplicate": {"delivery", "delivery", "rounds", RuntimeValidationInputConsumer}, "noncanonical": {RuntimeValidationInputConsumer, "rounds", "delivery"},
+		"foreign": {"foreign", RuntimeValidationInputConsumer}, "duplicate": {"delivery", "delivery", "rounds", RuntimeValidationInputConsumer},
+		"duplicate within bound": {"delivery", "delivery", RuntimeValidationInputConsumer}, "whitespace": {"delivery", "rounds", " validation_input"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			changed := report.Clone()

@@ -22,6 +22,7 @@ func runtimeSemanticInputReviewsForRequirement(catalogs []runtimecontract.Runtim
 					OwnerModuleID: catalog.OwnerModuleID, ValidationRecipeID: binding.ValidationRecipeID,
 					SubjectHash: binding.InputReview.Hash, ProtocolRef: binding.InputReview.ProtocolRef,
 					RequiredProofConsumerRefs: consumers,
+					ProofResponsibilities:     runtimeInputProofResponsibilities(binding.InputReview.LineageAssertions),
 					ScopeContractRef:          binding.InputReview.ScopeContractRef, ScopeRequirements: binding.InputReview.ScopeRequirements,
 					Files:                       append([]runtimecontract.RuntimeValidationInputReviewFile(nil), binding.InputReview.Files...),
 					LineageAssertions:           append([]runtimecontract.RuntimeLineageAssertion(nil), binding.InputReview.LineageAssertions...),
@@ -91,12 +92,21 @@ func runtimeSemanticInputObligationsInstruction(context runtimecontract.RuntimeS
 	}
 	base := " For validation/input-consistency, EVERY conjunct must be reviewed; these observations cannot authorize publication or grant execution credit. For a requiredCheckRef in sourceObligationChecks use its own original criterion and declaration; never substitute the shared CWI text. Every check MUST retain exact criterionText excerpts covering every non-whitespace original criterion character. Source checks use their own exact sourceObligationChecks criterion AND declaration, never shared CWI text. Each obligation includes finding, reason and inputTargetRefs."
 	if hasLineage {
-		base += " Canonical proofConsumerRefs must cover the complete requiredProofConsumerRefs, including validation_input AND every declared lineage rule; these are mandatory consumers, never selectable alternatives. The reserved validation_input consumer denotes actual assertions in the supplied input bytes; other refs must identify exact same-CWI sealed lineageAssertions. Independently judge joint semantic coverage: a rule ref or README claim is not proof. Ordinary all-of behavioral validation remains mandatory."
+		base += " Each obligation's proofConsumerRefs is a nonempty set of unique exact declared refs in any order. Across every check's obligations it must cover the complete requiredProofConsumerRefs, including validation_input AND every declared lineage rule; these are mandatory consumers, never selectable alternatives. The reserved validation_input consumer denotes actual assertions in the supplied input bytes; other refs must identify exact same-CWI sealed lineageAssertions. Independently judge joint semantic coverage: a rule ref or README claim is not proof. Ordinary all-of behavioral validation remains mandatory."
 	} else {
 		base += " Without lineageAssertions proofConsumerRefs are optional; when supplied they must name validation_input, which denotes actual assertions in the supplied input bytes."
 	}
 	if kinds[runtimecontract.RuntimeLineageCompletedWorkRounds] || kinds[runtimecontract.RuntimeLineageRepairThenFreshValidation] || kinds[runtimecontract.RuntimeLineageOwnerOperationReceipt] {
 		base += " Execution rules are separately checked against original work/repair/owner receipts at assessment cutoff."
+	}
+	hasDeferred := false
+	for _, review := range reviews {
+		for _, assertion := range review.LineageAssertions {
+			hasDeferred = hasDeferred || assertion.Rule.ConsumptionPoint == runtimecontract.RuntimeProofPhasePostTerminalDelivery
+		}
+	}
+	if hasDeferred {
+		base += " Every post_terminal_delivery consumer is reviewed only for its exact declared responsibility and source mapping. The absence of a future receipt, Result or ACK at input review time is not a coverage omission or unavailable input fact. Its actual satisfaction is checked by the declared consumer later; it cannot discharge ordinary behavioral assertions or certify the latest implementation bytes."
 	}
 	if kinds[runtimecontract.RuntimeLineageDeliveryAcknowledgements] {
 		base += " post_terminal_delivery rules describe future ordered ACK consumption, NOT existing ACKs, execution evidence or terminal credit."
@@ -111,4 +121,53 @@ func runtimeSemanticInputObligationsInstruction(context runtimecontract.RuntimeS
 		base += " The terminal_owner_snapshot separately requires exact original receiptSourceScope/receiptSourceId AND validationSourceScope/validationSourceId, actual owner-produced immutable snapshot/root identity, complete original validation-read and reviewed-input byte membership, and a clean unchanged bounded observation before the first material seal. It does not prove all owners remain continuously current."
 	}
 	return base + " During review these are obligation mappings, not existing receipts, snapshots or Results. Missing/conflicting => conflict; otherwise unknown => inconclusive; otherwise consistent. Never fabricate owner facts, waive a criterion, or widen owner input scope."
+}
+
+// Deterministic roles from sealed declarations. These are review instructions,
+// never a finding that a consumer has executed or covered a natural-language criterion.
+type runtimeInputProofResponsibility struct {
+	ConsumerRef          string `json:"consumerRef"`
+	ConsumptionPoint     string `json:"consumptionPoint"`
+	ReviewResponsibility string `json:"reviewResponsibility"`
+}
+
+func runtimeInputProofResponsibilities(assertions []runtimecontract.RuntimeLineageAssertion) []runtimeInputProofResponsibility {
+	ret := []runtimeInputProofResponsibility{{ConsumerRef: runtimecontract.RuntimeValidationInputConsumer, ConsumptionPoint: "ordinary_validation", ReviewResponsibility: "Review actual assertions in the complete supplied input corpus against every original behavioral criterion; names, compilation and self-claims are insufficient."}}
+	for _, assertion := range assertions {
+		responsibility := "Review the exact declared execution-receipt responsibility and source mapping; actual original receipts are independently consumed at assessment cutoff, never replaced by input assertions."
+		if assertion.Rule.ConsumptionPoint == runtimecontract.RuntimeProofPhasePostTerminalDelivery {
+			responsibility = "Review only the exact declared future responsibility and source mapping; do not require a future receipt, Result or ACK to exist now. Actual satisfaction is checked after terminal delivery and supplies no ordinary behavioral coverage."
+		}
+		ret = append(ret, runtimeInputProofResponsibility{ConsumerRef: assertion.Rule.Ref, ConsumptionPoint: string(assertion.Rule.ConsumptionPoint), ReviewResponsibility: responsibility})
+	}
+	return ret
+}
+
+// Index every original finding without duplicating or rewriting the raw report.
+// Indexes refer to inputRevision.report, which remains complete in this C3 input.
+// A worklist is not a replacement criterion, authorization or coverage ledger.
+type runtimeInputCoverageRevisionTask struct {
+	RequiredCheckRef                 string `json:"requiredCheckRef"`
+	CheckIndex                       int    `json:"checkIndex"`
+	PreserveCoveredObligationIndexes []int  `json:"preserveCoveredObligationIndexes,omitempty"`
+	UnresolvedObligationIndexes      []int  `json:"unresolvedObligationIndexes,omitempty"`
+}
+
+func runtimeInputCoverageRevisionTasks(revision *runtimecontract.RuntimeValidationInputRevision) []runtimeInputCoverageRevisionTask {
+	if revision == nil {
+		return nil
+	}
+	ret := make([]runtimeInputCoverageRevisionTask, 0, len(revision.Report.Checks))
+	for checkIndex, check := range revision.Report.Checks {
+		task := runtimeInputCoverageRevisionTask{RequiredCheckRef: check.RequiredCheckRef, CheckIndex: checkIndex}
+		for index, obligation := range check.Obligations {
+			if obligation.Finding == runtimecontract.RuntimeValidationInputCovered {
+				task.PreserveCoveredObligationIndexes = append(task.PreserveCoveredObligationIndexes, index)
+			} else {
+				task.UnresolvedObligationIndexes = append(task.UnresolvedObligationIndexes, index)
+			}
+		}
+		ret = append(ret, task)
+	}
+	return ret
 }

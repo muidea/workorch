@@ -364,11 +364,11 @@ func TestSemanticWorkPhysicalBoundaryIsExactUserDataAndSeparateFromTail(t *testi
 	}
 	found := false
 	for _, m := range sectionMessages(p, false) {
-		if len(m.Content) != 2 {
+		if len(m.Content) < 2 {
 			continue
 		}
 		found = true
-		if m.Role != "user" || m.Content[0].Text+m.Content[1].Text != source || m.Content[0].PromptCacheBreakpoint == nil || m.Content[1].PromptCacheBreakpoint != nil {
+		if m.Role != "user" || joinResponsesBlocks(m.Content) != source || m.Content[0].PromptCacheBreakpoint == nil || m.Content[len(m.Content)-1].PromptCacheBreakpoint == nil {
 			t.Fatal("snapshot split changed bytes/role or marked volatile tail cacheable")
 		}
 	}
@@ -376,11 +376,65 @@ func TestSemanticWorkPhysicalBoundaryIsExactUserDataAndSeparateFromTail(t *testi
 		t.Fatal("no reusable work boundary")
 	}
 	observed := providerContextBudgetAudit(p.ContextBudget).CacheObservation
-	if observed.RequestedHints != "explicit_prefix_and_work_snapshot_breakpoints" {
+	if observed.RequestedHints != "explicit_prefix_work_snapshot_and_authority_breakpoints" {
 		t.Fatal("actual requested boundary not observed")
 	}
 	effective, _ := observed.Payload().String("effectiveHints")
 	if effective != "unknown" {
 		t.Fatal("requested hint became claimed upstream support")
+	}
+}
+
+func joinResponsesBlocks(blocks []responsesInputContent) string {
+	var s string
+	for _, b := range blocks {
+		s += b.Text
+	}
+	return s
+}
+
+func TestSemanticCacheBoundariesReuseContentAcrossIntentAndHistoryChanges(t *testing.T) {
+	render := func(body, history, intent, authority, tail string) llmmodels.ProviderRequest {
+		r := sectionCacheRequest("ws", "phase")
+		r.PromptContext.Sections[3].ID = "C3.semantic-authority"
+		// The actual renderer orders work content ahead of prior rounds and intent.
+		r.PromptContext.Sections[3].Content = `{"workContext":{"content":{"Snapshots":[{"Content":"` + body + `"}]},"priorRounds":["` + history + `"],"intent":"` + intent + `"},"manifest":"` + authority + `"}`
+		r.PromptContext.Sections = append(r.PromptContext.Sections, llmmodels.PromptSection{ID: "C4.semantic-tail", Role: "user", Content: tail})
+		return r
+	}
+	base := render("exactsource", "round1", "intent1", "manifest", "attempt0")
+	original := sectionMessages(base, false)
+	if len(original[3].Content) != 3 {
+		t.Fatal("missing content/work/authority boundaries")
+	}
+	count := 0
+	for _, m := range original {
+		for _, b := range m.Content {
+			if b.PromptCacheBreakpoint != nil {
+				count++
+			}
+		}
+	}
+	if count != 4 || joinResponsesBlocks(original[3].Content) != "### C3.semantic-authority\n"+base.PromptContext.Sections[3].Content {
+		t.Fatal("cache budget or exact text changed")
+	}
+	for _, changed := range []llmmodels.ProviderRequest{render("exactsource", "round1", "intent2", "manifest", "attempt0"), render("exactsource", "round1+round2", "intent1", "manifest", "attempt0")} {
+		messages := sectionMessages(changed, false)
+		if !reflect.DeepEqual(original[3].Content[0], messages[3].Content[0]) || responsesPromptCacheKey(base) != responsesPromptCacheKey(changed) {
+			t.Fatal("intent/history broke unchanged content prefix")
+		}
+	}
+	tailChanged := sectionMessages(render("exactsource", "round1", "intent1", "manifest", "attempt1"), false)
+	if !reflect.DeepEqual(original[:4], tailChanged[:4]) {
+		t.Fatal("correction tail changed authority blocks")
+	}
+	sourceChanged := sectionMessages(render("newsource", "round1", "intent1", "manifest", "attempt0"), false)
+	if reflect.DeepEqual(original[3].Content[0], sourceChanged[3].Content[0]) {
+		t.Fatal("real change reused stale source")
+	}
+	for _, bad := range []string{`{"workContext":`, `{"workContext":{"content":{}}} trailing`, `[]`} {
+		if semanticContentPrefixEnd(bad) != 0 {
+			t.Fatal("invalid JSON created content boundary")
+		}
 	}
 }

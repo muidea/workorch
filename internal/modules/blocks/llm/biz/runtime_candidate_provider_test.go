@@ -1930,7 +1930,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 			Validation: &runtimecontract.RuntimeValidationObservation{RecipeID: "recipe", ObservationProtocolRef: "owner/checks/v1", FailedChecks: []string{"check-A"},
 				OutputPreview: "private output", CheckFailures: []runtimecontract.RuntimeValidationCheckFailure{{CheckRef: "check-A", TargetRef: "checks/a.test", Line: 47, DiagnosticHash: strings.Repeat("a", 64)}}}}
 		feedbackContext.Evidence.Rejected = []runtimecontract.EvidenceFact{failed}
-		for i := 0; i < runtimeCandidateExecutionTailLimit+1; i++ {
+		for i := 0; i < 5; i++ {
 			feedbackContext.Evidence.Rejected = append(feedbackContext.Evidence.Rejected, runtimecontract.EvidenceFact{ID: common.EvidenceRecordID(fmt.Sprintf("unrelated-%d", i)), Kind: runtimecontract.EvidenceKindStateChange})
 		}
 		withFeedback, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
@@ -2656,7 +2656,7 @@ func TestValidateRuntimeCandidateContextIntegrityRejectsProtectedContextLoss(t *
 		{ID: "C0.runtime", Content: "contract"}, {ID: "C1.goal", Content: "definition"}, {ID: "C2.capability", Content: "capability"},
 		{ID: "C3.authority", Content: "authority"}, {ID: "C4.execution", Content: "tail"},
 	}}
-	err := validateRuntimeCandidateContextIntegrity(definition, context, 0, nil, budget, prompt)
+	err := validateRuntimeCandidateContextIntegrity(definition, context, runtimecontract.RuntimeCandidateContractManifest{}, 0, nil, budget, prompt)
 	if err == nil || !strings.Contains(err.Error(), "P0.contract") || !strings.Contains(err.Error(), "P4.current_snapshots") || !strings.Contains(err.Error(), "protected_context_redacted") {
 		t.Fatalf("integrity error = %v", err)
 	}
