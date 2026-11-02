@@ -87,8 +87,11 @@ func validateRuntimeBootstrapStartupSeal(workspace *workspacemodel.Workspace, te
 		return fmt.Errorf("%w: Runtime bootstrap does not bind an eligible Workspace Definition admission", common.ErrConflict)
 	}
 	expectedInventory, err := definitionadmission.CompileRuntimeSourceObligationInventory(candidate, startup, admission)
-	if err != nil || !reflect.DeepEqual(expectedInventory, bootstrap.DefinitionSeed.SourceObligations) {
-		return fmt.Errorf("%w: Runtime bootstrap source obligations drifted from exact eligible specification", common.ErrConflict)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(expectedInventory, bootstrap.DefinitionSeed.SourceObligations) || !reflect.DeepEqual(expectedInventory, bootstrap.Definition.SourceObligations) {
+		return runtimecontract.NewRuntimeSourceObligationConflict("source_owner_binding", fmt.Errorf("%w: Runtime bootstrap source obligations drifted from exact eligible specification", common.ErrConflict))
 	}
 	if startup.WorkspaceTemplateRef != strings.TrimSpace(template.ID) {
 		return fmt.Errorf("%w: Runtime bootstrap Template snapshot drifted after Definition admission", common.ErrConflict)

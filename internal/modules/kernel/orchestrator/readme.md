@@ -795,8 +795,15 @@ current union 不含历史输入／后像，预算及三 ACK 门禁不变。
 `TestDriveRuntimeProfileDeliverableHistoricalAcceptanceProcessRecovery` 覆盖真实进程退出、新 Hub/owners 与原
 file-backed aggregate 恢复。二者采用 private startup/scripted provider，不代表公开 authoring fullflow 或 live。
 Profile 的 `RequiredEvidencePurposeContractRef` 仅声明确认前必须封存的来源关系，空扩展不改变既有 Profile hash。
-Workspace 与 bootstrap 从完整 Profile 集合核对必需关系、原文及单 Profile hash，缺失在进入 Runtime 前阻塞；
-不在运行期补映射或升级旧 aggregate。`TestMappedProfileHistoricalSourceFourRealWorkRoundsThenOrdinaryAcceptance`
+Workspace 在创作审查、确认及原 inventory 编译边界，从原 candidate Profile 认证原文和单 Profile hash；执行 owner
+独立反编 exact candidate inventory 并核对 Definition/seed，拒绝协调重算 hash 或替换原文。新 Start/Restart 使用当前
+Profile 的执行/证明方法，required 门禁核对用途身份、唯一完整关系及原 consumer 的适用性，不要求当前整体 hash 或
+描述等于历史来源。coverage compiler 以原 inventory 全文生成已映射 deliverable CWI/端点，当前描述不替换原义务；
+未映射声明仍按当前 Profile 编译。Bootstrap、facts、semantic request 与 aggregate 重载复用相同适用性/coverage 门禁。
+缺失、歧义、退役来源或不可用证明仍在进入 Runtime 前阻塞；不在运行期补映射或升级旧 aggregate。
+纯来源冲突通过 `runtime_source_obligation_conflict` 与具体 stage 交付，保留原 cause；启动前错误经 Workspace 执行请求
+返回，不伪造 Run 诊断记录，不将 provider/owner I/O 原文并入这一公开错误类型。
+`TestMappedProfileHistoricalSourceFourRealWorkRoundsThenOrdinaryAcceptance`
 覆盖初始历史 File effect 后，同一文件四轮真实修改、零提前 validation credit、普通终验结算及 Git 后继，
 以及普通证明 stale 后原消费者重验。`TestDriveRuntimeProfileDeliverableFourRoundProcessRecovery`
 覆盖行为提交后退出进程，再由新 owners 继续四轮及终验，保留原 receipt 和预算。这些是确定性 owner 回归，

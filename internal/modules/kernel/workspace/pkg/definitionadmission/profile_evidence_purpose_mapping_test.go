@@ -56,7 +56,7 @@ func TestProfileEvidencePurposeAdmissionConfirmsSnapshotWithoutInventingDoD(t *t
 			c.Specification.EvidencePurposeMappings[0].HistoricalText = "summary"
 		},
 		func(c *workspace.DefinitionAdmissionCandidate) {
-			c.Specification.EvidencePurposeMappings[0].HistoricalProfileHash = "new snapshot"
+			c.Specification.EvidencePurposeMappings[0].HistoricalProfileHash = "runtime-profile-contracts:candidate-prefix-01234567890123456789"
 		},
 		func(c *workspace.DefinitionAdmissionCandidate) {
 			c.RuntimeProfileContracts[0].DeliverableExpectations[0].Description = "new obligation"
@@ -69,6 +69,9 @@ func TestProfileEvidencePurposeAdmissionConfirmsSnapshotWithoutInventingDoD(t *t
 		}
 		changed.RuntimeProfileContractsHash = runtimecontract.StableRuntimeProfileContractsHash(changed.RuntimeProfileContracts)
 		changed = changed.WithHash()
+		if err := ValidateAuthoringVerificationApplicability(*changed.Specification, changed.DoDInputs, changed.RuntimeProfileContracts); err == nil {
+			t.Fatal("rehashing substituted original source before review/confirmation")
+		}
 		if _, err := CompileRuntimeSourceObligationInventory(changed, s, a); err == nil {
 			t.Fatal("coordinated rehash substituted reviewed/confirmed source")
 		}

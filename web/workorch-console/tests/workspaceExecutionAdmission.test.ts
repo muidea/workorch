@@ -82,6 +82,14 @@ test('treats an ordinary JSON 409 error as a transport/contract error', () => {
   );
 });
 
+test('preserves the complete source conflict before any Run admission exists', () => {
+  const message = '  runtime_source_obligation_conflict [current_source_applicability]:\r\n原始业务原因\n  ';
+  assert.throws(
+    () => parseWorkspaceExecutionAdmission({ error: message, code: 'runtime_source_obligation_conflict', stage: 'current_source_applicability' }, expectation(409)),
+    (error: unknown) => error instanceof Error && error.message === message
+  );
+});
+
 test('rejects mismatched response identity', () => {
   const body = admission('reconciliation_requested', 'current_run_continuation_accepted', true, 'accepted');
   assert.throws(

@@ -24,10 +24,14 @@ type fixedWorkspaceExecutionAdmission struct {
 	outcome runtimecontract.RuntimeExecutionIntentOutcome
 	reason  runtimecontract.RuntimeExecutionIntentReason
 	calls   []workorchdevents.WorkspaceRunRequestedCommand
+	failure error
 }
 
 func (a *fixedWorkspaceExecutionAdmission) AdmitWorkspaceExecution(_ context.Context, _ string, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
 	a.calls = append(a.calls, command)
+	if a.failure != nil {
+		return workorchdevents.WorkspaceRunRequestedResult{}, a.failure
+	}
 	if a.outcome == runtimecontract.RuntimeExecutionIntentFreshUnresolved {
 		return workorchdevents.WorkspaceRunRequestedResult{WorkspaceID: command.WorkspaceID, RequestID: command.RequestID,
 			Kind: runtimecontract.RuntimeExecutionIntentRestart, Outcome: a.outcome, Reason: a.reason,
@@ -41,6 +45,28 @@ func (a *fixedWorkspaceExecutionAdmission) AdmitWorkspaceExecution(_ context.Con
 		Outcome:     a.outcome,
 		Reason:      a.reason,
 	}, nil
+}
+
+func TestWorkspaceExecutionHTTPReportsSourceConflictBeforeAnyRunExists(t *testing.T) {
+	profiles := []runtimecontract.RuntimeProfileContract{{ID: "original", DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{ID: "delivery", Required: true, Description: "原义务\r\n全文", RequiredEvidencePurposeContractRef: runtimecontract.RuntimeProfileDeliverableEvidencePurpose}}}}
+	failure := runtimecontract.ValidateRuntimeSourceObligationApplicability(nil, profiles)
+	if failure == nil {
+		t.Fatal("fixture must fail required source gate")
+	}
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
+	port := &fixedWorkspaceExecutionAdmission{failure: failure}
+	state.workspaceExecutionAdmission = port
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/ws-no-run/execution-activations", strings.NewReader(`{"intent":"restart","requestId":"original-request"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	newMuxWithState(state).ServeHTTP(recorder, request)
+	var response errorResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusConflict || response.Code != runtimecontract.RuntimeSourceObligationConflictCode || response.Stage != "current_source_applicability" || response.Error != failure.Error() || len(port.calls) != 1 {
+		t.Fatalf("source conflict lost code, stage or original error: status=%d response=%+v calls=%d", recorder.Code, response, len(port.calls))
+	}
 }
 
 func TestWorkspaceExecutionHTTPUnresolvedIsNotAcceptedOrRejected(t *testing.T) {

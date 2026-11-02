@@ -17,6 +17,7 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	client "github.com/muidea/workorch/internal/pkg/workorchclient"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	port "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
@@ -639,6 +640,26 @@ func TestRemoteRunCommandRestartPostsWorkspaceScopedFreshActivation(t *testing.T
 	})
 	if err != nil || run == nil || run.RunID != "run-remote-restart" || run.Outcome != runtimecontract.RuntimeExecutionIntentReconciliationRequested || requests.Load() != 1 {
 		t.Fatalf("run=%+v requests=%d err=%v", run, requests.Load(), err)
+	}
+}
+
+func TestRemoteRunCommandPreservesSourceConflictBeforeRunAdmission(t *testing.T) {
+	message := "runtime_source_obligation_conflict [current_source_applicability]: required_evidence_purpose_missing\r\n" + strings.Repeat("原始业务原因", 2000)
+	requests := atomic.Int64{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/workorch/workspaces/ws-before-run/execution-activations" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": message, "code": runtimecontract.RuntimeSourceObligationConflictCode, "stage": "current_source_applicability"})
+	}))
+	defer server.Close()
+	admission, err := NewRemote(server.URL).Run().Command(context.Background(), port.WorkspaceRunCommand{WorkspaceID: "ws-before-run", Intent: port.RunCommandIntentRestart, RequestID: "original-request", Source: "tui"})
+	var apiError *client.APIError
+	if admission != nil || !errors.As(err, &apiError) || apiError.StatusCode != http.StatusConflict || apiError.Message != message || apiError.Code != runtimecontract.RuntimeSourceObligationConflictCode || apiError.Stage != "current_source_applicability" || requests.Load() != 1 {
+		t.Fatalf("lost source error or retried: admission=%v errorType=%T requests=%d", admission, err, requests.Load())
 	}
 }
 

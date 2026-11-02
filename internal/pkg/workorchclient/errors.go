@@ -5,6 +5,8 @@ import "fmt"
 type APIError struct {
 	StatusCode int
 	Message    string
+	Code       string
+	Stage      string
 }
 
 func (e *APIError) Error() string {

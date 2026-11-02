@@ -43,10 +43,13 @@ func validateRequiredRuntimeEvidencePurposes(mappings []RuntimeEvidencePurposeMa
 				continue
 			}
 			matches++
-			expected := r
-			expected.AcceptanceItemRef = m.AcceptanceItemRef
-			if m != expected || m.AcceptanceItemRef == "" {
-				return fmt.Errorf("required_evidence_purpose_invalid: %s differs from original Profile", r.HistoricalItemRef)
+			// This gate checks the current required declaration, not the preimage
+			// of the historical Profile. The confirmed candidate authenticates
+			// that hash and complete text at the source-owner boundary; comparing
+			// either with today's description would pin unrelated proof updates.
+			if m.ContractRef != r.ContractRef || m.HistoricalProfileID != r.HistoricalProfileID ||
+				m.HistoricalDeliverableID != r.HistoricalDeliverableID || m.AcceptanceItemRef == "" {
+				return fmt.Errorf("required_evidence_purpose_invalid: %s differs from current required declaration", r.HistoricalItemRef)
 			}
 		}
 		if matches != 1 {

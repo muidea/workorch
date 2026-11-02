@@ -79,7 +79,7 @@ func ValidateExecutionBootstrap(w *workspace.Workspace, t *workspace.WorkspaceTe
 		return err
 	}
 	if bootstrap.Definition.StartupInputHash != w.StartupInput.StartupInputHash || bootstrap.Definition.Revision != w.StartupInput.DefinitionRevision || !reflect.DeepEqual(expected, bootstrap.Definition.SourceObligations) || !reflect.DeepEqual(expected, bootstrap.DefinitionSeed.SourceObligations) {
-		return fmt.Errorf("%w: execution source differs from confirmed business inventory", common.ErrConflict)
+		return rc.NewRuntimeSourceObligationConflict("source_owner_binding", fmt.Errorf("%w: execution source differs from confirmed business inventory", common.ErrConflict))
 	}
 	return nil
 }

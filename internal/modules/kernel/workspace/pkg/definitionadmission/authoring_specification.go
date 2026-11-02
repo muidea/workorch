@@ -53,6 +53,13 @@ func ValidateSpecificationExecutionProofMappings(spec workspacemodel.GoalSpecifi
 	for _, mapping := range spec.EvidencePurposeMappings {
 		inventory.EvidencePurposeMappings = append(inventory.EvidencePurposeMappings, runtimecontract.RuntimeEvidencePurposeMapping(mapping))
 	}
+	// Before confirmation these profiles are the candidate's original source
+	// snapshot. Authenticate history here, independently of current execution
+	// applicability, so a self-consistent replacement hash cannot be reviewed
+	// or materialized as an original source.
+	if err := runtimecontract.ValidateRuntimeHistoricalProfileEvidencePurposeSources(&inventory, profiles); err != nil {
+		return err
+	}
 	if err := runtimecontract.ValidateRuntimeEvidencePurposeMappings(inventory, profiles); err != nil {
 		return err
 	}

@@ -22,6 +22,11 @@ func runtimeMappedFourRoundBootstrap(t *testing.T, b runtimecontract.RuntimeBoot
 		TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: "profile/test-file-shell-git", TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: nil, MaxRepeatedWorkStates: 8, MaxTargetsPerRound: 4, RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true}
 	p := &b.Activation.ExecutionContract.ProfileContracts[0]
 	p.DeliverableExpectations[0].RequiredEvidencePurposeContractRef = runtimecontract.RuntimeProfileDeliverableEvidencePurpose
+	// The business source was confirmed before this execution method update.
+	// Exercise the real owner/CAS/process-recovery chain with the original
+	// required source and today's work policy, never by rehashing history.
+	originalProfiles := runtimecontract.CloneRuntimeProfileContracts(b.Activation.ExecutionContract.ProfileContracts)
+	p.DeliverableExpectations[0].Description += " Current execution guidance."
 	p.EvidenceRequirements[1].ImplementationWorkPolicy = &policy
 	p.EvidenceRequirements[1].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	p.EvidenceRequirements[1].AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
@@ -30,8 +35,14 @@ func runtimeMappedFourRoundBootstrap(t *testing.T, b runtimecontract.RuntimeBoot
 	b.Slices[1].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	b.DefinitionFocuses[1].ImplementationWorkPolicy = &policy
 	inventory := b.Definition.SourceObligations.Clone()
-	inventory.EvidencePurposeMappings[0].HistoricalProfileHash = runtimecontract.StableRuntimeProfileContractsHash([]runtimecontract.RuntimeProfileContract{*p})
+	inventory.EvidencePurposeMappings[0].HistoricalProfileHash = runtimecontract.StableRuntimeProfileContractsHash(originalProfiles)
 	inventory = inventory.WithHash()
+	if err := runtimecontract.ValidateRuntimeHistoricalProfileEvidencePurposeSources(&inventory, originalProfiles); err != nil {
+		t.Fatal(err)
+	}
+	if inventory.EvidencePurposeMappings[0].HistoricalProfileHash == runtimecontract.StableRuntimeProfileContractsHash(b.Activation.ExecutionContract.ProfileContracts) {
+		t.Fatal("fixture did not separate original source from current method")
+	}
 	b.Definition.SourceObligations = &inventory
 	items, err := runtimecontract.CompileRuntimeEvidencePurposeMappingCoverage(inventory, b.CoverageItems)
 	if err != nil {

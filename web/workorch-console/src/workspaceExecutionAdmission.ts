@@ -54,7 +54,7 @@ function isOptionalString(body: Record<string, unknown>, key: string) {
 
 function responseError(body: unknown, expectation: WorkspaceExecutionAdmissionExpectation, violation: string) {
   if (isRecord(body) && typeof body.error === 'string' && body.error.trim()) {
-    return new Error(body.error.trim());
+    return new Error(body.error);
   }
   const status = `${expectation.httpStatus} ${expectation.httpStatusText}`.trim();
   return new Error(`workspace execution admission contract violation (${status}): ${violation}`);

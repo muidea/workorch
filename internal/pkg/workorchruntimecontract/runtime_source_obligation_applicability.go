@@ -4,7 +4,8 @@ import "fmt"
 
 // ValidateRuntimeSourceObligationApplicability 在 bootstrap 与 fresh-load 重新核对
 // 已封存的 Profile 声明适用性，不从声明存在推导 owner readiness、binding 或 credit。
-func ValidateRuntimeSourceObligationApplicability(inventory *RuntimeSourceObligationInventory, profiles []RuntimeProfileContract) error {
+func ValidateRuntimeSourceObligationApplicability(inventory *RuntimeSourceObligationInventory, profiles []RuntimeProfileContract) (err error) {
+	defer func() { err = NewRuntimeSourceObligationConflict("current_source_applicability", err) }()
 	if inventory == nil {
 		if err := validateRequiredRuntimeEvidencePurposes(nil, profiles); err != nil {
 			return err

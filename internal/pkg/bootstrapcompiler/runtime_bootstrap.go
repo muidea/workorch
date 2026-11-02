@@ -34,35 +34,35 @@ func RuntimeBootstrapWithSourceObligations(goal *GoalInput, dod *DoDInput, defin
 		}
 		dodLines = append(dodLines, fmt.Sprintf("%d. %s", idx+1, item))
 	}
-	compiled, err := CompileCoverage(goal, dod, activation)
+	compiled, err := compileCoverage(goal, dod, activation, inventory)
 	if err != nil {
-		return nil, err
+		return nil, runtimecontract.NewRuntimeSourceObligationConflict("source_coverage_compilation", err)
 	}
 	if err := runtimecontract.ValidateRuntimeSourceObligationApplicability(inventory, activation.ExecutionContract.ProfileContracts); err != nil {
 		return nil, err
 	}
 	if inventory != nil {
 		if inventory.DefinitionRevision != definitionRevision || inventory.StartupInputHash != startupInputHash {
-			return nil, fmt.Errorf("runtime source obligations do not bind sealed Definition")
+			return nil, runtimecontract.NewRuntimeSourceObligationConflict("source_definition_binding", fmt.Errorf("runtime source obligations do not bind sealed Definition"))
 		}
 		compiled.CoverageItems, err = runtimecontract.CompileRuntimeExecutionProofMappingCoverage(*inventory, compiled.CoverageItems)
 		if err != nil {
-			return nil, err
+			return nil, runtimecontract.NewRuntimeSourceObligationConflict("source_coverage_compilation", err)
 		}
 		compiled.CoverageItems, err = runtimecontract.CompileRuntimeEvidencePurposeMappingCoverage(*inventory, compiled.CoverageItems)
 		if err != nil {
-			return nil, err
+			return nil, runtimecontract.NewRuntimeSourceObligationConflict("source_coverage_compilation", err)
 		}
 		for n := range compiled.CoverageItems {
 			item := &compiled.CoverageItems[n]
 			checks, err := runtimecontract.CompileRuntimeSourceObligationChecks(*inventory, *item)
 			if err != nil {
-				return nil, err
+				return nil, runtimecontract.NewRuntimeSourceObligationConflict("source_coverage_compilation", err)
 			}
 			item.SourceObligationChecks = checks
 			item.GoalExecutionAssertions, err = runtimecontract.CompileRuntimeGoalExecutionAssertions(inventory, *item, activation.ExecutionContract.ProfileContracts)
 			if err != nil {
-				return nil, err
+				return nil, runtimecontract.NewRuntimeSourceObligationConflict("source_coverage_compilation", err)
 			}
 		}
 	}

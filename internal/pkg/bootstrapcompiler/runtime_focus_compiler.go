@@ -50,6 +50,13 @@ func CompileCoverageFocuses(goal *GoalInput, dod *DoDInput, activation runtimeco
 
 // CompileCoverage builds focuses, acceptance slices and item-level coverage identities.
 func CompileCoverage(goal *GoalInput, dod *DoDInput, activation runtimecontract.RuntimeActivationContext) (CoverageCompilation, error) {
+	return compileCoverage(goal, dod, activation, nil)
+}
+
+// The inventory is authenticated by the Workspace owner against its confirmed
+// candidate. It supplies original obligation text, while the current activation
+// supplies execution/proof policy. Neither input is rewritten by compilation.
+func compileCoverage(goal *GoalInput, dod *DoDInput, activation runtimecontract.RuntimeActivationContext, inventory *runtimecontract.RuntimeSourceObligationInventory) (CoverageCompilation, error) {
 	if goal == nil || dod == nil {
 		return CoverageCompilation{}, common.ErrInvalidArgument
 	}
@@ -57,8 +64,16 @@ func CompileCoverage(goal *GoalInput, dod *DoDInput, activation runtimecontract.
 	if err := runtimecontract.ValidateRuntimeProfileContracts(activation.ExecutionContract.ProfileContracts); err != nil {
 		return CoverageCompilation{}, fmt.Errorf("runtime profile proof closure: %w", err)
 	}
+	if inventory != nil {
+		if err := inventory.Validate(); err != nil {
+			return CoverageCompilation{}, err
+		}
+	}
 	units, err := compileRuntimeCoverageWorkUnits(goal, dod, activation.ExecutionContract.ProfileContracts)
 	if err != nil {
+		return CoverageCompilation{}, err
+	}
+	if err := bindOriginalProfileWorkUnitText(units, inventory); err != nil {
 		return CoverageCompilation{}, err
 	}
 	allUnits := append([]workUnit(nil), units...)
@@ -79,6 +94,28 @@ func CompileCoverage(goal *GoalInput, dod *DoDInput, activation runtimecontract.
 		return CoverageCompilation{}, err
 	}
 	return finalizeRuntimeCoverage(compiled, allUnits, activation.ExecutionContract.ProfileContracts, slicePolicy.MaxFocuses)
+}
+
+func bindOriginalProfileWorkUnitText(units []workUnit, inventory *runtimecontract.RuntimeSourceObligationInventory) error {
+	if inventory == nil {
+		return nil
+	}
+	for _, mapping := range inventory.EvidencePurposeMappings {
+		if mapping.ContractRef != runtimecontract.RuntimeProfileDeliverableEvidencePurpose {
+			continue
+		}
+		matches := 0
+		for n := range units {
+			if units[n].sourceScope == "deliverable" && units[n].sourceID == mapping.HistoricalDeliverableID {
+				units[n].text = mapping.HistoricalText
+				matches++
+			}
+		}
+		if matches != 1 {
+			return fmt.Errorf("evidence purpose mapping requires unique original deliverable work unit: %s", mapping.HistoricalItemRef)
+		}
+	}
+	return nil
 }
 
 func compileRuntimeCoverageWorkUnits(goal *GoalInput, dod *DoDInput, profiles []runtimecontract.RuntimeProfileContract) ([]workUnit, error) {

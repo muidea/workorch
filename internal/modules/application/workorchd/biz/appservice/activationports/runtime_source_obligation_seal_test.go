@@ -76,11 +76,84 @@ func TestRuntimeBootstrapStartupSealRejectsCoordinatedSourceOmission(t *testing.
 	if err := validateRuntimeBootstrapStartupSeal(workspace, template, candidate, original); err != nil {
 		t.Fatal(err)
 	}
+	for _, change := range []string{"proof method", "deliverable description", "multiple Profiles"} {
+		t.Run(change, func(t *testing.T) {
+			current := activation.Clone()
+			switch change {
+			case "proof method":
+				current.ExecutionContract.ProfileContracts[0].EvidenceRequirements[0].Description += " current implementation"
+			case "deliverable description":
+				for n := range current.ExecutionContract.ProfileContracts[0].DeliverableExpectations {
+					current.ExecutionContract.ProfileContracts[0].DeliverableExpectations[n].Description += " current description"
+				}
+			case "multiple Profiles":
+				current.ExecutionContract.ProfileContracts = append(current.ExecutionContract.ProfileContracts, runtimecontract.RuntimeProfileContract{ID: "independent"})
+			}
+			bootstrap, err := activationcore.RuntimeBootstrapWithSourceObligations(goal, dod, startup.DefinitionRevision, startup.StartupInputHash, nil, current, inventory)
+			if err != nil {
+				t.Fatalf("full bootstrap with original required source and current Profile: %v", err)
+			}
+			if !reflect.DeepEqual(inventory, bootstrap.Definition.SourceObligations) || !reflect.DeepEqual(inventory, bootstrap.DefinitionSeed.SourceObligations) {
+				t.Fatal("bootstrap changed original inventory")
+			}
+			for _, mapping := range inventory.EvidencePurposeMappings {
+				if mapping.ContractRef != runtimecontract.RuntimeProfileDeliverableEvidencePurpose {
+					continue
+				}
+				found := false
+				for _, item := range bootstrap.CoverageItems {
+					if item.SourceScope != "deliverable" || item.SourceID != mapping.HistoricalDeliverableID {
+						continue
+					}
+					found = true
+					if item.TargetText != strings.TrimSpace(mapping.HistoricalText) || item.HistoricalAcceptance == nil {
+						t.Fatal("current description replaced original coverage endpoint")
+					}
+					endpoints, err := runtimecontract.ResolveRuntimeEvidencePurposeEndpoints(bootstrap.Definition, bootstrap.Activation.ExecutionContract, bootstrap.DefinitionSeed, item.ID)
+					if err != nil || endpoints.Mapping != mapping {
+						t.Fatalf("semantic endpoint lost original source: %v", err)
+					}
+				}
+				if !found {
+					t.Fatal("required source missing from coverage")
+				}
+			}
+			raw, err := json.Marshal(bootstrap)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var reloaded runtimecontract.RuntimeBootstrap
+			if err := json.Unmarshal(raw, &reloaded); err != nil {
+				t.Fatal(err)
+			}
+			if err := reloaded.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			facts, err := reloaded.InitialFacts(workspace.ID, "current-run")
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err = json.Marshal(facts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fresh runtimecontract.RuntimeFacts
+			if err := json.Unmarshal(raw, &fresh); err != nil {
+				t.Fatal(err)
+			}
+			if err := fresh.Validate(); err != nil {
+				t.Fatalf("fresh facts rejected unchanged original source: %v", err)
+			}
+			if !reflect.DeepEqual(original.DefinitionSeed.SourceObligations, reloaded.DefinitionSeed.SourceObligations) {
+				t.Fatal("reload changed original history")
+			}
+		})
+	}
 	before, err := json.Marshal(original)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"coordinated delete B", "remove inventory"} {
+	for _, name := range []string{"coordinated delete B", "remove inventory", "coordinated historical text", "coordinated historical hash"} {
 		t.Run(name, func(t *testing.T) {
 			if name == "remove inventory" {
 				if _, err := activationcore.RuntimeBootstrapWithSourceObligations(goal, dod, startup.DefinitionRevision, startup.StartupInputHash, nil, activation, nil); err == nil {
@@ -102,6 +175,16 @@ func TestRuntimeBootstrapStartupSealRejectsCoordinatedSourceOmission(t *testing.
 						value.Verifications = append(value.Verifications[:n], value.Verifications[n+1:]...)
 						break
 					}
+				}
+				value = value.WithHash()
+				forged = &value
+			}
+			if name == "coordinated historical text" || name == "coordinated historical hash" {
+				value := inventory.Clone()
+				if name == "coordinated historical text" {
+					value.EvidencePurposeMappings[0].HistoricalText = "forged original obligation"
+				} else {
+					value.EvidencePurposeMappings[0].HistoricalProfileHash = "runtime-profile-contracts:candidate-prefix-01234567890123456789"
 				}
 				value = value.WithHash()
 				forged = &value

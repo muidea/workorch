@@ -17,6 +17,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/service/server"
@@ -83,12 +84,36 @@ func (h authoringActivationObservationHub) Send(ev magicevent.Event) magicevent.
 }
 
 func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testing.T) {
+	testSoftwareDevFullSizeRestart(t, false)
+}
+
+func TestSoftwareDevFullSizeRestartUsesCurrentMethodsWithOriginalRequiredSources(t *testing.T) {
+	testSoftwareDevFullSizeRestart(t, true)
+}
+
+func testSoftwareDevFullSizeRestart(t *testing.T, updateMethods bool) {
+	t.Helper()
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "data")
 	hub := &fullSizeAuthoringProviderHub{Hub: magicevent.NewHub(1024)}
 	runtime := testkit.NewRuntime("file", root, hub)
 	defer runtime.Shutdown(ctx)
 	repositories := testkit.RuntimeExports(runtime).Repositories
+	templateID := "software-dev"
+	if updateMethods {
+		// A test-owned catalog copy lets the real Workspace owner observe two
+		// deployments without mutating program-owned embedded defaults.
+		template, err := workspaceports.ReadWorkspaceTemplateRecord(ctx, hub, templateID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		templateID = "software-dev-current-method-fixture"
+		template.ID = templateID
+		template.EffectiveSources = nil
+		if err := repositories.WorkspaceTemplates.Create(ctx, template); err != nil {
+			t.Fatal(err)
+		}
+	}
 	calls := 0
 	hub.complete = func(command llmevents.CompleteProviderDocumentCommand) llmevents.CompleteProviderDocumentResult {
 		all, err := repositories.Workspaces.List(ctx)
@@ -195,7 +220,7 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 	for i := range 24 {
 		criteria = append(criteria, fmt.Sprintf("Required delivered behavior %02d is demonstrated by direct executable evidence.", i+1))
 	}
-	created := authoringHTTPRequest(t, baseURL, http.MethodPost, "/api/v1/workorch/workspace-authoring", management.DefinitionAuthoringCreate{RequestID: "full-size-authoring", Title: "完整规格创作", TemplateID: "software-dev", DeliverableDirectory: filepath.Join(t.TempDir(), "project"), Input: management.DefinitionAuthoringInput{GoalText: goal, AcceptanceRequirements: criteria}}, http.StatusCreated)
+	created := authoringHTTPRequest(t, baseURL, http.MethodPost, "/api/v1/workorch/workspace-authoring", management.DefinitionAuthoringCreate{RequestID: "full-size-authoring", Title: "完整规格创作", TemplateID: templateID, DeliverableDirectory: filepath.Join(t.TempDir(), "project"), Input: management.DefinitionAuthoringInput{GoalText: goal, AcceptanceRequirements: criteria}}, http.StatusCreated)
 	path := "/api/v1/workorch/workspaces/" + created.WorkspaceID + "/authoring"
 	ready := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", management.DefinitionAuthoringCompile{ExpectedInputHash: created.InputHash, ExpectedTemplateSnapshotHash: created.TemplateSnapshotHash}, http.StatusOK)
 	if ready.State != "ready_to_confirm" || ready.Proposal == nil || len(ready.Proposal.Reviews) != 6 || calls != 8 {
@@ -443,13 +468,87 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 	if err != nil || workspace.WorkspaceConfigurationHash(changed) == changed.DefinitionAuthoringConfirmation.ConfigurationHash {
 		t.Fatal("模型默认值未形成独立于确认的配置", err)
 	}
+	if updateMethods {
+		current, err := repositories.WorkspaceTemplates.Get(ctx, templateID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hints := current.ContextHints.Map()
+		profile := hints["profileContracts"].(map[string]any)["software-dev"].(map[string]any)
+		for _, value := range profile["deliverableExpectations"].([]any) {
+			declaration := value.(map[string]any)
+			declaration["description"] = declaration["description"].(string) + " Current descriptive guidance."
+		}
+		profile["evidenceRequirements"] = append(profile["evidenceRequirements"].([]any), map[string]any{
+			"id": "dod-002", "scope": "dodItem", "description": "Current additional proof contribution.",
+			"requiredEvidenceKinds": []string{runtimecontract.EvidenceKindValidation},
+			"acceptedStepKinds":     []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, "requiredCheckRefs": []string{"current-method-check"},
+		})
+		current.ContextHints, err = workorcheventpayload.FromMap(hints)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := repositories.WorkspaceTemplates.Update(ctx, current); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for range 2 {
 		recompiled, err := activationports.CompileWorkspaceExecutionRestartBootstrap(ctx, activation)
 		if err != nil || recompiled.Definition.StartupInputHash != first.Definition.StartupInputHash || !reflect.DeepEqual(recompiled.DefinitionSeed.SourceObligations, first.DefinitionSeed.SourceObligations) {
 			t.Fatalf("正常默认值更新阻塞后续编译或改写原规格: %v", err)
 		}
+		if updateMethods {
+			current, err := workspaceports.ReadWorkspaceTemplateRecord(ctx, hub, templateID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := definitionconfiguration.ValidateExecutionBootstrap(changed, current, *recompiled); err != nil {
+				t.Fatalf("owner rejected original source with current proof: %v", err)
+			}
+			if runtimecontract.StableRuntimeProfileContractsHash(first.Activation.ExecutionContract.ProfileContracts) == runtimecontract.StableRuntimeProfileContractsHash(recompiled.Activation.ExecutionContract.ProfileContracts) {
+				t.Fatal("compiler retained obsolete execution method")
+			}
+			foundCurrentCheck := false
+			for _, focus := range recompiled.DefinitionFocuses {
+				for _, ref := range focus.RequiredCheckRefs {
+					foundCurrentCheck = foundCurrentCheck || ref == "current-method-check"
+				}
+			}
+			if !foundCurrentCheck {
+				t.Fatal("current exact proof contribution was omitted")
+			}
+			for _, item := range recompiled.CoverageItems {
+				if item.HistoricalAcceptance != nil {
+					if _, err := runtimecontract.ResolveRuntimeEvidencePurposeEndpoints(recompiled.Definition, recompiled.Activation.ExecutionContract, recompiled.DefinitionSeed, item.ID); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			raw, err := json.Marshal(recompiled)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var reopened runtimecontract.RuntimeBootstrap
+			if err := json.Unmarshal(raw, &reopened); err != nil {
+				t.Fatal(err)
+			}
+			if err := reopened.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			facts, err := reopened.InitialFacts(changed.ID, "test-not-started")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := facts.Validate(); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 	if calls != 8 {
 		t.Fatal("配置重编发起额外模型调用")
+	}
+	currentOwner, err := repositories.Workspaces.Get(ctx, changed.ID)
+	if err != nil || !reflect.DeepEqual(changed, currentOwner) {
+		t.Fatal("current method compilation rewrote confirmed Workspace", err)
 	}
 }

@@ -33,7 +33,8 @@ func ValidateRuntimeProfileEvidencePurposeMappingDeclaration(m RuntimeEvidencePu
 // ValidateRuntimeHistoricalProfileEvidencePurposeSources authenticates the source
 // against its original confirmed Profile. Current applicability is a separate
 // check: a later declaration is not the preimage of a historical source hash.
-func ValidateRuntimeHistoricalProfileEvidencePurposeSources(inventory *RuntimeSourceObligationInventory, original []RuntimeProfileContract) error {
+func ValidateRuntimeHistoricalProfileEvidencePurposeSources(inventory *RuntimeSourceObligationInventory, original []RuntimeProfileContract) (err error) {
+	defer func() { err = NewRuntimeSourceObligationConflict("historical_source_authentication", err) }()
 	if inventory == nil {
 		return nil
 	}

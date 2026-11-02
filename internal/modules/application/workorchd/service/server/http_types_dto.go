@@ -383,6 +383,7 @@ type resolveApprovalRequest struct {
 type errorResponse struct {
 	Error                   string                                                          `json:"error"`
 	Code                    string                                                          `json:"code,omitempty"`
+	Stage                   string                                                          `json:"stage,omitempty"`
 	TicketID                string                                                          `json:"ticketId,omitempty"`
 	RequestedResolutionType string                                                          `json:"requestedResolutionType,omitempty"`
 	AllowedActions          []string                                                        `json:"allowedActions,omitempty"`

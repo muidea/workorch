@@ -183,9 +183,20 @@ func (c *Client) ResumeWorkspaceExecution(ctx context.Context, workspaceID strin
 		return nil, apiErrorFromResponse(resp)
 	}
 	defer resp.Body.Close()
-	var response executioncontract.WorkspaceExecutionAdmissionResponse
+	var response struct {
+		executioncontract.WorkspaceExecutionAdmissionResponse
+		Code  string `json:"code"`
+		Stage string `json:"stage"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return nil, fmt.Errorf("decode workspace execution admission: %w", err)
+	}
+	// Compilation can fail before the Workspace owner has any Run admission
+	// to return. Preserve that business error instead of trying to invent an
+	// admission from its absent outcome/identity. Real owner rejections still
+	// go through the complete typed classification and request checks below.
+	if resp.StatusCode == http.StatusConflict && response.Outcome == "" && response.Error != "" {
+		return nil, &APIError{StatusCode: resp.StatusCode, Message: response.Error, Code: response.Code, Stage: response.Stage}
 	}
 	admission, err := response.Admission()
 	if err != nil {

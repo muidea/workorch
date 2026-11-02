@@ -10,7 +10,10 @@ import (
 
 // CompileRuntimeSourceObligationInventory 仅从已封存、eligible 的 exact candidate
 // 投影来源图。不读取可变草稿，不解释正文，也不授予运行期 binding 或 credit。
-func CompileRuntimeSourceObligationInventory(candidate workspacemodel.DefinitionAdmissionCandidate, startup workspacemodel.WorkspaceStartupInputContract, admission workspacemodel.WorkspaceActivationAdmission) (*runtimecontract.RuntimeSourceObligationInventory, error) {
+func CompileRuntimeSourceObligationInventory(candidate workspacemodel.DefinitionAdmissionCandidate, startup workspacemodel.WorkspaceStartupInputContract, admission workspacemodel.WorkspaceActivationAdmission) (compiled *runtimecontract.RuntimeSourceObligationInventory, err error) {
+	defer func() {
+		err = runtimecontract.NewRuntimeSourceObligationConflict("historical_source_authentication", err)
+	}()
 	if err := admission.ValidateCandidate(startup, candidate); err != nil {
 		return nil, fmt.Errorf("runtime source obligations require exact Workspace admission: %w", err)
 	}
