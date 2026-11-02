@@ -77,7 +77,7 @@ func reducePreparationDiagnostic(o definitionSpecificationObservation, cmd works
 	if err != nil {
 		return definitionSpecificationTransition{}, err
 	}
-	if w.Revision != d.ObservedWorkspaceRevision || w.Revision == ^uint64(0) || d.InputHash != r.InputHash || d.TemplateSnapshotHash != r.TemplateSnapshotHash || o.template == nil || workspace.WorkspaceTemplateSnapshotHash(o.template) != r.TemplateSnapshotHash {
+	if w.Revision != d.ObservedWorkspaceRevision || w.Revision == ^uint64(0) || d.InputHash != r.InputHash || d.TemplateSnapshotHash != r.TemplateSnapshotHash || o.template == nil || o.template.ID != r.Input.TemplateID {
 		return definitionSpecificationTransition{}, common.ErrConflict
 	}
 	// 模型先检查 reserved target，再检查诊断容量。

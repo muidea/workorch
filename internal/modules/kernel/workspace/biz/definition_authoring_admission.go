@@ -76,8 +76,8 @@ func (m *Biz) verifyConfirmedAuthoringAdmission(ctx context.Context, current *wo
 	if err != nil || len(dods) != len(current.DefinitionAuthoringHistory)+1 || currentDoDLeaf(dods, current.ID) == nil || !reflect.DeepEqual(*currentDoDLeaf(dods, current.ID), journal.DoD) {
 		return common.ErrConflict
 	}
-	template, err := m.resolvedTemplate(ctx, current.TemplateID)
-	if err != nil || workspacemodel.WorkspaceTemplateSnapshotHash(template) != journal.TemplateSnapshotHash || candidate.WorkspaceTemplateSnapshot.TemplateRef != current.TemplateID || candidate.WorkspaceTemplateSnapshot.SnapshotHash != journal.TemplateSnapshotHash || candidate.WorkspaceTemplateSnapshot.Revision != "template:"+journal.TemplateSnapshotHash || candidate.ResolvedProjectWorkspaceDirectory != current.DeliverableDirectory {
+	template := &current.DefinitionAuthoring.TemplateSnapshot
+	if workspacemodel.WorkspaceTemplateSnapshotHash(template) != journal.TemplateSnapshotHash || candidate.WorkspaceTemplateSnapshot.TemplateRef != current.TemplateID || candidate.WorkspaceTemplateSnapshot.SnapshotHash != journal.TemplateSnapshotHash || candidate.WorkspaceTemplateSnapshot.Revision != "template:"+journal.TemplateSnapshotHash || candidate.ResolvedProjectWorkspaceDirectory != current.DeliverableDirectory {
 		return common.ErrConflict
 	}
 	bindings, err := definitionconfiguration.Compile(current, template)

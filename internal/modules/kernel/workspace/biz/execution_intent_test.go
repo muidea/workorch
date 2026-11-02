@@ -124,10 +124,15 @@ func (f *workspaceExecutionIntentFixture) seedWorkspace(t *testing.T, workspaceI
 		DefinitionRevision: definitionRevision, StartupInputHash: startup.StartupInputHash, State: workspacemodel.WorkspaceActivationEligible,
 	}
 	workspace := &workspacemodel.Workspace{
-		ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: activeRunID,
+		ID: workspaceID, TemplateID: "template-1", State: common.WorkspaceStateActive, ActiveRunID: activeRunID,
 		DeliverableDirectory: startup.ResolvedProjectWorkspaceDirectory, StartupInput: &startup, ActivationAdmission: &admission,
 		DefinitionAdmissionCandidates: []workspacemodel.DefinitionAdmissionCandidate{candidate},
 		PreparationFence:              &workspacemodel.WorkspacePreparationFence{Version: workspacemodel.WorkspacePreparationFenceVersion, WorkspaceID: workspaceID, CreationEpoch: strings.Repeat("a", 32)},
+	}
+	if _, err := f.biz.templates.Get(context.Background(), "template-1"); err != nil {
+		if err := f.biz.templates.Create(context.Background(), &workspacemodel.WorkspaceTemplate{ID: "template-1", Name: "current"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := f.workspaces.Create(context.Background(), workspace); err != nil {
 		t.Fatal(err)

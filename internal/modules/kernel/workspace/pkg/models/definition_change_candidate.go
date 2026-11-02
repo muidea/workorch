@@ -32,7 +32,7 @@ func (c DefinitionChangeCandidate) Validate(w *Workspace) error {
 	if w == nil || w.DefinitionAuthoring == nil || strings.TrimSpace(c.RequestID) == "" || len(c.RequestID) > 256 || !utf8.ValidString(c.RequestID) || c.TicketID == "" || c.ProposalRevision == 0 || c.ProposalHash == "" ||
 		c.ExpectedWorkspaceRevision == 0 || c.ExpectedWorkspaceRevision == ^uint64(0) || c.RecordedWorkspaceRevision != c.ExpectedWorkspaceRevision+1 || c.RecordedWorkspaceRevision > w.Revision ||
 		c.BaseInputHash != w.DefinitionAuthoring.InputHash || c.Record.Input.WorkspaceID != w.ID || w.DefinitionAuthoring.Input.Revision == ^uint64(0) || c.Record.Input.Revision != w.DefinitionAuthoring.Input.Revision+1 ||
-		c.Record.TemplateSnapshotHash != w.DefinitionAuthoring.TemplateSnapshotHash || c.Record.Validate() != nil ||
+		c.Record.TemplateSnapshot.ID != w.DefinitionAuthoring.Input.TemplateID || c.Record.Validate() != nil ||
 		c.Record.Input.TemplateID != w.DefinitionAuthoring.Input.TemplateID || !reflect.DeepEqual(c.Record.Input.ResourceRefs, w.DefinitionAuthoring.Input.ResourceRefs) {
 		return common.ErrConflict
 	}

@@ -63,7 +63,7 @@ func TestAuthoringSummaryEventRecordRefreshesHTTPListAndDetail(t *testing.T) {
 	}
 	reserve := workspaceevents.ReserveDefinitionDerivationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "derive"),
 		WorkspaceID: query.WorkspaceID, WorkspaceRevision: view.WorkspaceRevision,
-		InputHash: view.Record.InputHash, RequestID: "derive/" + view.Record.InputHash,
+		InputHash: view.Record.InputHash, RequestID: workspace.DefinitionDerivationRequestID(view.Record.InputHash, view.Record.TemplateSnapshotHash),
 		ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil), ProviderBindingHash: "fixture-provider",
 	}
 	reserved := send(workspaceevents.TopicWorkspaceDerivationReserve, reserve).(workspaceevents.DefinitionDerivationRequestResult)

@@ -13,6 +13,7 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -186,6 +187,13 @@ func (m *Biz) prepareWorkspaceExecutionIntent(ev magicevent.Event) (preparedWork
 	if err := validateRestartExecutionDefinition(cmd, goal, dod, definitionRevision); err != nil {
 		return preparedWorkspaceExecutionIntent{}, err
 	}
+	template, err := m.resolvedTemplate(ctx, workspace.TemplateID)
+	if err != nil {
+		return preparedWorkspaceExecutionIntent{}, err
+	}
+	if err := definitionconfiguration.ValidateExecutionBootstrap(workspace, template, *cmd.Bootstrap); err != nil {
+		return preparedWorkspaceExecutionIntent{}, err
+	}
 	return preparedWorkspaceExecutionIntent{
 		ctx: ctx, command: cmd, workspace: workspace, goal: goal, dod: dod, definitionRevision: definitionRevision,
 	}, nil
@@ -230,7 +238,7 @@ func (p preparedWorkspaceExecutionIntent) ownerAdmission() (workspaceevents.Work
 			}, true
 		}
 		definition := p.command.Bootstrap.Definition.Normalized()
-		if startup.Validate() != nil || admission.Validate(startup) != nil || admission.State != workspacemodel.WorkspaceActivationEligible || definition.Revision != startup.DefinitionRevision || definition.StartupInputHash != startup.StartupInputHash || runtimecontract.StableRuntimeProfileContractsHash(p.command.Bootstrap.Activation.ExecutionContract.ProfileContracts) != startup.RuntimeProfileContractsHash {
+		if startup.Validate() != nil || admission.Validate(startup) != nil || admission.State != workspacemodel.WorkspaceActivationEligible || definition.Revision != startup.DefinitionRevision || definition.StartupInputHash != startup.StartupInputHash {
 			return workspaceevents.WorkspaceExecutionIntentResult{
 				WorkspaceID: p.workspace.ID, RequestID: p.command.RequestID, Kind: p.command.Kind,
 				Outcome: runtimecontract.RuntimeExecutionIntentFreshActivationRequired,

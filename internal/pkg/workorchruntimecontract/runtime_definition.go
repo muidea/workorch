@@ -14,9 +14,9 @@ func StableRuntimeCandidatePrefixHash(definition RuntimeDefinitionContext) strin
 }
 
 // StableRuntimeProfileContractsHash seals the normalized profile policy set
-// independently from live capability catalogs. Workspace Definition admission
-// uses it to prove that the Runtime bootstrap consumes the exact pre-seal
-// profile snapshot rather than a later application-side reinterpretation.
+// independently from live capability catalogs. It authenticates the actual
+// declaration selected for a transaction. Historical admission hashes prove
+// their original source; they do not pin future execution to that declaration.
 func StableRuntimeProfileContractsHash(profiles []RuntimeProfileContract) string {
 	hash := StableRuntimeCandidatePrefixHashWithExecutionContract(RuntimeDefinitionContext{}, RuntimeExecutionContract{ProfileContracts: profiles})
 	return "runtime-profile-contracts:" + hash

@@ -113,7 +113,8 @@ func reduceDefinitionAuthoring(o definitionSpecificationObservation, cmd workspa
 		record.DerivationRequests = previous.Clone().DerivationRequests
 		record.SpecificationRequests = previous.Clone().SpecificationRequests
 		record.PreparationDiagnostics = previous.Clone().PreparationDiagnostics
-		if previous.Input.Revision == ^uint64(0) || input.Revision != previous.Input.Revision+1 {
+		machineRefresh := w.DefinitionAuthoringConfirmation == nil && input.InputHash() == previous.InputHash && directory == w.DeliverableDirectory && input.TemplateID == w.TemplateID
+		if !machineRefresh && (previous.Input.Revision == ^uint64(0) || input.Revision != previous.Input.Revision+1) {
 			return definitionSpecificationTransition{}, common.ErrConflict
 		}
 	} else {

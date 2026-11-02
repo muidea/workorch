@@ -67,6 +67,7 @@ func reduceDefinitionAdmissionInternalEvent(current *workspacemodel.Workspace, e
 		// 创作草稿和确认 journal 只能通过审查来源校验的专用准入入口。
 		return definitionAdmissionTransition{}, fmt.Errorf("%w: authoring draft requires reviewed confirmation before admission", common.ErrConflict)
 	}
+	originalConfiguration := current
 	if event.Intent.CurrentTemplate {
 		baseline := uint64(0)
 		if current.ActivationAdmission != nil {
@@ -100,7 +101,16 @@ func reduceDefinitionAdmissionInternalEvent(current *workspacemodel.Workspace, e
 	} else if _, _, err := current.ValidateActivationAdmissionPersistence(); err != nil {
 		return definitionAdmissionTransition{}, fmt.Errorf("%w: invalid current definition admission: %v", common.ErrConflict, err)
 	}
-	return reduceDefinitionAdmissionIntent(current, *event.Intent)
+	transition, err := reduceDefinitionAdmissionIntent(current, *event.Intent)
+	if err == nil && transition.Next != nil && event.Intent.CurrentTemplate {
+		// The selected declaration is archived in the admission; inherited defaults
+		// are a detached view, never project overrides for the next transaction.
+		transition.Next.DefaultSoulID = originalConfiguration.DefaultSoulID
+		transition.Next.SoulBindings = originalConfiguration.SoulBindings
+		transition.Next.ContextHints = originalConfiguration.ContextHints.Clone()
+		transition.Next.EvidencePolicies = originalConfiguration.EvidencePolicies
+	}
+	return transition, err
 }
 
 func reduceConfirmedAuthoringAdmission(current *workspacemodel.Workspace, command workspaceevents.AdmitDefinitionAuthoringCommand) (definitionAdmissionTransition, error) {

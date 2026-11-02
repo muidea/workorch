@@ -91,14 +91,14 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 	result.InputRevision = input.Revision
 	result.TemplateID = input.TemplateID
 	result.TemplateSnapshotHash = record.TemplateSnapshotHash
-	result.TemplateCurrent = view.CurrentTemplateAvailable && view.CurrentTemplateSnapshotHash == record.TemplateSnapshotHash
+	result.TemplateCurrent = view.CurrentTemplateAvailable
 	result.State = "draft"
 	var derivation *workspace.DefinitionDerivationRequest
 	selectedPermit := ""
 	if view.Confirmation != nil {
 		selectedPermit = view.Confirmation.DerivationPermitID
 	}
-	for n := range record.DerivationRequests {
+	for n := len(record.DerivationRequests) - 1; n >= 0; n-- {
 		request := &record.DerivationRequests[n]
 		if request.Input.InputHash() != record.InputHash || workspace.WorkspaceTemplateSnapshotHash(&request.Template) != record.TemplateSnapshotHash {
 			continue
@@ -108,7 +108,7 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 				derivation = request
 				break
 			}
-		} else if request.RequestID == "derive/"+record.InputHash {
+		} else {
 			derivation = request
 			break
 		}

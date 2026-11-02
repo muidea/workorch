@@ -102,7 +102,7 @@ export function WorkspaceAuthoringCandidate({ workspaceId, onClose, onOpenConfir
     try {
       const next = await workorchApi.compileDefinitionAuthoring(workspaceId, { expectedInputHash: baseline.inputHash!, expectedTemplateSnapshotHash: baseline.templateSnapshotHash! });
       if (!session.current.matches(token)) return;
-      if (next.inputHash !== baseline.inputHash || next.templateSnapshotHash !== baseline.templateSnapshotHash) throw new Error('生成回执与已查看输入不匹配，请只读核对服务端；不会自动生成新版本');
+      if (next.inputHash !== baseline.inputHash || next.inputRevision !== baseline.inputRevision) throw new Error('生成回执与已查看业务输入不匹配，请只读核对服务端');
       setAccepted(Boolean(next.compilationAccepted));
       acceptedInput.current = baseline.inputHash || '';
       acceptedFromPreparationFailure.current = baseline.state === 'preparation_failed';
@@ -142,7 +142,7 @@ export function WorkspaceAuthoringCandidate({ workspaceId, onClose, onOpenConfir
           { key: 'derivation', label: '派生请求身份', children: `${view.derivationRequestId || '-'} · ${view.derivationPermitId || '-'}` },
           { key: 'binding', label: '配置与资源绑定', children: `${view.providerBindingHash || '-'} · ${view.resourceSnapshotHash || '-'}` },
         ]} />
-        {!view.templateCurrent && <Alert type="warning" message="模板已变化或不可用；本步不会隐式保存新 revision，生成已阻塞。" />}
+        {!view.templateCurrent && <Alert type="warning" message="当前模板不可用，无法生成新的候选；已有记录仍可只读核对。" />}
         <Typography.Title level={5}>已保存输入原文</Typography.Title>
         <pre style={{ whiteSpace: 'pre-wrap' }}>{view.input?.goalText}</pre>
         {(view.input?.acceptanceRequirements || []).map((text, i) => <pre key={`requirement-${i}`} style={{ whiteSpace: 'pre-wrap' }}>{text}</pre>)}

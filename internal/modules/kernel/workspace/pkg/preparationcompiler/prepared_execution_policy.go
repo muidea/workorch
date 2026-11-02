@@ -89,7 +89,11 @@ func compileOriginalPreparedExecutionPolicy(w *workspace.Workspace, a workspace.
 func (s originalPreparedSource) policy(w *workspace.Workspace, a workspace.WorkspacePreparationAttempt) (PreparedExecutionPolicy, error) {
 	for _, e := range w.PreparationSealEvidence {
 		if e.Ref == a.SealEvidenceRef && e.ExecutionInputs != nil {
-			return CompilePreparedExecutionPolicy(s.snapshot, s.manifest, e.ExecutionInputs.Clone())
+			original, err := workspace.OriginalPreparationTemplate(w, a)
+			if err != nil {
+				return PreparedExecutionPolicy{}, err
+			}
+			return CompilePreparedExecutionPolicy(s.snapshot, s.manifest, e.ExecutionInputs.Clone(), original)
 		}
 	}
 	return PreparedExecutionPolicy{}, common.ErrConflict
@@ -98,11 +102,20 @@ func (s originalPreparedSource) policy(w *workspace.Workspace, a workspace.Works
 // Like CompilePreparedBootstrap, this detached compiler validates structure
 // but does not authenticate caller inputs or grant readiness. Production
 // historical consumers must use CompileOriginalPreparedExecutionPolicy.
-func CompilePreparedExecutionPolicy(snapshot startuppreparation.ExactConfirmedStartupSnapshot, manifest startuppreparation.Manifest, inputs workspace.PreparationExecutionInputs) (PreparedExecutionPolicy, error) {
-	if manifest.ValidateFor(snapshot) != nil || inputs.Validate() != nil || snapshot.WorkspaceRevision == ^uint64(0) || inputs.Process.WorkspaceID != snapshot.WorkspaceID || inputs.Process.WorkspaceRevision != snapshot.WorkspaceRevision+1 || workspace.WorkspaceTemplateSnapshotHash(&inputs.Template) != snapshot.StartupInput.TemplateSnapshotHash || inputs.Configuration.Hash() != snapshot.AuthoringConfigurationHash {
+func CompilePreparedExecutionPolicy(snapshot startuppreparation.ExactConfirmedStartupSnapshot, manifest startuppreparation.Manifest, inputs workspace.PreparationExecutionInputs, originalTemplate workspace.WorkspaceTemplate) (PreparedExecutionPolicy, error) {
+	if manifest.ValidateFor(snapshot) != nil || inputs.Validate() != nil || snapshot.WorkspaceRevision == ^uint64(0) || inputs.Process.WorkspaceID != snapshot.WorkspaceID || inputs.Process.WorkspaceRevision != snapshot.WorkspaceRevision+1 || inputs.Template.ID != snapshot.StartupInput.WorkspaceTemplateRef || inputs.Configuration.Hash() != snapshot.AuthoringConfigurationHash {
 		return PreparedExecutionPolicy{}, common.ErrConflict
 	}
-	w := &workspace.Workspace{ContextHints: inputs.Configuration.ContextHints.Clone()}
+	w := &workspace.Workspace{ID: snapshot.WorkspaceID, TemplateID: inputs.Template.ID, DefaultSoulID: inputs.Configuration.DefaultSoulID, SoulBindings: inputs.Configuration.Clone().SoulBindings, EvidencePolicies: inputs.Configuration.Clone().EvidencePolicies, ContextHints: inputs.Configuration.ContextHints.Clone(), DefinitionAdmissionCandidates: []workspace.DefinitionAdmissionCandidate{snapshot.Candidate.Clone()}, StartupInput: &snapshot.StartupInput, ActivationAdmission: &snapshot.ActivationAdmission}
+	// The source configuration is original owner material, while this operation's
+	// declaration snapshot is current and retained in ExecutionInputs.
+	originalTemplate = originalTemplate.Clone()
+	w.DefinitionAuthoring = &workspace.DefinitionAuthoringRecord{TemplateSnapshot: originalTemplate, Input: workspace.DefinitionAuthoringInput{GoalText: snapshot.Candidate.GoalInput.Text}}
+	current, err := workspace.WorkspaceForCurrentTemplate(w, &inputs.Template)
+	if err != nil {
+		return PreparedExecutionPolicy{}, err
+	}
+	w = current
 	contract := executionContractHints(w.ContextHints.Map(), inputs.Template.ContextHints.Map())
 	p := inputs.Process.Before
 	// Same exact configuration projection as applyConfiguredRuntimeRepairLimit;
@@ -118,10 +131,11 @@ func CompilePreparedExecutionPolicy(snapshot startuppreparation.ExactConfirmedSt
 		return PreparedExecutionPolicy{}, err
 	}
 	execution.ProfileContracts = compiled.ProfileContracts
-	if execution.Validate() != nil || runtimecontract.StableRuntimeProfileContractsHash(execution.ProfileContracts) != snapshot.StartupInput.RuntimeProfileContractsHash {
+	execution.ExecutionLimits = compiled.ExecutionLimits
+	if execution.Validate() != nil {
 		return PreparedExecutionPolicy{}, common.ErrConflict
 	}
-	policies, err := runtimeprojection.CompileRuntimeEvidencePolicies("Workspace", inputs.Configuration.EvidencePolicies)
+	policies, err := runtimeprojection.CompileRuntimeEvidencePolicies("Workspace", w.EvidencePolicies)
 	if err != nil {
 		return PreparedExecutionPolicy{}, err
 	}

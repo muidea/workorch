@@ -75,6 +75,20 @@ func (b *Biz) ObservePreparationSouls(ctx context.Context, command workspaceeven
 	if w == nil || w.ID != command.WorkspaceID || w.Revision != command.ExpectedWorkspaceRevision || workspace.WorkspaceConfigurationHash(w) != value.ConfigurationHash {
 		return fail("configuration_drift", common.ErrConflict)
 	}
+	// A check uses its owner-selected declaration. A standalone observation
+	// resolves current defaults without creating an operation or readiness.
+	if w.StartupPreparation != nil && len(w.StartupPreparation.Attempts) > 0 && w.StartupPreparation.Attempts[len(w.StartupPreparation.Attempts)-1].State == workspace.WorkspacePreparationAccepted && w.StartupPreparation.Attempts[len(w.StartupPreparation.Attempts)-1].ExecutionTemplate != nil {
+		w, err = workspace.PreparationWorkspace(w, w.StartupPreparation.Attempts[len(w.StartupPreparation.Attempts)-1])
+	} else {
+		var template *workspace.WorkspaceTemplate
+		template, err = ownerreadports.ReadWorkspaceTemplateByOwnerCommand(bounded, b.EventHub(), w.TemplateID)
+		if err == nil {
+			w, err = workspace.WorkspaceForCurrentTemplate(w, template)
+		}
+	}
+	if err != nil {
+		return fail("configuration_unavailable", err)
+	}
 	value.WorkspaceDefaultSoulID = w.DefaultSoulID
 	value.WorkspaceBindings = soulbinding.FromSoulIDMap(w.SoulBindings)
 	plan, defaultLookup, err := preparationSoulPlan(w, value.SystemDefaultSoulID)

@@ -37,7 +37,14 @@ func TestPreparationSkillHubReservationRecoveryFencesNewIntent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fact := workspacePreparationAccepted{Command: c, Snapshot: read.Snapshot, Manifest: manifest, At: time.Now().UTC(), SkillHubRef: workspace.PreparationSkillHubRefPrefix + strings.Repeat("a", 32)}
+	fact := workspacePreparationAccepted{ExecutionTemplate: func() *workspace.PreparationTemplate {
+		t, err := owners.workspace.resolvedTemplate(ctx, w.TemplateID)
+		if err != nil {
+			panic(err)
+		}
+		selected := workspace.NewPreparationTemplate(*t)
+		return &selected
+	}(), Command: c, Snapshot: read.Snapshot, Manifest: manifest, At: time.Now().UTC(), SkillHubRef: workspace.PreparationSkillHubRefPrefix + strings.Repeat("a", 32)}
 	plain := fact
 	plain.SkillHubRef = ""
 	base, baseErr := reduceWorkspacePreparationAccepted(w, plain)

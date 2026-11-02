@@ -35,7 +35,7 @@ func reduceDefinitionDerivation(o definitionSpecificationObservation, e definiti
 	var fresh bool
 	var err error
 	if cmd := e.DeriveReserve; cmd != nil {
-		if cmd.Validate() != nil || cmd.InputHash != record.InputHash || cmd.WorkspaceID != w.ID || o.template == nil || workspace.WorkspaceTemplateSnapshotHash(o.template) != record.TemplateSnapshotHash || workspace.ValidateDefinitionAuthoringResources(record.Input, cmd.Resources) != nil || (len(cmd.Resources) > 0 && (!e.VerifiedResources || cmd.WorkspaceRevision != w.Revision)) {
+		if cmd.Validate() != nil || cmd.InputHash != record.InputHash || cmd.WorkspaceID != w.ID || o.template == nil || !candidate && workspace.WorkspaceTemplateSnapshotHash(o.template) != record.TemplateSnapshotHash || workspace.ValidateDefinitionAuthoringResources(record.Input, cmd.Resources) != nil || (len(cmd.Resources) > 0 && (!e.VerifiedResources || cmd.WorkspaceRevision != w.Revision)) {
 			return definitionSpecificationTransition{}, common.ErrConflict
 		}
 		next, request, fresh, err = record.ReserveDerivation(cmd.RequestID, cmd.ProviderBindingHash, cmd.Resources)

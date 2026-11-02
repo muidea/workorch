@@ -34,7 +34,7 @@ func reduceAuthoringSpecification(o definitionSpecificationObservation, e defini
 	var fresh bool
 	var err error
 	if cmd := e.AuthoringSpecReserve; cmd != nil {
-		if cmd.Validate() != nil || cmd.WorkspaceID != w.ID || cmd.InputHash != record.InputHash || o.template == nil || workspace.WorkspaceTemplateSnapshotHash(o.template) != record.TemplateSnapshotHash {
+		if cmd.Validate() != nil || cmd.WorkspaceID != w.ID || cmd.InputHash != record.InputHash || o.template == nil || o.template.ID != record.Input.TemplateID {
 			return definitionSpecificationTransition{}, common.ErrConflict
 		}
 		next, request, fresh, err = record.ReserveSpecification(cmd.Request())

@@ -9,6 +9,6 @@ import (
 func CompileOriginalPreparedExecutionPolicy(w *workspace.Workspace, a workspace.WorkspacePreparationAttempt) (preparationcompiler.PreparedExecutionPolicy, error) {
 	return preparationcompiler.CompileOriginalPreparedExecutionPolicy(w, a)
 }
-func CompilePreparedExecutionPolicy(s startuppreparation.ExactConfirmedStartupSnapshot, m startuppreparation.Manifest, i workspace.PreparationExecutionInputs) (preparationcompiler.PreparedExecutionPolicy, error) {
-	return preparationcompiler.CompilePreparedExecutionPolicy(s, m, i)
+func CompilePreparedExecutionPolicy(s startuppreparation.ExactConfirmedStartupSnapshot, m startuppreparation.Manifest, i workspace.PreparationExecutionInputs, original workspace.WorkspaceTemplate) (preparationcompiler.PreparedExecutionPolicy, error) {
+	return preparationcompiler.CompilePreparedExecutionPolicy(s, m, i, original)
 }

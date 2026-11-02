@@ -109,9 +109,61 @@ func TestProfileEvidencePurposeRejectsRehashedDriftMissingAndAmbiguousSources(t 
 			i, p, _ := profilePurposeFixture()
 			mutate(&i, &p)
 			i = i.WithHash()
-			if ValidateRuntimeSourceObligationApplicability(&i, p) == nil {
+			if ValidateRuntimeSourceObligationApplicability(&i, p) == nil && ValidateRuntimeHistoricalProfileEvidencePurposeSources(&i, p) == nil {
 				t.Fatal("self-consistent hash bypassed confirmed Profile/original consumer")
 			}
 		})
+	}
+}
+
+func TestHistoricalProfileAuthenticationIsIndependentFromCurrentApplicability(t *testing.T) {
+	inventory, original, _ := profilePurposeFixture()
+	current := CloneRuntimeProfileContracts(original)
+	current[0].DeliverableExpectations[0].Description = "current execution declaration"
+	if err := ValidateRuntimeHistoricalProfileEvidencePurposeSources(&inventory, original); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateRuntimeSourceObligationApplicability(&inventory, current); err != nil {
+		t.Fatalf("current descriptive update blocked historical source: %v", err)
+	}
+	for _, mutate := range []func(*RuntimeSourceObligationInventory){
+		func(i *RuntimeSourceObligationInventory) {
+			i.EvidencePurposeMappings[0].HistoricalProfileHash = StableRuntimeProfileContractsHash(current)
+		},
+		func(i *RuntimeSourceObligationInventory) {
+			i.EvidencePurposeMappings[0].HistoricalText = "summarized original"
+		},
+	} {
+		forged := inventory.Clone()
+		mutate(&forged)
+		forged = forged.WithHash()
+		if ValidateRuntimeHistoricalProfileEvidencePurposeSources(&forged, original) == nil {
+			t.Fatal("rehashing substituted historical source")
+		}
+	}
+}
+
+func TestHistoricalProfileSourceAuthenticatesItsOwnProfileInMultipleProfiles(t *testing.T) {
+	inventory, original, _ := profilePurposeFixture()
+	other := CloneRuntimeProfileContracts(original)[0]
+	other.ID = "independent-profile"
+	other.DeliverableExpectations[0].ID = "independent-deliverable"
+	original = append(original, other)
+	if err := ValidateRuntimeHistoricalProfileEvidencePurposeSources(&inventory, original); err != nil {
+		t.Fatalf("unrelated Profile invalidated exact original source: %v", err)
+	}
+	forged := inventory.Clone()
+	forged.EvidencePurposeMappings[0].HistoricalProfileHash = StableRuntimeProfileContractsHash(original)
+	forged = forged.WithHash()
+	if ValidateRuntimeHistoricalProfileEvidencePurposeSources(&forged, original) == nil {
+		t.Fatal("whole catalog hash substituted for the selected original Profile")
+	}
+	current := CloneRuntimeProfileContracts(original)
+	current[0].DeliverableExpectations[0].Description = "new current proof declaration"
+	if err := validateRuntimeProfileEvidencePurposeSource(inventory.EvidencePurposeMappings[0], current); err != nil {
+		t.Fatal(err)
+	}
+	if ValidateRuntimeHistoricalProfileEvidencePurposeSources(&inventory, current) == nil {
+		t.Fatal("current declaration authenticated a different original Profile")
 	}
 }

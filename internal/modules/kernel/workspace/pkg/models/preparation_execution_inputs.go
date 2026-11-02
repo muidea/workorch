@@ -62,7 +62,7 @@ func (f PreparationProcessPolicyFacts) Validate() error {
 }
 
 // Stored only inside the restricted original seal archive. Workspace supplies
-// its own complete declarations and the confirmed (not live) template. Pure
+// its original configuration and the operation-selected template. Pure
 // policy compilation must consume these values, never today's configuration.
 // This input archive grants no readiness, M3 or execution permission.
 type PreparationExecutionInputs struct {
@@ -87,7 +87,19 @@ func (i PreparationExecutionInputs) Validate() error {
 }
 
 func (i PreparationExecutionInputs) validateFor(s PreparationSealSnapshot, a WorkspacePreparationAttempt, record *DefinitionAuthoringRecord) error {
-	if i.Validate() != nil || record == nil || i.Process.WorkspaceID != s.WorkspaceID || i.Process.WorkspaceRevision != s.WorkspaceRevision || i.Process.StartedAt.Before(a.StartedAt) || i.Process.CompletedAt.After(a.CompletedAt) || !reflect.DeepEqual(i.Template, record.TemplateSnapshot) || WorkspaceTemplateSnapshotHash(&i.Template) != s.StartupInput.TemplateSnapshotHash || i.Configuration.Hash() != s.AuthoringConfigurationHash || i.Configuration.InternalDirectory != s.InternalDirectory || i.Configuration.Directory != s.StartupInput.ResolvedProjectWorkspaceDirectory || i.Configuration.TemplateID != s.StartupInput.WorkspaceTemplateRef {
+	if i.Validate() != nil || record == nil || i.Process.WorkspaceID != s.WorkspaceID || i.Process.WorkspaceRevision != s.WorkspaceRevision || i.Process.StartedAt.Before(a.StartedAt) || i.Process.CompletedAt.After(a.CompletedAt) || i.Template.ID != record.TemplateSnapshot.ID || i.Configuration.Hash() != s.AuthoringConfigurationHash || i.Configuration.InternalDirectory != s.InternalDirectory || i.Configuration.Directory != s.StartupInput.ResolvedProjectWorkspaceDirectory || i.Configuration.TemplateID != s.StartupInput.WorkspaceTemplateRef {
+		return common.ErrConflict
+	}
+	// Existing archives prove their original confirmed source. Newly selected
+	// sources are bound by the immutable operation selection, never by today.
+	source := record.TemplateSnapshot
+	if a.ExecutionTemplate != nil {
+		if a.ExecutionTemplate.Validate() != nil {
+			return common.ErrConflict
+		}
+		source = a.ExecutionTemplate.Template()
+	}
+	if !reflect.DeepEqual(i.Template, source) {
 		return common.ErrConflict
 	}
 	for _, check := range a.Checks {

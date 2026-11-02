@@ -1013,8 +1013,8 @@ func TestRuntimeBootstrapStartupSealRejectsTemplateAndProfileDrift(t *testing.T)
 
 	driftedTemplate := *template
 	driftedTemplate.Description = "drifted"
-	if err := validateRuntimeBootstrapStartupSeal(workspace, &driftedTemplate, candidate, bootstrap); err == nil {
-		t.Fatal("Template drift was accepted by final bootstrap gate")
+	if err := validateRuntimeBootstrapStartupSeal(workspace, &driftedTemplate, candidate, bootstrap); err != nil {
+		t.Fatal("current Template metadata blocked execution", err)
 	}
 	driftedBootstrap := *bootstrap
 	driftedBootstrap.Activation.ExecutionContract.ProfileContracts = []runtimecontract.RuntimeProfileContract{{ID: "drifted-profile"}}

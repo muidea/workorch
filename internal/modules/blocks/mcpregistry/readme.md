@@ -47,7 +47,8 @@ Application 在原操作预算内双读并精确比较，Workspace 随原结算�
 - 所有 handler 都要求同步 `Result`；EventHub `Post` 不执行 query 或 mutation。
 - Server/Capability list、selection、字符串、schema、environment reference 和聚合数量均受 owner 上限约束。
 - update 保持 immutable identity；Server allowlist reconciliation 保留用户 metadata/disabled 状态并禁用失效 binding。
-- defaults 只补齐缺失 ID，不覆盖已有资源；错误 System source 在 owner mutation 前拒绝。
+- defaults 补齐缺失 ID，并同步 exact builtin source/ref 与原 binding 的系统 Capability 描述/schema；实际变化才推进 revision，重复同步为 no-op。Server 没有可证明的系统来源时保留其 endpoint、环境引用、allowlist 和禁用等设置；不能凭 ID 推定所有权。Capability 的 Enabled/ApprovalPolicy overlay、自定义来源与绑定均不被同步覆盖。
+- Capability permission-only update 保留 builtin 来源；显式编辑 descriptor 通过 owner ingress 转为 user 来源，后续 defaults 保留该声明。错误 System source 在 owner mutation 前拒绝。
 - 所有 Application/MCP/System ingress 先按 topic 校验 exact publisher source，再执行 load、query 或 CAS；不存在 prefix 或
   trim 后授权。
 - Registry 不推断 effect/risk/readiness，不选择 Runtime action；transport 与 reference resolution 归 `blocks/mcp`。

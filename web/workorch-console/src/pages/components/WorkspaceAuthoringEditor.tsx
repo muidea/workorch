@@ -297,7 +297,7 @@ export function WorkspaceAuthoringEditor({ open, workspaceId, onClose, onAdmitte
       {edited && view?.input && <Alert type="info" message="owner 当前目标（本地编辑尚未覆盖）" description={view.input.goalText} />}
       <EditorInputForm form={form} templateOptions={templateOptions} disabled={serverRecoveryInvalid || busy || !view || sealed || Boolean(exact)} onValuesChange={onValuesChange} />
       {view && <Typography.Text>{view.workspaceId} · revision {view.inputRevision} · {view.state}</Typography.Text>}
-      {view && !view.templateCurrent && <Alert type="warning" message="模板已变化，请保存修订并重新审查。" />}
+      {view && !view.templateCurrent && <Alert type="warning" message="当前模板不可用，请核对模板配置。" />}
       {edited && <Alert type="warning" message="本地输入已修改，旧规格不可确认。" />}
       {view?.admissionViolationCode && <Alert type="warning" message={view.admissionViolationCode} description={view.admissionOffendingRefs?.join('、')} />}
       {view?.preparationDiagnostics?.map(diagnostic => <AuthoringPreparationFailure key={diagnostic.diagnosticId} diagnostic={diagnostic} />)}

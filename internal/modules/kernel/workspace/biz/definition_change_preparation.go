@@ -31,7 +31,7 @@ func reduceDefinitionChangePreparation(o definitionSpecificationObservation, cmd
 		}
 		return definitionSpecificationTransition{DefinitionChange: definitionChangePreparationResult(w, *current)}, nil
 	}
-	if w.Revision != cmd.ExpectedWorkspaceRevision || o.template == nil || workspace.WorkspaceTemplateSnapshotHash(o.template) != w.DefinitionAuthoring.TemplateSnapshotHash ||
+	if w.Revision != cmd.ExpectedWorkspaceRevision || o.template == nil || o.template.ID != w.TemplateID ||
 		w.DefinitionAuthoringConfirmation != nil && w.DefinitionAuthoringConfirmation.Phase != workspace.DefinitionAuthoringConfirmationMaterialized {
 		return definitionSpecificationTransition{}, common.ErrConflict
 	}
@@ -59,6 +59,8 @@ func reduceDefinitionChangePreparation(o definitionSpecificationObservation, cmd
 	// 原 permit、unknown、失败和诊断继承到同一有界 ledger，不重开预算。
 	record := w.DefinitionAuthoring.Clone()
 	record.Input, record.InputHash = input, input.InputHash()
+	record.TemplateSnapshot = o.template.Clone()
+	record.TemplateSnapshotHash = workspace.WorkspaceTemplateSnapshotHash(o.template)
 	candidate := workspace.DefinitionChangeCandidate{
 		RequestID: cmd.RequestID, ExpectedWorkspaceRevision: cmd.ExpectedWorkspaceRevision, RecordedWorkspaceRevision: w.Revision + 1,
 		TicketID: cmd.TicketID, ProposalRevision: cmd.ProposalRevision, ProposalHash: cmd.ProposalHash,

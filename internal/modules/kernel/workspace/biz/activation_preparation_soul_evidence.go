@@ -28,8 +28,12 @@ func (m *Biz) bindOriginalPreparationSouls(ctx context.Context, c workspaceevent
 		return nil, unavailable
 	}
 	a := w.StartupPreparation.Attempts[i]
+	effective, err := workspace.PreparationWorkspace(w, a)
+	if err != nil {
+		return nil, unavailable
+	}
 	f := c.SoulFacts.Clone()
-	if a.State != workspace.WorkspacePreparationAccepted || w.Revision != a.CommittedWorkspaceRevision || f.Validate() != nil || f.WorkspaceRevision != w.Revision || f.ConfigurationHash != a.Binding.AuthoringConfigurationHash || f.WorkspaceDefaultSoulID != w.DefaultSoulID || !reflect.DeepEqual(f.WorkspaceBindings, soulbinding.FromSoulIDMap(w.SoulBindings)) || f.StartedAt.Before(a.StartedAt) || f.CompletedAt.After(time.Now().UTC()) {
+	if a.State != workspace.WorkspacePreparationAccepted || w.Revision != a.CommittedWorkspaceRevision || f.Validate() != nil || f.WorkspaceRevision != w.Revision || f.ConfigurationHash != a.Binding.AuthoringConfigurationHash || f.WorkspaceDefaultSoulID != effective.DefaultSoulID || !reflect.DeepEqual(f.WorkspaceBindings, soulbinding.FromSoulIDMap(effective.SoulBindings)) || f.StartedAt.Before(a.StartedAt) || f.CompletedAt.After(time.Now().UTC()) {
 		return nil, unavailable
 	}
 	read, err := m.queryExactConfirmedStartupSnapshot(ctx, workspaceevents.QueryExactConfirmedStartupSnapshotCommand{WorkspaceID: w.ID, ExpectedWorkspaceRevision: w.Revision})

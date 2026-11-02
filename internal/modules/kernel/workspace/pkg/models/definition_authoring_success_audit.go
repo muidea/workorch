@@ -130,3 +130,28 @@ func (r DefinitionAuthoringSpecificationRequest) Metadata() DefinitionAuthoringS
 	}
 	return r
 }
+
+// Metadata is the canonical non-authoritative view, detached from the original
+// bytes. Compilers may consume it; persistence and mutations still validate
+// the complete original with Validate.
+func (r DefinitionAuthoringRecord) Metadata() DefinitionAuthoringRecord {
+	r = r.Clone()
+	for n := range r.DerivationRequests {
+		d := &r.DerivationRequests[n]
+		if d.SuccessAudit != nil {
+			a := d.SuccessAudit.Metadata()
+			d.SuccessAudit = &a
+		}
+		if d.Diagnostic != nil {
+			a := d.Diagnostic.Metadata()
+			d.Diagnostic = &a
+		}
+	}
+	for n := range r.SpecificationRequests {
+		r.SpecificationRequests[n] = r.SpecificationRequests[n].Metadata()
+	}
+	for n := range r.PreparationDiagnostics {
+		r.PreparationDiagnostics[n] = r.PreparationDiagnostics[n].Metadata()
+	}
+	return r
+}

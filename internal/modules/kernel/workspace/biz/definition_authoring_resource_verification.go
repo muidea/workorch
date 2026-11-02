@@ -67,7 +67,7 @@ func (m *Biz) verifyCurrentAuthoringResources(ctx context.Context, id common.Wor
 	if err != nil {
 		return verifiedAuthoringResources{}, err
 	}
-	if view.Record == nil || !view.CurrentTemplateAvailable || view.Record.TemplateSnapshotHash != view.CurrentTemplateSnapshotHash || view.Record.Validate() != nil {
+	if view.Record == nil || !view.CurrentTemplateAvailable || view.Record.Validate() != nil {
 		return verifiedAuthoringResources{}, common.ErrConflict
 	}
 	record, err := view.Record.Model()

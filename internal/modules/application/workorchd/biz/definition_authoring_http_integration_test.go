@@ -65,6 +65,10 @@ func TestAuthoringHTTPFileBackedCompilationConfirmationAndRecovery(t *testing.T)
 	}
 }
 
+func TestAuthoringHTTPBuiltinUpdateKeepsAcceptedSourceThroughConfirmation(t *testing.T) {
+	testAuthoringHTTPFileBackedScenario(t, "builtin_update_after_derivation")
+}
+
 func TestStartupPreparationHTTPFileOwnersReadOnlyAndReopen(t *testing.T) {
 	testAuthoringHTTPFileBackedScenario(t, "step04_read_only")
 }
@@ -446,6 +450,15 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			var payload []byte
 			switch command.Request.Kind {
 			case "workspace/specification/derive":
+				if scenario == "builtin_update_after_derivation" {
+					changed := template.Clone()
+					changed.Description = "current deployment description"
+					changed.DoDItems = append(changed.DoDItems, "new default cannot rewrite accepted authoring input")
+					if err := repositories.WorkspaceTemplates.Update(ctx, &changed); err != nil {
+						t.Error(err)
+						return
+					}
+				}
 				if scenario == "concurrent_compile" {
 					startedOnce.Do(func() { close(deriveStarted) })
 					<-releaseDerive
@@ -954,7 +967,34 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			t.Fatal("rejected compile performed a provider call")
 		}
 	}
-	accepted := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", compileRequest, http.StatusAccepted)
+	compileStatus := http.StatusAccepted
+	if scenario == "attempt_budget" {
+		compileStatus = http.StatusOK
+	}
+	accepted := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", compileRequest, compileStatus)
+	if scenario == "attempt_budget" {
+		// Known failure of this exact source is replayed irrespective of its
+		// request ID. A new deterministic ID cannot authorize another sample.
+		if accepted.State != "failed" || accepted.CompilationAccepted || physicalCalls.Load() != 0 {
+			t.Fatalf("known failure was hidden: %+v", accepted)
+		}
+		stored, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
+		if err != nil || len(stored.DefinitionAuthoring.DerivationRequests) != workspace.DefinitionDerivationAttemptLimit || len(stored.DefinitionAuthoring.PreparationDiagnostics) != 0 {
+			t.Fatalf("failure replay changed ledger: %v", err)
+		}
+		again := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", compileRequest, http.StatusOK)
+		if again.WorkspaceRevision != accepted.WorkspaceRevision || again.State != "failed" || physicalCalls.Load() != 0 {
+			t.Fatal("duplicate failure resampled or mutated source")
+		}
+		closeOwners()
+		baseURL, routine, closeOwners = open()
+		recovered := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
+		if recovered.State != "failed" || recovered.WorkspaceRevision != accepted.WorkspaceRevision {
+			t.Fatal("known failure lost after owner restart")
+		}
+		assertNoRuns()
+		return
+	}
 	if !accepted.CompilationAccepted || accepted.State != "draft" || (!realWorker && physicalCalls.Load() != 0) {
 		t.Fatal("acceptance fabricated owner progress")
 	}
@@ -980,7 +1020,18 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		routine.queued.Run() // Delayed accepted task must not select the new input.
 		authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", compileRequest, http.StatusConflict)
 		stored, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
-		if err != nil || physicalCalls.Load() != 0 || len(stored.DefinitionAuthoring.DerivationRequests) != 0 || len(stored.DefinitionAuthoring.SpecificationRequests) != 0 {
+		if scenario == "step02_template_guard" {
+			// The business input is unchanged. A delayed first transaction may
+			// select the latest declaration, but cannot confirm or start it.
+			if err != nil || physicalCalls.Load() == 0 || stored.DefinitionAuthoring.InputHash != updated.InputHash || stored.DefinitionAuthoring.Input.Revision != updated.InputRevision || stored.DefinitionAuthoring.TemplateSnapshotHash == updated.TemplateSnapshotHash || stored.DefinitionAuthoringConfirmation != nil || stored.StartupInput != nil {
+				t.Fatalf("current builtin refresh lost source isolation: %v calls=%d", err, physicalCalls.Load())
+			}
+			for _, r := range stored.DefinitionAuthoring.DerivationRequests {
+				if workspace.WorkspaceTemplateSnapshotHash(&r.Template) != stored.DefinitionAuthoring.TemplateSnapshotHash {
+					t.Fatal("new request used obsolete declaration")
+				}
+			}
+		} else if err != nil || physicalCalls.Load() != 0 || len(stored.DefinitionAuthoring.DerivationRequests) != 0 || len(stored.DefinitionAuthoring.SpecificationRequests) != 0 {
 			t.Fatalf("stale task reached reserve/provider: %v calls=%d", err, physicalCalls.Load())
 		}
 		assertNoRuns()

@@ -32,6 +32,16 @@ func AuthoringProfileContracts(d DefinitionDerivationRequest) ([]runtimecontract
 	return runtimeprofiledecode.Decode(profiles), nil
 }
 func CompileTemplateProofProfiles(t *WorkspaceTemplate, workspaceHints, profiles map[string]any, items []DefinitionCandidateItem) (map[string]any, error) {
+	return compileTemplateProofProfiles(t, workspaceHints, profiles, items, false)
+}
+
+// Original business items remain fixed when system proof methods change.
+// Only exact original text can receive a current method; new template criteria
+// are not appended to an already confirmed business inventory.
+func CompileCurrentTemplateProofProfiles(t *WorkspaceTemplate, workspaceHints, profiles map[string]any, items []DefinitionCandidateItem) (map[string]any, error) {
+	return compileTemplateProofProfiles(t, workspaceHints, profiles, items, true)
+}
+func compileTemplateProofProfiles(t *WorkspaceTemplate, workspaceHints, profiles map[string]any, items []DefinitionCandidateItem, sealed bool) (map[string]any, error) {
 	raw, present := t.ContextHints.Map()["templateProofBindings"]
 	if other, exists := workspaceHints["templateProofBindings"]; exists && (!present || !reflect.DeepEqual(other, raw)) {
 		return nil, fmt.Errorf("Workspace cannot replace template proof source contract")
@@ -92,13 +102,20 @@ func CompileTemplateProofProfiles(t *WorkspaceTemplate, workspaceHints, profiles
 		id := ""
 		count := 0
 		for _, item := range items {
-			if item.CandidateItemRef == ref {
+			matches := item.CandidateItemRef == ref
+			if sealed {
+				matches = strings.HasPrefix(item.CandidateItemRef, "derived-dod:template:") && item.Text == text
+			}
+			if matches {
 				if item.Text != text {
 					return nil, fmt.Errorf("template proof sealed source drift")
 				}
-				id = sources[ref]
+				id = sources[item.CandidateItemRef]
 				count++
 			}
+		}
+		if sealed && count == 0 {
+			continue
 		}
 		if count != 1 || id == "" {
 			return nil, fmt.Errorf("missing exact template proof source")

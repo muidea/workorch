@@ -13,8 +13,11 @@ import (
 	applicationbiz "github.com/muidea/workorch/internal/modules/application/workorchd/biz"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/fileobservation"
+	"github.com/muidea/workorch/internal/pkg/repository"
 	payload "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagedconfig"
 	management "github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
@@ -67,6 +70,57 @@ func writeManagedFixture(t *testing.T, root string, raw []byte) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// An operation with no independent declaration selection used the exact
+// confirmed source. Expose that source without migrating the stored operation.
+type originalManagedPreparationSourceRepository struct {
+	repository.WorkspaceRepository
+}
+
+func (r originalManagedPreparationSourceRepository) Get(ctx context.Context, id common.WorkspaceID) (*workspace.Workspace, error) {
+	w, err := r.WorkspaceRepository.Get(ctx, id)
+	if err == nil && w.StartupPreparation != nil {
+		record := w.StartupPreparation.Clone()
+		w.StartupPreparation = &record
+		for i := range record.Attempts {
+			record.Attempts[i].ExecutionTemplate = nil
+		}
+	}
+	return w, err
+}
+
+func TestPreparationManagedConfigsOriginalSourceNeedsNoIndependentSelection(t *testing.T) {
+	ctx := context.Background()
+	owners := openFileDefinitionAdmissionOwners(t, t.TempDir())
+	defer owners.close()
+	internal := filepath.Join(t.TempDir(), "internal", "workspace")
+	w := seedManagedPreparation(t, owners, internal, "exact")
+	startManagedPreparationOwners(t, owners)
+	raw := []byte(`{"nested":{"required":1},"token":"fixture-config-value"}`)
+	writeManagedFixture(t, workorchmanagedconfig.SystemDirectory(internal), raw)
+	writeManagedFixture(t, internal, raw)
+	command := workspaceevents.CheckWorkspacePreparationCommand{WorkspaceID: w.ID, RequestID: "original-source", ExpectedWorkspaceRevision: w.Revision}
+	if _, err := owners.workspace.beginWorkspacePreparation(ctx, command, false, true); err != nil {
+		t.Fatal(err)
+	}
+	owners.workspace.workspaces = originalManagedPreparationSourceRepository{owners.workspace.workspaces}
+	selected, err := owners.workspace.workspaces.Get(ctx, w.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.StartupPreparation.Attempts[0].ExecutionTemplate != nil {
+		t.Fatal("fixture unexpectedly selected a separate declaration")
+	}
+	evidence, reason := owners.workspace.observeOriginalPreparationManagedConfigs(ctx, command)
+	if evidence == nil || evidence.Validate() != nil || reason != "managed_configs_observed_remaining_checks" || len(evidence.Files) != 2 {
+		t.Fatalf("original source observation: evidence=%+v reason=%s", evidence, reason)
+	}
+	for _, file := range evidence.Files {
+		if !bytes.Equal(file.Observation.Content, raw) {
+			t.Fatal("original File bytes changed")
+		}
+	}
 }
 
 func TestPreparationManagedConfigsProductionOriginalEvidenceReopenNoReplay(t *testing.T) {

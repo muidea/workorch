@@ -46,6 +46,27 @@ describe('STEP02 只读候选正式入口', () => {
     expect(screen.getByLabelText('独立审查明细').textContent).toContain('依据引用：source');
     forbidden();
   });
+  it('相同业务输入采用服务端当前内置声明；不重新保存、确认或启动', async () => {
+    const current = { ...ready(), templateSnapshotHash: 'current-template' };
+    vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValue(current);
+    render(wrap('ws')); await act(async () => {});
+    await act(async () => { fireEvent.click(generateButton()); });
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledExactlyOnceWith('ws', { expectedInputHash: 'input-1', expectedTemplateSnapshotHash: 'template-exact' });
+    expect(screen.getByText(/候选已达到 ready_to_confirm/)).toBeTruthy();
+    expect(screen.queryByText(/生成回执与已查看业务输入不匹配/)).toBeNull();
+    forbidden();
+  });
+  it.each(['hash', 'revision'])('内置声明刷新仍拒绝业务输入%s漂移', async changed => {
+    const current = { ...ready(), templateSnapshotHash: 'current-template' };
+    if (changed === 'hash') current.inputHash = 'another-input';
+    else current.inputRevision = 3;
+    vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValue(current);
+    render(wrap('ws')); await act(async () => {});
+    await act(async () => { fireEvent.click(generateButton()); });
+    expect(screen.getByText('生成回执与已查看业务输入不匹配，请只读核对服务端')).toBeTruthy();
+    expect(screen.queryByText(/候选已达到 ready_to_confirm/)).toBeNull();
+    forbidden();
+  });
   it('展示项目设计、分类问题及有界修订状态；观察不进行确认或启动', async () => {
     const view = ready(); view.state = 'reviewing';
     view.proposal!.designDecisions = [{ candidateItemRef: 'source', decision: '固定输入匹配规则', verificationBasis: '独立预期输出断言' }];

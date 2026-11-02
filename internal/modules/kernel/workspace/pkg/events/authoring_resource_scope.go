@@ -41,7 +41,7 @@ func (r QueryAuthoringResourceScopeResult) ValidateFor(c QueryAuthoringResourceS
 }
 
 func AuthoringResourceScopeFor(view QueryDefinitionAuthoringResult, command QueryAuthoringResourceScopeCommand) (QueryAuthoringResourceScopeResult, error) {
-	if command.Validate() != nil || view.ValidateFor(QueryDefinitionAuthoringCommand{WorkspaceID: command.WorkspaceID}) != nil || view.Record == nil || view.Record.InputHash != command.InputHash || !view.CurrentTemplateAvailable || view.CurrentTemplateSnapshotHash != view.Record.TemplateSnapshotHash || view.DeliverableDirectory == "" || !slices.Contains(view.Record.Input.ResourceRefs, command.ResourceRef) {
+	if command.Validate() != nil || view.ValidateFor(QueryDefinitionAuthoringCommand{WorkspaceID: command.WorkspaceID}) != nil || view.Record == nil || view.Record.InputHash != command.InputHash || !view.CurrentTemplateAvailable || view.DeliverableDirectory == "" || !slices.Contains(view.Record.Input.ResourceRefs, command.ResourceRef) {
 		return QueryAuthoringResourceScopeResult{}, common.ErrConflict
 	}
 	return QueryAuthoringResourceScopeResult{WorkspaceID: command.WorkspaceID, WorkspaceRevision: view.WorkspaceRevision, InputHash: command.InputHash, ResourceRef: command.ResourceRef, DeliverableDirectory: view.DeliverableDirectory}, nil

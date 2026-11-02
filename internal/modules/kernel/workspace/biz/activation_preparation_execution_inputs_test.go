@@ -38,7 +38,11 @@ func executionInputsOriginal(t *testing.T, owners *fileDefinitionAdmissionOwners
 	if seal == nil {
 		t.Fatal("original seal unavailable")
 	}
-	fact := workspacePreparationBlocked{Command: c, Reason: "check_pipeline_incomplete", SealEvidence: seal}
+	template, err := owners.workspace.resolvedTemplate(ctx, accepted.TemplateID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact := workspacePreparationBlocked{ExecutionTemplate: template, Command: c, Reason: "check_pipeline_incomplete", SealEvidence: seal}
 	p := workspace.PreparationProcessPolicy{ConfiguredDialogLanguage: "  zh_CN.UTF-8  ", LCAll: "en_US.UTF-8", MaxRuntimeRepairAttempts: 7, MaxDocumentRecoveryAttempts: 2}
 	fact.ProcessPolicyFacts = &workspace.PreparationProcessPolicyFacts{Version: workspace.PreparationExecutionInputsVersion, WorkspaceID: accepted.ID, WorkspaceRevision: accepted.Revision, StartedAt: time.Now().UTC(), Before: p, After: p}
 	fact.ProcessPolicyFacts.CompletedAt = time.Now().UTC()
@@ -152,14 +156,14 @@ func TestPreparationExecutionInputsFirstCASRechecksActualWorkspacePreimage(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, change := range []string{"workspace", "template", "revision", "process_time", "version"} {
+	for _, change := range []string{"workspace", "original_template", "revision", "process_time", "version"} {
 		bad := *r.Next
 		bad.PreparationSealEvidence = workspace.ClonePreparationSealEvidence(r.Next.PreparationSealEvidence)
 		e := &bad.PreparationSealEvidence[0]
 		switch change {
 		case "workspace":
 			e.ExecutionInputs.Configuration.ContextHints = payload.New(payload.StringField("unexpected", "caller"))
-		case "template":
+		case "original_template":
 			e.ExecutionInputs.Template.Name += "changed"
 		case "revision":
 			e.ExecutionInputs.Process.WorkspaceRevision++

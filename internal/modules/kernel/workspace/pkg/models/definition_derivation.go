@@ -227,3 +227,11 @@ func (r DefinitionDerivationRequest) Metadata() DefinitionDerivationRequest {
 	}
 	return r
 }
+
+// DefinitionDerivationRequestID binds a new transaction to its actual input and
+// declaration without exceeding the owner request identity bound.
+func DefinitionDerivationRequestID(inputHash, templateHash string) string {
+	h := sha256.New()
+	writeDefinitionHash(h, inputHash, templateHash)
+	return "derive/" + hex.EncodeToString(h.Sum(nil))
+}

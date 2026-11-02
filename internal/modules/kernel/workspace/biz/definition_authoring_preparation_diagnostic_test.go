@@ -156,8 +156,8 @@ func TestPreparationDiagnosticReducerGuardsAndTargetBeforeCapacity(t *testing.T)
 	changed := w.DefinitionAuthoring.TemplateSnapshot.Clone()
 	changed.Description = "changed"
 	o.template = &changed
-	if _, err := reducePreparationDiagnostic(o, cmd); !errors.Is(err, common.ErrConflict) {
-		t.Fatal("mutable template drift accepted")
+	if _, err := reducePreparationDiagnostic(o, cmd); err != nil {
+		t.Fatalf("current template update blocked original diagnostic: %v", err)
 	}
 	for n := 0; n < workspace.DefinitionAuthoringPreparationDiagnosticLimit; n++ {
 		current, _ := owners.repositories.Workspaces.Get(context.Background(), w.ID)

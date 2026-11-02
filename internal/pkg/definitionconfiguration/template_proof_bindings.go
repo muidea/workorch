@@ -25,6 +25,11 @@ func configurationDoDItems(w *workspace.Workspace, t *workspace.WorkspaceTemplat
 	if w == nil || t == nil {
 		return nil, fmt.Errorf("configuration requires workspace and template")
 	}
+	if w.DefinitionAuthoring != nil && w.DefinitionAuthoringConfirmation != nil {
+		record := w.DefinitionAuthoring.Metadata()
+		_, items, _, _, err := workspace.ConfirmedAuthoringAdmissionSourceView(&record, *w.DefinitionAuthoringConfirmation, w.ID)
+		return items, err
+	}
 	if w.DefinitionAuthoring != nil {
 		r := w.DefinitionAuthoring
 		// Configuration compilation also runs before derivation. Template ordinals

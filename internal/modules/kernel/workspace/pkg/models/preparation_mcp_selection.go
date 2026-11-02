@@ -271,3 +271,19 @@ func validatePreparationMCPSelectionPersistence(w *Workspace) error {
 	}
 	return nil
 }
+
+func PreparationMCPDefinitionForAttempt(w *Workspace, a WorkspacePreparationAttempt) PreparationMCPSelectionDefinition {
+	effective, err := PreparationWorkspace(w, a)
+	if err != nil {
+		return PreparationMCPSelectionDefinition{FailureCode: "configuration_source_unavailable"}
+	}
+	record := *effective.DefinitionAuthoring
+	record.TemplateSnapshot, err = PreparationTemplateForAttempt(w, a)
+	if err != nil {
+		return PreparationMCPSelectionDefinition{FailureCode: "configuration_source_unavailable"}
+	}
+	effective.DefinitionAuthoring = &record
+	d := PreparationMCPDefinition(effective)
+	d.ConfigurationHash = a.Binding.AuthoringConfigurationHash
+	return d
+}

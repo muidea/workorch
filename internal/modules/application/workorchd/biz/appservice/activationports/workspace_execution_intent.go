@@ -11,6 +11,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/definitionadmission"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -89,15 +90,19 @@ func validateRuntimeBootstrapStartupSeal(workspace *workspacemodel.Workspace, te
 	if err != nil || !reflect.DeepEqual(expectedInventory, bootstrap.DefinitionSeed.SourceObligations) {
 		return fmt.Errorf("%w: Runtime bootstrap source obligations drifted from exact eligible specification", common.ErrConflict)
 	}
-	if startup.WorkspaceTemplateRef != strings.TrimSpace(template.ID) || startup.TemplateSnapshotHash != workspaceTemplateSnapshotHash(template) {
+	if startup.WorkspaceTemplateRef != strings.TrimSpace(template.ID) {
 		return fmt.Errorf("%w: Runtime bootstrap Template snapshot drifted after Definition admission", common.ErrConflict)
 	}
-	expectedEvidencePolicies, err := compileRuntimeEvidencePolicies("Workspace "+strings.TrimSpace(string(workspace.ID)), workspace.EvidencePolicies)
+	current, err := workspacemodel.WorkspaceForCurrentTemplate(workspace, template)
+	if err != nil {
+		return err
+	}
+	expectedEvidencePolicies, err := compileRuntimeEvidencePolicies("Workspace "+strings.TrimSpace(string(workspace.ID)), current.EvidencePolicies)
 	if err != nil {
 		return fmt.Errorf("%w: admitted Workspace evidence policies are invalid: %v", common.ErrConflict, err)
 	}
 	if bootstrap.Definition.Revision != startup.DefinitionRevision || bootstrap.Definition.StartupInputHash != startup.StartupInputHash ||
-		runtimecontract.StableRuntimeProfileContractsHash(bootstrap.Activation.ExecutionContract.ProfileContracts) != startup.RuntimeProfileContractsHash ||
+		!sameCurrentExecutionProfiles(workspace, template, bootstrap.Activation.ExecutionContract.ProfileContracts) ||
 		!runtimecontract.SameRuntimeEvidencePolicies(bootstrap.Activation.EvidencePolicies, expectedEvidencePolicies) {
 		return fmt.Errorf("%w: Runtime bootstrap definition/profile/evidence-policy snapshot drifted from Workspace startup input", common.ErrConflict)
 	}
@@ -133,4 +138,9 @@ func workspaceRuntimeActivation(ctx context.Context, request ActivateWorkspaceEx
 		DefaultEmbeddingProviderLoader: request.DefaultEmbeddingProviderLoader,
 		SkillHubCatalog:                request.SkillHubCatalog,
 	})
+}
+
+func sameCurrentExecutionProfiles(w *workspacemodel.Workspace, t *workspacemodel.WorkspaceTemplate, profiles []runtimecontract.RuntimeProfileContract) bool {
+	compiled, err := definitionconfiguration.Compile(w, t)
+	return err == nil && reflect.DeepEqual(runtimecontract.NormalizeRuntimeProfileContracts(profiles), runtimecontract.NormalizeRuntimeProfileContracts(compiled.ProfileContracts))
 }

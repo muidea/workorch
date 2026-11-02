@@ -167,6 +167,13 @@ func (s *service) updateCapability(ctx context.Context, cmd mcpevents.UpdateCapa
 		if reflect.DeepEqual(updated, existing) {
 			return nil
 		}
+		// Permission-only edits remain an overlay on the system declaration.
+		// Explicit descriptor edits transfer ownership through this owner ingress.
+		declaration := mcpmodel.CloneCapability(updated)
+		declaration.Enabled, declaration.ApprovalPolicy = existing.Enabled, existing.ApprovalPolicy
+		if existing.Source == mcpmodel.CapabilitySourceBuiltin && !reflect.DeepEqual(declaration, existing) {
+			updated.Source, updated.SourceRef = mcpmodel.CapabilitySourceUser, string(id)
+		}
 		updated.Revision++
 		next.Capabilities[idx] = updated
 		return nil

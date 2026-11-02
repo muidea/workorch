@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"reflect"
 	"strings"
 
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
@@ -43,11 +44,22 @@ func (s *service) ensureBuiltinDefaults(ctx context.Context) (string, error) {
 		for _, item := range capabilityDefaults {
 			id := common.MCPCapabilityID(strings.TrimSpace(item.ID))
 			serverID := common.MCPServerID(strings.TrimSpace(item.ServerID))
-			if findCapability(next.Capabilities, id) != nil || findCapabilityByBinding(next.Capabilities, serverID, strings.TrimSpace(item.Kind), strings.TrimSpace(item.Name)) != nil {
+			existing := findCapability(next.Capabilities, id)
+			if existing != nil {
+				// ID alone does not establish system ownership. User-owned
+				// declarations and user-selected executable bindings stay exact.
+				if existing.Source != mcpmodel.CapabilitySourceBuiltin || existing.SourceRef != string(id) || existing.ServerID != serverID || existing.Kind != strings.TrimSpace(item.Kind) || existing.Name != strings.TrimSpace(item.Name) {
+					continue
+				}
+			} else if findCapabilityByBinding(next.Capabilities, serverID, strings.TrimSpace(item.Kind), strings.TrimSpace(item.Name)) != nil {
 				continue
 			}
+			enabled, approvalPolicy := item.Enabled, item.ApprovalPolicy
+			if existing != nil {
+				enabled, approvalPolicy = existing.Enabled, existing.ApprovalPolicy
+			}
 			server := findServer(next.Servers, serverID)
-			if server == nil || !serverAllowsCapability(server, strings.TrimSpace(item.Kind), strings.TrimSpace(item.Name)) || (item.Enabled && !server.Enabled) {
+			if server == nil || !serverAllowsCapability(server, strings.TrimSpace(item.Kind), strings.TrimSpace(item.Name)) || (enabled && !server.Enabled) {
 				if server != nil {
 					if _, created := createdServerIDs[serverID]; !created {
 						continue
@@ -65,12 +77,24 @@ func (s *service) ensureBuiltinDefaults(ctx context.Context) (string, error) {
 				InputSummary: item.InputSummary, OutputSummary: item.OutputSummary, StageHints: append([]string(nil), item.StageHints...),
 				RiskLevel: item.RiskLevel, EffectScope: item.EffectScope, IdempotencyClass: item.IdempotencyClass,
 				ValidationProofApplicability: item.ValidationProofApplicability, Schema: schema, URI: item.URI,
-				Enabled: item.Enabled, ApprovalPolicy: item.ApprovalPolicy,
+				Enabled: enabled, ApprovalPolicy: approvalPolicy,
 			}, server, mcpmodel.CapabilitySourceBuiltin, string(id))
 			if err != nil {
 				return err
 			}
-			next.Capabilities = append(next.Capabilities, capability)
+			if existing != nil {
+				capability.Enabled, capability.ApprovalPolicy = existing.Enabled, existing.ApprovalPolicy
+				capability.Revision = existing.Revision
+				if !reflect.DeepEqual(existing, capability) {
+					if existing.Revision == ^uint64(0) {
+						return common.ErrConflict
+					}
+					capability.Revision++
+					*existing = *capability
+				}
+			} else {
+				next.Capabilities = append(next.Capabilities, capability)
+			}
 		}
 		for _, server := range next.Servers {
 			if err := reconcileServerCapabilities(next, server); err != nil {

@@ -33,6 +33,8 @@ func (b *Biz) compileAuthoringSpecificationBound(ctx context.Context, id common.
 		return workspace.GoalSpecification{}, err
 	}
 	defer release()
+	// Continue the exact derivation transaction. Selecting a newer declaration
+	// here would detach the mapping/reviews from their already accepted source.
 	view, err := b.QueryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: id, InputHash: inputHash})
 	if err != nil {
 		return workspace.GoalSpecification{}, err
@@ -40,7 +42,7 @@ func (b *Biz) compileAuthoringSpecificationBound(ctx context.Context, id common.
 	if view.Record == nil {
 		return workspace.GoalSpecification{}, common.ErrConflict
 	}
-	if expected != nil && (view.Record.InputHash != expected.ExpectedInputHash || view.Record.TemplateSnapshotHash != expected.ExpectedTemplateSnapshotHash || !view.CurrentTemplateAvailable || view.CurrentTemplateSnapshotHash != expected.ExpectedTemplateSnapshotHash) {
+	if expected != nil && (view.Record.InputHash != expected.ExpectedInputHash || !view.CurrentTemplateAvailable) {
 		return workspace.GoalSpecification{}, common.ErrConflict
 	}
 	record, err := view.Record.Model()
@@ -219,7 +221,7 @@ func (b *Biz) prepareAuthoringSpecification(ctx context.Context, id common.Works
 			return authoringSpecificationOutcome(previous)
 		}
 	}
-	if !view.CurrentTemplateAvailable || view.CurrentTemplateSnapshotHash != expected.TemplateSnapshotHash {
+	if !view.CurrentTemplateAvailable {
 		return request, common.ErrConflict
 	}
 	stage := workspace.DefinitionAuthoringPreparationProposal

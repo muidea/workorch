@@ -58,14 +58,14 @@ func TestTemplateProofSourcesResolveExactOriginalItemsAcrossUserOffsets(t *testi
 				if !reflect.DeepEqual(r.RequiredEvidenceKinds, []string{"validation"}) {
 					t.Fatal("guard replaced ordinary validation")
 				}
-				if r.ID != fmt.Sprintf("dod-%03d", users+3) && r.ID != fmt.Sprintf("dod-%03d", users+4) && r.ID != fmt.Sprintf("dod-%03d", users+13) {
+				if r.ID != fmt.Sprintf("dod-%03d", users+1) && r.ID != fmt.Sprintf("dod-%03d", users+3) && r.ID != fmt.Sprintf("dod-%03d", users+4) && r.ID != fmt.Sprintf("dod-%03d", users+13) {
 					t.Fatal("guard attached to unrelated item", r.ID)
 				}
 				if r.LineageAssertions[0].ConsumptionPoint != runtimecontract.RuntimeProofPhasePostTerminalDelivery {
 					t.Fatal("terminal proof introduced ordinary acceptance dependency")
 				}
 			}
-			if guardCount != 3 {
+			if guardCount != 4 {
 				t.Fatalf("guards=%d", guardCount)
 			}
 			current := &workspace.Workspace{DefinitionAuthoring: &workspace.DefinitionAuthoringRecord{Input: input}}

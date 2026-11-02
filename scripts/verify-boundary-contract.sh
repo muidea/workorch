@@ -4428,7 +4428,7 @@ definition_configuration_source="$({
 	sed -n '/^func evidencePolicyBindings(/,/^}/p' internal/pkg/definitionconfiguration/definition_configuration.go
 })"
 for marker in \
-	'return CompileForItems(workspace, template, items)' \
+	'return CompileForItems(current, template, items)' \
 	'compileTemplateProofBindings(template, workspaceHints, rawProfiles, items)' \
 	'validateEvidencePolicies("Template ' \
 	'validateEvidencePolicies("Workspace ' \

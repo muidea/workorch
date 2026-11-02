@@ -32,8 +32,10 @@ Module/Block shape: `module.go` / `plugin.go`, `biz/` (orchestrator has `biz/run
 - Forbidden production surfaces: StagePacket, NextAction, DispatchNextStep, ExecutionContextPatch, auto replan successor, and map-based authority rebuild.
 - Workspace owner first persists a pre-seal `DefinitionAdmissionCandidate`; pure admission accepts complete `all_of` semantics
   only. Unsupported one-of/ambiguity opens a blocking clarification ticket and cannot create a Run. Promotion seals Goal/DoD,
-  template/profile policy snapshot, resolved project directory and `StartupInputHash`; all Start/Restart ingresses require an
-  eligible `WorkspaceActivationAdmission`.
+  resolved project directory and `StartupInputHash`; all Start/Restart ingresses require an eligible
+  `WorkspaceActivationAdmission`. Recorded template/profile snapshots identify the inputs actually used; they must not pin
+  later execution to historical built-in data or require unchanged built-in hashes across deployments. See the built-in data
+  update rule below.
 - A bounded SM-3 semantic-plan document may propose per-CWI proof after startup input is sealed; capability owners return
   feasibility; only an SM-2 private internal event may seal `CoverageEvidenceBinding` and the reconciliation contract before
   operation candidate/dispatch. Runtime LLM processing may not modify the sealed startup input.
@@ -121,6 +123,16 @@ Do not commit generated runtime data: `.workorch-data`, `.workorch-workspaces`, 
 - 修改现有合同应同步清理旧实现、选择分支、兼容测试和文档。缺失或不符合当前合同的输入明确拒绝，不猜测历史格式、不自动修复或迁移数据，不维护多套实现。
 - CAS revision、真实文件版本边、幂等请求身份、内容 hash、原始规格及人工确认绑定属于执行正确性和证据，不属于历史软件版本管理，必须保留。外部服务已明确要求的协议协商与依赖版本由对应 adapter/工具链负责，不扩展为内部兼容框架。
 - 不为满足新合同改写既有 Run、Result、原始诊断或封存规格；需要改变业务目标、验收、权限或预算时仍遵守原 owner 和精确确认边界。不得把删除版本管理解释为删除这些门禁。
+
+### 内置数据更新与持续推进
+
+- 系统内置 Template、Workspace Profile、Soul、prompt 及其他内置处理声明默认使用当前部署提供的最新内容。内置数据随优化更新属于正常开发行为，不得仅因其内容或 hash 发生变化而阻塞既有 Workspace 的后续推进、Start、Restart 或恢复。
+- 不把内置数据完整快照或 hash 与历史记录相等作为跨部署准入条件；不得因此要求清空数据、新建 Workspace、重新生成业务 Goal/DoD 或重复人工确认。Profile 中的执行与证明方法允许优化，但不能借此修改已确认的业务目标、验收含义、用户权限或预算。
+- 已保存的内置数据快照与 hash 用于记录实际执行来源及内容完整性，不作为选择旧实现或固定旧内置内容的依据；系统内置数据由系统维护，不作为项目工作区内需要人工同步的配置副本。
+- 单次已封存事务保持输入、来源、权限和预算一致；后续执行在合法事务边界由所属 owner 按当前内置数据重新编译必要的派生产物。旧派生产物需要刷新时，走幂等、可恢复的正常处理路径，不以历史内置 hash 不同要求用户重新授权。不得在已发出的操作中途静默换规则或改写原输入。
+- 原 Goal/DoD、用户验收、资源权限与预算、已执行操作、owner receipt/evidence、真实文件版本边、Run/Result 及终态事实继续保留原始记录。新规则不得追溯伪造旧执行结果、赋予旧证据验收 credit 或复活已终止 Run；实际业务变更仍遵守对应 owner 和精确确认边界。
+- 当前内置声明缺失、执行能力不可用、真实越权或无法满足原验收时，报告具体事实和可处理原因；不能用笼统的历史快照/hash 不一致代替这些判断。该规则不引入版本选择、兼容实现或历史数据迁移。
+- 相关实现与回归必须覆盖同一 Workspace 在内置数据更新后的正常推进、派生产物刷新、重复/stale/恢复，以及业务 Goal/DoD、权限、预算和历史执行事实不被改写；不能仅删除最外层 hash 比较而保留下游同类阻塞。
 
 ## 数据保真原则
 

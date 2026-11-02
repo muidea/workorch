@@ -31,14 +31,14 @@ func (b *Biz) deriveDefinitionAcceptanceBound(ctx context.Context, id common.Wor
 		return workspace.DefinitionDerivedAcceptance{}, err
 	}
 	defer release()
-	view, err := b.QueryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: id, InputHash: inputHash})
+	view, err := b.currentDefinitionAuthoring(ctx, id, inputHash)
 	if err != nil {
 		return workspace.DefinitionDerivedAcceptance{}, err
 	}
 	if view.Record == nil {
 		return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
 	}
-	if expected != nil && (view.Record.InputHash != expected.ExpectedInputHash || view.Record.TemplateSnapshotHash != expected.ExpectedTemplateSnapshotHash || !view.CurrentTemplateAvailable || view.CurrentTemplateSnapshotHash != expected.ExpectedTemplateSnapshotHash) {
+	if expected != nil && (view.Record.InputHash != expected.ExpectedInputHash || !view.CurrentTemplateAvailable) {
 		return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
 	}
 	if err := view.Record.Validate(); err != nil {
@@ -49,9 +49,10 @@ func (b *Biz) deriveDefinitionAcceptanceBound(ctx context.Context, id common.Wor
 		return workspace.DefinitionDerivedAcceptance{}, err
 	}
 	record := &recordModel
-	requestID := "derive/" + record.InputHash
-	for _, previous := range record.DerivationRequests {
-		if previous.Input.InputHash() == record.InputHash && workspace.WorkspaceTemplateSnapshotHash(&previous.Template) == record.TemplateSnapshotHash && previous.Proposal == nil && previous.FailureCode == "" {
+	requestID := workspace.DefinitionDerivationRequestID(record.InputHash, record.TemplateSnapshotHash)
+	for n := len(record.DerivationRequests) - 1; n >= 0; n-- {
+		previous := record.DerivationRequests[n]
+		if previous.Input.InputHash() == record.InputHash && workspace.WorkspaceTemplateSnapshotHash(&previous.Template) == record.TemplateSnapshotHash {
 			return derivationOutcome(previous)
 		}
 	}
@@ -61,7 +62,7 @@ func (b *Biz) deriveDefinitionAcceptanceBound(ctx context.Context, id common.Wor
 			return derivationOutcome(previous)
 		}
 	}
-	if !view.CurrentTemplateAvailable || record.TemplateSnapshotHash != view.CurrentTemplateSnapshotHash {
+	if !view.CurrentTemplateAvailable || inputHash == "" && record.TemplateSnapshotHash != view.CurrentTemplateSnapshotHash {
 		return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
 	}
 	identity := authoringPreparationIdentity(view, workspace.DefinitionAuthoringPreparationDerivation, requestID)

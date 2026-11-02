@@ -22,10 +22,40 @@ func runtimeEvidencePurposeHasProfileFields(m RuntimeEvidencePurposeMapping) boo
 func ValidateRuntimeProfileEvidencePurposeMappingDeclaration(m RuntimeEvidencePurposeMapping) error {
 	if m.ContractRef != RuntimeProfileDeliverableEvidencePurpose ||
 		!runtimeSourceIdentity(m.HistoricalProfileID, 128) || !runtimeSourceIdentity(m.HistoricalDeliverableID, 128) ||
-		!runtimeSourceIdentity(m.HistoricalProfileHash, 256) ||
+		!validHistoricalProfileSourceHash(m.HistoricalProfileHash) ||
 		m.HistoricalItemRef != RuntimeProfileDeliverablePurposeRef(m.HistoricalProfileID, m.HistoricalDeliverableID) ||
 		strings.TrimSpace(m.HistoricalText) == "" || len(m.HistoricalText) > 4096 || !utf8.ValidString(m.HistoricalText) || strings.ContainsRune(m.HistoricalText, 0) {
 		return fmt.Errorf("Profile evidence purpose requires exact bounded snapshot identity and complete original deliverable text")
+	}
+	return nil
+}
+
+// ValidateRuntimeHistoricalProfileEvidencePurposeSources authenticates the source
+// against its original confirmed Profile. Current applicability is a separate
+// check: a later declaration is not the preimage of a historical source hash.
+func ValidateRuntimeHistoricalProfileEvidencePurposeSources(inventory *RuntimeSourceObligationInventory, original []RuntimeProfileContract) error {
+	if inventory == nil {
+		return nil
+	}
+	for _, m := range inventory.EvidencePurposeMappings {
+		if m.ContractRef != RuntimeProfileDeliverableEvidencePurpose {
+			continue
+		}
+		if err := validateRuntimeProfileEvidencePurposeSource(m, original); err != nil {
+			return err
+		}
+		for _, p := range original {
+			if p.ID == m.HistoricalProfileID {
+				if m.HistoricalProfileHash != StableRuntimeProfileContractsHash([]RuntimeProfileContract{p}) {
+					return fmt.Errorf("Profile evidence purpose differs from original Profile hash")
+				}
+				for _, d := range p.DeliverableExpectations {
+					if d.ID == m.HistoricalDeliverableID && d.Description != m.HistoricalText {
+						return fmt.Errorf("Profile evidence purpose differs from complete original deliverable text")
+					}
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -43,11 +73,13 @@ func validateRuntimeProfileEvidencePurposeSource(m RuntimeEvidencePurposeMapping
 			if d.ID != m.HistoricalDeliverableID {
 				continue
 			}
+			// Historical text/hash authenticate the original source inventory, not the
+			// full current Profile. A policy or descriptive update cannot retire
+			// this business source; current existence/requiredness is still checked.
 			// Coverage source IDs have no Profile namespace. Reject another
 			// declaration of this ID rather than selecting a first match.
 			matches++
-			if p.ID != m.HistoricalProfileID || !d.Required || d.Description != m.HistoricalText ||
-				m.HistoricalProfileHash != StableRuntimeProfileContractsHash([]RuntimeProfileContract{p}) {
+			if p.ID != m.HistoricalProfileID || !d.Required {
 				return fmt.Errorf("Profile evidence purpose source differs from confirmed required deliverable snapshot")
 			}
 		}
@@ -83,4 +115,14 @@ func runtimeProfileEvidencePurposeCheck(i RuntimeSourceObligationInventory, m Ru
 		Criterion: m.HistoricalText, Declaration: m.HistoricalText}
 	check.CheckRef = StableRuntimeSourceObligationCheckRef(i.DefinitionRevision, item.ID, check)
 	return check
+}
+
+func validHistoricalProfileSourceHash(value string) bool {
+	const prefix = "runtime-profile-contracts:candidate-prefix-"
+	if !strings.HasPrefix(value, prefix) {
+		return false
+	}
+	raw := strings.TrimPrefix(value, prefix)
+	bytes, err := hex.DecodeString(raw)
+	return err == nil && len(bytes) == 10 && hex.EncodeToString(bytes) == raw
 }

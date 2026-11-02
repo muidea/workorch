@@ -26,17 +26,36 @@ type Bindings struct {
 	RequiredOwnerFacts    []workspacemodel.DefinitionRequiredOwnerFactBinding
 	OwnerFactConvergences []workspacemodel.DefinitionOwnerFactConvergenceBinding
 	ProfileContractsHash  string
+	ExecutionLimits       *runtimecontract.RuntimeExecutionLimits
 }
 
 // Compile validates both raw source layers before merge, then derives the
 // effective profile contracts and policy snapshot bindings. It is pure: neither
 // source model is mutated and it performs no I/O.
 func Compile(workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate) (Bindings, error) {
-	items, err := configurationDoDItems(workspace, template)
+	if workspace == nil || template == nil {
+		return Bindings{}, common.ErrInvalidArgument
+	}
+	// Invalid explicit input must not disappear while resolving inherited defaults.
+	if err := runtimeprofiledecode.ValidateInputShape(workspace.ContextHints.Map()); err != nil {
+		return Bindings{}, err
+	}
+	if err := validateExecutionLimitsInput(workspace.ContextHints.Map()); err != nil {
+		return Bindings{}, err
+	}
+	current := workspace
+	if workspace != nil && workspace.TemplateID != "" {
+		var err error
+		current, err = workspacemodel.WorkspaceForCurrentTemplate(workspace, template)
+		if err != nil {
+			return Bindings{}, err
+		}
+	}
+	items, err := configurationDoDItems(current, template)
 	if err != nil {
 		return Bindings{}, err
 	}
-	return CompileForItems(workspace, template, items)
+	return CompileForItems(current, template, items)
 }
 
 func CompileForItems(workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate, items []workspacemodel.DefinitionCandidateItem) (Bindings, error) {
@@ -60,9 +79,44 @@ func CompileForItems(workspace *workspacemodel.Workspace, template *workspacemod
 	}
 
 	effective := runtimeprofiledecode.MergeTemplateWorkspaceContextHintsForExecutionContract(templateHints, workspaceHints)
+	// No default may introduce a new resource budget into an already sealed
+	// business boundary that had no such limit. Existing limits stay exact.
+	if workspace.StartupInput != nil {
+		for _, c := range workspace.DefinitionAdmissionCandidates {
+			if workspace.ActivationAdmission == nil || c.CandidateHash != workspace.ActivationAdmission.CandidateHash {
+				continue
+			}
+			var confirmed *workspacemodel.DefinitionAdmissionPolicyBinding
+			for index := range c.AdmissionPolicyBindings {
+				b := &c.AdmissionPolicyBindings[index]
+				if b.PolicyRef != executionLimitsAdmissionRef {
+					continue
+				}
+				if confirmed != nil {
+					return Bindings{}, common.ErrConflict
+				}
+				confirmed = b
+			}
+			if confirmed == nil {
+				delete(effective, "executionLimits")
+			} else {
+				// Template-first execution merging must not replace the original
+				// authorization already retained in the detached Workspace view.
+				effective["executionLimits"] = workspaceHints["executionLimits"]
+				limits := executionLimits(effective)
+				if limits == nil || confirmed.SnapshotHash != runtimecontract.StableRuntimeExecutionLimitsHash(*limits) || confirmed.Revision != limits.ProtocolRef {
+					return Bindings{}, fmt.Errorf("%w: current execution cannot change confirmed budgets", common.ErrConflict)
+				}
+			}
+		}
+	}
 	rawProfiles := runtimeprofiledecode.Map(effective["profileContracts"])
 	var err error
-	rawProfiles, err = compileTemplateProofBindings(template, workspaceHints, rawProfiles, items)
+	if workspace.StartupInput != nil || workspace.DefinitionAuthoringConfirmation != nil {
+		rawProfiles, err = workspacemodel.CompileCurrentTemplateProofProfiles(template, workspaceHints, rawProfiles, items)
+	} else {
+		rawProfiles, err = compileTemplateProofBindings(template, workspaceHints, rawProfiles, items)
+	}
 	if err != nil {
 		return Bindings{}, err
 	}
@@ -111,7 +165,7 @@ func CompileForItems(workspace *workspacemodel.Workspace, template *workspacemod
 	}
 	required, convergences := definitionadmission.CompileProfileOwnerFactBindings(profiles)
 	return Bindings{
-		PolicyBindings: policies, ProfileContracts: profiles,
+		PolicyBindings: policies, ProfileContracts: profiles, ExecutionLimits: executionLimits(effective),
 		RequiredOwnerFacts: required, OwnerFactConvergences: convergences,
 		ProfileContractsHash: runtimecontract.StableRuntimeProfileContractsHash(profiles),
 	}, nil

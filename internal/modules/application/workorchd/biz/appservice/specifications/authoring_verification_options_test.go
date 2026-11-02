@@ -124,7 +124,7 @@ func TestDefaultSoftwareTemplateProvidesSourceOptionsWithoutBorrowingDeliverable
 				t.Fatalf("default DoD source has no applicable declaration: %s", item.CandidateItemRef)
 			}
 			for _, declaration := range item.Declarations {
-				wantConsumer := item.CandidateItemRef == "derived-dod:template:000003" || item.CandidateItemRef == "derived-dod:template:000004" || item.CandidateItemRef == "derived-dod:template:000013"
+				wantConsumer := item.CandidateItemRef == "derived-dod:template:000001" || item.CandidateItemRef == "derived-dod:template:000003" || item.CandidateItemRef == "derived-dod:template:000004" || item.CandidateItemRef == "derived-dod:template:000013"
 				if wantConsumer != (len(item.MergedRequiredConsumers) != 0) {
 					t.Fatalf("consumer source mismatch: %+v", item)
 				}

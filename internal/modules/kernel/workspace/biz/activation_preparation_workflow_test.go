@@ -275,7 +275,14 @@ func TestPreparationWorkflowConcurrentOriginalAndDriftedRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	command.RequestID, command.ExpectedWorkspaceRevision = "drift-original", stored.Revision
-	_, accepted, err := owners.workspace.acceptPreparation(ctx, workspacePreparationAccepted{Command: command, Snapshot: read.Snapshot, Manifest: manifest, At: time.Now().UTC()})
+	_, accepted, err := owners.workspace.acceptPreparation(ctx, workspacePreparationAccepted{ExecutionTemplate: func() *workspace.PreparationTemplate {
+		t, err := owners.workspace.resolvedTemplate(ctx, w.TemplateID)
+		if err != nil {
+			panic(err)
+		}
+		selected := workspace.NewPreparationTemplate(*t)
+		return &selected
+	}(), Command: command, Snapshot: read.Snapshot, Manifest: manifest, At: time.Now().UTC()})
 	if err != nil || !accepted {
 		t.Fatalf("accepted cut: %v", err)
 	}

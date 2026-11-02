@@ -83,10 +83,14 @@ func TestCurrentConfigurationAdmissionPreservesFileArchivesAcrossReopen(t *testi
 			t.Fatalf("automatic admission after reopen %d: %v", attempt, err)
 		}
 		current = snapshot.Workspace
+		effective, err := workspacemodel.WorkspaceForCurrentTemplate(current, template)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if current.ID != workspace.ID || current.Title != workspace.Title || current.DeliverableDirectory != workspace.DeliverableDirectory || current.InternalDirectory != workspace.InternalDirectory || current.State != workspace.State || current.ActiveRunID != "" {
 			t.Fatalf("new admission changed workspace identity/lifecycle: %+v", current)
 		}
-		if len(current.DefinitionAdmissionCandidates) != 2 || snapshot.Candidate.CandidateRevision != 2 || snapshot.Candidate.GoalInput.Text != goal.Text || snapshot.Candidate.DoDInputs[0].Text != dod.Items[0] || current.DefaultSoulID != "soul-current" || current.SoulBindings["execution"] != "soul-current" || !current.ContextHints.Equal(hints) {
+		if len(current.DefinitionAdmissionCandidates) != 2 || snapshot.Candidate.CandidateRevision != 2 || snapshot.Candidate.GoalInput.Text != goal.Text || snapshot.Candidate.DoDInputs[0].Text != dod.Items[0] || current.DefaultSoulID != "soul-old" || effective.SoulBindings["execution"] != "soul-current" || !effective.ContextHints.Equal(hints) {
 			t.Fatalf("new admission did not load current configuration: %+v", current)
 		}
 		if current.StartupInput.TemplateSnapshotHash != workspacemodel.WorkspaceTemplateSnapshotHash(template) || current.StartupInput.StartupInputHash == workspace.StartupInput.StartupInputHash || snapshot.Candidate.BaseStartupInputHash != "historical-startup" {

@@ -194,7 +194,15 @@ func validatePreparationManagedConfigEvidenceTransition(current, next *Workspace
 			if current.DefinitionAuthoring == nil || e.InternalDirectory != current.InternalDirectory {
 				return common.ErrConflict
 			}
-			declarations, err := workorchmanagedconfig.CompilePreparationDeclarations(current.DefinitionAuthoring.TemplateSnapshot.ContextHints, current.ContextHints)
+			_, err := PreparationWorkspace(current, a)
+			if err != nil {
+				return common.ErrConflict
+			}
+			selected, err := PreparationTemplateForAttempt(current, a)
+			if err != nil {
+				return common.ErrConflict
+			}
+			declarations, err := workorchmanagedconfig.CompilePreparationDeclarations(selected.ContextHints, current.ContextHints)
 			if err != nil || len(declarations) != len(e.Files) {
 				return common.ErrConflict
 			}

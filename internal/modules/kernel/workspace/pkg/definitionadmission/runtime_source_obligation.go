@@ -92,6 +92,9 @@ func CompileRuntimeSourceObligationInventory(candidate workspacemodel.Definition
 			ProfileID: verification.ProfileID, EvidenceRequirementID: verification.EvidenceRequirementID, Scope: verification.Scope,
 		})
 	}
+	if err := runtimecontract.ValidateRuntimeHistoricalProfileEvidencePurposeSources(&inventory, candidate.RuntimeProfileContracts); err != nil {
+		return nil, err
+	}
 	inventory = inventory.WithHash()
 	if err := inventory.Validate(); err != nil {
 		return nil, err

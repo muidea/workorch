@@ -17,15 +17,13 @@ func (r DefinitionAuthoringRecord) CurrentAuthoringSummary() (state, failurePhas
 	}
 	state = "draft"
 	var derivation *DefinitionDerivationRequest
-	for n := range r.DerivationRequests {
+	for n := len(r.DerivationRequests) - 1; n >= 0; n-- {
 		request := &r.DerivationRequests[n]
 		if request.Input.InputHash() != r.InputHash || WorkspaceTemplateSnapshotHash(&request.Template) != r.TemplateSnapshotHash {
 			continue
 		}
-		if request.RequestID == "derive/"+r.InputHash {
-			derivation = request
-			break
-		}
+		derivation = request
+		break
 	}
 	if derivation != nil {
 		state = "deriving"
@@ -149,7 +147,7 @@ func preparationDiagnosticCurrentForSummary(record DefinitionAuthoringRecord, de
 		}
 	}
 	if derivation == nil {
-		return diagnostic.Stage == DefinitionAuthoringPreparationDerivation && diagnostic.TargetRequestID == "derive/"+record.InputHash
+		return diagnostic.Stage == DefinitionAuthoringPreparationDerivation
 	}
 	if derivation.Proposal == nil || derivation.FailureCode != "" || diagnostic.DerivationPermitID != derivation.PermitID {
 		return false

@@ -37,7 +37,8 @@ func TestPreparationMCPRegistryRepositoryOriginalCASCloneAndReopen(t *testing.T)
 			}
 			repo := open()
 			w := &workspace.Workspace{ID: "ws-mcp", PreparationFence: &workspace.WorkspacePreparationFence{Version: workspace.WorkspacePreparationFenceVersion, WorkspaceID: "ws-mcp", CreationEpoch: strings.Repeat("a", 32)}}
-			w.DefinitionAuthoring = &workspace.DefinitionAuthoringRecord{}
+			w.TemplateID = "fixture-template"
+			w.DefinitionAuthoring = &workspace.DefinitionAuthoringRecord{TemplateSnapshot: workspace.WorkspaceTemplate{ID: w.TemplateID}}
 			// Scoped storage detaches these from metadata; the original accepted
 			// configuration binding must survive that internal representation.
 			w.DefaultSoulID = "fixture-soul"
@@ -47,6 +48,8 @@ func TestPreparationMCPRegistryRepositoryOriginalCASCloneAndReopen(t *testing.T)
 			}
 			now := time.Now().UTC()
 			w.StartupPreparation = &workspace.WorkspacePreparationRecord{Version: workspace.WorkspacePreparationWorkflowVersion, WorkspaceID: w.ID, Attempts: []workspace.WorkspacePreparationAttempt{{RequestID: "original", PayloadHash: "payload", ExpectedWorkspaceRevision: w.Revision, CommittedWorkspaceRevision: w.Revision + 1, CreationEpoch: w.PreparationFence.CreationEpoch, State: workspace.WorkspacePreparationAccepted, StartedAt: now, EvaluationVersion: workspace.PreparationCheckEvaluationVersion, ObservationSnapshotHash: "observed-snapshot", Binding: workspace.WorkspacePreparationBinding{AuthoringRef: workspace.DefinitionAuthoringAdmissionRef{InputHash: "input", DerivationPermitID: "permit", ProposalHash: "proposal", SpecificationHash: "spec"}, CandidateID: "candidate", CandidateRevision: 1, CandidateHash: "candidate-hash", DefinitionRevision: "definition", StartupInputHash: "startup", AuthoringConfigurationHash: "config", SnapshotHash: "snapshot", ManifestHash: "manifest", CheckPolicyVersion: "policy", CompilerVersion: "compiler"}, Checks: []workspace.WorkspacePreparationCheckResult{{ID: "mcp_selection", Owner: "mcpregistry", Required: true, State: "pending", Reason: "not_observed"}}}}}
+			selected := workspace.NewPreparationTemplate(w.DefinitionAuthoring.TemplateSnapshot)
+			w.StartupPreparation.Attempts[0].ExecutionTemplate = &selected
 			w.StartupPreparation.Attempts[0].Binding.AuthoringConfigurationHash = workspace.WorkspaceConfigurationHash(w)
 			if err := repo.CompareAndSwap(ctx, w, w.Revision); err != nil {
 				t.Fatal(err)

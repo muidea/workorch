@@ -6,18 +6,18 @@ import (
 	"path/filepath"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
+	mcpmodule "github.com/muidea/workorch/internal/modules/blocks/mcpregistry"
 	mcpregistrybiz "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/biz"
+	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
+	soulmodule "github.com/muidea/workorch/internal/modules/blocks/soul"
 	soulbiz "github.com/muidea/workorch/internal/modules/blocks/soul/biz"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	systembiz "github.com/muidea/workorch/internal/modules/kernel/system/biz"
+	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	workspacebiz "github.com/muidea/workorch/internal/modules/kernel/workspace/biz"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
-
-	magicevent "github.com/muidea/magicCommon/event"
-	mcpmodule "github.com/muidea/workorch/internal/modules/blocks/mcpregistry"
-	soulmodule "github.com/muidea/workorch/internal/modules/blocks/soul"
-	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	"github.com/muidea/workorch/internal/pkg/common"
 	filerepo "github.com/muidea/workorch/internal/pkg/repository/file"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -212,6 +212,7 @@ func TestSystemModuleStartConvergesAfterPartialFailureWithoutOverwritingUserChan
 	customServer.Enabled = false
 	customCapability := registrySnapshot.Capabilities[0]
 	customCapability.DisplayName = "user-customized MCP capability"
+	customCapability.Source, customCapability.SourceRef = mcpmodel.CapabilitySourceUser, string(customCapability.ID)
 	for _, capability := range registrySnapshot.Capabilities {
 		if capability.ServerID == customServer.ID {
 			capability.Enabled = false

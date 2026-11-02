@@ -222,8 +222,8 @@ func TestDefinitionAuthoringReducerSavesWithoutAdmission(t *testing.T) {
 	}
 	cmd.Input = input
 	template.Description = "模板已变"
-	if _, err := reduceDefinitionAuthoring(o, cmd); err == nil {
-		t.Fatal("template drift silently replayed")
+	if result, err := reduceDefinitionAuthoring(o, cmd); err != nil || result.Next == nil || result.Next.DefinitionAuthoring.TemplateSnapshot.Description != template.Description {
+		t.Fatal("current template refresh did not preserve business input", err)
 	}
 }
 

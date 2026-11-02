@@ -3,7 +3,6 @@ package activationports
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -39,6 +38,8 @@ func EnsureWorkspaceDefinitionAdmission(ctx context.Context, hub magicevent.Hub,
 	if hub == nil || workspace == nil || goal == nil || dod == nil || workspace.ID == "" || goal.WorkspaceID != workspace.ID || dod.WorkspaceID != workspace.ID {
 		return WorkspaceDefinitionAdmissionSnapshot{}, common.ErrInvalidArgument
 	}
+	detached := *workspace
+	workspace = &detached
 	definitionRevision := workspacecontracts.ExecutionDefinitionRevision(string(goal.ID), goal.DefinitionRevision, string(dod.ID), dod.DefinitionRevision)
 	if definitionRevision == "" {
 		return WorkspaceDefinitionAdmissionSnapshot{}, fmt.Errorf("%w: current Goal/DoD revision is incomplete", common.ErrConflict)
@@ -46,11 +47,6 @@ func EnsureWorkspaceDefinitionAdmission(ctx context.Context, hub magicevent.Hub,
 	template, err := workspaceports.ReadWorkspaceTemplateRecord(ctx, hub, strings.TrimSpace(workspace.TemplateID))
 	if err != nil {
 		return WorkspaceDefinitionAdmissionSnapshot{}, fmt.Errorf("%w: Workspace Template snapshot is required for Definition admission: %v", common.ErrConflict, err)
-	}
-	// Fresh activation compiles current configuration, not historical policy.
-	workspace, err = workspacemodel.WorkspaceForCurrentTemplate(workspace, template)
-	if err != nil {
-		return WorkspaceDefinitionAdmissionSnapshot{}, err
 	}
 	for _, candidate := range workspace.DefinitionAdmissionCandidates {
 		if candidate.AuthoringRef == nil {
@@ -82,21 +78,24 @@ func EnsureWorkspaceDefinitionAdmission(ctx context.Context, hub magicevent.Hub,
 	if workspace.DefinitionAuthoring != nil || workspace.DefinitionAuthoringConfirmation != nil {
 		candidate, present, err := workspace.ValidateActivationAdmissionView()
 		journal := workspace.DefinitionAuthoringConfirmation
-		if err != nil || !present || journal == nil || workspace.ActivationAdmission.State != workspacemodel.WorkspaceActivationEligible ||
-			journal.TemplateSnapshotHash != workspacemodel.WorkspaceTemplateSnapshotHash(template) || workspace.DeliverableDirectory != candidate.ResolvedProjectWorkspaceDirectory ||
+		if err != nil || !present || journal == nil || workspacemodel.WorkspaceConfigurationHash(workspace) != journal.ConfigurationHash || workspace.ActivationAdmission.State != workspacemodel.WorkspaceActivationEligible ||
+			workspace.DeliverableDirectory != candidate.ResolvedProjectWorkspaceDirectory ||
 			goal.ID != journal.Goal.ID || goal.DefinitionRevision != journal.Goal.DefinitionRevision || goal.Text != journal.Goal.Text ||
 			dod.ID != journal.DoD.ID || dod.DefinitionRevision != journal.DoD.DefinitionRevision || !slices.Equal(dod.Items, journal.DoD.Items) ||
 			definitionRevision != workspace.StartupInput.DefinitionRevision {
 			return WorkspaceDefinitionAdmissionSnapshot{}, fmt.Errorf("%w: authoring activation requires exact confirmed admission and unchanged input", common.ErrConflict)
 		}
-		bindings, err := definitionconfiguration.Compile(workspace, template)
-		if err != nil || bindings.ProfileContractsHash != candidate.RuntimeProfileContractsHash || !reflect.DeepEqual(bindings.PolicyBindings, candidate.AdmissionPolicyBindings) {
-			return WorkspaceDefinitionAdmissionSnapshot{}, fmt.Errorf("%w: authoring activation policy changed after confirmation", common.ErrConflict)
+		if _, err := definitionconfiguration.Compile(workspace, template); err != nil {
+			return WorkspaceDefinitionAdmissionSnapshot{}, err
 		}
 		if err := validateCurrentWorkspaceDefinitionAdmission(workspace); err != nil {
 			return WorkspaceDefinitionAdmissionSnapshot{}, invalidCurrentWorkspaceStartupInput(err)
 		}
 		return WorkspaceDefinitionAdmissionSnapshot{Workspace: workspace, Template: template, Candidate: candidate}, nil
+	}
+	workspace, err = workspacemodel.WorkspaceForCurrentTemplate(workspace, template)
+	if err != nil {
+		return WorkspaceDefinitionAdmissionSnapshot{}, err
 	}
 	candidate, err := definitionAdmissionCandidate(workspace, goal, dod, template)
 	if err != nil {
@@ -345,9 +344,10 @@ func AuthoringAdmissionCandidate(workspace *workspacemodel.Workspace, template *
 		return workspacemodel.DefinitionAdmissionCandidate{}, common.ErrConflict
 	}
 	journal := *workspace.DefinitionAuthoringConfirmation
-	if journal.ConfigurationHash != workspacemodel.WorkspaceConfigurationHash(workspace) || journal.TemplateSnapshotHash != workspacemodel.WorkspaceTemplateSnapshotHash(template) {
+	if journal.ConfigurationHash != workspacemodel.WorkspaceConfigurationHash(workspace) {
 		return workspacemodel.DefinitionAdmissionCandidate{}, common.ErrConflict
 	}
+	template = &workspace.DefinitionAuthoring.TemplateSnapshot
 	goal, dod, spec, ref, err := workspacemodel.ConfirmedAuthoringAdmissionSourceView(workspace.DefinitionAuthoring, journal, workspace.ID)
 	if err != nil {
 		return workspacemodel.DefinitionAdmissionCandidate{}, err

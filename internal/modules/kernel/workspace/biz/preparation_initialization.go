@@ -103,14 +103,23 @@ func (m *Biz) initializePreparationResources(ctx context.Context, c workspaceeve
 		return empty, err
 	}
 	if index < 0 {
-		ds, err := workorchmanagedconfig.CompilePreparationDeclarations(current.DefinitionAuthoring.TemplateSnapshot.ContextHints, current.ContextHints)
+		template, err := m.resolvedTemplate(bound, current.TemplateID)
+		if err != nil {
+			return empty, err
+		}
+		_, err = workspace.WorkspaceForCurrentTemplate(current, template)
+		if err != nil {
+			return empty, err
+		}
+		selected := workspace.NewPreparationTemplate(*template)
+		ds, err := workorchmanagedconfig.CompilePreparationDeclarations(template.ContextHints, current.ContextHints)
 		if err != nil {
 			return empty, err
 		}
 		if current.PreparationFence == nil || current.PreparationFence.Validate(current.ID) != nil {
 			return empty, common.ErrConflict
 		}
-		r := workspace.PreparationResourceInitialization{Version: workspace.PreparationInitializationVersion, ExpectedWorkspaceRevision: c.ExpectedWorkspaceRevision, CommittedWorkspaceRevision: current.Revision + 1, StartupInputHash: read.Snapshot.StartupInput.StartupInputHash, ConfigurationHash: read.Snapshot.AuthoringConfigurationHash, CreationEpoch: current.PreparationFence.CreationEpoch, PreparationEpoch: current.PreparationFence.PreparationEpoch, PreparedAt: time.Now().UTC(), Plan: fileevents.InitializePreparationResourcesCommand{WorkspaceID: c.WorkspaceID, RequestID: c.RequestID, InternalDirectory: read.Snapshot.InternalDirectory, DeliverableDirectory: read.Snapshot.StartupInput.ResolvedProjectWorkspaceDirectory, Declarations: nil}}
+		r := workspace.PreparationResourceInitialization{ExecutionTemplate: &selected, Version: workspace.PreparationInitializationVersion, ExpectedWorkspaceRevision: c.ExpectedWorkspaceRevision, CommittedWorkspaceRevision: current.Revision + 1, StartupInputHash: read.Snapshot.StartupInput.StartupInputHash, ConfigurationHash: read.Snapshot.AuthoringConfigurationHash, CreationEpoch: current.PreparationFence.CreationEpoch, PreparationEpoch: current.PreparationFence.PreparationEpoch, PreparedAt: time.Now().UTC(), Plan: fileevents.InitializePreparationResourcesCommand{WorkspaceID: c.WorkspaceID, RequestID: c.RequestID, InternalDirectory: read.Snapshot.InternalDirectory, DeliverableDirectory: read.Snapshot.StartupInput.ResolvedProjectWorkspaceDirectory, Declarations: nil}}
 		for _, d := range ds {
 			raw, e := json.Marshal(d.Defaults)
 			if e != nil {

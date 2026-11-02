@@ -98,6 +98,16 @@ func TestPreparationInitializationPreservesNestedEmptyHistoryAcrossCASAndReopen(
 	if stored.Revision != before.Revision+2 || len(stored.PreparationResourceInitializations[0].Attempts) != 1 || !reflect.DeepEqual(before.StartupPreparation, stored.StartupPreparation) || !reflect.DeepEqual(before.PreparationSealEvidence, stored.PreparationSealEvidence) || !reflect.DeepEqual(before.DefinitionAuthoring, stored.DefinitionAuthoring) || !reflect.DeepEqual(before.StartupInput, stored.StartupInput) || !reflect.DeepEqual(before.ActivationAdmission, stored.ActivationAdmission) || stored.ActiveRunID != "" {
 		t.Fatal("initialization changed old history/seal, budget or Run boundary")
 	}
+	initialization := stored.PreparationResourceInitializations[0].Clone()
+	if initialization.Validate(w.ID) != nil || initialization.ExecutionTemplate == nil {
+		t.Fatal("selected initialization source unavailable")
+	}
+	initialization.ExecutionTemplate.Description += " corrupt source"
+	initialization.Attempts[0].Result = nil
+	initialization.Plan.BindingHash = initialization.BindingHash()
+	if initialization.Validate(w.ID) == nil {
+		t.Fatal("outer identity accepted internally corrupt declaration")
+	}
 	// Inspect the exact persisted JSON, rather than comparing two cloned
 	// values that might share the same lossy transformation.
 	ownerBytes, err := os.ReadFile(ownerPath)

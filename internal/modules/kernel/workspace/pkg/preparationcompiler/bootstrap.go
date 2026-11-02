@@ -5,10 +5,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/muidea/workorch/internal/pkg/bootstrapcompiler"
 
 	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/definitionadmission"
 	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/startuppreparation"
+	"github.com/muidea/workorch/internal/pkg/bootstrapcompiler"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -35,9 +35,6 @@ func CompilePreparedBootstrap(snapshot startuppreparation.ExactConfirmedStartupS
 	}
 	if err := activation.Validate(); err != nil {
 		return PreparedBootstrapCompilation{}, fmt.Errorf("%w: invalid detached activation input", common.ErrInvalidArgument)
-	}
-	if runtimecontract.StableRuntimeProfileContractsHash(activation.ExecutionContract.ProfileContracts) != snapshot.StartupInput.RuntimeProfileContractsHash {
-		return PreparedBootstrapCompilation{}, fmt.Errorf("%w: prepared profile differs from exact startup input", common.ErrConflict)
 	}
 	inventory, err := definitionadmission.CompileRuntimeSourceObligationInventory(snapshot.Candidate, snapshot.StartupInput, snapshot.ActivationAdmission)
 	if err != nil {

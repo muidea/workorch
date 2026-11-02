@@ -161,8 +161,9 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
   Application 不重写 Workspace admission、Run 封存输入或既有请求，不自动启动执行。
 - bootstrap compiler 无损封存 definition/profile、provider、Soul、Skill、MCP、Memory、evidence policy、budget 与 directory
   snapshot；Goal-only authoring 在 owner 创建／修订事务中物化完整 Template binding。其显式 Restart 通过 typed
-  authoring 查询核对原确认、当前 Workspace revision、正式 Goal／DoD 和模板／Definition policy，复用 exact eligible candidate，
-  不进入退休的通用定义准入入口、不重新调用 provider。任何输入漂移均阻塞，不能自动替换用户已确认规格。
+  authoring 查询核对原确认、当前 Workspace revision、正式 Goal／DoD、目录与原配置，复用 exact eligible candidate。
+  当前 Template/Profile/Soul 作为本次执行来源重新解析，不与历史内置 hash 强制相等；原预算与项目显式约束仍保持完整。
+  不进入退休的通用定义准入入口、不重新调用创作 provider、不替换用户已确认规格；真实业务输入或授权变化仍阻塞。
   其他受支持的 owner 定义路径仍由 Workspace owner-private admission 管理。Resume/recovery
   不重新读取当前资源。capability requirement 必须是终态证明
   kinds 与 Profile validation-repair route kinds 的并集，因此 repair-only owner operation 可被启动时采集，但不得被加入终态

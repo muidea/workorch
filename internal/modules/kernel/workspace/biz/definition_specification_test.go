@@ -563,7 +563,15 @@ func TestSpecificationLedgerCompiledSixCriticAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := workspaceevents.DefinitionAdmissionIntentCommand{Candidate: compiled, CurrentTemplate: true, ExpectedWorkspaceRevision: w.Revision, ExpectedConfigurationHash: workspacemodel.WorkspaceConfigurationHash(w)}
+	template, err := f.owner.resolvedTemplate(f.ctx, w.TemplateID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := workspacemodel.WorkspaceForCurrentTemplate(w, template)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := workspaceevents.DefinitionAdmissionIntentCommand{Candidate: compiled, CurrentTemplate: true, ExpectedWorkspaceRevision: w.Revision, ExpectedConfigurationHash: workspacemodel.WorkspaceConfigurationHash(selected)}
 	forged := compiled.Clone()
 	forged.Specification.Reviews[0].Reason = "forged pass"
 	forged = forged.WithHash()

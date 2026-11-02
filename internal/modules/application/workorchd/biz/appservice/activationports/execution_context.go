@@ -31,6 +31,13 @@ func buildWorkspaceRuntimeActivation(ctx context.Context, request workspaceRunti
 	if request.Hub == nil || workspace == nil || template == nil || goal == nil || dod == nil || goal.WorkspaceID != workspace.ID || dod.WorkspaceID != workspace.ID || strings.TrimSpace(template.ID) != strings.TrimSpace(workspace.TemplateID) {
 		return workspaceRuntimeActivationBuild{}, common.ErrInvalidArgument
 	}
+	originalWorkspace := workspace
+	currentWorkspace, err := workspacemodel.WorkspaceForCurrentTemplate(workspace, template)
+	if err != nil {
+		return workspaceRuntimeActivationBuild{}, err
+	}
+	workspace = currentWorkspace
+	request.Workspace = currentWorkspace
 	var definitions WorkspaceExecutionDefinitionContext
 	if workspace.StartupInput != nil && workspace.ActivationAdmission != nil && workspace.ActivationAdmission.State == workspacemodel.WorkspaceActivationEligible {
 		definitions = sealedWorkspaceExecutionDefinitionsContext(goal, dod)
@@ -127,14 +134,12 @@ func buildWorkspaceRuntimeActivation(ctx context.Context, request workspaceRunti
 		return workspaceRuntimeActivationBuild{}, err
 	}
 
-	profiles, err := definitionconfiguration.Compile(workspace, template)
+	profiles, err := definitionconfiguration.Compile(originalWorkspace, template)
 	if err != nil {
 		return workspaceRuntimeActivationBuild{}, err
 	}
-	if workspace.StartupInput != nil && profiles.ProfileContractsHash != workspace.StartupInput.RuntimeProfileContractsHash {
-		return workspaceRuntimeActivationBuild{}, fmt.Errorf("%w: activation Profile differs from sealed startup input", common.ErrConflict)
-	}
 	runtimeActivation.ExecutionContract.ProfileContracts = profiles.ProfileContracts
+	runtimeActivation.ExecutionContract.ExecutionLimits = profiles.ExecutionLimits
 	return workspaceRuntimeActivationBuild{
 		EffectiveGoal: effectiveGoal,
 		EffectiveDoD:  effectiveDoD,

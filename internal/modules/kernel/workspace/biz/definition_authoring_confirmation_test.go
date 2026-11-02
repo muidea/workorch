@@ -310,17 +310,12 @@ func TestAuthoringConfirmationRejectsTemplateAndConfigurationDrift(t *testing.T)
 				t.Fatal(err)
 			}
 			_, err = owners.workspace.submitDefinitionAuthoringConfirmationInternalEvent(ctx, definitionAuthoringConfirmationInternalEvent{Command: cmd})
-			if cut != "materialized" && !errors.Is(err, common.ErrConflict) {
-				t.Fatalf("template drift was accepted at %s: %v", cut, err)
+			if err != nil {
+				t.Fatalf("built-in update blocked exact reviewed confirmation at %s: %v", cut, err)
 			}
-			if cut == "materialized" && err != nil {
-				t.Fatalf("completed materialization could not be replayed: %v", err)
-			}
-			if cut == "before-prepare" {
-				unchanged, err := owners.repositories.Workspaces.Get(ctx, cmd.WorkspaceID)
-				if err != nil || unchanged.DefinitionAuthoringConfirmation != nil {
-					t.Fatalf("template drift prepared a journal: %+v %v", unchanged, err)
-				}
+			confirmed, err := owners.repositories.Workspaces.Get(ctx, cmd.WorkspaceID)
+			if err != nil || confirmed.DefinitionAuthoringConfirmation == nil || confirmed.DefinitionAuthoring.TemplateSnapshotHash != workspace.WorkspaceTemplateSnapshotHash(&originalTemplate) {
+				t.Fatal("reviewed original was replaced", err)
 			}
 			if err := owners.repositories.WorkspaceTemplates.Update(ctx, &originalTemplate); err != nil {
 				t.Fatal(err)

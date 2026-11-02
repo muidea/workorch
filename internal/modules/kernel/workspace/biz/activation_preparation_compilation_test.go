@@ -147,6 +147,41 @@ func TestPreparedBootstrapPureCompilationIsNotReadiness(t *testing.T) {
 	if string(before) != string(after) {
 		t.Fatal("pure compilation changed input")
 	}
+	// A later system declaration changes execution proof, not the confirmed
+	// business inventory or its original Profile provenance.
+	current := activation.Clone()
+	current.ExecutionContract.ProfileContracts[0].EvidenceRequirements[0].Description += " current system proof"
+	latest, err := activationcore.CompilePreparedBootstrap(snapshot, manifest, current)
+	if err != nil {
+		t.Fatalf("current declaration blocked original business: %v", err)
+	}
+	if !reflect.DeepEqual(latest.Bootstrap.Definition.SourceObligations, again.Bootstrap.Definition.SourceObligations) || !reflect.DeepEqual(latest.Bootstrap.Activation.ExecutionContract.ProfileContracts, current.Normalized().ExecutionContract.ProfileContracts) {
+		t.Fatal("current proof replaced original source or was discarded")
+	}
+	// A method update must reach the compiled proof, not merely change a
+	// descriptive hash. It still cannot alter the original acceptance source.
+	current.ExecutionContract.ProfileContracts[0].EvidenceRequirements[0].RequireDirectEvidence = true
+	current.ExecutionContract.ProfileContracts[0].EvidenceRequirements[0].TargetRole = "current-validation-subject"
+	method, err := activationcore.CompilePreparedBootstrap(snapshot, manifest, current)
+	if err != nil {
+		t.Fatalf("current proof method blocked original business: %v", err)
+	}
+	if !reflect.DeepEqual(method.Bootstrap.Definition, again.Bootstrap.Definition) || !reflect.DeepEqual(method.Bootstrap.DefinitionSeed.SourceObligations, again.Bootstrap.DefinitionSeed.SourceObligations) || !reflect.DeepEqual(method.Bootstrap.ExecutionBudgetPolicy, again.Bootstrap.ExecutionBudgetPolicy) {
+		t.Fatal("new proof method changed confirmed business or budget")
+	}
+	matched := 0
+	for _, focus := range method.Bootstrap.DefinitionFocuses {
+		if focus.AssessmentScope != "dodItem" {
+			continue
+		}
+		matched++
+		if !focus.RequireDirectEvidence || focus.TargetRole != "current-validation-subject" {
+			t.Fatal("new method did not reach the compiled DoD proof")
+		}
+	}
+	if matched == 0 {
+		t.Fatal("method fixture contains no original DoD proof")
+	}
 	changed := activation.Clone()
 	changed.ExecutionContract.ProfileContracts = nil
 	if _, err := activationcore.CompilePreparedBootstrap(snapshot, manifest, changed); err == nil {

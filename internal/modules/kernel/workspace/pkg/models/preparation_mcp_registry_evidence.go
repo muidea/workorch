@@ -182,7 +182,7 @@ func validatePreparationMCPRegistryEvidenceTransition(current, next *Workspace, 
 		// Scoped metadata excludes separately persisted Soul bindings. Derive
 		// declarations from the real preimage, but take full configuration
 		// identity from the immutable, already accepted operation binding.
-		expected := PreparationMCPDefinition(current)
+		expected := PreparationMCPDefinitionForAttempt(current, a)
 		expected.ConfigurationHash = a.Binding.AuthoringConfigurationHash
 		if !reflect.DeepEqual(compiled.Definition, expected) {
 			return common.ErrConflict

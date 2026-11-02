@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -91,5 +92,76 @@ func TestEnsureBuiltinMCPDefaultsPreservesCustomizedBuiltinID(t *testing.T) {
 	}
 	if !reflect.DeepEqual(after.Servers[0], server) || !reflect.DeepEqual(after.Capabilities[0], capability) {
 		t.Fatalf("custom defaults overwritten: %+v", after)
+	}
+}
+
+func TestBuiltinCapabilityRefreshPreservesUserPermissionAndIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	registry := memoryrepo.NewMCPRegistryRepository()
+	service := newService(registry)
+	if _, err := service.ensureBuiltinDefaults(ctx); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := registry.Load(ctx)
+	wanted := *before.Capabilities[0]
+	stale := before.Capabilities[0]
+	stale.Description = "obsolete builtin declaration"
+	stale.Enabled = false
+	stale.ApprovalPolicy = "always"
+	stale.Revision++
+	staleRevision := stale.Revision
+	before.Revision++
+	if err := registry.Commit(ctx, before.Revision-1, before); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ensureBuiltinDefaults(ctx); err != nil {
+		t.Fatal(err)
+	}
+	current, _ := registry.Load(ctx)
+	actual := findCapability(current.Capabilities, wanted.ID)
+	if actual.Description != wanted.Description || actual.Enabled || actual.ApprovalPolicy != "always" || actual.Revision != staleRevision+1 {
+		t.Fatalf("current declaration or user permission lost: %+v", actual)
+	}
+	if _, err := service.ensureBuiltinDefaults(ctx); err != nil {
+		t.Fatal(err)
+	}
+	duplicate, _ := registry.Load(ctx)
+	if !reflect.DeepEqual(current, duplicate) {
+		t.Fatal("duplicate default synchronization mutated registry")
+	}
+}
+
+func TestBuiltinCapabilityUserEditTransfersOnlyDeclarationOwnership(t *testing.T) {
+	ctx := context.Background()
+	registry := memoryrepo.NewMCPRegistryRepository()
+	service := newService(registry)
+	if _, err := service.ensureBuiltinDefaults(ctx); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := registry.Load(ctx)
+	original := snapshot.Capabilities[0]
+	command := mcpevents.CreateCapabilityCommand{
+		CapabilityID: original.ID, ServerID: original.ServerID, Kind: original.Kind, Name: original.Name,
+		DisplayName: original.DisplayName, Description: original.Description, Category: original.Category,
+		Tags: original.Tags, UsageHint: original.UsageHint, InputSummary: original.InputSummary, OutputSummary: original.OutputSummary,
+		StageHints: original.StageHints, RiskLevel: original.RiskLevel, EffectScope: original.EffectScope,
+		IdempotencyClass: original.IdempotencyClass, ValidationProofApplicability: original.ValidationProofApplicability,
+		Schema: original.Schema, URI: original.URI, Enabled: false, ApprovalPolicy: "always",
+	}
+	permission, _, err := service.updateCapability(ctx, mcpevents.UpdateCapabilityCommand(command))
+	if err != nil || permission.Source != mcpmodel.CapabilitySourceBuiltin {
+		t.Fatalf("permission overlay: %+v %v", permission, err)
+	}
+	command.Description = "explicit project-owned description"
+	custom, _, err := service.updateCapability(ctx, mcpevents.UpdateCapabilityCommand(command))
+	if err != nil || custom.Source != mcpmodel.CapabilitySourceUser || custom.SourceRef != string(custom.ID) {
+		t.Fatalf("custom declaration: %+v %v", custom, err)
+	}
+	if _, err := service.ensureBuiltinDefaults(ctx); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := registry.Load(ctx)
+	if !reflect.DeepEqual(custom, findCapability(after.Capabilities, custom.ID)) {
+		t.Fatal("system refresh replaced user declaration")
 	}
 }

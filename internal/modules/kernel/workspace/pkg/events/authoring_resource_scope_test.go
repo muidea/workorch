@@ -16,6 +16,10 @@ func TestAuthoringResourceScopeBindsCurrentDraftAndRef(t *testing.T) {
 	if err != nil || got.ValidateFor(command) != nil || got.DeliverableDirectory != view.DeliverableDirectory || got.WorkspaceRevision != view.WorkspaceRevision {
 		t.Fatalf("current scope: %+v %v", got, err)
 	}
+	view.CurrentTemplateSnapshotHash = "new-current-template"
+	if _, err := AuthoringResourceScopeFor(view, command); err != nil {
+		t.Fatal("built-in update invalidated resource scope", err)
+	}
 	got.WorkspaceRevision = 0
 	if got.ValidateFor(command) == nil {
 		t.Fatal("unversioned resource scope was accepted")
@@ -30,9 +34,6 @@ func TestAuthoringResourceScopeBindsCurrentDraftAndRef(t *testing.T) {
 		{"input hash", func(_ *QueryDefinitionAuthoringResult, c *QueryAuthoringResourceScopeCommand) { c.InputHash = "old" }},
 		{"ref", func(_ *QueryDefinitionAuthoringResult, c *QueryAuthoringResourceScopeCommand) {
 			c.ResourceRef = "other.txt"
-		}},
-		{"template", func(v *QueryDefinitionAuthoringResult, _ *QueryAuthoringResourceScopeCommand) {
-			v.CurrentTemplateSnapshotHash = "changed"
 		}},
 		{"removed template", func(v *QueryDefinitionAuthoringResult, _ *QueryAuthoringResourceScopeCommand) {
 			v.CurrentTemplateAvailable = false

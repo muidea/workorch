@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
-
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -45,7 +44,7 @@ func (b *Biz) SaveDefinitionAuthoringView(ctx context.Context, id common.Workspa
 	}
 	if view.Record != nil {
 		input.Revision = view.Record.Input.Revision
-		if !reflect.DeepEqual(input.Normalized(), view.Record.Input.Normalized()) || (directory != nil && *directory != view.DeliverableDirectory) || !view.CurrentTemplateAvailable || view.CurrentTemplateSnapshotHash != view.Record.TemplateSnapshotHash {
+		if !reflect.DeepEqual(input.Normalized(), view.Record.Input.Normalized()) || (directory != nil && *directory != view.DeliverableDirectory) {
 			input.Revision++
 		}
 	} else {

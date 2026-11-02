@@ -240,6 +240,17 @@ func (b *Biz) StartDefinitionAuthoringCompilation(ctx context.Context, id common
 	if !authoringCompileMatches(view, request) {
 		return view, common.ErrConflict
 	}
+	currentSource, err := b.currentDefinitionAuthoring(ctx, id, "")
+	if err != nil {
+		return view, err
+	}
+	if currentSource.Record != nil && currentSource.Record.TemplateSnapshotHash != view.TemplateSnapshotHash {
+		view, err = definitionAuthoringView(currentSource)
+		if err != nil {
+			return view, err
+		}
+		request.ExpectedTemplateSnapshotHash = view.TemplateSnapshotHash
+	}
 	switch view.State {
 	case "ready_to_confirm", "review_blocked", "failed", "outcome_unresolved", "confirming", "admitting", "admitted", "clarification_required":
 		return view, nil
@@ -255,9 +266,12 @@ func (b *Biz) StartDefinitionAuthoringCompilation(ctx context.Context, id common
 			return
 		}
 		current, err = b.ReadDefinitionAuthoringView(taskCtx, id)
-		if err != nil || !authoringCompileMatches(current, request) {
+		if err != nil || current.InputHash != request.ExpectedInputHash || !current.TemplateCurrent {
 			return
 		}
+		// A normal owner refresh may have selected the current declaration for
+		// this same business input. Subsequent stages use that exact source.
+		request.ExpectedTemplateSnapshotHash = current.TemplateSnapshotHash
 		if _, err := b.compileAuthoringSpecificationBound(taskCtx, id, "", &request); err != nil {
 			b.logAuthoringCompilationFailure(taskCtx, id, hash, "specification", err)
 		}

@@ -5,10 +5,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/runtimeprofiledecode"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -66,7 +68,7 @@ func WorkspaceTemplateSnapshotHash(template *WorkspaceTemplate) string {
 	return "template-snapshot-sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
-// WorkspaceForCurrentTemplate is a detached authoring view. A changed Template
+// WorkspaceForCurrentTemplate is a detached current-declaration view. A changed Template
 // replaces its previously materialized binding, not Goal/DoD, directories,
 // provider selection, lifecycle or admission history. Persistence belongs to
 // the private definition-admission transaction, never to this pure helper.
@@ -77,27 +79,111 @@ func WorkspaceForCurrentTemplate(workspace *Workspace, template *WorkspaceTempla
 	next := *workspace
 	next.PreparationFence = workspace.PreparationFence.Clone()
 	next.FirstExecutionPreparationEvidence = workspace.FirstExecutionPreparationEvidence.Clone()
-	boundHash := workspace.TemplateBindingHash
-	if boundHash == "" && workspace.StartupInput != nil {
-		boundHash = workspace.StartupInput.TemplateSnapshotHash
-	}
 	currentHash := WorkspaceTemplateSnapshotHash(template)
-	if boundHash == currentHash {
-		return &next, nil
-	}
 	next.TemplateBindingHash = currentHash
 	next.ProfileID = template.ID
 	next.DefaultSoulID = common.SoulID(template.DefaultSoulID)
-	next.SoulBindings = nil
-	if len(template.SoulBindings) > 0 {
-		next.SoulBindings = make(map[string]common.SoulID, len(template.SoulBindings))
-	}
+	next.SoulBindings = make(map[string]common.SoulID, len(template.SoulBindings))
 	for stage, id := range template.SoulBindings {
 		next.SoulBindings[stage] = common.SoulID(id)
 	}
 	next.ContextHints = template.ContextHints.Clone()
 	next.EvidencePolicies = workorcheventpayload.CloneSlice(template.EvidencePolicies)
+	// The original declaration is provenance, not a historical implementation.
+	// Only fields actually inherited from it are replaced; project overrides stay.
+	if record := workspace.DefinitionAuthoring; record != nil {
+		original := &record.TemplateSnapshot
+		if workspace.DefaultSoulID != common.SoulID(original.DefaultSoulID) {
+			next.DefaultSoulID = workspace.DefaultSoulID
+		}
+		for stage, id := range workspace.SoulBindings {
+			if string(id) != original.SoulBindings[stage] {
+				next.SoulBindings[stage] = id
+			}
+		}
+		overrides := templateOverrides(workspace.ContextHints.Map(), original.ContextHints.Map())
+		// Resource budgets belong to the confirmed business boundary, even when
+		// their initial values were supplied by a system default.
+		effective := mergeCurrentTemplate(template.ContextHints.Map(), overrides)
+		if workspace.StartupInput != nil || workspace.DefinitionAuthoringConfirmation != nil {
+			oldEffective := runtimeprofiledecode.MergeTemplateWorkspaceContextHintsForExecutionContract(original.ContextHints.Map(), workspace.ContextHints.Map())
+			if limits, ok := oldEffective["executionLimits"]; ok {
+				// The budget is one complete authorization, not recursively
+				// merged defaults that can acquire new limits after deployment.
+				effective["executionLimits"] = limits
+			} else {
+				delete(effective, "executionLimits")
+			}
+		}
+		var err error
+		next.ContextHints, err = workorcheventpayload.FromMap(effective)
+		if err != nil {
+			return nil, err
+		}
+		if !reflect.DeepEqual(workspace.EvidencePolicies, original.EvidencePolicies) {
+			next.EvidencePolicies = workorcheventpayload.CloneSlice(workspace.EvidencePolicies)
+		}
+	} else {
+		// With no original inheritance source, explicit project values cannot be
+		// classified as obsolete system defaults merely by comparing a hash.
+		effective := mergeCurrentTemplate(template.ContextHints.Map(), workspace.ContextHints.Map())
+		var err error
+		next.ContextHints, err = workorcheventpayload.FromMap(effective)
+		if err != nil {
+			return nil, err
+		}
+		if workspace.DefaultSoulID != "" {
+			next.DefaultSoulID = workspace.DefaultSoulID
+		}
+		for stage, id := range workspace.SoulBindings {
+			next.SoulBindings[stage] = id
+		}
+		if len(workspace.EvidencePolicies) > 0 {
+			next.EvidencePolicies = workorcheventpayload.CloneSlice(workspace.EvidencePolicies)
+		}
+	}
+
 	return &next, nil
+}
+
+// templateOverrides computes detached explicit configuration, never persisted
+// migration or a hash-based permission. Both sources are original full values.
+func templateOverrides(actual, inherited map[string]any) map[string]any {
+	result := map[string]any{}
+	for k, value := range actual {
+		// These keys are excluded when template defaults are materialized.
+		// Their presence in Workspace is explicit, even if equal to a default.
+		if k == "managedWorkspaceConfigs" || k == "defaultMCPServerIds" || k == "defaultCapabilityIds" {
+			result[k] = value
+			continue
+		}
+		a, aok := value.(map[string]any)
+		b, bok := inherited[k].(map[string]any)
+		if aok && bok {
+			if nested := templateOverrides(a, b); len(nested) > 0 {
+				result[k] = nested
+			}
+		} else if !reflect.DeepEqual(value, inherited[k]) {
+			result[k] = value
+		}
+	}
+	return result
+}
+func mergeCurrentTemplate(base, overrides map[string]any) map[string]any {
+	result := map[string]any{}
+	for k, v := range base {
+		result[k] = v
+	}
+	for k, v := range overrides {
+		a, aok := v.(map[string]any)
+		b, bok := result[k].(map[string]any)
+		if aok && bok {
+			result[k] = mergeCurrentTemplate(b, a)
+		} else {
+			result[k] = v
+		}
+	}
+	return result
 }
 
 // WorkspaceConfigurationHash fences only live authoring configuration, not

@@ -40,6 +40,7 @@ type WorkspacePreparationBinding struct {
 }
 
 type WorkspacePreparationAttempt struct {
+	ExecutionTemplate *PreparationTemplate `json:",omitempty"`
 	// Restricted owner diagnostics; public projections expose metadata only.
 	Observations               []PreparationObservationDiagnostic `json:",omitempty"`
 	Finalization               *PreparationFinalization           `json:",omitempty"`
@@ -119,6 +120,10 @@ func (r WorkspacePreparationRecord) Clone() WorkspacePreparationRecord {
 	r.Completions = slices.Clone(r.Completions)
 	r.Attempts = slices.Clone(r.Attempts)
 	for i := range r.Attempts {
+		if t := r.Attempts[i].ExecutionTemplate; t != nil {
+			value := t.Clone()
+			r.Attempts[i].ExecutionTemplate = &value
+		}
 		if r.Attempts[i].DefinitionCompilation != nil {
 			value := *r.Attempts[i].DefinitionCompilation
 			r.Attempts[i].DefinitionCompilation = &value
@@ -240,6 +245,9 @@ func ValidPreparationBlockedReason(checkID, reason string) bool {
 }
 
 func (a WorkspacePreparationAttempt) Validate() error {
+	if a.ExecutionTemplate != nil && a.ExecutionTemplate.Validate() != nil {
+		return common.ErrConflict
+	}
 	if len(a.Observations) != 0 && a.State != WorkspacePreparationBlocked {
 		return common.ErrConflict
 	}

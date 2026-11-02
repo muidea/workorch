@@ -21,6 +21,7 @@ const PreparationInitializationResultLimit = 4
 // Private, bounded write journal. Raw before/after bytes and owner errors stay
 // in restricted persistence. Neither completion nor the plan grants readiness.
 type PreparationResourceInitialization struct {
+	ExecutionTemplate                                     *PreparationTemplate `json:",omitempty"`
 	Version                                               string
 	ExpectedWorkspaceRevision, CommittedWorkspaceRevision uint64
 	StartupInputHash, ConfigurationHash, CreationEpoch    string
@@ -39,6 +40,10 @@ type PreparationResourceInitializationAttempt struct {
 }
 
 func (r PreparationResourceInitialization) Clone() PreparationResourceInitialization {
+	if t := r.ExecutionTemplate; t != nil {
+		selected := t.Clone()
+		r.ExecutionTemplate = &selected
+	}
 	r.Registration = r.Registration.Clone()
 	r.Plan = r.Plan.Clone()
 	r.SoulBindings = maps.Clone(r.SoulBindings)
@@ -72,7 +77,8 @@ func (r PreparationResourceInitialization) BindingHash() string {
 		Bindings               map[string]common.SoulID
 		Plan                   fileevents.InitializePreparationResourcesCommand
 		Registration           *skillhubpreparation.RegistrationPlan `json:",omitempty"`
-	}{r.StartupInputHash, r.ConfigurationHash, r.CreationEpoch, r.PreparationEpoch, r.DefaultSoulID, r.SoulBindings, plan, r.registrationPlan()})
+		ExecutionTemplate      *PreparationTemplate                  `json:",omitempty"`
+	}{r.StartupInputHash, r.ConfigurationHash, r.CreationEpoch, r.PreparationEpoch, r.DefaultSoulID, r.SoulBindings, plan, r.registrationPlan(), r.ExecutionTemplate})
 	return fileobservation.Digest(raw)
 }
 
@@ -108,6 +114,9 @@ func (r PreparationResourceInitialization) Matches(w *Workspace) bool {
 	return w != nil && w.StartupInput != nil && w.PreparationFence != nil && w.ActiveRunID == "" && w.PreparationFence.Pending == nil && w.PreparationFence.CreationEpoch == r.CreationEpoch && w.PreparationFence.PreparationEpoch == r.PreparationEpoch && len(w.PreparationFence.Settled) == 0 && w.StartupInput.StartupInputHash == r.StartupInputHash && WorkspaceConfigurationHash(w) == r.ConfigurationHash && w.InternalDirectory == r.Plan.InternalDirectory && w.DeliverableDirectory == r.Plan.DeliverableDirectory && r.matchesDeclarations(w)
 }
 func (r PreparationResourceInitialization) Validate(id common.WorkspaceID) error {
+	if r.ExecutionTemplate != nil && r.ExecutionTemplate.Validate() != nil {
+		return common.ErrConflict
+	}
 	if r.validateRegistration() != nil || r.Plan.WorkspaceID != id || r.Plan.Validate() != nil || r.Plan.BindingHash != r.BindingHash() || r.StartupInputHash == "" || r.ConfigurationHash == "" || r.CreationEpoch == "" || r.PreparedAt.IsZero() || r.ExpectedWorkspaceRevision == 0 || r.CommittedWorkspaceRevision < r.ExpectedWorkspaceRevision+1 || len(r.Attempts) == 0 || len(r.Attempts) > PreparationInitializationResultLimit || !r.Attempts[0].PreparedAt.Equal(r.PreparedAt) {
 		return common.ErrConflict
 	}
@@ -251,7 +260,19 @@ func (r PreparationResourceInitialization) matchesDeclarations(w *Workspace) boo
 	if w.DefinitionAuthoring == nil {
 		return false
 	}
-	ds, err := workorchmanagedconfig.CompilePreparationDeclarations(w.DefinitionAuthoring.TemplateSnapshot.ContextHints, w.ContextHints)
+	template := w.DefinitionAuthoring.TemplateSnapshot
+	if r.ExecutionTemplate != nil {
+		if r.ExecutionTemplate.Validate() != nil {
+			return false
+		}
+		template = r.ExecutionTemplate.Template()
+		var err error
+		_, err = WorkspaceForCurrentTemplate(w, &template)
+		if err != nil {
+			return false
+		}
+	}
+	ds, err := workorchmanagedconfig.CompilePreparationDeclarations(template.ContextHints, w.ContextHints)
 	if err != nil || len(ds) != len(r.Plan.Declarations) {
 		return false
 	}

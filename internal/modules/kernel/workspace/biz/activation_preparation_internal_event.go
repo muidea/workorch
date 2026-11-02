@@ -5,20 +5,20 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
-	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/preparationcompiler"
-	"github.com/muidea/workorch/internal/pkg/preparationtrace"
 	"slices"
 	"strings"
 	"time"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
 	workspaceeventmapping "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/eventmapping"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/preparationcompiler"
 	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/startuppreparation"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/preparationtrace"
 )
 
 func (m *Biz) handlePreparationCheck(ev magicevent.Event, result magicevent.Result) {
@@ -98,7 +98,12 @@ func (m *Biz) beginWorkspacePreparation(ctx context.Context, command workspaceev
 	if err != nil {
 		return workspaceevents.CheckWorkspacePreparationResult{}, err
 	}
-	fact := workspacePreparationAccepted{Command: command, Snapshot: read.Snapshot, Manifest: manifest, At: time.Now().UTC()}
+	template, err := m.resolvedTemplate(bound, current.TemplateID)
+	if err != nil {
+		return workspaceevents.CheckWorkspacePreparationResult{}, err
+	}
+	selected := workspace.NewPreparationTemplate(*template)
+	fact := workspacePreparationAccepted{ExecutionTemplate: &selected, Command: command, Snapshot: read.Snapshot, Manifest: manifest, At: time.Now().UTC()}
 	if deferSettlement {
 		var nonce [16]byte
 		if _, err := rand.Read(nonce[:]); err != nil {
@@ -218,14 +223,16 @@ func (m *Biz) acceptPreparation(ctx context.Context, fact workspacePreparationAc
 // Private facts, not public commands: callers cannot choose mutations or
 // submit a manifest/verdict. The owner constructs these from its exact rows.
 type workspacePreparationAccepted struct {
-	Command     workspaceevents.CheckWorkspacePreparationCommand
-	Snapshot    startuppreparation.ExactConfirmedStartupSnapshot
-	Manifest    startuppreparation.Manifest
-	At          time.Time
-	SkillHubRef string
+	ExecutionTemplate *workspace.PreparationTemplate
+	Command           workspaceevents.CheckWorkspacePreparationCommand
+	Snapshot          startuppreparation.ExactConfirmedStartupSnapshot
+	Manifest          startuppreparation.Manifest
+	At                time.Time
+	SkillHubRef       string
 }
 
 type workspacePreparationBlocked struct {
+	ExecutionTemplate               *workspace.WorkspaceTemplate
 	Observations                    []workspace.PreparationObservationDiagnostic
 	MCPConnection                   *mcpevents.ObservePreparationResult
 	ProcessPolicyFacts              *workspace.PreparationProcessPolicyFacts
@@ -265,6 +272,9 @@ func reduceWorkspacePreparationAccepted(current *workspace.Workspace, fact works
 	if index >= 0 {
 		return workspaceExecutionTransition{Next: current, Noop: true}, nil
 	}
+	if fact.ExecutionTemplate == nil || fact.ExecutionTemplate.Validate() != nil || fact.ExecutionTemplate.ID != current.TemplateID {
+		return workspaceExecutionTransition{}, common.ErrConflict
+	}
 	fence := current.PreparationFence
 	if workspace.ValidatePreparationSkillHubEffectsPersistence(current) != nil {
 		return workspaceExecutionTransition{}, common.ErrConflict
@@ -303,6 +313,7 @@ func reduceWorkspacePreparationAccepted(current *workspace.Workspace, fact works
 		return workspaceExecutionTransition{}, err
 	}
 	attempt := workspace.WorkspacePreparationAttempt{
+		ExecutionTemplate:        fact.ExecutionTemplate,
 		OwnerRevalidationVersion: workspace.PreparationOwnerRevalidationVersion,
 		RequestID:                fact.Command.RequestID, PayloadHash: fact.Command.PayloadHash(), ExpectedWorkspaceRevision: current.Revision, CommittedWorkspaceRevision: current.Revision + 1,
 		Binding: workspace.WorkspacePreparationBinding{
@@ -380,6 +391,14 @@ func (m *Biz) finishBlockedPreparation(ctx context.Context, fact workspacePrepar
 		finishLoad()
 		if err != nil {
 			return workspaceevents.CheckWorkspacePreparationResult{}, err
+		}
+		if current.StartupPreparation != nil {
+			for _, a := range current.StartupPreparation.Attempts {
+				if a.RequestID == command.RequestID && a.ExecutionTemplate != nil {
+					selected := a.ExecutionTemplate.Template()
+					fact.ExecutionTemplate = &selected
+				}
+			}
 		}
 		fact.At = time.Now().UTC()
 		finishReduce := preparationtrace.Start(ctx, command.WorkspaceID, command.RequestID, "settlement_reduce", current.Revision)
@@ -712,7 +731,7 @@ func reduceWorkspacePreparationBlocked(current *workspace.Workspace, fact worksp
 				skills = &next.PreparationSkillRegistryEvidence[n]
 			}
 		}
-		compiled := workspace.CompilePreparationMCPSelection(workspace.PreparationMCPDefinition(current), *registry, skills)
+		compiled := workspace.CompilePreparationMCPSelection(workspace.PreparationMCPDefinitionForAttempt(current, a), *registry, skills)
 		registry.Selection = &compiled
 		if fact.MCPConnection != nil && reason == "check_pipeline_incomplete" {
 			r := fact.MCPConnection.Clone()
@@ -744,8 +763,8 @@ func reduceWorkspacePreparationBlocked(current *workspace.Workspace, fact worksp
 		// Only the original exact settlement can introduce policy inputs. The
 		// caller supplies local process facts, never Workspace/template policy.
 		// Drift/recovery cannot construct old policy from today's declarations.
-		if reason == "check_pipeline_incomplete" && fact.ProcessPolicyFacts != nil && current.DefinitionAuthoring != nil && workspace.WorkspaceConfigurationHash(current) == a.Binding.AuthoringConfigurationHash {
-			inputs := workspace.PreparationExecutionInputs{Version: workspace.PreparationExecutionInputsVersion, Process: *fact.ProcessPolicyFacts, Template: current.DefinitionAuthoring.TemplateSnapshot.Clone(), Configuration: workspace.CaptureWorkspaceConfiguration(current)}
+		if reason == "check_pipeline_incomplete" && fact.ProcessPolicyFacts != nil && fact.ExecutionTemplate != nil && a.ExecutionTemplate != nil && workspace.WorkspaceTemplateSnapshotHash(fact.ExecutionTemplate) == a.ExecutionTemplate.SnapshotHash && current.DefinitionAuthoring != nil && workspace.WorkspaceConfigurationHash(current) == a.Binding.AuthoringConfigurationHash {
+			inputs := workspace.PreparationExecutionInputs{Version: workspace.PreparationExecutionInputsVersion, Process: *fact.ProcessPolicyFacts, Template: fact.ExecutionTemplate.Clone(), Configuration: workspace.CaptureWorkspaceConfiguration(current)}
 			e.ExecutionInputs = &inputs
 			a.ExecutionInputVersion = inputs.Version
 			e.ContentHash = e.Hash()

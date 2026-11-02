@@ -29,7 +29,7 @@ func (b *Biz) acquireDefinitionAuthoringResources(ctx context.Context, id common
 	if err != nil {
 		return nil, err
 	}
-	if view.Record == nil || !view.CurrentTemplateAvailable || view.Record.TemplateSnapshotHash != view.CurrentTemplateSnapshotHash || view.DeliverableDirectory == "" {
+	if view.Record == nil || !view.CurrentTemplateAvailable || view.DeliverableDirectory == "" {
 		return nil, common.ErrConflict
 	}
 	if len(view.Record.Input.ResourceRefs) > workspace.DefinitionAuthoringResourceLimit {

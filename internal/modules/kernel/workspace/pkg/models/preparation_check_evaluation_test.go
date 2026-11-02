@@ -44,6 +44,10 @@ func TestPreparationManagedEvaluationRequiresOriginalCompleteDeclarations(t *tes
 			a := &next.StartupPreparation.Attempts[0]
 			next.InternalDirectory = "/internal"
 			next.DefinitionAuthoring = &DefinitionAuthoringRecord{TemplateSnapshot: WorkspaceTemplate{ContextHints: payload.New(payload.Field{Name: "managedWorkspaceConfigs", Value: payload.Value{Kind: payload.ValueArray, Array: []payload.Value{{Kind: payload.ValueObject, Object: []payload.Field{payload.StringField("path", "config.json"), payload.ObjectField("content", payload.New(payload.StringField("fixture", "original")))}}}}})}}
+			next.TemplateID = "template"
+			next.DefinitionAuthoring.TemplateSnapshot.ID = next.TemplateID
+			selected := NewPreparationTemplate(next.DefinitionAuthoring.TemplateSnapshot)
+			a.ExecutionTemplate = &selected
 			raw := []byte(`{"fixture":"original"}`)
 			e := WorkspacePreparationManagedConfigEvidence{Version: PreparationManagedConfigEvidenceVersion, Ref: PreparationManagedConfigRefPrefix + strings.Repeat("b", 32), WorkspaceID: next.ID, RequestID: a.RequestID, PayloadHash: a.PayloadHash, ObservedWorkspaceRevision: 2, ConfigurationHash: a.Binding.AuthoringConfigurationHash, InternalDirectory: "/internal", StartedAt: a.StartedAt, CompletedAt: a.CompletedAt, Files: []WorkspacePreparationManagedConfigObservation{{Scope: "system", Path: "config.json", Policy: "system_exact", DefaultsJSON: append([]byte(nil), raw...), Observation: fileobservation.Resource{Ref: "config.json", Complete: true, Inode: 1, Mode: 0100600, Content: raw, ContentBytes: len(raw), ContentSHA256: fileobservation.Digest(raw), DiagnosticSHA256: fileobservation.Digest(nil)}}}}
 			a.Checks = append(a.Checks[:2], append([]WorkspacePreparationCheckResult{{ID: "managed_configuration", Owner: "file", Required: true, State: "blocked", Reason: "managed_configs_observed_remaining_checks", SubjectHash: PreparationFileSubjectHash("managed_configuration", "/internal", "/deliverable", "/internal", "")}}, a.Checks[2:]...)...)
@@ -75,6 +79,9 @@ func TestPreparationManagedEvaluationRequiresOriginalCompleteDeclarations(t *tes
 			a.Checks = EvaluatePreparationFileChecks(*a, &next.PreparationDirectoryEvidence[0], &next.PreparationResourceEvidence[0], &e)
 			if err := ValidatePreparationEvidencePersistence(next); err != nil {
 				t.Fatal("test must reach independent declaration gate", err)
+			}
+			if _, err := PreparationWorkspace(&before, before.StartupPreparation.Attempts[0]); err != nil {
+				t.Fatalf("selected source: %v", err)
 			}
 			err := validatePreparationManagedConfigEvidenceTransition(&before, next, true)
 			if (err == nil) != (scenario == "exact") {

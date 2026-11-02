@@ -38,10 +38,11 @@ func (m *Biz) observeOriginalPreparationManagedConfigs(ctx context.Context, orig
 	if err != nil {
 		return nil, unavailable
 	}
-	// The confirmed template snapshot and the exact workspace configuration
-	// remain independent source roots. Never fetch current template defaults,
-	// use merged effective hints, or invoke the write/repair materializer.
-	declarations, err := workorchmanagedconfig.CompilePreparationDeclarations(w.DefinitionAuthoring.TemplateSnapshot.ContextHints, w.ContextHints)
+	selected, err := workspace.PreparationTemplateForAttempt(w, a)
+	if err != nil {
+		return nil, unavailable
+	}
+	declarations, err := workorchmanagedconfig.CompilePreparationDeclarations(selected.ContextHints, w.ContextHints)
 	if err != nil {
 		return nil, "managed_config_declaration_invalid"
 	}

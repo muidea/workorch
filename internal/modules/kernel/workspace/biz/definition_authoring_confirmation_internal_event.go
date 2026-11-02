@@ -82,8 +82,8 @@ func (m *Biz) prepareDefinitionAuthoringConfirmationWithProof(ctx context.Contex
 	if len(derivation.Resources) != 0 && (proof == nil || !proof.matches(current, derivation)) {
 		return workspace.DefinitionAuthoringConfirmation{}, fmt.Errorf("%w: resource-bound confirmation requires current File verification", common.ErrConflict)
 	}
-	template, err := m.resolvedTemplate(ctx, current.TemplateID)
-	if err != nil || workspace.WorkspaceTemplateSnapshotHash(template) != record.TemplateSnapshotHash {
+	template := &record.TemplateSnapshot
+	if workspace.WorkspaceTemplateSnapshotHash(template) != record.TemplateSnapshotHash {
 		return workspace.DefinitionAuthoringConfirmation{}, common.ErrConflict
 	}
 	if err := validateAuthoringVerificationAgainstSealedTemplate(record.TemplateSnapshotHash, derivation, specification); err != nil {
@@ -176,8 +176,8 @@ func (m *Biz) driveDefinitionAuthoringConfirmation(ctx context.Context, cmd work
 		return workspaceevents.ConfirmDefinitionAuthoringResult{}, common.ErrConflict
 	}
 	if journal.Phase == workspace.DefinitionAuthoringConfirmationPrepared {
-		template, err := m.resolvedTemplate(ctx, initial.TemplateID)
-		if err != nil || workspace.WorkspaceTemplateSnapshotHash(template) != journal.TemplateSnapshotHash {
+		template := &initial.DefinitionAuthoring.TemplateSnapshot
+		if workspace.WorkspaceTemplateSnapshotHash(template) != journal.TemplateSnapshotHash {
 			return workspaceevents.ConfirmDefinitionAuthoringResult{}, common.ErrConflict
 		}
 		derivation, specification, err := initial.DefinitionAuthoring.ConfirmableSpecification(journal.DerivationPermitID, journal.ProposalHash)
