@@ -356,6 +356,9 @@ func (m *Biz) handleRuntimeTerminationRequest(ev magicevent.Event, result magice
 		setOrchestratorAck(result, common.ErrInvalidArgument)
 		return
 	}
+	if cmd.Kind.Normalized() == runtimecontract.RuntimeTerminationSuperseded && m.handleRestartTerminalPredecessor(ev.Context(), cmd, result) {
+		return
+	}
 	key := runtimeDriveKey(cmd.WorkspaceID, cmd.RunID)
 	gateToken, acquiredGate := m.beginRuntimeDriveWithToken(key)
 	gate, ownsGate := m.currentRuntimeDriveGate(key)

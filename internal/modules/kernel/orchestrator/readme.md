@@ -848,6 +848,17 @@ slot 为空而 Run 尚 active 时，合法 Restart 只能保留原 Run 的 repla
 owner 重启后的原 request 重放仍守住屏障，恢复只交付同一 seal／Result 和有序三个 ACK。
 该回归不驱动后继 materialization，也不证明首次 activation 的手动／自动语义去重或真实 provider 验收。
 
+`biz/runtime_restart_terminal.go` 补齐显式 Restart 的另一种交接前像：SM-2 已封存 terminal，SM-1 Run 尚 active。
+Run owner 的 typed handoff 必须绑定当前已 claim 的 replacement request、完整 immutable intent hash 与 recovery generation；
+SM-4 经真实 owner snapshot 反查 scope、stage、running claim 和剩余 replacement attempts，取得唯一 drive gate 后仅重投
+原 `Result -> Workspace -> Run` terminal。不得再写 RuntimeTerminationRecord，不更改原 Decision、Failure、material seal、
+Result、预算、receipt 或 CWI credit。原自动 terminal delivery intervention 保留，旧 attempts 不清零；单次同步交付失败
+只返回 Run replacement 的既有有界恢复链，不新增自动 SM-4 lease。旧 gate/lease 尚在时拒绝并发抢占。
+`TestRestartTerminalPredecessorOwnerMainline` 使用 file owners 和实际 Run recovery/三 owner delivery，覆盖 intervention、
+Result 写后丢回复、冷 owner 恢复 running claim、有界 owner 失败、stale generation 和唯一后继 activation。
+`TestRestartTerminalDeliveryRejectsUnclaimedOrStaleAuthority` 与 busy-gate 回归固定错源、错身份、预算耗尽及零状态变化。
+这只证明 SM-1/SM-4 交接，不证明后继真实模型调用、Loop 业务效果或验收完成；SM-2/SM-3 权威规则不变。
+
 ### Semantic and candidate authority
 
 `runtime/cwi-suspension/v1` 的安全暂停／普通重验／原后继恢复见

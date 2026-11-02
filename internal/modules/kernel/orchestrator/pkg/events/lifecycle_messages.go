@@ -47,20 +47,26 @@ func (d RuntimeTerminalDeliveryRequestData) Identity() runtimecontract.RuntimeTe
 	return d.Normalized().RuntimeTerminalDeliveryIdentity
 }
 
-// RequestRuntimeTerminationCommand is an application administrative intent.
-// Orchestrator persists RuntimeTerminationRecord before it starts SM-4.
+// RequestRuntimeTerminationCommand carries a Run-owned administrative intent.
+// Restart binds the exact claimed replacement recovery generation. If SM-2
+// already sealed a terminal, SM-4 delivers that original terminal instead of
+// writing a competing RuntimeTerminationRecord.
 type RequestRuntimeTerminationCommand struct {
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-	Kind        runtimecontract.RuntimeTerminationKind
-	Reason      string
-	RequestedBy string
+	WorkspaceID           common.WorkspaceID
+	RunID                 common.RunID
+	Kind                  runtimecontract.RuntimeTerminationKind
+	Reason                string
+	RequestedBy           string
+	ReplacementRequestID  string
+	ReplacementIntentHash string
+	RecoveryGeneration    uint64
 }
 
 // RequestRuntimeTerminationResult is the synchronous acceptance receipt for an
-// administrative termination intent. It proves that the SM-4 saga persisted
-// the Workspace release acknowledgement before a caller may create a
-// replacement Run. It carries no caller-selected lifecycle state.
+// administrative intent, including delivery of an already-sealed convergence
+// terminal. It proves that SM-4 persisted the Workspace release acknowledgement
+// before a caller may create a replacement Run. The original terminal outcome
+// remains authoritative; this receipt carries no selected lifecycle state.
 type RequestRuntimeTerminationResult struct {
 	TerminalDeliveryID string
 	WorkspaceReleased  bool
@@ -70,6 +76,13 @@ type RequestRuntimeTerminationResult struct {
 func (c RequestRuntimeTerminationCommand) Validate() error {
 	if c.WorkspaceID == "" || c.RunID == "" || !runtimecontract.ValidRuntimeTerminationKind(c.Kind) || strings.TrimSpace(c.Reason) == "" || strings.TrimSpace(c.RequestedBy) == "" {
 		return fmt.Errorf("%w: runtime termination intent requires scope, kind, requester and reason", common.ErrInvalidArgument)
+	}
+	if c.Kind.Normalized() == runtimecontract.RuntimeTerminationSuperseded {
+		if strings.TrimSpace(c.ReplacementRequestID) == "" || strings.TrimSpace(c.ReplacementIntentHash) == "" || c.RecoveryGeneration == 0 {
+			return fmt.Errorf("%w: restart handoff requires exact replacement request, intent hash and recovery generation", common.ErrInvalidArgument)
+		}
+	} else if c.ReplacementRequestID != "" || c.ReplacementIntentHash != "" || c.RecoveryGeneration != 0 {
+		return fmt.Errorf("%w: cancellation cannot carry replacement recovery authority", common.ErrInvalidArgument)
 	}
 	return nil
 }

@@ -820,6 +820,7 @@ func (m *Biz) deliverClaimedReplacementTermination(ctx context.Context, predeces
 	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorRequestRuntimeTermination, ModuleID, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.RequestRuntimeTerminationCommand{
 		WorkspaceID: workspaceID, RunID: predecessorRunID, Kind: intent.Kind,
 		RequestedBy: ModuleID, Reason: intent.Reason,
+		ReplacementRequestID: intent.RequestID, ReplacementIntentHash: runmodel.StableReplacementIntentHash(intent), RecoveryGeneration: generation,
 	})
 	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(orchestratorevents.Contracts(), event.ID(), eventcontract.LaneScope{SubjectType: "run", SubjectID: string(predecessorRunID), WorkspaceID: string(workspaceID), RunID: string(predecessorRunID)}))
 	response := m.SendEvent(event)

@@ -54,6 +54,10 @@ scope 冲突、损坏或部分库存都拒绝，不能 fallback 为普通列表�
   RuntimeState。新账本的 detached clone、lifecycle fence 规范化和完整比较不变；不缓存成功校验，也不改变任何
   SM-1～SM-4 transition、预算、generation、fresh-load 或 Orchestrator 完整 aggregate gate。
 - replacement 是 SM-1 subordinate transaction，不是第二个状态机 owner；successor 只能在 predecessor 的 exact termination/clarification binding 后物化。
+- Restart 的 termination handoff 携带已 claim 的 `ReplacementRequestID + ReplacementIntentHash + RecoveryGeneration`。
+  predecessor 的 Runtime 已有 convergence terminal 而 Run 尚未收尾时，Orchestrator 只交付原 terminal，不能增加第二个
+  administrative terminal。自动 terminal delivery 已 intervention 也不重置旧预算：本次显式 Restart 的单次交付由既有
+  Run replacement generation 约束；失败原样返回本 owner 的有界 recovery reducer，只有原有序三 ACK 完成才进入后继物化。
 - retirement fence 一旦进入 draining/retired，新的 creation、普通 SM-1 和 Step/Checkpoint mutation必须 fail closed；retired owner facts仍可供恢复校验。
 - 不拥有 Workspace activation、Orchestrator SM-2/SM-3/SM-4、Decision/Approval 或 Result aggregate；不提供跨 owner repository/service。
 
