@@ -118,6 +118,7 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 
 	case RuntimeInternalEventSemanticPlanRequestStarted,
 		RuntimeInternalEventSemanticPlanEvaluated,
+		RuntimeInternalEventSemanticSingletonOrderCompiled,
 		RuntimeInternalEventSemanticPlanCorrectionRequired,
 		RuntimeInternalEventCandidateRequestEnsured,
 		RuntimeInternalEventSemanticPlanBatchCompiled,

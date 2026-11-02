@@ -2727,10 +2727,12 @@ type RuntimeSemanticPlanningLedger struct {
 	// immutable RequestLogicalID and is never a sealed binding preimage by itself.
 	LogicalRequestID    string
 	CorrectionDirective *RuntimeSemanticCorrectionDirective
-	// CoverageOrderDocument is the immutable, provider-authored full CWI order.
+	// CoverageOrderDocument is the immutable full CWI order. CompiledOrder
+	// explicitly distinguishes deterministic compilation from provider authorship.
 	// It survives current-focus proof sealing so the Orchestrator can admit the
 	// next focus without asking a later proof batch to restate global authority.
 	// It is lineage only: it never grants a binding, operation, or transition.
+	CompiledOrder           *RuntimeSemanticCompiledOrder `json:",omitempty"`
 	CoverageOrderDocument   *RuntimeSemanticPlanDocument
 	Document                *RuntimeSemanticPlanDocument
 	DocumentHash            string
@@ -2781,6 +2783,10 @@ func (l RuntimeSemanticPlanningLedger) Normalized() RuntimeSemanticPlanningLedge
 	if l.Manifest != nil {
 		value := l.Manifest.Clone()
 		l.Manifest = &value
+	}
+	if l.CompiledOrder != nil {
+		value := *l.CompiledOrder
+		l.CompiledOrder = &value
 	}
 	if l.CoverageOrderDocument != nil {
 		value := l.CoverageOrderDocument.Clone()
@@ -3021,6 +3027,9 @@ func validateRuntimeSemanticPlanningLedgerNormalized(raw, l RuntimeSemanticPlann
 		}
 		validatedManifest = &validated
 		l.Manifest = &validated.manifest
+	}
+	if err := l.CompiledOrder.Validate(l.Manifest, l.CoverageOrderDocument); err != nil {
+		return err
 	}
 	if l.CoverageOrderDocument != nil {
 		if l.Manifest == nil {

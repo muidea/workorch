@@ -21,7 +21,7 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 	}
 	startedAt := time.Now().UTC()
 	requestID := newProviderRequestID(request)
-	providerRequest, err := runtimeProviderRequest(request)
+	providerRequest, err := runtimeProviderRequestForSubmission(request)
 	if err != nil {
 		budget := providerRequest.ContextBudget
 		audit := sealedAuditFromRequest(request, requestID, budget, startedAt, time.Now().UTC(), false, llmmodels.RuntimeCandidateStatusFailed, "internal", 0)
@@ -412,6 +412,10 @@ func cloneProviderContextBudget(budget *llmmodels.ProviderContextBudget) *llmmod
 	if budget.CachePlan != nil {
 		plan := *budget.CachePlan
 		plan.SectionHashes = append([]llmmodels.ProviderCacheSectionHash(nil), budget.CachePlan.SectionHashes...)
+		for i := range plan.SectionHashes {
+			plan.SectionHashes[i].SourceRefs = append([]string(nil), plan.SectionHashes[i].SourceRefs...)
+			plan.SectionHashes[i].Components = append([]llmmodels.ProviderContextComponent(nil), plan.SectionHashes[i].Components...)
+		}
 		plan.CacheBreakers = append([]llmmodels.ProviderCacheBreaker(nil), budget.CachePlan.CacheBreakers...)
 		plan.Canonicalization.SectionOrder = append([]string(nil), budget.CachePlan.Canonicalization.SectionOrder...)
 		plan.AdapterHint.CacheablePrefix = append([]string(nil), budget.CachePlan.AdapterHint.CacheablePrefix...)

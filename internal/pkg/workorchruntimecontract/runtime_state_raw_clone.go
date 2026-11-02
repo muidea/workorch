@@ -788,6 +788,7 @@ func cloneRuntimeCandidateRequestOutcomeRaw(in RuntimeCandidateRequestOutcome) R
 
 func cloneRuntimeCandidateRequestSessionRaw(in RuntimeCandidateRequestSession) RuntimeCandidateRequestSession {
 	out := in
+	out.InputRef = cloneRuntimeStateRawPointer(in.InputRef, func(v RuntimeProviderInputRef) RuntimeProviderInputRef { return v })
 	out.CandidateManifest = cloneRuntimeStateRawPointer(in.CandidateManifest, func(item RuntimeCandidateContractManifest) RuntimeCandidateContractManifest {
 		return cloneRuntimeCandidateContractManifestRaw(item)
 	})
@@ -1887,6 +1888,7 @@ func cloneRuntimeSemanticPlanningGenerationRaw(in RuntimeSemanticPlanningGenerat
 
 func cloneRuntimeSemanticPlanningLedgerRaw(in RuntimeSemanticPlanningLedger) RuntimeSemanticPlanningLedger {
 	out := in
+	out.CompiledOrder = cloneRuntimeStateRawPointer(in.CompiledOrder, func(v RuntimeSemanticCompiledOrder) RuntimeSemanticCompiledOrder { return v })
 	out.DefinitionSeed = cloneRuntimeDefinitionSeedRaw(in.DefinitionSeed)
 	out.Manifest = cloneRuntimeStateRawPointer(in.Manifest, func(item RuntimeSemanticPlanManifest) RuntimeSemanticPlanManifest {
 		return cloneRuntimeSemanticPlanManifestRaw(item)

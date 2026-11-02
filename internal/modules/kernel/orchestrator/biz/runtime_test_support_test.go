@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -2118,7 +2119,7 @@ func ensureRuntimeCandidatePreflightTestResponder(hub magicevent.Hub) {
 		if command.DocumentKind == runtimecontract.RuntimeProviderDocumentOperations {
 			feedback.AuthoritySnapshotID = command.Transaction.AuthoritySnapshotID
 		}
-		result.Set(llmevents.PreflightRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, Feedback: feedback}, nil)
+		result.Set(withRuntimePreflightSnapshotForTest(command, llmevents.PreflightRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, Feedback: feedback}), nil)
 	})
 }
 
@@ -2779,4 +2780,18 @@ func runtimeCandidateDocumentForTest(t *testing.T, manifest runtimecontract.Runt
 		t.Fatalf("encode test provider document from sealed manifest: %v", err)
 	}
 	return document
+}
+
+// Fake candidate owners do not render provider wire. Their self-contained
+// snapshot fixture still exercises exact persistence, replay and isolation.
+func withRuntimePreflightSnapshotForTest(command llmevents.PreflightRuntimeCandidateCommand, result llmevents.PreflightRuntimeCandidateResult) llmevents.PreflightRuntimeCandidateResult {
+	if command.FreezeInput && result.Feedback.StableCategory == runtimecontract.RuntimeFeedbackCategoryAccepted {
+		raw, err := json.Marshal(command)
+		if err != nil {
+			panic(err)
+		}
+		result.FrozenInput = raw
+		result.FrozenInputRef = &runtimecontract.RuntimeProviderInputRef{Bytes: len(raw), Hash: runtimecontract.RuntimeProviderInputHash(raw)}
+	}
+	return result
 }

@@ -17,6 +17,7 @@ type RuntimeInternalTransactionPayload struct {
 	SemanticPlanMergedDocument         *runtimecontract.RuntimeSemanticPlanDocument
 	SemanticDiagnostic                 *runtimecontract.RuntimeOriginalDiagnostic
 
+	InputRef         *runtimecontract.RuntimeProviderInputRef
 	StablePrefixHash string
 	DocumentKind     runtimecontract.RuntimeProviderDocumentKind
 	ManifestHash     string
@@ -90,6 +91,7 @@ type RuntimeInternalTransactionPayload struct {
 // cannot select the next convergence action.
 const (
 	RuntimeInternalEventSemanticPlanRequestStarted               RuntimeInternalEventKind = "semantic_plan_request_started"
+	RuntimeInternalEventSemanticSingletonOrderCompiled           RuntimeInternalEventKind = "semantic_singleton_order_compiled"
 	RuntimeInternalEventSemanticPlanEvaluated                    RuntimeInternalEventKind = "semantic_plan_evaluated"
 	RuntimeInternalEventSemanticPlanCorrectionRequired           RuntimeInternalEventKind = "semantic_plan_correction_required"
 	RuntimeInternalEventCandidateRequestEnsured                  RuntimeInternalEventKind = "candidate_request_ensured"

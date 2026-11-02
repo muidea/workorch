@@ -18,7 +18,7 @@ type candidateRequestSessionEnsureResult struct {
 	AuthorityFailure *runtimecontract.FailureFact
 }
 
-func (c *planningTransactionComponent) ensureCandidateRequestSessionWithExpected(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, documentKind runtimecontract.RuntimeProviderDocumentKind, stablePrefixHash, manifestHash, correctionHash string, expected *runtimecontract.RuntimeExpectedDocumentContract) (candidateRequestSessionEnsureResult, error) {
+func (c *planningTransactionComponent) ensureCandidateRequestSessionWithExpected(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, documentKind runtimecontract.RuntimeProviderDocumentKind, stablePrefixHash, manifestHash, correctionHash string, expected *runtimecontract.RuntimeExpectedDocumentContract, inputRefs ...*runtimecontract.RuntimeProviderInputRef) (candidateRequestSessionEnsureResult, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(stablePrefixHash) == "" || strings.TrimSpace(manifestHash) == "" || expected == nil {
 		return candidateRequestSessionEnsureResult{}, common.ErrInvalidArgument
 	}
@@ -60,6 +60,13 @@ func (c *planningTransactionComponent) ensureCandidateRequestSessionWithExpected
 		return candidateRequestSessionEnsureResult{}, fmt.Errorf("%w: invalid expected document contract", common.ErrInvalidArgument)
 	}
 	session.ExpectedDocument = &value
+	if len(inputRefs) > 0 {
+		session.InputRef = inputRefs[0].Clone()
+	}
+	if err := session.InputRef.Validate(); err != nil {
+		return candidateRequestSessionEnsureResult{}, err
+	}
+
 	// Re-read and fence intent inside the sole session writer. A successful
 	// preflight of an earlier aggregate cannot authorize a new transaction.
 	if documentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
@@ -70,6 +77,9 @@ func (c *planningTransactionComponent) ensureCandidateRequestSessionWithExpected
 	if idx, existing, found := runtimeCandidateRequestSessionByID(aggregate.CandidateRequestSessions, session.LogicalRequestID); found {
 		if err := validateCurrentCandidateRequestSession(aggregate, existing); err != nil {
 			return candidateRequestSessionEnsureResult{}, err
+		}
+		if session.InputRef != nil && (existing.InputRef == nil || *existing.InputRef != *session.InputRef) {
+			return candidateRequestSessionEnsureResult{}, fmt.Errorf("%w: frozen provider input differs from request session", common.ErrConflict)
 		}
 		if existing.DocumentKind != session.DocumentKind || existing.StablePrefixHash != session.StablePrefixHash || existing.ManifestHash != session.ManifestHash || existing.CorrectionHash != session.CorrectionHash || existing.Transaction != session.Transaction || !sameRuntimeExpectedDocument(existing.ExpectedDocument, session.ExpectedDocument) {
 			return candidateRequestSessionEnsureResult{}, fmt.Errorf("%w: runtime candidate request session identity conflicts", common.ErrConflict)

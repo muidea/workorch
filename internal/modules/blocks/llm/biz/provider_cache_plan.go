@@ -3,6 +3,7 @@ package llm
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"strings"
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
@@ -45,7 +46,9 @@ func buildProviderCachePlan(request llmmodels.ProviderRequest) llmmodels.Provide
 		if group != "" {
 			groupHashes[group] = append(groupHashes[group], sectionID+"\n"+hash)
 		}
+		metrics := runtimeProviderSectionMetrics(section)
 		sectionHashes = append(sectionHashes, llmmodels.ProviderCacheSectionHash{
+			BodyBytes: metrics.BodyBytes, ExpandedBytes: metrics.ExpandedBytes, LocalReferences: metrics.LocalReferences, Applicability: metrics.Applicability, Components: metrics.Components,
 			SectionID:          sectionID,
 			Name:               section.Name,
 			Cacheability:       section.Cacheability,
@@ -99,6 +102,16 @@ func buildProviderCachePlan(request llmmodels.ProviderRequest) llmmodels.Provide
 		plan.RenderedStablePrefixHash = sectionMessagePrefixHash(request)
 		plan.CacheKey = responsesPromptCacheKey(request)
 		plan.ObservedRequestShape.ProviderFacingMode = llmmodels.PromptMessageLayoutSectionsV1
+		messages := sectionMessages(request, false)
+		if len(request.FrozenSectionMessages) > 0 {
+			// Observe restored physical blocks rather than a newly rendered layout.
+			_ = json.Unmarshal(request.FrozenSectionMessages, &messages)
+		}
+		for _, message := range messages {
+			if message.Role == "user" && len(message.Content) > 1 && message.Content[0].PromptCacheBreakpoint != nil {
+				plan.WorkSnapshotBreakpointRequested = true
+			}
+		}
 	}
 	return plan
 }

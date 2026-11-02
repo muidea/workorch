@@ -48,11 +48,12 @@ func validateRuntimeSemanticContextIntegrity(context runtimecontract.RuntimeSema
 			missing = append(missing, "P0.source_obligation_inventory")
 		}
 	}
+	expectedWorkContext := runtimeSemanticVisibleWorkContext(context, manifest)
 	var tail runtimeSemanticTailProjection
 	var authority runtimeSemanticAuthorityProjection
 	tailErr := json.Unmarshal([]byte(contents["C4"]), &tail)
 	authorityErr := json.Unmarshal([]byte(contents["C3"]), &authority)
-	if authorityErr != nil || authority.ContextEncoding != runtimecontract.RuntimeSemanticContextEncoding || tail.WorkContext != nil || (context.WorkContext != nil && tail.WorkContextRef != semanticWorkContextRef) || (context.WorkContext == nil && tail.WorkContextRef != "") {
+	if authorityErr != nil || authority.ContextEncoding != runtimecontract.RuntimeSemanticContextEncoding || tail.WorkContext != nil || (expectedWorkContext != nil && tail.WorkContextRef != semanticWorkContextRef) || (expectedWorkContext == nil && tail.WorkContextRef != "") {
 		missing = append(missing, "P4.semantic_work_reference")
 	} else {
 		expanded, err := expandSemanticWorkContext(authority.WorkContext, tail.ExecutionHistory)
@@ -71,7 +72,7 @@ func validateRuntimeSemanticContextIntegrity(context runtimecontract.RuntimeSema
 		{"P1.semantic_execution_feedback", reflect.DeepEqual(tail.ExecutionFeedback, context.ExecutionFeedback)},
 		{"P3.semantic_execution_history", reflect.DeepEqual(tail.ExecutionHistory, context.ExecutionHistory)},
 		{"P3.semantic_execution_budget", reflect.DeepEqual(tail.ExecutionBudget, context.ExecutionBudget)},
-		{"P4.semantic_work_context", reflect.DeepEqual(tail.WorkContext, context.WorkContext)},
+		{"P4.semantic_work_context", reflect.DeepEqual(tail.WorkContext, expectedWorkContext)},
 	} {
 		if tailErr != nil || !field.equal {
 			missing = append(missing, field.name)

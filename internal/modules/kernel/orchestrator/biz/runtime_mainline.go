@@ -101,59 +101,8 @@ func (m *Biz) requestAndSealRuntimeCandidate(
 			Signature: "runtime-context-integrity", Message: err.Error(),
 		})
 	}
-	// The LLM owner is the sole renderer, so the rendered C0-C5/P0-P4 integrity
-	// gate must run through its typed EventHub contract before SM-3 creates an
-	// attempt. A persisted proposal or document-recovery session has already passed this
-	// boundary; re-rendering it on restart would add a non-authoritative failure
-	// point to an otherwise idempotent seal path.
-	// Runtime preflight acquisition guarantees a sealed provider ceiling before
-	// any provider request. Persisted proposals and the exact request session do
-	// not re-enter this boundary.
-	if candidateContext.Resources.ProviderCeiling != nil {
-		_, proposalPersisted := runtimePendingCandidateProposal(aggregate, candidateAttempt)
-		previousFailure, previousErr := runtimePreviousCandidateFailure(aggregate, candidateAttempt)
-		if previousErr != nil {
-			return runtime.RuntimeAggregate{}, previousErr
-		}
-		correctionDirective, correctionErr := runtimePreviousCandidateCorrection(aggregate, candidateAttempt)
-		if correctionErr != nil {
-			return runtime.RuntimeAggregate{}, correctionErr
-		}
-		correctionObservation, observationErr := requestcontent.ProjectRuntimeCandidateCorrectionObservation(previousFailure, correctionDirective)
-		if observationErr != nil {
-			return runtime.RuntimeAggregate{}, observationErr
-		}
-		correctionInput := runtimeCandidateCorrectionInputFromDirective(correctionDirective)
-		correctionHash := correctionInput.StableRequestCorrectionHash(correctionObservation)
-		requestSessionPersisted := runtimeCurrentOperationsCandidateRequestSessionPersisted(
-			aggregate,
-			stablePrefixHash,
-			manifest,
-			correctionHash,
-			candidateAttempt,
-		)
-		if !proposalPersisted && !requestSessionPersisted {
-			preflight, preflightErr := PreflightRuntimeCandidate(ctx, m.EventHub(), llmevents.PreflightRuntimeCandidateCommand{
-				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-				DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
-				Decision:     aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), CandidateAttempt: candidateAttempt,
-				CandidateCorrectionObservation: correctionObservation, CandidateCorrection: correctionInput,
-				StablePrefixHash: stablePrefixHash, CandidateManifest: manifest, DefinitionContext: aggregate.Definition, CandidateContext: candidateContext,
-			})
-			if preflightErr != nil {
-				return m.runtimeRecordFailure(ctx, aggregate, runtimecontract.FailureFact{
-					Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_context_integrity",
-					Signature: "runtime-context-integrity", Message: preflightErr.Error(),
-				})
-			}
-			if preflight.Feedback.StableCategory == runtimecontract.RuntimeFeedbackCategoryContextIntegrity {
-				return m.runtimeRecordFailure(ctx, aggregate, runtimecontract.FailureFact{
-					Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_context_integrity",
-					Signature: preflight.Feedback.OriginalDiagnostic.Signature, Message: preflight.Feedback.OriginalDiagnostic.OriginalMessage,
-				})
-			}
-		}
-	}
+	// The LLM owner renders and freezes C0-C5 in requestRuntimeCandidateDocument
+	// before the request-session CAS. A persisted proposal bypasses that boundary.
 	candidate, proposalPersisted := runtimePendingCandidateProposal(aggregate, candidateAttempt)
 	if !proposalPersisted {
 		var candidateReady bool
@@ -325,7 +274,39 @@ func (m *Biz) requestRuntimeCandidateDocument(
 	if err != nil {
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
-	ensured, session, err := m.runtimeEnsureCandidateRequestWithExpected(ctx, aggregate, runtimecontract.RuntimeProviderDocumentOperations, stablePrefixHash, manifest.Hash, correctionHash, expected)
+	logical := runtimecontract.StableRuntimeCandidateRequestSessionID(runtimecontract.RuntimeProviderDocumentOperations, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.AuthorityTransaction(), stablePrefixHash, manifest.Hash, correctionHash)
+	expected.LogicalRequestID = logical
+	expected.StablePrefixHash = stablePrefixHash
+	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
+	if _, exists := runtimeCandidateRequestSession(aggregate, logical); exists {
+		ensured, session, err := m.runtimeEnsureCandidateRequestWithExpected(ctx, aggregate, runtimecontract.RuntimeProviderDocumentOperations, stablePrefixHash, manifest.Hash, correctionHash, expected)
+		if err != nil {
+			return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
+		}
+		aggregate = ensured
+		if progress, err := m.resumeRuntimeCandidateDocumentSession(ctx, aggregate, manifest, session, candidateAttempt); progress.handled {
+			return progress.aggregate, progress.candidate, progress.ready, err
+		}
+	}
+	frozenInput, inputRef, freezeErr := m.prepareRuntimeProviderInput(ctx, aggregate, logical, expected, llmevents.PreflightRuntimeCandidateCommand{
+		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
+		Decision: aggregate.Decision, Transaction: aggregate.Decision.AuthorityTransaction(), CandidateAttempt: candidateAttempt,
+		CandidateCorrectionObservation: correctionObservation, CandidateCorrection: correctionInput, StablePrefixHash: stablePrefixHash,
+		CandidateManifest: manifest, DefinitionContext: aggregate.Definition, CandidateContext: candidateContext,
+	})
+	if freezeErr != nil {
+		failure := runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "provider_request_input_unavailable", Signature: "provider-request-input-unavailable", Message: freezeErr.Error()}
+		var inputErr *runtimeProviderInputError
+		if errors.As(freezeErr, &inputErr) {
+			failure.Code = "runtime_context_integrity"
+			failure.Signature = inputErr.diagnostic.Signature
+			failure.Message = inputErr.diagnostic.OriginalMessage
+			failure.OriginalDiagnostic = inputErr.diagnostic.CloneOriginal()
+		}
+		failed, e := m.runtimeRecordFailure(ctx, aggregate, failure)
+		return failed, runtimecontract.RuntimeCandidate{}, false, e
+	}
+	ensured, session, err := m.runtimeEnsureCandidateRequestWithExpected(ctx, aggregate, runtimecontract.RuntimeProviderDocumentOperations, stablePrefixHash, manifest.Hash, correctionHash, expected, inputRef)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
@@ -348,6 +329,7 @@ func (m *Biz) requestRuntimeCandidateDocument(
 	aggregate = submitted
 	response, requestErr := RequestRuntimeCandidate(ctx, m.EventHub(), llmevents.RequestRuntimeCandidateCommand{
 		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		FrozenInput: frozenInput, FrozenInputRef: inputRef,
 		DocumentKind:     runtimecontract.RuntimeProviderDocumentOperations,
 		RequestIdentity:  requestIdentity,
 		ExpectedDocument: session.ExpectedDocument,

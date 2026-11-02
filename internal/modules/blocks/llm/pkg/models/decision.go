@@ -8,16 +8,19 @@ import (
 )
 
 type ProviderRequest struct {
-	WorkspaceID     string `json:"workspaceId"`
-	RunID           string `json:"runId"`
-	StepID          string `json:"stepId"`
-	Kind            string `json:"kind"`
-	Model           string `json:"model"`
-	ReasoningEffort string `json:"reasoningEffort,omitempty"`
-	SystemLocale    string `json:"systemLocale,omitempty"`
-	DialogLanguage  string `json:"dialogLanguage,omitempty"`
-	Schema          string `json:"schema"`
-	SchemaFormat    string `json:"schemaFormat,omitempty"`
+	// Exact adapter input restored from the restricted pre-submit snapshot.
+	FrozenSectionMessages json.RawMessage `json:"-"`
+	FrozenCacheKey        string          `json:"-"`
+	WorkspaceID           string          `json:"workspaceId"`
+	RunID                 string          `json:"runId"`
+	StepID                string          `json:"stepId"`
+	Kind                  string          `json:"kind"`
+	Model                 string          `json:"model"`
+	ReasoningEffort       string          `json:"reasoningEffort,omitempty"`
+	SystemLocale          string          `json:"systemLocale,omitempty"`
+	DialogLanguage        string          `json:"dialogLanguage,omitempty"`
+	Schema                string          `json:"schema"`
+	SchemaFormat          string          `json:"schemaFormat,omitempty"`
 	// MaxOutputTokens is an optional activation-sealed stage budget. The
 	// provider adapter clamps it to the sealed model ceiling.
 	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
@@ -148,31 +151,42 @@ type ProviderContextBudget struct {
 }
 
 type ProviderCachePlan struct {
-	SchemaVersion            string                       `json:"schemaVersion,omitempty"`
-	Strategy                 string                       `json:"strategy,omitempty"`
-	CacheKey                 string                       `json:"cacheKey,omitempty"`
-	StablePrefixHash         string                       `json:"stablePrefixHash,omitempty"`
-	RenderedStablePrefixHash string                       `json:"renderedStablePrefixHash,omitempty"`
-	WorkspaceDefinitionHash  string                       `json:"workspaceDefinitionHash,omitempty"`
-	CapabilityContractHash   string                       `json:"capabilityContractHash,omitempty"`
-	StageBundleHash          string                       `json:"stageBundleHash,omitempty"`
-	VolatileTailHash         string                       `json:"volatileTailHash,omitempty"`
-	LargeRefsHash            string                       `json:"largeRefsHash,omitempty"`
-	SectionHashes            []ProviderCacheSectionHash   `json:"sectionHashes,omitempty"`
-	CacheBreakers            []ProviderCacheBreaker       `json:"cacheBreakers,omitempty"`
-	Canonicalization         ProviderCanonicalizationPlan `json:"canonicalization,omitempty"`
-	ObservedRequestShape     ProviderObservedRequestShape `json:"observedRequestShape,omitempty"`
-	AdapterHint              ProviderAdapterCacheHint     `json:"adapterHint,omitempty"`
+	WorkSnapshotBreakpointRequested bool                         `json:"workSnapshotBreakpointRequested,omitempty"`
+	SchemaVersion                   string                       `json:"schemaVersion,omitempty"`
+	Strategy                        string                       `json:"strategy,omitempty"`
+	CacheKey                        string                       `json:"cacheKey,omitempty"`
+	StablePrefixHash                string                       `json:"stablePrefixHash,omitempty"`
+	RenderedStablePrefixHash        string                       `json:"renderedStablePrefixHash,omitempty"`
+	WorkspaceDefinitionHash         string                       `json:"workspaceDefinitionHash,omitempty"`
+	CapabilityContractHash          string                       `json:"capabilityContractHash,omitempty"`
+	StageBundleHash                 string                       `json:"stageBundleHash,omitempty"`
+	VolatileTailHash                string                       `json:"volatileTailHash,omitempty"`
+	LargeRefsHash                   string                       `json:"largeRefsHash,omitempty"`
+	SectionHashes                   []ProviderCacheSectionHash   `json:"sectionHashes,omitempty"`
+	CacheBreakers                   []ProviderCacheBreaker       `json:"cacheBreakers,omitempty"`
+	Canonicalization                ProviderCanonicalizationPlan `json:"canonicalization,omitempty"`
+	ObservedRequestShape            ProviderObservedRequestShape `json:"observedRequestShape,omitempty"`
+	AdapterHint                     ProviderAdapterCacheHint     `json:"adapterHint,omitempty"`
+}
+
+type ProviderContextComponent struct {
+	Path  string `json:"path"`
+	Bytes int    `json:"bytes"`
 }
 
 type ProviderCacheSectionHash struct {
-	SectionID          string   `json:"sectionId"`
-	Name               string   `json:"name,omitempty"`
-	Cacheability       string   `json:"cacheability,omitempty"`
-	Hash               string   `json:"hash,omitempty"`
-	SizeBytes          int      `json:"sizeBytes,omitempty"`
-	SourceRefs         []string `json:"sourceRefs,omitempty"`
-	DefinitionRevision string   `json:"definitionRevision,omitempty"`
+	BodyBytes          int                        `json:"bodyBytes,omitempty"`
+	ExpandedBytes      int                        `json:"expandedBytes,omitempty"`
+	LocalReferences    int                        `json:"localReferences,omitempty"`
+	Applicability      string                     `json:"applicability,omitempty"`
+	Components         []ProviderContextComponent `json:"components,omitempty"`
+	SectionID          string                     `json:"sectionId"`
+	Name               string                     `json:"name,omitempty"`
+	Cacheability       string                     `json:"cacheability,omitempty"`
+	Hash               string                     `json:"hash,omitempty"`
+	SizeBytes          int                        `json:"sizeBytes,omitempty"`
+	SourceRefs         []string                   `json:"sourceRefs,omitempty"`
+	DefinitionRevision string                     `json:"definitionRevision,omitempty"`
 }
 
 type ProviderCacheBreaker struct {

@@ -109,7 +109,7 @@ func expandSemanticWorkContext(v *runtimeSemanticWorkProjection, h rc.RuntimeSem
 }
 
 func runtimeSemanticSharedWorkOutputInstruction(c rc.RuntimeSemanticPlanRequestContext, m rc.RuntimeSemanticPlanManifest) string {
-	if c.WorkContext == nil {
+	if runtimeSemanticVisibleWorkContext(c, m) == nil {
 		return runtimeSemanticOutputInstruction(c, m)
 	}
 	return strings.ReplaceAll(runtimeSemanticOutputInstruction(c, m), "C4 workContext", "C3 workContext") + semanticSharedWorkInstruction

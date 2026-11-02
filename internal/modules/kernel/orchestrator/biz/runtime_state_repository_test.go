@@ -3751,7 +3751,7 @@ func TestRuntimeMainlineMissingRequiredTargetCorrectionSurvivesRestart(t *testin
 			Domain: runtimecontract.RuntimeFeedbackDomainProviderPreflight, StableCategory: runtimecontract.RuntimeFeedbackCategoryAccepted,
 			WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.Transaction.AuthoritySnapshotID,
 		}
-		result.Set(llmevents.PreflightRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, Feedback: feedback}, nil)
+		result.Set(withRuntimePreflightSnapshotForTest(command, llmevents.PreflightRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, Feedback: feedback}), nil)
 	})
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
@@ -3928,7 +3928,7 @@ func TestRuntimeMainlineSchemaCorrectionDocumentCASRestartMatrix(t *testing.T) {
 					Domain: runtimecontract.RuntimeFeedbackDomainProviderPreflight, StableCategory: runtimecontract.RuntimeFeedbackCategoryAccepted,
 					WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.Transaction.AuthoritySnapshotID,
 				}
-				result.Set(llmevents.PreflightRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, Feedback: feedback}, nil)
+				result.Set(withRuntimePreflightSnapshotForTest(command, llmevents.PreflightRuntimeCandidateResult{Transaction: command.Transaction, DocumentKind: command.DocumentKind, Feedback: feedback}), nil)
 			})
 			llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 				command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
@@ -4235,11 +4235,11 @@ func TestRuntimeMainlineRenderedPreflightStopsBeforeCandidateAttempt(t *testing.
 	llmObserver.Subscribe(llmevents.TopicPreflightRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		preflightCalls++
 		command := event.Data().(llmevents.PreflightRuntimeCandidateCommand)
-		result.Set(llmevents.PreflightRuntimeCandidateResult{
+		result.Set(withRuntimePreflightSnapshotForTest(command, llmevents.PreflightRuntimeCandidateResult{
 			Transaction:  command.Transaction,
 			DocumentKind: command.DocumentKind,
 			Feedback:     runtimePreflightFeedbackForTest(t, command, "P4.current_snapshots is redacted"),
-		}, nil)
+		}), nil)
 	})
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) {
 		candidateCalls++

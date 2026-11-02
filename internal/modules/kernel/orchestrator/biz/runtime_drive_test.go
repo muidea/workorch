@@ -11037,7 +11037,7 @@ func TestRequestAndSealRuntimeCandidateRepairsDeclaredValueRuleOnceAcrossRestart
 	if err != nil {
 		t.Fatal(err)
 	}
-	restartedOwner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: memory.NewArtifactContinuationRepository()})
+	restartedOwner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: owner.evidence.ArtifactContinuations})
 	if err := restartedOwner.ConfigureRuntimeRepository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -11145,7 +11145,7 @@ func TestRequestAndSealRuntimeCandidateReencodesDeclaredParameterEntriesOnAttemp
 	if err != nil {
 		t.Fatal(err)
 	}
-	restartedOwner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: memory.NewArtifactContinuationRepository()})
+	restartedOwner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: owner.evidence.ArtifactContinuations})
 	if err := restartedOwner.ConfigureRuntimeRepository(state); err != nil {
 		t.Fatal(err)
 	}
@@ -11477,6 +11477,18 @@ func TestRequestAndSealRuntimeCandidateRestartsFromPersistedIncompleteOutcome(t 
 	if err != nil {
 		t.Fatal(err)
 	}
+	// This manually seeded recovery fixture must retain the pre-submission
+	// input just as the production request path does. The scripted provider
+	// consumes opaque bytes; it does not exercise the real LLM renderer here.
+	frozen := []byte(`{"fixture":"complete original provider input"}`)
+	if err := newTestBiz(owner, hub, nil).persistRuntimeProviderInput(ctx, prepared, session.LogicalRequestID, frozen); err != nil {
+		t.Fatal(err)
+	}
+	session.InputRef = &runtimecontract.RuntimeProviderInputRef{Bytes: len(frozen), Hash: runtimecontract.RuntimeProviderInputHash(frozen)}
+	prepared.CandidateRequestSessions[0].InputRef = session.InputRef.Clone()
+	if err := state.Save(ctx, prepared, prepared.StateRevision); err != nil {
+		t.Fatal(err)
+	}
 	first := `{"operations":[{"kind":"file/edit",`
 	firstPhysicalID := runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, 1)
 	submitted, err := owner.MarkRuntimeCandidateRequestSubmitted(ctx, prepared.Facts.WorkspaceID, prepared.Facts.RunID, session.LogicalRequestID, 1, firstPhysicalID)
@@ -11686,7 +11698,13 @@ func TestRuntimeFileBackedPrepareRestartSubmitsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared, session, err := firstOwner.EnsureRuntimeCandidateRequestSession(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, prefix, manifest.Hash, "")
+	logical := runtimecontract.StableRuntimeCandidateRequestSessionID(runtimecontract.RuntimeProviderDocumentOperations, initialized.Facts.WorkspaceID, initialized.Facts.RunID, initialized.Decision.AuthorityTransaction(), prefix, manifest.Hash, "")
+	frozen := []byte(`{"fixture":"complete original provider input"}`)
+	if err := newTestBiz(firstOwner, hub, nil).persistRuntimeProviderInput(ctx, initialized, logical, frozen); err != nil {
+		t.Fatal(err)
+	}
+	inputRef := &runtimecontract.RuntimeProviderInputRef{Bytes: len(frozen), Hash: runtimecontract.RuntimeProviderInputHash(frozen)}
+	prepared, session, err := firstOwner.EnsureRuntimeCandidateRequestSession(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, prefix, manifest.Hash, "", inputRef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -11695,7 +11713,7 @@ func TestRuntimeFileBackedPrepareRestartSubmitsOnce(t *testing.T) {
 	}
 
 	// Rebuild both the state controller and opaque-content repository before
-	// any physical provider request. The only persisted input is session ID.
+	// any physical provider request. Both the session index and exact opaque input survive.
 	if err := runOwner.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -11742,10 +11760,10 @@ func TestRuntimeFileBackedPrepareRestartSubmitsOnce(t *testing.T) {
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(llmevents.TopicPreflightRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(llmevents.PreflightRuntimeCandidateCommand)
-		result.Set(llmevents.PreflightRuntimeCandidateResult{
+		result.Set(withRuntimePreflightSnapshotForTest(command, llmevents.PreflightRuntimeCandidateResult{
 			Transaction: command.Transaction, DocumentKind: command.DocumentKind,
 			Feedback: runtimePreflightFeedbackForTest(t, command, ""),
-		}, nil)
+		}), nil)
 	})
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		providerCalls++

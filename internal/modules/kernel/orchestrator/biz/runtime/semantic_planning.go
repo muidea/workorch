@@ -1118,6 +1118,7 @@ func (c *planningTransactionComponent) startSemanticPlanRequest(ctx context.Cont
 		ledger.Attempt = 0
 		ledger.StablePrefixHash = stablePrefixHash
 		ledger.LogicalRequestID = logicalRequestID
+
 		return true, nil
 	}(transaction.aggregate, &transaction.ledger)
 	if err != nil {
@@ -1139,6 +1140,37 @@ func (c *planningTransactionComponent) evaluateSemanticPlan(ctx context.Context,
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
+	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
+}
+
+// compileSingletonSemanticOrder uses the same private SM-3 document transition,
+// with explicit compiler provenance and no provider session or budget credit.
+func (c *planningTransactionComponent) compileSingletonSemanticOrder(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logical string) (RuntimeAggregate, error) {
+	transaction, err := c.beginSemanticPlanningMutation(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	ledger := &transaction.ledger
+	if ledger.Manifest == nil || ledger.LogicalRequestID != logical {
+		return RuntimeAggregate{}, common.ErrConflict
+	}
+	order, ok := runtimecontract.CompileRuntimeSingletonCoverageOrder(*ledger.Manifest)
+	if !ok || ledger.Attempt != 0 {
+		return RuntimeAggregate{}, common.ErrConflict
+	}
+	if ledger.CompiledOrder != nil {
+		return transaction.aggregate, nil
+	}
+	for _, session := range transaction.aggregate.CandidateRequestSessions {
+		if session.LogicalRequestID == logical {
+			return RuntimeAggregate{}, fmt.Errorf("%w: provider transaction already exists", common.ErrConflict)
+		}
+	}
+	changed, err := evaluateSemanticPlanMutation(transaction.aggregate, ledger, logical, order)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	ledger.CompiledOrder = runtimecontract.NewRuntimeSemanticCompiledOrder(*ledger.Manifest, order)
 	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
 }
 

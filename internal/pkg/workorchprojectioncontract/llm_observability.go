@@ -254,6 +254,7 @@ func cloneContextSections(items []llmaudit.ContextSection) []llmaudit.ContextSec
 	ret := append([]llmaudit.ContextSection(nil), items...)
 	for idx := range ret {
 		ret[idx].SourceRefs = append([]string(nil), items[idx].SourceRefs...)
+		ret[idx].Components = append([]llmaudit.ContextComponent(nil), items[idx].Components...)
 	}
 	return ret
 }

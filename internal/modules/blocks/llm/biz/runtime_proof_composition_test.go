@@ -50,7 +50,7 @@ func TestRuntimeProofCompositionV3IsExactProtectedC3Only(t *testing.T) {
 	if len(reviews) != 1 || !reflect.DeepEqual(reviews[0].LineageAssertions, assertions) || !strings.Contains(projection.OutputInstruction, "NOT existing ACKs") {
 		t.Fatal("v3 scope/rules/observation-only boundary lost")
 	}
-	if !strings.Contains(projection.OutputInstruction, "does NOT prove final repository HEAD/tree/blob bytes") || reviews[0].LineageAssertions[1].Rule.TerminalContractRef != runtimecontract.RuntimeTerminalReceiptProofContract {
+	if strings.Contains(projection.OutputInstruction, "The terminal_owner_operation_receipt uses") || reviews[0].LineageAssertions[1].Rule.TerminalContractRef != runtimecontract.RuntimeTerminalReceiptProofContract {
 		t.Fatal("terminal proof version or original-receipt-only boundary lost")
 	}
 	if !strings.Contains(projection.OutputInstruction, "validationSourceScope/validationSourceId") || !strings.Contains(projection.OutputInstruction, "not existing receipts, snapshots or Results") || reviews[0].LineageAssertions[2].Rule != obligation.LineageAssertions[2] {

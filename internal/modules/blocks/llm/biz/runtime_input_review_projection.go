@@ -77,13 +77,38 @@ func runtimeSemanticVisibleInputReviews(context runtimecontract.RuntimeSemanticP
 }
 
 func runtimeSemanticInputObligationsInstruction(context runtimecontract.RuntimeSemanticPlanRequestContext, manifest runtimecontract.RuntimeSemanticPlanManifest) string {
-	if len(runtimeSemanticVisibleInputReviews(context, manifest)) == 0 {
+	reviews := runtimeSemanticVisibleInputReviews(context, manifest)
+	if len(reviews) == 0 {
 		return ""
 	}
-	instructions := ""
-	// Canonical protocol order avoids catalog traversal order changing prose.
-
-	instructions += " For validation/input-consistency, EVERY conjunct must be reviewed; these observations cannot authorize publication or grant execution credit. For a requiredCheckRef in sourceObligationChecks use its own original criterion and declaration; never substitute the shared CWI text. Every check MUST retain exact criterionText excerpts covering every non-whitespace original criterion character. Source checks use their own exact sourceObligationChecks criterion AND declaration, never shared CWI text. Each obligation includes finding, reason and inputTargetRefs. When lineageAssertions are present, canonical proofConsumerRefs must cover the complete requiredProofConsumerRefs; without lineageAssertions these refs are optional but if supplied must name validation_input. The reserved validation_input consumer denotes actual assertions in the supplied input bytes; other refs must identify exact same-CWI sealed lineageAssertions. Every check's union must equal the supplied requiredProofConsumerRefs, including validation_input AND every declared lineage rule; these are mandatory consumers, never selectable alternatives. Independently judge joint semantic coverage: a rule ref or README claim is not proof. Ordinary all-of behavioral validation remains mandatory. Execution rules are separately checked against original work/repair/owner receipts at assessment cutoff. post_terminal_delivery rules describe future ordered ACK consumption, NOT existing ACKs, execution evidence or terminal credit. The terminal_result_evidence_index checks complete original DoD/source rows, current accepted refs and the immutable formal Result index after material generation and real owner delivery. The terminal_owner_operation_receipt uses its exact receiptSourceScope/receiptSourceId and canonical owner/kind/variant/effect to join an original receipt into that source's terminal proof; it does NOT prove final repository HEAD/tree/blob bytes or owner-currentness. The terminal_owner_snapshot separately requires exact original receiptSourceScope/receiptSourceId AND validationSourceScope/validationSourceId, actual owner-produced immutable snapshot/root identity, complete original validation-read and reviewed-input byte membership, and a clean unchanged bounded observation before the first material seal. It does not prove all owners remain continuously current. During review these are obligation mappings, not existing receipts, snapshots or Results. Missing/conflicting => conflict; otherwise unknown => inconclusive; otherwise consistent. Never fabricate owner facts, waive a criterion, or widen owner input scope."
-
-	return instructions
+	kinds := map[runtimecontract.RuntimeLineageAssertionKind]bool{}
+	hasLineage := false
+	for _, review := range reviews {
+		for _, assertion := range review.LineageAssertions {
+			hasLineage = true
+			kinds[assertion.Rule.Kind] = true
+		}
+	}
+	base := " For validation/input-consistency, EVERY conjunct must be reviewed; these observations cannot authorize publication or grant execution credit. For a requiredCheckRef in sourceObligationChecks use its own original criterion and declaration; never substitute the shared CWI text. Every check MUST retain exact criterionText excerpts covering every non-whitespace original criterion character. Source checks use their own exact sourceObligationChecks criterion AND declaration, never shared CWI text. Each obligation includes finding, reason and inputTargetRefs."
+	if hasLineage {
+		base += " Canonical proofConsumerRefs must cover the complete requiredProofConsumerRefs, including validation_input AND every declared lineage rule; these are mandatory consumers, never selectable alternatives. The reserved validation_input consumer denotes actual assertions in the supplied input bytes; other refs must identify exact same-CWI sealed lineageAssertions. Independently judge joint semantic coverage: a rule ref or README claim is not proof. Ordinary all-of behavioral validation remains mandatory."
+	} else {
+		base += " Without lineageAssertions proofConsumerRefs are optional; when supplied they must name validation_input, which denotes actual assertions in the supplied input bytes."
+	}
+	if kinds[runtimecontract.RuntimeLineageCompletedWorkRounds] || kinds[runtimecontract.RuntimeLineageRepairThenFreshValidation] || kinds[runtimecontract.RuntimeLineageOwnerOperationReceipt] {
+		base += " Execution rules are separately checked against original work/repair/owner receipts at assessment cutoff."
+	}
+	if kinds[runtimecontract.RuntimeLineageDeliveryAcknowledgements] {
+		base += " post_terminal_delivery rules describe future ordered ACK consumption, NOT existing ACKs, execution evidence or terminal credit."
+	}
+	if kinds[runtimecontract.RuntimeLineageTerminalResultIndex] {
+		base += " The terminal_result_evidence_index checks complete original DoD/source rows, current accepted refs and the immutable formal Result index after material generation and real owner delivery."
+	}
+	if kinds[runtimecontract.RuntimeLineageTerminalOwnerReceipt] {
+		base += " The terminal_owner_operation_receipt uses its exact receiptSourceScope/receiptSourceId and canonical owner/kind/variant/effect to join an original receipt into that source's terminal proof; it does NOT prove final repository HEAD/tree/blob bytes or owner-currentness."
+	}
+	if kinds[runtimecontract.RuntimeLineageTerminalOwnerSnapshot] {
+		base += " The terminal_owner_snapshot separately requires exact original receiptSourceScope/receiptSourceId AND validationSourceScope/validationSourceId, actual owner-produced immutable snapshot/root identity, complete original validation-read and reviewed-input byte membership, and a clean unchanged bounded observation before the first material seal. It does not prove all owners remain continuously current."
+	}
+	return base + " During review these are obligation mappings, not existing receipts, snapshots or Results. Missing/conflicting => conflict; otherwise unknown => inconclusive; otherwise consistent. Never fabricate owner facts, waive a criterion, or widen owner input scope."
 }

@@ -60,6 +60,7 @@ func (c CompleteProviderDocumentCommand) Clone() CompleteProviderDocumentCommand
 			p.SectionHashes = slices.Clone(p.SectionHashes)
 			for i := range p.SectionHashes {
 				p.SectionHashes[i].SourceRefs = slices.Clone(p.SectionHashes[i].SourceRefs)
+				p.SectionHashes[i].Components = slices.Clone(p.SectionHashes[i].Components)
 			}
 			p.CacheBreakers = slices.Clone(p.CacheBreakers)
 			p.Canonicalization.SectionOrder = slices.Clone(p.Canonicalization.SectionOrder)

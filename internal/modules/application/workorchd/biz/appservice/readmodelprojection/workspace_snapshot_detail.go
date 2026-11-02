@@ -368,6 +368,7 @@ func projectLLMContextBudgetSections(items []llmaudit.ContextSection) []llmaudit
 		item.ID = trimTraceString(item.ID)
 		item.Hash = trimTraceString(item.Hash)
 		item.SourceRefs = compactStringSlice(item.SourceRefs, workspaceSnapshotTraceSliceLimit)
+		item.Components = append([]llmaudit.ContextComponent(nil), item.Components...)
 		ret = append(ret, item)
 	}
 	return ret

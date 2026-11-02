@@ -148,6 +148,8 @@ type AcquireProviderCeilingResult struct {
 }
 
 type RequestRuntimeCandidateCommand struct {
+	FrozenInput                    []byte `json:"-"`
+	FrozenInputRef                 *runtimecontract.RuntimeProviderInputRef
 	WorkspaceID                    common.WorkspaceID
 	RunID                          common.RunID
 	DocumentKind                   runtimecontract.RuntimeProviderDocumentKind
@@ -169,6 +171,11 @@ type RequestRuntimeCandidateCommand struct {
 }
 
 type PreflightRuntimeCandidateCommand struct {
+	BaseFrozenInput                []byte `json:"-"`
+	BaseFrozenInputRef             *runtimecontract.RuntimeProviderInputRef
+	FreezeInput                    bool
+	LogicalRequestID               string
+	ExpectedDocument               *runtimecontract.RuntimeExpectedDocumentContract
 	WorkspaceID                    common.WorkspaceID
 	RunID                          common.RunID
 	DocumentKind                   runtimecontract.RuntimeProviderDocumentKind
@@ -188,10 +195,12 @@ type PreflightRuntimeCandidateCommand struct {
 }
 
 type PreflightRuntimeCandidateResult struct {
-	Transaction  runtimecontract.AuthorityTransaction
-	DocumentKind runtimecontract.RuntimeProviderDocumentKind
-	Feedback     runtimecontract.RuntimeFeedback
-	Audit        *runtimecontract.ProviderRequestAuditView
+	FrozenInput    []byte `json:"-"`
+	FrozenInputRef *runtimecontract.RuntimeProviderInputRef
+	Transaction    runtimecontract.AuthorityTransaction
+	DocumentKind   runtimecontract.RuntimeProviderDocumentKind
+	Feedback       runtimecontract.RuntimeFeedback
+	Audit          *runtimecontract.ProviderRequestAuditView
 }
 
 // RuntimeProviderDocumentOutcome is the LLM owner's authoritative factual

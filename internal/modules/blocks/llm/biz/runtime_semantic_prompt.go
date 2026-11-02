@@ -56,7 +56,7 @@ func buildRuntimeSemanticPrompt(request llmmodels.RuntimeCandidateRequest, prepa
 		BatchCoverageIDs:  prepared.context.BatchCoverageWorkItemIDs,
 	}
 	authority.ContextEncoding = runtimecontract.RuntimeSemanticContextEncoding
-	authority.WorkContext = compactSemanticWorkContext(prepared.context.WorkContext, prepared.context.ExecutionHistory)
+	authority.WorkContext = compactSemanticWorkContext(runtimeSemanticVisibleWorkContext(prepared.context, prepared.manifest), prepared.context.ExecutionHistory)
 	authority.OutputInstruction = runtimeSemanticSharedWorkOutputInstruction(prepared.context, prepared.manifest)
 	authorityJSON, err := json.Marshal(authority)
 	if err != nil {
@@ -68,7 +68,7 @@ func buildRuntimeSemanticPrompt(request llmmodels.RuntimeCandidateRequest, prepa
 	}
 
 	tail := runtimeSemanticTailProjection{
-		WorkContext:         prepared.context.WorkContext.Clone(),
+		WorkContext:         runtimeSemanticVisibleWorkContext(prepared.context, prepared.manifest),
 		CoverageProgress:    prepared.context.CoverageProgress,
 		ExecutionHistory:    prepared.context.ExecutionHistory,
 		ExecutionBudget:     prepared.context.ExecutionBudget,
@@ -78,7 +78,7 @@ func buildRuntimeSemanticPrompt(request llmmodels.RuntimeCandidateRequest, prepa
 		CorrectionDirective: cloneRuntimeSemanticCorrectionDirective(request.SemanticCorrectionDirective),
 		ExistingTarget:      runtimeSemanticExistingTargetForProvider(prepared.manifest, request.SemanticCorrectionObservation),
 	}
-	if prepared.context.WorkContext != nil {
+	if authority.WorkContext != nil {
 		tail.WorkContext = nil
 		tail.WorkContextRef = semanticWorkContextRef
 	}

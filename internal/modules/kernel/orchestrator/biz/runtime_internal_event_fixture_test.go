@@ -38,7 +38,7 @@ func (o *Biz) RequestTermination(ctx context.Context, workspaceID common.Workspa
 	return result.Aggregate, err
 }
 
-func (o *Biz) EnsureRuntimeCandidateRequestSession(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stablePrefixHash, manifestHash, correctionHash string) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession, error) {
+func (o *Biz) EnsureRuntimeCandidateRequestSession(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stablePrefixHash, manifestHash, correctionHash string, inputRefs ...*runtimecontract.RuntimeProviderInputRef) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession, error) {
 	aggregate, err := o.loadRuntime(ctx, workspaceID, runID)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidateRequestSession{}, err
@@ -62,9 +62,13 @@ func (o *Biz) EnsureRuntimeCandidateRequestSession(ctx context.Context, workspac
 	if expected.MaxOutputTokens <= 0 {
 		expected.MaxOutputTokens = 8192
 	}
+	var inputRef *runtimecontract.RuntimeProviderInputRef
+	if len(inputRefs) > 0 {
+		inputRef = inputRefs[0].Clone()
+	}
 	result, err := o.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 		Kind: runtime.RuntimeInternalEventCandidateRequestEnsured, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Transaction: &runtime.RuntimeInternalTransactionPayload{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, StablePrefixHash: stablePrefixHash,
-			ManifestHash: manifestHash, CorrectionHash: correctionHash, ExpectedDocument: &expected},
+			ManifestHash: manifestHash, CorrectionHash: correctionHash, ExpectedDocument: &expected, InputRef: inputRef},
 	})
 	return result.Aggregate, result.CandidateSession, err
 }

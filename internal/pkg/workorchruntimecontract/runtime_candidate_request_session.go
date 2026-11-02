@@ -91,6 +91,7 @@ func (o RuntimeCandidateRequestOutcome) Validate() error {
 // correction after a complete candidate rejection creates a distinct session
 // fingerprint; whole-document recovery keeps the same ID.
 type RuntimeCandidateRequestSession struct {
+	InputRef         *RuntimeProviderInputRef `json:",omitempty"`
 	LogicalRequestID string
 	DocumentKind     RuntimeProviderDocumentKind
 	ExpectedDocument *RuntimeExpectedDocumentContract
@@ -149,6 +150,7 @@ func SameRuntimeCandidateRequestIdentity(left, right RuntimeCandidateRequestIden
 }
 
 func (s RuntimeCandidateRequestSession) Normalized() RuntimeCandidateRequestSession {
+	s.InputRef = s.InputRef.Clone()
 	s.LogicalRequestID = strings.TrimSpace(s.LogicalRequestID)
 	s.DocumentKind = RuntimeProviderDocumentKind(strings.TrimSpace(string(s.DocumentKind)))
 	s.StablePrefixHash = strings.TrimSpace(s.StablePrefixHash)
@@ -178,6 +180,9 @@ func (s RuntimeCandidateRequestSession) Normalized() RuntimeCandidateRequestSess
 }
 
 func (s RuntimeCandidateRequestSession) Validate() error {
+	if err := s.InputRef.Validate(); err != nil {
+		return err
+	}
 	var validatedManifest *runtimeValidatedCandidateManifest
 	if s.CandidateManifest != nil {
 		validated, err := validateRuntimeCandidateManifestRawCanonical(*s.CandidateManifest)

@@ -44,6 +44,15 @@ func persistRuntimeCandidateRequestDocument(ctx context.Context, repo repository
 	if err := (runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: logicalRequestID, Sequence: sequence, PhysicalCallID: physicalCallID}).Validate(); err != nil || len(content) == 0 {
 		return "", "", common.ErrInvalidArgument
 	}
+	return persistRuntimeCandidateOpaqueContent(ctx, repo, aggregate, logicalRequestID, content)
+}
+
+// Shared restricted byte carrier. Input snapshots use a distinct deterministic
+// namespace and do not fabricate physical calls or provider documents.
+func persistRuntimeCandidateOpaqueContent(ctx context.Context, repo repository.ArtifactContinuationRepository, aggregate runtime.RuntimeAggregate, logicalRequestID string, content []byte) (common.ArtifactContinuationID, string, error) {
+	if len(content) == 0 {
+		return "", "", common.ErrInvalidArgument
+	}
 	continuation, err := loadOrCreateRuntimeCandidateRequestContent(ctx, repo, aggregate, logicalRequestID)
 	if err != nil {
 		return "", "", err

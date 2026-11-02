@@ -13,6 +13,7 @@ func (c *RuntimeController) applyTransactionInternalEvent(ctx context.Context, e
 	switch event.Kind {
 	case RuntimeInternalEventSemanticPlanRequestStarted,
 		RuntimeInternalEventSemanticPlanEvaluated,
+		RuntimeInternalEventSemanticSingletonOrderCompiled,
 		RuntimeInternalEventSemanticPlanCorrectionRequired,
 		RuntimeInternalEventCandidateRequestEnsured,
 		RuntimeInternalEventSemanticPlanBatchCompiled,
@@ -62,6 +63,10 @@ func (c *RuntimeController) applyPlanningTransactionInternalEvent(ctx context.Co
 		aggregate, err := c.planning.startSemanticPlanRequest(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Transaction.SemanticManifest, event.Transaction.StablePrefixHash, event.Transaction.LogicalRequestID)
 		result.Aggregate = aggregate
 		return result, err
+	case RuntimeInternalEventSemanticSingletonOrderCompiled:
+		aggregate, err := c.planning.compileSingletonSemanticOrder(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID)
+		result.Aggregate = aggregate
+		return result, err
 	case RuntimeInternalEventSemanticPlanEvaluated:
 		if event.Transaction.SemanticDocument == nil {
 			return result, common.ErrInvalidArgument
@@ -80,7 +85,7 @@ func (c *RuntimeController) applyPlanningTransactionInternalEvent(ctx context.Co
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateRequestEnsured:
-		ensured, err := c.planning.ensureCandidateRequestSessionWithExpected(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.DocumentKind, event.Transaction.StablePrefixHash, event.Transaction.ManifestHash, event.Transaction.CorrectionHash, event.Transaction.ExpectedDocument)
+		ensured, err := c.planning.ensureCandidateRequestSessionWithExpected(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.DocumentKind, event.Transaction.StablePrefixHash, event.Transaction.ManifestHash, event.Transaction.CorrectionHash, event.Transaction.ExpectedDocument, event.Transaction.InputRef)
 		result.Aggregate = ensured.Aggregate
 		result.CandidateSession = ensured.Session
 		if ensured.AuthorityFailure != nil {

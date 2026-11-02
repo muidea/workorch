@@ -2770,3 +2770,53 @@ func runtimeTestAdvanceSemanticFocus(t *testing.T, repository *controllerReposit
 	repository.aggregate = &value
 	return nil
 }
+
+func TestRuntimeSemanticSingletonOrderCompilesWithoutProviderCredit(t *testing.T) {
+	controller, repo, a := newSemanticPlanningController(t)
+	manifest, _, _ := semanticPlanningFixture(t, a)
+	ctx := context.Background()
+	event := RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, Scope: RuntimeInternalEventScope{WorkspaceID: a.Facts.WorkspaceID, RunID: a.Facts.RunID}, Transaction: &RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: "compiled-prefix", LogicalRequestID: "compiled-lineage"}}
+	result, err := controller.ApplyInternalEvent(ctx, event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticSingletonOrderCompiled, Scope: event.Scope, Transaction: &RuntimeInternalTransactionPayload{LogicalRequestID: "compiled-lineage"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled := result.Aggregate
+	if compiled.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningOrderAccepted || compiled.SemanticPlanning.CompiledOrder == nil || len(compiled.CandidateRequestSessions) != 0 || !reflect.DeepEqual(compiled.ExecutionBudget, a.ExecutionBudget) || len(compiled.OperationReceipts) != 0 {
+		t.Fatal("singleton compilation fabricated provider/effect/budget credit")
+	}
+	saves := repo.saves
+	replay, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticSingletonOrderCompiled, Scope: event.Scope, Transaction: &RuntimeInternalTransactionPayload{LogicalRequestID: "compiled-lineage"}})
+	if err != nil || replay.Aggregate.StateRevision != compiled.StateRevision || repo.saves != saves {
+		t.Fatal("compiler replay changed state", err)
+	}
+	reloaded, err := controller.Load(ctx, a.Facts.WorkspaceID, a.Facts.RunID)
+	if err != nil || reloaded.SemanticPlanning.CompiledOrder == nil {
+		t.Fatal("compiler source did not survive reload", err)
+	}
+	expected, err := SemanticExpectedDocument(reloaded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := controller.ensureCandidateRequestSessionWithExpected(ctx, a.Facts.WorkspaceID, a.Facts.RunID, runtimecontract.RuntimeProviderDocumentSemanticPlan, "compiled-prefix", manifest.Hash, "", &expected); err == nil {
+		t.Fatal("compiled order acquired a provider session")
+	}
+	wrong := *reloaded.SemanticPlanning.CompiledOrder
+	wrong.DocumentHash = "foreign-order"
+	if wrong.Validate(reloaded.SemanticPlanning.Manifest, reloaded.SemanticPlanning.CoverageOrderDocument) == nil {
+		t.Fatal("compiler provenance accepted a different document")
+	}
+	multiple := manifest.Clone()
+	multiple.CoverageItems = append(multiple.CoverageItems, multiple.CoverageItems[0])
+	if _, compiled := runtimecontract.CompileRuntimeSingletonCoverageOrder(multiple); compiled {
+		t.Fatal("multiple members silently bypassed semantic ordering")
+	}
+	purpose := manifest.Clone()
+	purpose.ProofObligations[0].ImplementationWork = &runtimecontract.RuntimeSemanticImplementationWork{PurposeChoiceOnly: true}
+	if _, compiled := runtimecontract.CompileRuntimeSingletonCoverageOrder(purpose); compiled {
+		t.Fatal("singleton compilation bypassed semantic purpose choice")
+	}
+}

@@ -626,6 +626,20 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 	return string(encoded), err
 }
 
+// RuntimeSemanticPurposeChoice applies only to the coverage-order purpose
+// transaction. Work context presence alone never grants purpose/intent fields.
+func RuntimeSemanticPurposeChoice(manifest RuntimeSemanticPlanManifest, step RuntimeSemanticPlanStep) bool {
+	if step != RuntimeSemanticPlanStepCoverageOrder {
+		return false
+	}
+	for _, obligation := range manifest.ProofObligations {
+		if obligation.ImplementationWork != nil && obligation.ImplementationWork.PurposeChoiceOnly {
+			return true
+		}
+	}
+	return false
+}
+
 // RuntimeSemanticPlanJSONSchemaForRequest narrows the sealed manifest schema
 // to one provider transaction. The full manifest remains the authority used by
 // the evaluator; this projection only prevents an order or proof-batch request
@@ -652,7 +666,7 @@ func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifes
 		delete(properties, "batchCoverageWorkItemIds")
 		properties["proposals"] = map[string]any{"type": "array", "maxItems": 0}
 		for _, obligation := range manifest.ProofObligations {
-			if work := obligation.ImplementationWork; work != nil && work.PurposeChoiceOnly {
+			if work := obligation.ImplementationWork; work != nil && RuntimeSemanticPurposeChoice(manifest, step) && work.PurposeChoiceOnly {
 				purposes := []string{}
 				if work.Scope.Request.InputRevision == nil {
 					purposes = append(purposes, string(RuntimeImplementationWorkPurposeTerminal))

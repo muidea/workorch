@@ -59,7 +59,7 @@ func TestRuntimeSemanticLatePreflightCannotReopenTerminatedIntent(t *testing.T) 
 			return
 		}
 		command := event.Data().(llmevents.PreflightRuntimeCandidateCommand)
-		result.Set(llmevents.PreflightRuntimeCandidateResult{DocumentKind: command.DocumentKind, Feedback: runtimePreflightFeedbackForTest(t, command, "")}, nil)
+		result.Set(withRuntimePreflightSnapshotForTest(command, llmevents.PreflightRuntimeCandidateResult{DocumentKind: command.DocumentKind, Feedback: runtimePreflightFeedbackForTest(t, command, "")}), nil)
 	})
 	observer.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providers++ })
 	if _, err := module.driveRuntimeSemanticPlanning(ctx, started); !errors.Is(err, common.ErrConflict) {
@@ -216,7 +216,7 @@ func TestRuntimeSemanticPreflightSessionRestartMatrix(t *testing.T) {
 						t.Error("preflight ran after session CAS")
 					}
 					command := event.Data().(llmevents.PreflightRuntimeCandidateCommand)
-					result.Set(llmevents.PreflightRuntimeCandidateResult{DocumentKind: command.DocumentKind, Feedback: runtimePreflightFeedbackForTest(t, command, "")}, nil)
+					result.Set(withRuntimePreflightSnapshotForTest(command, llmevents.PreflightRuntimeCandidateResult{DocumentKind: command.DocumentKind, Feedback: runtimePreflightFeedbackForTest(t, command, "")}), nil)
 				})
 				observer.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 					providers++
@@ -236,7 +236,7 @@ func TestRuntimeSemanticPreflightSessionRestartMatrix(t *testing.T) {
 						SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
 						ManifestHash:  command.SemanticManifest.Hash, DefinitionSeedHash: command.SemanticManifest.DefinitionSeedHash,
 						PlanStep:      runtimecontract.RuntimeSemanticPlanStepCoverageOrder,
-						CoverageOrder: []common.CoverageWorkItemID{command.SemanticManifest.CoverageItems[0].ID},
+						CoverageOrder: runtimePreflightCoverageIDsForTest(command.SemanticManifest),
 					}
 					payload, err := runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(command.SemanticManifest, document)
 					if err != nil {
@@ -262,15 +262,20 @@ func TestRuntimeSemanticPreflightSessionRestartMatrix(t *testing.T) {
 				if err := reloaded.Validate(); err != nil {
 					t.Fatalf("cut point cannot reload: %v", err)
 				}
+				// Completion/unknown handling must not depend on input bytes that
+				// are needed only to submit a new physical call.
+				if after && (boundary == "submitted" || boundary == "document_complete") {
+					id := runtimecontract.StableRuntimeCandidateRequestContentID(providerInputContentKey(reloaded.CandidateRequestSessions[0].LogicalRequestID))
+					if err := module.evidence.ArtifactContinuations.Delete(ctx, id); err != nil {
+						t.Fatal(err)
+					}
+				}
 				restarted := newRuntimeSemanticPreflightModule(t, hub, cut)
 				resumed, err := restarted.driveRuntimeSemanticPlanning(ctx, reloaded)
 				if err != nil {
 					t.Fatal(err)
 				}
 				wantPreflights := 1
-				if boundary == "prepared" && !after {
-					wantPreflights = 2
-				}
 				unknown := boundary == "submitted" && after || (boundary == "document_complete" || boundary == "recovery_pending") && !after
 				wantProviders := 1
 				if boundary == "submitted" && after {
@@ -326,7 +331,7 @@ func TestRuntimeSemanticPreparedSessionRejectsIdentityDrift(t *testing.T) {
 			observer.Subscribe(llmevents.TopicPreflightRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 				preflights++
 				command := event.Data().(llmevents.PreflightRuntimeCandidateCommand)
-				result.Set(llmevents.PreflightRuntimeCandidateResult{DocumentKind: command.DocumentKind, Feedback: runtimePreflightFeedbackForTest(t, command, "")}, nil)
+				result.Set(withRuntimePreflightSnapshotForTest(command, llmevents.PreflightRuntimeCandidateResult{DocumentKind: command.DocumentKind, Feedback: runtimePreflightFeedbackForTest(t, command, "")}), nil)
 			})
 			observer.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providers++ })
 			started, err := module.driveRuntimeSemanticPlanning(ctx, aggregate)
@@ -368,6 +373,19 @@ func TestRuntimeSemanticPreparedSessionRejectsIdentityDrift(t *testing.T) {
 func runtimeSemanticPreflightFixture(t *testing.T) (*runtimeDriveRepository, runtime.RuntimeAggregate) {
 	t.Helper()
 	bootstrap := runtimeBootstrap()
+	// These tests exercise real provider transactions; a singleton ordinary
+	// order is compiled locally and has separate zero-provider coverage.
+	extra := bootstrap.CoverageItems[0]
+	extra.ID = "cwi-preflight-second"
+	extra.SourceID = "preflight-second"
+	extra.TargetText = "verify second independent original"
+	bootstrap.CoverageItems = append(bootstrap.CoverageItems, extra)
+	bootstrap.Slices[0].CoverageWorkItemIDs = append(bootstrap.Slices[0].CoverageWorkItemIDs, extra.ID)
+	focus := bootstrap.DefinitionFocuses[0].Clone()
+	focus.ID = "focus-preflight-second"
+	focus.CoverageWorkItemIDs = []common.CoverageWorkItemID{extra.ID}
+	bootstrap.DefinitionFocuses = append(bootstrap.DefinitionFocuses, focus)
+	bootstrap = runtimeTestBootstrapWithBindings(bootstrap)
 	facts, err := bootstrap.InitialFacts("ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
@@ -410,7 +428,7 @@ func TestRuntimeSemanticPreflightRejectsBeforeSession(t *testing.T) {
 					return
 				}
 				command := event.Data().(llmevents.PreflightRuntimeCandidateCommand)
-				result.Set(llmevents.PreflightRuntimeCandidateResult{DocumentKind: command.DocumentKind, Feedback: runtimePreflightFeedbackForTest(t, command, "protected semantic context exceeds rendered budget")}, nil)
+				result.Set(withRuntimePreflightSnapshotForTest(command, llmevents.PreflightRuntimeCandidateResult{DocumentKind: command.DocumentKind, Feedback: runtimePreflightFeedbackForTest(t, command, "protected semantic context exceeds rendered budget")}), nil)
 			})
 			observer.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providers++ })
 			started, err := module.driveRuntimeSemanticPlanning(ctx, aggregate)
@@ -456,7 +474,7 @@ func TestRuntimeSemanticBatchAndCorrectionPreflightRejectBeforeNewSession(t *tes
 				if reject {
 					reason = "protected semantic batch context omitted"
 				}
-				result.Set(llmevents.PreflightRuntimeCandidateResult{DocumentKind: command.DocumentKind, Feedback: runtimePreflightFeedbackForTest(t, command, reason)}, nil)
+				result.Set(withRuntimePreflightSnapshotForTest(command, llmevents.PreflightRuntimeCandidateResult{DocumentKind: command.DocumentKind, Feedback: runtimePreflightFeedbackForTest(t, command, reason)}), nil)
 			})
 			observer.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 				providers++
@@ -466,7 +484,7 @@ func TestRuntimeSemanticBatchAndCorrectionPreflightRejectBeforeNewSession(t *tes
 					document := runtimecontract.RuntimeSemanticPlanDocument{
 						SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: command.SemanticManifest.Hash,
 						DefinitionSeedHash: command.SemanticManifest.DefinitionSeedHash, PlanStep: runtimecontract.RuntimeSemanticPlanStepCoverageOrder,
-						CoverageOrder: []common.CoverageWorkItemID{command.SemanticManifest.CoverageItems[0].ID},
+						CoverageOrder: runtimePreflightCoverageIDsForTest(command.SemanticManifest),
 					}
 					var err error
 					payload, err = runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(command.SemanticManifest, document)
@@ -542,7 +560,7 @@ func TestRuntimeSemanticPreflightFailureCASRestart(t *testing.T) {
 						t.Errorf("preflight did not use current owner progress across restart: %+v err=%v", progress, err)
 					}
 				}
-				result.Set(llmevents.PreflightRuntimeCandidateResult{DocumentKind: command.DocumentKind, Feedback: runtimePreflightFeedbackForTest(t, command, "protected context missing")}, nil)
+				result.Set(withRuntimePreflightSnapshotForTest(command, llmevents.PreflightRuntimeCandidateResult{DocumentKind: command.DocumentKind, Feedback: runtimePreflightFeedbackForTest(t, command, "protected context missing")}), nil)
 			})
 			observer.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providers++ })
 			started, err := module.driveRuntimeSemanticPlanning(ctx, aggregate)
@@ -579,4 +597,12 @@ func TestRuntimeSemanticPreflightFailureCASRestart(t *testing.T) {
 			}
 		})
 	}
+}
+
+func runtimePreflightCoverageIDsForTest(m runtimecontract.RuntimeSemanticPlanManifest) []common.CoverageWorkItemID {
+	ids := make([]common.CoverageWorkItemID, 0, len(m.CoverageItems))
+	for _, item := range m.CoverageItems {
+		ids = append(ids, item.ID)
+	}
+	return ids
 }

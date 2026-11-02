@@ -104,6 +104,7 @@ func runtimeInternalTransitionContract(kind RuntimeInternalEventKind) (runtimeIn
 		RuntimeInternalEventSemanticPlanBatchDocumentObserved,
 		RuntimeInternalEventSemanticPlanBatchDocumentsMerged,
 		RuntimeInternalEventSemanticPlanEvaluated,
+		RuntimeInternalEventSemanticSingletonOrderCompiled,
 		RuntimeInternalEventSemanticPlanCorrectionRequired,
 		RuntimeInternalEventCandidateRequestEnsured,
 		RuntimeInternalEventCandidateRequestSubmitted,

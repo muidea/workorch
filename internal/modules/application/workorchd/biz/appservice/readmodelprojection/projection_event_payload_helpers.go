@@ -293,6 +293,18 @@ func sanitizeLLMContextBudgetAudit(input workorcheventpayload.Payload) workorche
 			if refs, ok := section.StringSlice("sourceRefs"); ok {
 				sectionFields = append(sectionFields, workorcheventpayload.StringArrayField("sourceRefs", refs))
 			}
+			for _, name := range []string{"bodyBytes", "expandedBytes", "localReferences"} {
+				if value, ok := section.Int64(name); ok {
+					sectionFields = append(sectionFields, workorcheventpayload.IntField(name, value))
+				}
+			}
+			if value, ok := section.String("applicability"); ok {
+				sectionFields = append(sectionFields, workorcheventpayload.StringField("applicability", value))
+			}
+			paths, sizes := llmContextComponentArrays(section)
+			if len(paths) > 0 {
+				sectionFields = append(sectionFields, workorcheventpayload.StringArrayField("componentPaths", paths), workorcheventpayload.Field{Name: "componentBytes", Value: workorcheventpayload.Value{Kind: workorcheventpayload.ValueArray, Array: sizes}})
+			}
 			sections = append(sections, workorcheventpayload.Value{Kind: workorcheventpayload.ValueObject, Object: workorcheventpayload.New(sectionFields...).Fields})
 		}
 		if len(sections) > 0 {

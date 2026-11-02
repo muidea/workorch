@@ -1,9 +1,11 @@
 package llm
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 )
@@ -50,7 +52,13 @@ func sectionMessages(request llmmodels.ProviderRequest, prefixOnly bool) []respo
 		if role == "system" {
 			role = "developer"
 		}
-		messages = append(messages, responsesInputMessage{Role: role, Content: []responsesInputContent{{Type: "input_text", Text: "### " + section.ID + "\n" + section.Content}}})
+		blocks := []responsesInputContent{{Type: "input_text", Text: "### " + section.ID + "\n" + section.Content}}
+		if section.ID == "C3.semantic-authority" && role == "user" {
+			if end := semanticWorkPrefixEnd(section.Content); end > 0 && end < len(section.Content) {
+				blocks = []responsesInputContent{{Type: "input_text", Text: "### " + section.ID + "\n" + section.Content[:end], PromptCacheBreakpoint: &responsesCacheBreakpoint{Mode: "explicit"}}, {Type: "input_text", Text: section.Content[end:]}}
+			}
+		}
+		messages = append(messages, responsesInputMessage{Role: role, Content: blocks})
 		if isProviderCacheablePrefixGroup(promptSectionGroup(section.ID)) {
 			lastPrefix = len(messages) - 1
 		}
@@ -68,6 +76,9 @@ func sectionMessagePrefixHash(request llmmodels.ProviderRequest) string {
 }
 
 func responsesPromptCacheKey(request llmmodels.ProviderRequest) string {
+	if request.FrozenCacheKey != "" {
+		return request.FrozenCacheKey
+	}
 	if !usesSectionMessages(request) {
 		return ""
 	}
@@ -127,7 +138,42 @@ func responsesWireInputForRequest(request *llmmodels.ProviderRequest) json.RawMe
 	for _, s := range request.PromptContext.Sections {
 		request.ContextBudget.IncludedSections = append(request.ContextBudget.IncludedSections, s.ID)
 	}
+	if len(request.FrozenSectionMessages) > 0 {
+		return append(json.RawMessage(nil), request.FrozenSectionMessages...)
+	}
 	messages := sectionMessages(*request, false)
 	wire, _ := json.Marshal(messages)
 	return wire
+}
+
+// The first block ends after the complete reusable work snapshot/history. The
+// concatenated text is byte-identical, and both blocks keep the user role.
+// This requests an adapter breakpoint, never asserts remote gateway support.
+func semanticWorkPrefixEnd(content string) int {
+	d := json.NewDecoder(bytes.NewBufferString(content))
+	token, err := d.Token()
+	if err != nil || token != json.Delim('{') {
+		return 0
+	}
+	end := 0
+	for d.More() {
+		key, err := d.Token()
+		if err != nil {
+			return 0
+		}
+		var raw json.RawMessage
+		if d.Decode(&raw) != nil {
+			return 0
+		}
+		if key == "workContext" && string(raw) != "null" {
+			end = int(d.InputOffset())
+		}
+	}
+	if _, err = d.Token(); err != nil {
+		return 0
+	}
+	if _, err = d.Token(); err != io.EOF {
+		return 0
+	}
+	return end
 }

@@ -349,3 +349,38 @@ func testRuntimeCacheScopeConcurrentWorkspaceProfileIsolation(t *testing.T, cata
 		t.Fatal("claimed prompt version bypassed exact C0 recognition")
 	}
 }
+
+func TestSemanticWorkPhysicalBoundaryIsExactUserDataAndSeparateFromTail(t *testing.T) {
+	r := runtimeSemanticWorkProviderRequestForTest(t, true)
+	p, err := runtimeProviderRequest(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var source string
+	for _, s := range p.PromptContext.Sections {
+		if s.ID == "C3.semantic-authority" {
+			source = "### " + s.ID + "\n" + s.Content
+		}
+	}
+	found := false
+	for _, m := range sectionMessages(p, false) {
+		if len(m.Content) != 2 {
+			continue
+		}
+		found = true
+		if m.Role != "user" || m.Content[0].Text+m.Content[1].Text != source || m.Content[0].PromptCacheBreakpoint == nil || m.Content[1].PromptCacheBreakpoint != nil {
+			t.Fatal("snapshot split changed bytes/role or marked volatile tail cacheable")
+		}
+	}
+	if !found {
+		t.Fatal("no reusable work boundary")
+	}
+	observed := providerContextBudgetAudit(p.ContextBudget).CacheObservation
+	if observed.RequestedHints != "explicit_prefix_and_work_snapshot_breakpoints" {
+		t.Fatal("actual requested boundary not observed")
+	}
+	effective, _ := observed.Payload().String("effectiveHints")
+	if effective != "unknown" {
+		t.Fatal("requested hint became claimed upstream support")
+	}
+}

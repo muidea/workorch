@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"testing"
 )
 
-// Fixtures consume both historical scalar Runtime inputs and section messages.
+// Fixtures consume provider scalar inputs and Runtime section messages.
 // They preserve all message content and leave owner assertions unchanged.
 type fixtureResponsesInput string
 
@@ -31,13 +32,26 @@ func (v *fixtureResponsesInput) UnmarshalJSON(data []byte) error {
 		if msg.Role != "developer" && msg.Role != "user" && msg.Role != "assistant" {
 			return fmt.Errorf("invalid fixture message role")
 		}
+		var message strings.Builder
 		for _, content := range msg.Content {
 			if content.Type != "input_text" {
 				return fmt.Errorf("invalid fixture content")
 			}
-			parts = append(parts, content.Text)
+			message.WriteString(content.Text)
 		}
+		parts = append(parts, message.String())
 	}
 	*v = fixtureResponsesInput(strings.Join(parts, "\n\n"))
 	return nil
+}
+
+func TestFixtureResponsesInputPreservesSplitBlockBytes(t *testing.T) {
+	var input fixtureResponsesInput
+	raw := []byte(`[{"role":"developer","content":[{"type":"input_text","text":"contract"}]},{"role":"user","content":[{"type":"input_text","text":"{\"workContext\":{}"},{"type":"input_text","text":",\"planStep\":\"proof_batch\"}"}]}]`)
+	if err := json.Unmarshal(raw, &input); err != nil {
+		t.Fatal(err)
+	}
+	if string(input) != "contract\n\n"+`{"workContext":{},"planStep":"proof_batch"}` {
+		t.Fatalf("block concatenation changed bytes: %q", input)
+	}
 }

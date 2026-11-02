@@ -54,6 +54,10 @@ func (c *RuntimeCandidateCorrectionInput) StableRequestCorrectionHash(observatio
 }
 
 type RuntimeCandidateRequest struct {
+	BaseFrozenInput                []byte `json:"-"`
+	BaseFrozenInputRef             *runtimecontract.RuntimeProviderInputRef
+	FrozenInput                    []byte `json:"-"`
+	FrozenInputRef                 *runtimecontract.RuntimeProviderInputRef
 	DocumentKind                   runtimecontract.RuntimeProviderDocumentKind
 	RequestIdentity                runtimecontract.RuntimeCandidateRequestIdentity
 	ExpectedDocument               *runtimecontract.RuntimeExpectedDocumentContract

@@ -306,8 +306,11 @@ func (m *Biz) handleRuntimeCandidatePreflight(event magicevent.Event, result mag
 		return
 	}
 	request := llmmodels.RuntimeCandidateRequest{
-		DocumentKind: command.DocumentKind,
-		Decision:     command.Decision, Transaction: command.Transaction,
+		BaseFrozenInput: command.BaseFrozenInput, BaseFrozenInputRef: command.BaseFrozenInputRef,
+		ExpectedDocument: command.ExpectedDocument,
+		RequestIdentity:  runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: command.LogicalRequestID},
+		DocumentKind:     command.DocumentKind,
+		Decision:         command.Decision, Transaction: command.Transaction,
 		CandidateAttempt: command.CandidateAttempt, CandidateCorrectionObservation: cloneRuntimeCandidateCorrectionObservation(command.CandidateCorrectionObservation), CandidateCorrection: command.CandidateCorrection.Clone(),
 		StablePrefixHash: command.StablePrefixHash, DefinitionContext: command.DefinitionContext,
 		CandidateManifest: command.CandidateManifest, CandidateContext: command.CandidateContext,
@@ -330,6 +333,10 @@ func (m *Biz) handleRuntimeCandidatePreflight(event magicevent.Event, result mag
 	}
 	audit := sealedAuditFromRequest(request, newProviderRequestID(request), budget, startedAt, completedAt, false, status, failureClass, 0)
 	if audit != nil {
+		// Rendering freezes a logical request but has no physical call. The
+		// physical usage identity pair is published only at real submission.
+		audit.LogicalRequestID = ""
+		audit.PhysicalCallID = ""
 		audit.Kind = "runtime_candidate_preflight"
 		audit.Operation = "runtime_candidate_preflight"
 		if command.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
@@ -346,7 +353,32 @@ func (m *Biz) handleRuntimeCandidatePreflight(event magicevent.Event, result mag
 		setPrerequisiteMagicError(result, feedbackErr)
 		return
 	}
+	var frozen []byte
+	var frozenRef *runtimecontract.RuntimeProviderInputRef
+	if preflightErr == nil && command.FreezeInput {
+		var freezeErr error
+		if ceiling := runtimeRequestProviderCeiling(request); ceiling != nil {
+			cfg, cfgErr := m.activeConfiguration()
+			if cfgErr != nil {
+				setPrerequisiteMagicError(result, cfgErr)
+				return
+			}
+			resolved, _, resolveErr := ResolveProviderClientForSealedCeiling(cfg, *ceiling)
+			if resolveErr != nil {
+				setPrerequisiteMagicError(result, resolveErr)
+				return
+			}
+			providerRequest.Config = llmproviderconfig.RedactedProviderConfig(resolved)
+			providerRequest.Model = ceiling.Selection.Target.ModelID
+		}
+		frozen, frozenRef, freezeErr = freezeRuntimeProviderInput(request, providerRequest)
+		if freezeErr != nil {
+			setPrerequisiteMagicError(result, freezeErr)
+			return
+		}
+	}
 	result.Set(llmevents.PreflightRuntimeCandidateResult{
+		FrozenInput: frozen, FrozenInputRef: frozenRef,
 		Transaction:  command.Transaction,
 		DocumentKind: command.DocumentKind,
 		Feedback:     feedback,
@@ -417,6 +449,7 @@ func (m *Biz) handleRuntimeCandidate(event magicevent.Event, result magicevent.R
 	response, err := llmruntime.RequestCandidate(event.Context(), runtimePhysicalSubmissionGuardedProvider{
 		guard: m.physicalSubmissionGuard, delegate: m.candidateProvider,
 	}, llmmodels.RuntimeCandidateRequest{
+		FrozenInput: append([]byte(nil), command.FrozenInput...), FrozenInputRef: command.FrozenInputRef.Clone(),
 		DocumentKind:                   command.DocumentKind,
 		RequestIdentity:                command.RequestIdentity,
 		ExpectedDocument:               command.ExpectedDocument,
@@ -800,6 +833,9 @@ func providerContextBudgetAudit(budget *llmmodels.ProviderContextBudget) llmaudi
 		}
 		if budget.MessageLayout == llmmodels.PromptMessageLayoutSectionsV1 {
 			ret.CacheObservation.RequestedHints = "explicit_prefix_breakpoint"
+			if budget.CachePlan.WorkSnapshotBreakpointRequested {
+				ret.CacheObservation.RequestedHints = "explicit_prefix_and_work_snapshot_breakpoints"
+			}
 		}
 
 	}
@@ -856,7 +892,12 @@ func boundedLLMAuditSections(values []llmmodels.ProviderCacheSectionHash) []llma
 			continue
 		}
 		seen[id] = struct{}{}
+		var components []llmaudit.ContextComponent
+		for _, c := range value.Components {
+			components = append(components, llmaudit.ContextComponent{Path: c.Path, Bytes: c.Bytes})
+		}
 		ret = append(ret, llmaudit.ContextSection{
+			BodyBytes: value.BodyBytes, ExpandedBytes: value.ExpandedBytes, LocalReferences: value.LocalReferences, Applicability: value.Applicability, Components: components,
 			ID: id, Hash: strings.TrimSpace(value.Hash), SizeBytes: value.SizeBytes,
 			SourceRefs: boundedLLMAuditStrings(value.SourceRefs),
 		})

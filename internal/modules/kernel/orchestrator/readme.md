@@ -1022,8 +1022,8 @@ ordinary 前驱，state-change-only 不补造来源，明确 `cwi_revalidation_s
   禁止 seal 从 ledger cursor、最后一个 session 或下游 projection 选择 generation。
 - semantic coverage-order、proof-batch 与 correction 私有事件只封存请求意图；统一 request path 在 causal context/content 和
   LLM rendered preflight 通过后才 CAS 创建 session。新请求预检失败由既有 SM-2 semantic failure 终止，零新 session、
-  physical call 或预算 allocation；不伪造结算以调用 provider-terminal。精确 persisted session 是同版本预检证明，SM-4
-  重驱不重复预检，SM-3 仍重验完整 session/expected-document 身份。prepared 继续首次提交，submitted-without-outcome
+  physical call 或预算 allocation；不伪造结算以调用 provider-terminal。精确 persisted session 绑定原预检的受限完整输入索引（bytes/SHA256），SM-4
+  重驱读取原冻结载荷，不按当前文件、预算或新内置合同重渲染；SM-3 仍重验完整 session/expected-document 身份。prepared 继续首次提交，submitted-without-outcome
   只封存 unknown，document-complete 只本地准入。`biz/runtime_semantic_preflight_test.go` 覆盖真实 LLM 渲染拒绝、三个入口、
   session/submitted/document-complete CAS 前中断和 CAS 后响应丢失；SM-1 owner、现有预算与跨 owner 合同不变。
 - semantic ExpectedDocument 由 `biz/runtime/semantic_request_contract.go` 的同一 owner-local 纯投影供 rendering 与 session
@@ -1675,10 +1675,11 @@ independent validation/repair, and three-owner ACK remain unchanged. No global e
 Unknown Profile fields, including retired version switches, are rejected.
 
 All semantic ExpectedDocument contracts require `semantic/shared-work`; unsupported request shapes are rejected.
-Recovery and same-contract correction preserve exact source identity and budget without historical renderer selection. A singleton order still uses its original provider
-transaction: its current ledger contract explicitly identifies the order as provider-authored. Local compilation must not
-fabricate that provenance, usage, session or accepted document. Removing this call requires a separate explicit compiler
-origin and complete lineage contract; this change does not silently bypass that transaction.
+Recovery and same-contract correction preserve exact source identity and budget without historical renderer selection.
+An ordinary singleton coverage order with no implementation-purpose choice is compiled by the exact
+`singleton_ordinary_order` rule. SM-2 records `CompiledOrder` manifest/document provenance through its private event/CAS;
+SM-3 creates no provider session, usage or review for that order. Multi-member ordering, purpose choice and subsequent
+proof/feasibility keep their semantic transactions. Compilation grants no readiness, effect, validation or completion credit.
 
 ### Intent-bound implementation and honest exhaustion
 
@@ -1756,3 +1757,19 @@ manifest 的精确补集。attempt1 必须补齐全部缺项、保留所有已�
 
 回归落点：`runtime/candidate_required_operations_test.go`、`runtime/implementation_work_scope_transition_test.go`、
 共享 `runtime_candidate_required_operations_test.go` 以及 LLM 的正文 render gate 测试。
+
+### 精确 provider 输入与请求效率
+
+SM-3 在物理提交前通过 LLM owner 预检冻结完整 ProviderRequest、原角色消息块、schema 与 cache key；配置凭据不进入载荷。
+原件存于 Orchestrator 受限 ArtifactContinuation，aggregate request session 仅保存 bytes/SHA256 索引。session CAS 前中断
+复用已保存原件；缺失、错域或损坏明确拒绝，不从新文件补造。SM-4 优先处理已持久 document-complete、terminal 或
+submitted-without-outcome，未知物理结果仍按 unknown 结算，不因输入原件缺失重发。允许的 correction 保留原 C0–C3、
+schema、角色消息块和路由 key，仅投影该合同允许的新 C4/C5。fresh 请求才消费当前布局。
+
+C1/C3 的本地引用仅共享同请求内逐值相等的正文或原意图；提交前展开核对完整 owner 输入。普通 order 不携带工作正文
+或要求 implementationIntent；purpose/proof、独立输入审查与终验仍保留所需完整语料。实际 bytes、展开 bytes、引用数及
+阶段组件来源沿原 audit 投影，既不是 token 估计，也不是第二套预算。共享快照断点仅为 requested hint；远端生效、
+native uncached tokens、费用及模型语义稳定性须独立验证。SM-1、原规格/预算、工作回执和终态三方 ACK 均不变。
+
+回归入口：LLM `runtime_*refs_test.go`、`runtime_provider_input_test.go`、`runtime_request_metrics_test.go`；
+Orchestrator `runtime_provider_input_test.go`、`runtime_semantic_preflight_test.go`、runtime `semantic_planning_test.go`。

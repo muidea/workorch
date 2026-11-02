@@ -276,7 +276,7 @@ Runtime operations and semantic-plan use `section_messages/v1`. The actual Respo
 does not enter the explicit prefix key. Provider/model/schema-family/format/reasoning and Workspace remain isolated. Runtime's sealed
 stable-prefix identity is not replaced by the rendered wire hash; neither a cache key nor a hit is execution authority.
 
-`workorch.section-cache/v2` derives the operations or semantic-plan schema family only from the owner's exact known C0
+`workorch.section-cache` derives the operations or semantic-plan schema family only from the owner's exact known C0
 bytes and matching prompt version/layout. Unknown contracts keep full schema isolation. Current manifest/step/batch schema
 bytes remain exact in strict provider output and local response admission; they do not split an otherwise identical Runtime
 prefix. Actual provider JSON-schema capability, raw-text mode and explicit schema format remain isolated. No cache scope is
@@ -340,3 +340,23 @@ missingRefs、冻结 retained 值，模型重新输出完整文档。Block 只�
 
 owner validation surface 的 generation context 在 preparation 和 ready binding 两种状态均可按当前 CWI 投影，用于后续
 输入修订；其实现正文是只读依赖，不是修改权限、oracle、receipt 或验收 credit。同一 requirement hash 在一条 surface 内去重。
+
+### 请求去重、冻结与物理复用边界
+
+C1 的 Goal/DoD 保持完整 inline；inventory 中逐 bytes 相等的长原文使用同一 C1 内闭合引用，来源与义务身份不变。
+C3 中 input revision 与当前快照、generation context 中相同来源文件、previousRound 与 priorRounds 中相同原意图
+分别在精确 target/hash/bytes 或完整结构相等后共享；不同前后像、版本或作用域绝不合并。完整展开后通过原 integrity
+门禁，未知、混合、缺失、循环或错域引用拒绝；原始 owner 数据与完整历史不被改写。
+
+普通 coverage order 只表达顺序规则，不要求 schema 禁止的 implementationIntent，也不附加实施正文；purpose 与 proof
+保持各自适用的语义合同。验证输入 review 只携带实际存在的 lineage 规则，独立语义审查与原验收范围保持完整。
+
+预检可冻结完整 provider 请求、schema、实际 section messages 和 cache key，通过 typed 同步结果交由 Orchestrator
+受限存储；公开审计不携带正文或配置凭据。submission 校验 exact expected document、scope、ceiling 与 bytes/SHA256，
+不再按可变内容重渲染。correction 仅换原合同允许的 C4/C5，复用原 C0–C3/schema/消息块/key。预检无物理调用身份；
+真实提交及 native usage 仍按原 logical/physical identity 关联。
+
+C3 workContext 完整结束处拆为两个原角色 input_text block，拼接文本逐字节保持，首块请求额外 explicit breakpoint。
+C0–C2 前缀隔离不变；requested hint 与 effective unknown 分开，不能据客户端断点声称网关已生效。section 统计记录
+body/expanded bytes、本地引用数及闭合组件字段 bytes，经原 usage/event/projection 链路展示，不导出任意业务 JSON key。
+不增加估算预算、跨 Workspace 字典或结果缓存。native tokens、费用和模型重复评测尚需部署验证。

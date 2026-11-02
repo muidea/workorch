@@ -62,11 +62,20 @@ type ContextBudget struct {
 
 // ContextSection is the audit-safe identity of one rendered prompt section.
 // SourceRefs are opaque identifiers only; they must not contain source content.
+type ContextComponent struct {
+	Path  string `json:"path"`
+	Bytes int    `json:"bytes"`
+}
 type ContextSection struct {
-	ID         string   `json:"id,omitempty"`
-	Hash       string   `json:"hash,omitempty"`
-	SizeBytes  int      `json:"sizeBytes,omitempty"`
-	SourceRefs []string `json:"sourceRefs,omitempty"`
+	BodyBytes       int                `json:"bodyBytes,omitempty"`
+	ExpandedBytes   int                `json:"expandedBytes,omitempty"`
+	LocalReferences int                `json:"localReferences,omitempty"`
+	Applicability   string             `json:"applicability,omitempty"`
+	Components      []ContextComponent `json:"components,omitempty"`
+	ID              string             `json:"id,omitempty"`
+	Hash            string             `json:"hash,omitempty"`
+	SizeBytes       int                `json:"sizeBytes,omitempty"`
+	SourceRefs      []string           `json:"sourceRefs,omitempty"`
 }
 
 func (v ContextBudget) Empty() bool {
@@ -127,7 +136,19 @@ func (v ContextBudget) Payload() workorcheventpayload.Payload {
 	if len(v.SectionHashes) > 0 {
 		sections := make([]workorcheventpayload.Value, 0, len(v.SectionHashes))
 		for _, section := range v.SectionHashes {
+			var paths []string
+			var sizes []workorcheventpayload.Value
+			for _, c := range section.Components {
+				paths = append(paths, c.Path)
+				sizes = append(sizes, workorcheventpayload.Value{Kind: workorcheventpayload.ValueInt, Int: int64(c.Bytes)})
+			}
 			sections = append(sections, workorcheventpayload.Value{Kind: workorcheventpayload.ValueObject, Object: workorcheventpayload.New(
+				workorcheventpayload.StringArrayField("componentPaths", paths),
+				workorcheventpayload.Field{Name: "componentBytes", Value: workorcheventpayload.Value{Kind: workorcheventpayload.ValueArray, Array: sizes}},
+				workorcheventpayload.IntField("bodyBytes", int64(section.BodyBytes)),
+				workorcheventpayload.IntField("expandedBytes", int64(section.ExpandedBytes)),
+				workorcheventpayload.IntField("localReferences", int64(section.LocalReferences)),
+				workorcheventpayload.StringField("applicability", section.Applicability),
 				workorcheventpayload.StringField("id", section.ID),
 				workorcheventpayload.StringField("hash", section.Hash),
 				workorcheventpayload.IntField("sizeBytes", int64(section.SizeBytes)),

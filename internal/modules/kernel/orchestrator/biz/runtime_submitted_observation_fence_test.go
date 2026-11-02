@@ -33,7 +33,7 @@ func TestRuntimeSubmittedObservationFenceSemanticRecovery(t *testing.T) {
 	observer.Subscribe(llmevents.TopicPreflightRuntimeCandidate, func(ev magicevent.Event, result magicevent.Result) {
 		preflights++
 		command := ev.Data().(llmevents.PreflightRuntimeCandidateCommand)
-		result.Set(llmevents.PreflightRuntimeCandidateResult{DocumentKind: command.DocumentKind, Feedback: runtimePreflightFeedbackForTest(t, command, "")}, nil)
+		result.Set(withRuntimePreflightSnapshotForTest(command, llmevents.PreflightRuntimeCandidateResult{DocumentKind: command.DocumentKind, Feedback: runtimePreflightFeedbackForTest(t, command, "")}), nil)
 	})
 	observer.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, result magicevent.Result) {
 		providers++

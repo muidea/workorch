@@ -637,8 +637,8 @@ func TestO7SemanticPlanningTransactionHasNoMutationCallback(t *testing.T) {
 	if legacyDeclarations != 0 {
 		t.Fatalf("legacy callback transaction declarations = %d, want 0", legacyDeclarations)
 	}
-	if beginCalls != 11 || commitCalls != 11 {
-		t.Fatalf("explicit semantic planning transaction calls begin=%d commit=%d, want 11/11", beginCalls, commitCalls)
+	if beginCalls != 12 || commitCalls != 12 {
+		t.Fatalf("explicit semantic planning transaction calls begin=%d commit=%d, want 12/12", beginCalls, commitCalls)
 	}
 }
 
