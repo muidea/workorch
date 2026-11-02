@@ -158,7 +158,10 @@ func (e WorkspacePreparationSealEvidence) validateFor(w *Workspace, a WorkspaceP
 	} else {
 		record, journal = w.DefinitionAuthoring, w.DefinitionAuthoringConfirmation
 	}
-	if record == nil || journal == nil || journal.Phase != DefinitionAuthoringConfirmationMaterialized || journal.ConfigurationHash != s.AuthoringConfigurationHash || !reflect.DeepEqual(journal.Goal, s.Goal) || !reflect.DeepEqual(journal.DoD, s.DoD) {
+	// The journal proves the business definition; the preparation binding and
+	// ExecutionInputs prove this attempt's configuration. They need not describe
+	// the defaults present when the business definition was first confirmed.
+	if record == nil || journal == nil || journal.Phase != DefinitionAuthoringConfirmationMaterialized || !reflect.DeepEqual(journal.Goal, s.Goal) || !reflect.DeepEqual(journal.DoD, s.DoD) {
 		return common.ErrConflict
 	}
 	if (e.ExecutionInputs == nil) != (a.ExecutionInputVersion == "") || e.ExecutionInputs != nil && (a.ExecutionInputVersion != PreparationExecutionInputsVersion || e.ExecutionInputs.validateFor(s, a, record) != nil) {

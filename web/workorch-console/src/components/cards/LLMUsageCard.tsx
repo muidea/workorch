@@ -1,3 +1,4 @@
+import { formatLocalDateTime } from '../../utils/time';
 import { llmCacheTokenValue, llmCacheReadRatio, nativeCacheSummaryItems } from '../../llmUsagePresentation';
 import React from 'react';
 import { Space, Empty, Tag, Descriptions, Tabs, Alert } from 'antd';
@@ -117,7 +118,7 @@ export const LLMUsageCard = React.memo(function LLMUsageCard({ summary, traces }
                         { key: 'physicalCallId', label: '物理调用 ID', children: item.physicalCallId ? <BoundedParagraph text={item.physicalCallId} rows={1} copyText={item.physicalCallId} /> : '-' },
                         { key: 'step', label: '步骤', children: item.stepId ? <BoundedParagraph text={item.stepId} rows={1} copyText={item.stepId} /> : '-' },
                         { key: 'bytes', label: '请求/响应字节', children: `${numberText(item.requestBytes)} / ${numberText(item.responseBytes)}` },
-                        { key: 'time', label: '开始/结束时间', children: `${item.startedAt || '-'} / ${item.completedAt || '-'}` },
+                        { key: 'time', label: '开始/结束时间', children: `${formatLocalDateTime(item.startedAt)} / ${formatLocalDateTime(item.completedAt)}` },
                         { key: 'failureClass', label: '失败类型', children: item.failureClass || '-' },
                         { key: 'cacheUsage', label: 'Cache Usage', children: <pre className="json-panel">{JSON.stringify(item.cacheUsage ?? null, null, 2)}</pre> },
                         { key: 'evidenceRef', label: '证据引用', children: item.evidenceRef || '-' }

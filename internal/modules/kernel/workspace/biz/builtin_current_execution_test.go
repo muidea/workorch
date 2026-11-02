@@ -55,6 +55,17 @@ func TestConfirmedBusinessUsesCurrentBuiltinsWithoutReseal(t *testing.T) {
 	if err := owners.workspace.Start(); err != nil {
 		t.Fatal(err)
 	}
+	confirmation := w.DefinitionAuthoringConfirmation.Clone()
+	// This is the same private event used after the first activation. A later
+	// restart must not compare its derived default with the confirmation hash.
+	w, err := owners.workspace.submitWorkspaceExecutionInternalEvent(ctx, workspaceExecutionInternalEvent{
+		Kind:        workspaceExecutionInternalEventActivationProviderSelectionObserved,
+		WorkspaceID: w.ID, StartupInputHash: w.StartupInput.StartupInputHash,
+		ProviderSelection: rc.ProviderInferenceSelection{Target: rc.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "current-model"}},
+	})
+	if err != nil || workspace.WorkspaceConfigurationHash(w) == confirmation.ConfigurationHash {
+		t.Fatal("fixture did not materialize a distinct execution default", err)
+	}
 	original, _ := json.Marshal(w)
 	originalCandidate, present, err := w.ValidateActivationAdmissionPersistence()
 	if err != nil || !present {
@@ -119,11 +130,12 @@ func TestConfirmedBusinessUsesCurrentBuiltinsWithoutReseal(t *testing.T) {
 	if !bytes.Equal(original, persisted) {
 		t.Fatal("current compilation modified confirmed owner input or history")
 	}
-	// Full explicit configuration still belongs to the exact original journal.
-	tampered := *w
-	tampered.ContextHints = payload.New(payload.StringField("project-option", "changed"))
-	if _, err := activationports.EnsureWorkspaceDefinitionAdmission(ctx, owners.hub, &tampered, goal, dod); err == nil {
-		t.Fatal("project configuration tampering bypassed confirmation")
+	// Business changes still require exact confirmation. A configuration hash
+	// is not a substitute for checking the actual business after-images.
+	tamperedGoal := *goal
+	tamperedGoal.Text += " unconfirmed requirement"
+	if _, err := activationports.EnsureWorkspaceDefinitionAdmission(ctx, owners.hub, w, &tamperedGoal, dod); err == nil {
+		t.Fatal("changed business input bypassed confirmation")
 	}
 }
 
@@ -132,6 +144,14 @@ func TestPreparationKeepsSelectedCurrentDeclarationAcrossLaterUpdate(t *testing.
 	owners := openFileDefinitionAdmissionOwners(t, t.TempDir())
 	defer owners.close()
 	w := seedPreparationEligible(t, owners, "ws-current-check")
+	w, err := owners.workspace.submitWorkspaceExecutionInternalEvent(ctx, workspaceExecutionInternalEvent{
+		Kind:        workspaceExecutionInternalEventActivationProviderSelectionObserved,
+		WorkspaceID: w.ID, StartupInputHash: w.StartupInput.StartupInputHash,
+		ProviderSelection: rc.ProviderInferenceSelection{Target: rc.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "current-model"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	selected := updatedBuiltinTemplate(t, owners, w, "selected for original check")
 	candidateSelection := workspace.NewPreparationTemplate(*selected)
 	if err := candidateSelection.Validate(); err != nil {
@@ -161,6 +181,9 @@ func TestPreparationKeepsSelectedCurrentDeclarationAcrossLaterUpdate(t *testing.
 	if seal == nil {
 		t.Fatal("exact original seal unavailable")
 	}
+	if seal.Before.AuthoringConfigurationHash != workspace.WorkspaceConfigurationHash(w) || seal.Before.AuthoringConfigurationHash == w.DefinitionAuthoringConfirmation.ConfigurationHash {
+		t.Fatal("preparation pinned configuration to the historical confirmation")
+	}
 	p := workspace.PreparationProcessPolicy{MaxRuntimeRepairAttempts: 2, MaxDocumentRecoveryAttempts: 1}
 	now := time.Now().UTC()
 	f := workspacePreparationBlocked{Command: command, Reason: "check_pipeline_incomplete", SealEvidence: seal, ProcessPolicyFacts: &workspace.PreparationProcessPolicyFacts{Version: workspace.PreparationExecutionInputsVersion, WorkspaceID: w.ID, WorkspaceRevision: accepted.Revision, StartedAt: now, CompletedAt: now, Before: p, After: p}}
@@ -181,6 +204,67 @@ func TestPreparationKeepsSelectedCurrentDeclarationAcrossLaterUpdate(t *testing.
 	}
 	if !reflect.DeepEqual(saved.StartupInput, w.StartupInput) || !reflect.DeepEqual(saved.DefinitionAuthoringConfirmation, w.DefinitionAuthoringConfirmation) {
 		t.Fatal("preparation rewrote business seal")
+	}
+	// The new configuration identity is authenticated by the complete original
+	// execution input, including on a fresh repository read. Removing the old
+	// journal equality must not allow an injected preparation configuration.
+	for _, mutate := range []func(*workspace.Workspace){
+		func(w *workspace.Workspace) {
+			w.PreparationSealEvidence[0].ExecutionInputs.Configuration.InternalDirectory += "-foreign"
+		},
+		func(w *workspace.Workspace) {
+			w.PreparationSealEvidence[0].ExecutionInputs.Configuration.DefaultLLMSelection.Target.ModelID = "foreign-model"
+		},
+	} {
+		bad, err := owners.repositories.Workspaces.Get(ctx, w.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mutate(bad)
+		if workspace.ValidatePreparationEvidencePersistence(bad) == nil {
+			t.Fatal("changed preparation preimage accepted")
+		}
+	}
+}
+
+func TestMaterializedConfirmationReplayAfterExecutionDefaultsAndReopen(t *testing.T) {
+	ctx, root := context.Background(), t.TempDir()
+	owners := openFileDefinitionAdmissionOwners(t, root)
+	defer func() { owners.close() }()
+	w := seedPreparationEligible(t, owners, "ws-confirmed-default-replay")
+	command := authoringConfirmationCommandFromPersistedLedger(t, w)
+	journal := w.DefinitionAuthoringConfirmation.Clone()
+	selected := workspaceExecutionInternalEvent{Kind: workspaceExecutionInternalEventActivationProviderSelectionObserved,
+		WorkspaceID: w.ID, StartupInputHash: w.StartupInput.StartupInputHash,
+		ProviderSelection: rc.ProviderInferenceSelection{Target: rc.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "current-model"}}}
+	w, err := owners.workspace.submitWorkspaceExecutionInternalEvent(ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedBuiltinTemplate(t, owners, w, "new deployment")
+	before, _ := json.Marshal(w)
+	owners.close()
+	owners = openFileDefinitionAdmissionOwners(t, root)
+	for range 2 {
+		if _, err := owners.workspace.submitDefinitionAuthoringConfirmationInternalEvent(ctx, definitionAuthoringConfirmationInternalEvent{Command: command}); err != nil {
+			t.Fatalf("materialized confirmation replay blocked by execution defaults: %v", err)
+		}
+		if _, err := owners.workspace.submitWorkspaceExecutionInternalEvent(ctx, selected); err != nil {
+			t.Fatal(err)
+		}
+		after, err := owners.repositories.Workspaces.Get(ctx, w.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(after)
+		if !bytes.Equal(before, raw) || !reflect.DeepEqual(journal, *after.DefinitionAuthoringConfirmation) {
+			t.Fatal("replay changed business seal, revision or execution metadata")
+		}
+	}
+	stale := command
+	stale.SpecificationHash += "-foreign"
+	if _, err := owners.workspace.submitDefinitionAuthoringConfirmationInternalEvent(ctx, definitionAuthoringConfirmationInternalEvent{Command: stale}); err == nil {
+		t.Fatal("foreign confirmation identity accepted")
 	}
 }
 

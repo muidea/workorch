@@ -3,6 +3,7 @@ export * from './constants';
 
 // 格式化函数
 export * from './format';
+export * from './time';
 
 // UI 工具函数
 export * from './ui';

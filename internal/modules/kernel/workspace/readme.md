@@ -145,6 +145,9 @@ close，独立反查完整原协议回复，零业务工具调用。原始 frame
 Workspace 与非零 expected revision。owner 反查完整持久 authoring/六审/确认/准入链和实际正式 Goal、DoD 行，
 再读 revision 排除混合观察；缺失或漂移拒绝，不 fallback admission、不生成 ticket，也不物化资源。
 返回有界 detached snapshot，保留正式 DoD 原顺序与逐项来源。snapshot hash 是内容身份，不是 readiness。
+`AuthoringConfigurationHash` 绑定本次 owner 完整配置观察（含独立存储的 Soul 绑定），不与历史确认 journal
+配置 hash 比较。准备受理、原始 ExecutionInputs、结算与首次激活仍反查同一本次配置；新准备可以使用更新后的
+系统默认，既有准备记录仍保留原来源，不改写或复用成新的观察。
 内部目录含无效 UTF-8 或 NUL 时明确拒绝，不借 JSON 替换字符、路径清洗或截断修复原输入。
 
 `QueryWorkspacePreparationStateCommand/Result`（`/workspace/activation-preparation/state/query`）
@@ -612,7 +615,7 @@ Workspace 私有结算及生产 ingress 已有真实 Run owner EventHub 配对�
 - 验证声明适用性必须逐项沿 `Verification → Obligation → DoDItemRefs → 正式 DoD sourceID → Profile(scope,id|*)` 反证；一个义务引用多个 DoD 时全部检查，不因同名 declaration 存在或另一个 DoD 命中而通过。正式候选引用中的 `:item:NNNNNN` 保留原序号；derived 引用按确认 after-image 的 user、template、generated 分组及组内原序号解析，不能使用准入 normalize 后的 slice 位置。`dod-001` 是 sourceID，不是 `cwi-001`；Profile bootstrap artifact 和其他 work unit 独立占用 CWI 序号。
 - Workspace 保留规格图解析；中立 `workorchruntimecontract.CompileRuntimeSourceEvidencePolicy` 与 activation 共用 exact→wildcard 的完整合并及 source selector matcher。所有命中声明共同贡献 evidence／operation 集合、约束及 owner-fact closure，冲突不能被 exact 优先级隐藏；被引用声明的非空角色、selector、recipe／check、合取约束和 closure 必须在最终产物保留。wildcard 的 recipe／check 被剥离，带这些具体身份的 wildcard 不能据 selector 命中冒充适用验证；无具体 recipe／check 的合法 wildcard 可贡献声明约束，默认 software-dev 模板仍可准入。此门禁不读取 capability catalog、不证明实际可执行／通过，不生成 `CoverageEvidenceBinding`，不改确认 hash 或旧封存准入。
 - 无绑定 `UNVERIFIED` 可持久表达草稿缺口，但六份 PASS 也不能取得确认资格：全部 Verification 必须为 `DECLARED` 且声明非空，每个 Obligation 必须有声明。owner 在提案 completion、确认准备和 prepared 恢复时核对原封存 Template 的实际 Profile 适用性，准入再核对当前 Workspace／Template 合同；逐项覆盖全部确认后 DoD source 并保留最终合并贡献。上述检查不产生 owner fact、proof 或 credit。
-- 确认 journal 按原 input/permit/proposal/specification/configuration 与 Template 来源核对，prepared→materialized after-image 可跨内置更新幂等续写；不要求当前目录仍与原快照相同。真实资源漂移和冲突正式行仍阻塞，资源绑定的 replay 每次向 File 重验；不制造新 hash、不覆盖已准备输入或结果。后续新执行独立解析当前声明。
+- 确认 journal 按原 input/permit/proposal/specification 与 Template 来源核对；configuration 围栏只在 prepared 事务未完成时使用。prepared→materialized after-image 可跨内置更新幂等续写，materialized 重放不要求恢复历史默认模型等配置。真实资源漂移和冲突正式行仍阻塞，资源绑定的 replay 每次向 File 重验；不制造新 hash、不覆盖已准备输入或结果。后续准备与 Start/Restart 独立解析当前声明，不能把历史 journal 配置 hash 作为资格。
 - Workspace 的 `pkg/definitionadmission.CompileRuntimeSourceObligationInventory` 只从 eligible exact candidate 与 startup/admission 身份投影完整来源图；保留原 Requirement、Obligation、Verification 正文及正式 item ref，不读取草稿、不授予 Runtime binding 或 credit。声明逐项反查封存 Profile 的完整适用贡献；`runtime_source_obligation_test.go` 固定共享 DoD、多源身份、原文、独立副本及 seal／声明漂移拒绝。Application 最终 bootstrap gate 从原 candidate 独立重编 inventory；自洽删 B 或删除整份 inventory 不能通过该前像反证。
 - nil Specification 保留既有候选与 startup hash。此合同约束提交的规格候选，不表示所有 Web/TUI 输入已自动经过完整 Goal Compiler；正式执行仍须通过 exact CWI、owner feasibility、sealed dispatch 和 SM-2 闭包。
 

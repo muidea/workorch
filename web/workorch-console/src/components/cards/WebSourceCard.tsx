@@ -1,3 +1,4 @@
+import { formatLocalDateTime } from '../../utils/time';
 import React from 'react';
 import { Space, Empty, Tag, Typography, Descriptions } from 'antd';
 import { ProTable } from '../proCompat';
@@ -96,7 +97,7 @@ export const WebSourceCard = React.memo(function WebSourceCard({ items }: WebSou
           { title: 'URL', render: (_, item) => <Typography.Link href={item.finalUrl || item.url} target="_blank" rel="noreferrer">{item.finalUrl || item.url}</Typography.Link>, ellipsis: true },
           { title: '证据', dataIndex: 'evidenceRef', ellipsis: true, render: (_, item) => item.evidenceRef ? <CompactTags tags={[item.evidenceRef]} maxVisible={1} /> : '-' },
           { title: '策略', dataIndex: 'policyDecision', width: 110, render: (_, item) => item.policyDecision || '-' },
-          { title: '时间', dataIndex: 'occurredAt', width: 180, ellipsis: true },
+          { title: '时间', dataIndex: 'occurredAt', width: 210, ellipsis: true, render: (_, item) => formatLocalDateTime(item.occurredAt) },
           { title: 'Hash', dataIndex: 'contentHash', ellipsis: true, render: (_, item) => item.contentHash || '-' }
         ]}
         expandable={{

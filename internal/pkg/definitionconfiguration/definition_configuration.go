@@ -29,19 +29,12 @@ type Bindings struct {
 	ExecutionLimits       *runtimecontract.RuntimeExecutionLimits
 }
 
-// Compile validates both raw source layers before merge, then derives the
-// effective profile contracts and policy snapshot bindings. It is pure: neither
-// source model is mutated and it performs no I/O.
+// Compile resolves inherited defaults to the current declaration, validates
+// both effective source layers before merge, then derives profile and policy
+// bindings. It is pure: neither source is mutated and it performs no I/O.
 func Compile(workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate) (Bindings, error) {
 	if workspace == nil || template == nil {
 		return Bindings{}, common.ErrInvalidArgument
-	}
-	// Invalid explicit input must not disappear while resolving inherited defaults.
-	if err := runtimeprofiledecode.ValidateInputShape(workspace.ContextHints.Map()); err != nil {
-		return Bindings{}, err
-	}
-	if err := validateExecutionLimitsInput(workspace.ContextHints.Map()); err != nil {
-		return Bindings{}, err
 	}
 	current := workspace
 	if workspace != nil && workspace.TemplateID != "" {
@@ -51,6 +44,9 @@ func Compile(workspace *workspacemodel.Workspace, template *workspacemodel.Works
 			return Bindings{}, err
 		}
 	}
+	// Validate the resolved declaration below. Historical inherited fields may
+	// have been retired by this deployment; explicit project overrides remain
+	// in the resolved view and still pass the same strict current validators.
 	items, err := configurationDoDItems(current, template)
 	if err != nil {
 		return Bindings{}, err

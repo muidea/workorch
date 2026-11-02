@@ -186,8 +186,9 @@ func mergeCurrentTemplate(base, overrides map[string]any) map[string]any {
 	return result
 }
 
-// WorkspaceConfigurationHash fences only live authoring configuration, not
-// lifecycle, candidate history or an old Run's immutable startup snapshot.
+// WorkspaceConfigurationHash identifies one complete owner configuration
+// observation for transaction fencing. It does not lock later execution to a
+// historical confirmation, lifecycle or an old Run's startup snapshot.
 func WorkspaceConfigurationHash(workspace *Workspace) string {
 	if workspace == nil {
 		return ""

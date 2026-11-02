@@ -61,6 +61,38 @@ func TestCompileRejectsInvalidOriginalSourceBeforeTemplatePrecedence(t *testing.
 	}
 }
 
+func TestCompileResolvesRetiredInheritedDefaultsBeforeCurrentValidation(t *testing.T) {
+	current, input, _ := templateProofFixture(t, 1)
+	original := current.Clone()
+	hints := original.ContextHints.Map()
+	for _, raw := range hints["profileContracts"].(map[string]any) {
+		raw.(map[string]any)["retiredBuiltinProcessingRule"] = true
+	}
+	original.ContextHints = payload(t, hints)
+	w := &workspacemodel.Workspace{ID: input.WorkspaceID, TemplateID: current.ID, ContextHints: original.ContextHints.Clone(),
+		DefinitionAuthoring: &workspacemodel.DefinitionAuthoringRecord{Input: input, TemplateSnapshot: original}}
+	before := w.ContextHints.Clone()
+	for range 2 {
+		got, err := Compile(w, &current)
+		if err != nil || len(got.ProfileContracts) == 0 {
+			t.Fatalf("obsolete inherited declaration blocked current compilation: %v", err)
+		}
+		if !reflect.DeepEqual(before, w.ContextHints) {
+			t.Fatal("current compilation rewrote original inputs")
+		}
+	}
+	// Only an exact inherited value can be replaced. An unknown explicit
+	// project override must still be rejected by the current strict contract.
+	hints = w.ContextHints.Map()
+	for _, raw := range hints["profileContracts"].(map[string]any) {
+		raw.(map[string]any)["retiredBuiltinProcessingRule"] = false
+	}
+	w.ContextHints = payload(t, hints)
+	if _, err := Compile(w, &current); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("unknown explicit override accepted: %v", err)
+	}
+}
+
 func TestCompileRejectsLossyEvidencePolicyAndLegacyTargetInputs(t *testing.T) {
 	workspace := &workspacemodel.Workspace{ID: "ws"}
 	template := &workspacemodel.WorkspaceTemplate{ID: "tpl", EvidencePolicies: []workorcheventpayload.Payload{{}}}

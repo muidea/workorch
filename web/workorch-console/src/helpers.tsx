@@ -7,6 +7,7 @@ import { errorMessage } from './utils/errorMessage';
 import { workorchApi } from './api';
 import { modelLabels, progressKindLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels } from './utils/constants';
 import { stateLabel as canonicalStateLabel } from './utils/format';
+import { formatLocalDateTime } from './utils/time';
 import { stateTag as canonicalStateTag } from './utils/ui';
 import { presentWorkspaceRunCommand } from './workspaceRunCommand';
 import { validationRepairPolicyLabel } from './runtimeProgressPresentation';
@@ -160,8 +161,8 @@ export function projectionStatusDescriptions(status?: ProjectionStatus) {
     { key: 'workspaceRevision', label: 'Workspace Revision', children: status.workspaceRevision ?? '-' },
     { key: 'sourceRevision', label: 'Source Revision', children: status.sourceEventRevision ?? '-' },
     { key: 'projectedRevision', label: '已投影 Revision', children: status.projectedSourceRevision ?? '-' },
-    { key: 'updatedAt', label: '更新时间', children: status.updatedAt || '-' },
-    { key: 'rebuiltAt', label: '重建时间', children: status.rebuiltAt || '-' },
+    { key: 'updatedAt', label: '更新时间', children: formatLocalDateTime(status.updatedAt) },
+    { key: 'rebuiltAt', label: '重建时间', children: formatLocalDateTime(status.rebuiltAt) },
     { key: 'staleReason', label: 'Stale 原因', children: status.staleReason || '-' },
     { key: 'error', label: '投影错误', children: status.error ? boundedParagraph(status.error, { rows: 2 }) : '-' }
   ];
@@ -175,13 +176,13 @@ export function runHeartbeatDescriptions(heartbeat?: RunHeartbeat) {
     { key: 'activity', label: '运行活动', children: <Space wrap>{heartbeat.activityState ? stateTag(heartbeat.activityState) : '-'}{heartbeat.stalled ? <Tag color="red">stalled</Tag> : null}{heartbeat.ineffectiveRetry ? <Tag color="gold">ineffective retry</Tag> : null}</Space> },
     { key: 'summary', label: '活动摘要', children: boundedParagraph(heartbeat.summary, { rows: 2 }) },
     { key: 'latestStep', label: '最近步骤', children: [heartbeat.latestStepId, heartbeat.latestStepKind, heartbeat.latestStepState].filter(Boolean).join(' / ') || '-' },
-    { key: 'latestEvent', label: '最近事件', children: [heartbeat.latestEventTopic, heartbeat.latestEventRevision ? `rev ${heartbeat.latestEventRevision}` : '', heartbeat.latestEventAt].filter(Boolean).join(' / ') || '-' },
-    { key: 'latestActivity', label: '最近活动', children: heartbeat.latestActivityAt || '-' },
-    { key: 'latestProgress', label: '最近有效进展', children: heartbeat.latestEffectiveProgressAt || '-' },
-    { key: 'latestLLM', label: '最近 LLM', children: heartbeat.latestLLMUsageAt || '-' },
-    { key: 'latestResult', label: '最近结果', children: heartbeat.latestResultAt || '-' },
-    { key: 'latestArtifact', label: '最近交付物', children: heartbeat.latestArtifactAt || '-' },
-    { key: 'latestPatch', label: '最近补丁', children: heartbeat.latestPatchAt || '-' },
+    { key: 'latestEvent', label: '最近事件', children: [heartbeat.latestEventTopic, heartbeat.latestEventRevision ? `rev ${heartbeat.latestEventRevision}` : '', heartbeat.latestEventAt ? formatLocalDateTime(heartbeat.latestEventAt) : ''].filter(Boolean).join(' / ') || '-' },
+    { key: 'latestActivity', label: '最近活动', children: formatLocalDateTime(heartbeat.latestActivityAt) },
+    { key: 'latestProgress', label: '最近有效进展', children: formatLocalDateTime(heartbeat.latestEffectiveProgressAt) },
+    { key: 'latestLLM', label: '最近 LLM', children: formatLocalDateTime(heartbeat.latestLLMUsageAt) },
+    { key: 'latestResult', label: '最近结果', children: formatLocalDateTime(heartbeat.latestResultAt) },
+    { key: 'latestArtifact', label: '最近交付物', children: formatLocalDateTime(heartbeat.latestArtifactAt) },
+    { key: 'latestPatch', label: '最近补丁', children: formatLocalDateTime(heartbeat.latestPatchAt) },
     { key: 'evidence', label: '最近证据', children: heartbeat.latestEvidenceRef || '-' }
   ];
 }
@@ -207,7 +208,7 @@ export function convergenceStatusDescriptions(status?: ConvergenceStatus) {
     { key: 'gap', label: '当前 Gap', children: boundedParagraph(status.gapSummary || status.currentGap, { rows: 2 }) },
     { key: 'missingEvidence', label: '缺失证据', children: compactTags(status.missingEvidenceKinds ?? [], 4) },
     { key: 'evidenceCount', label: '证据计数', children: <Space wrap><Tag color="green">accepted {status.acceptedEvidenceCount ?? 0}</Tag><Tag color="red">rejected {status.rejectedEvidenceCount ?? 0}</Tag>{status.latestAcceptedEvidenceRef ? <Tag>latest {status.latestAcceptedEvidenceRef}</Tag> : null}</Space> },
-    { key: 'latestProgress', label: '最近有效进展', children: status.lastProgressAt || status.latestEffectiveProgressAt || '-' },
+    { key: 'latestProgress', label: '最近有效进展', children: formatLocalDateTime(status.lastProgressAt || status.latestEffectiveProgressAt) },
     { key: 'nextActivation', label: '需要下一 Activation', children: status.nextActivationRequired ? <Tag color="red">required</Tag> : '-' },
     { key: 'contractViolation', label: '最近合同违例', children: status.latestContractViolationRule ? <Space wrap><Tag color="red">{status.latestContractViolationRule}</Tag>{status.latestRecovery ? <Tag color="gold">{status.latestRecovery}</Tag> : null}</Space> : '-' },
     { key: 'decisionCause', label: '决策原因', children: status.decisionCause ? <Tag color="gold">{status.decisionCause}</Tag> : '-' },
@@ -231,7 +232,7 @@ export function runCommandDescriptions(snapshot?: WorkspaceSnapshot) {
     { key: 'admissionReason', label: 'Admission reason', children: command.admissionReason },
     { key: 'diagnostic', label: 'Diagnostic', children: boundedParagraph(command.diagnostic, { rows: 2 }) },
     { key: 'requestReason', label: '请求原因', children: command.requestReason || '-' },
-    { key: 'observedAt', label: command.state === 'accepted' ? '接收时间' : '拒绝时间', children: command.state === 'accepted' ? command.acceptedAt : command.rejectedAt },
+    { key: 'observedAt', label: command.state === 'accepted' ? '接收时间' : '拒绝时间', children: formatLocalDateTime(command.state === 'accepted' ? command.acceptedAt : command.rejectedAt) },
     { key: 'revision', label: '投影 Revision', children: command.revision }
   ];
 }
@@ -1266,7 +1267,7 @@ export function webSourceCard(items?: WebSourceTrace[]) {
           { title: 'URL', render: (_, item) => <Typography.Link href={item.finalUrl || item.url} target="_blank" rel="noreferrer">{item.finalUrl || item.url}</Typography.Link>, ellipsis: true },
           { title: '证据', dataIndex: 'evidenceRef', ellipsis: true, render: (_, item) => item.evidenceRef ? compactTags([item.evidenceRef], 1) : '-' },
           { title: '策略', dataIndex: 'policyDecision', width: 110, render: (_, item) => item.policyDecision || '-' },
-          { title: '时间', dataIndex: 'occurredAt', width: 180, ellipsis: true },
+          { title: '时间', dataIndex: 'occurredAt', width: 210, ellipsis: true, render: (_, item) => formatLocalDateTime(item.occurredAt) },
           { title: 'Hash', dataIndex: 'contentHash', ellipsis: true, render: (_, item) => item.contentHash || '-' }
         ]}
         expandable={{
@@ -1404,7 +1405,7 @@ export function llmUsageCard(summary?: LLMUsageSummary, traces?: LLMUsageTrace[]
                         { key: 'step', label: '步骤', children: item.stepId ? boundedParagraph(item.stepId, { rows: 1, copyText: item.stepId }) : '-' },
                         { key: 'bytes', label: '请求/响应字节', children: `${numberText(item.requestBytes)} / ${numberText(item.responseBytes)}` },
                         { key: 'failure', label: '失败分类', children: item.failureClass || '-' },
-                        { key: 'time', label: '时间', children: [item.startedAt, item.completedAt || item.occurredAt].filter(Boolean).join(' → ') || '-' },
+                        { key: 'time', label: '时间', children: [item.startedAt, item.completedAt || item.occurredAt].filter(Boolean).map(formatLocalDateTime).join(' → ') || '-' },
                         { key: 'cacheUsage', label: 'Cache Usage', children: <pre className="json-panel">{compactJSON(item.cacheUsage)}</pre> },
                         { key: 'budget', label: 'Context Budget', children: <pre className="json-panel">{compactJSON(item.contextBudget)}</pre> }
                       ]}
@@ -1564,7 +1565,7 @@ export function contextBundleCard(bundle?: ContextBundle) {
                   { title: '类型', dataIndex: 'kind', width: 180 },
                   { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => item.state ? stateTag(item.state) : '-' },
                   { title: '摘要', dataIndex: 'summary', ellipsis: true },
-                  { title: '时间', dataIndex: 'occurredAt', width: 190 }
+                  { title: '时间', dataIndex: 'occurredAt', width: 210, render: (_, item) => formatLocalDateTime(item.occurredAt) }
                 ]}
                 expandable={{
                   expandedRowRender: (item) => <pre className="json-panel json-panel-large">{compactJSON(item.data)}</pre>
@@ -1729,7 +1730,7 @@ function numberValue(value: unknown) {
 }
 
 export function timelineOccurredAtContent(item: RuntimeTimelineItem) {
-  return item.occurredAt || secondaryCellText('未记录');
+  return item.occurredAt ? formatLocalDateTime(item.occurredAt) : secondaryCellText('未记录');
 }
 
 export function recordValue(value: unknown): Record<string, unknown> | undefined {

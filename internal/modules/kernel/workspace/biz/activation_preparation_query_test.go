@@ -238,8 +238,8 @@ func TestExactConfirmedStartupQueryRejectsStaleAndMissingSealWithoutFallback(t *
 		"pending_clarification": func(w *workspace.Workspace) {
 			w.ActivationAdmission.State = workspace.WorkspaceActivationPendingClarificationResolution
 		},
-		"changed_configuration": func(w *workspace.Workspace) { w.InternalDirectory += "-changed" },
-		"changed_candidate":     func(w *workspace.Workspace) { w.DefinitionAdmissionCandidates[0].CandidateHash = "changed" },
+		"changed_project_directory": func(w *workspace.Workspace) { w.DeliverableDirectory += "-changed" },
+		"changed_candidate":         func(w *workspace.Workspace) { w.DefinitionAdmissionCandidates[0].CandidateHash = "changed" },
 		"changed_six_review_source": func(w *workspace.Workspace) {
 			w.DefinitionAuthoring.SpecificationRequests[1].Review.Reason += "changed"
 		},

@@ -24,8 +24,8 @@ import (
 
 // WorkspaceDefinitionAdmissionSnapshot is the exact owner snapshot admitted
 // for one bootstrap compilation. The Template instance must be reused by every
-// downstream compiler in that transaction; rereading a live Template would
-// allow its profile policy to drift away from the Workspace-owner startup seal.
+// downstream compiler in that transaction; rereading a live Template would mix
+// current declarations within the same compilation.
 type WorkspaceDefinitionAdmissionSnapshot struct {
 	Workspace *workspacemodel.Workspace
 	Template  *workspacemodel.WorkspaceTemplate
@@ -78,7 +78,10 @@ func EnsureWorkspaceDefinitionAdmission(ctx context.Context, hub magicevent.Hub,
 	if workspace.DefinitionAuthoring != nil || workspace.DefinitionAuthoringConfirmation != nil {
 		candidate, present, err := workspace.ValidateActivationAdmissionView()
 		journal := workspace.DefinitionAuthoringConfirmation
-		if err != nil || !present || journal == nil || workspacemodel.WorkspaceConfigurationHash(workspace) != journal.ConfigurationHash || workspace.ActivationAdmission.State != workspacemodel.WorkspaceActivationEligible ||
+		// The journal authenticates the confirmed business source. Its configuration
+		// hash fences confirmation writes, not later execution: defaults may have
+		// been materialized and built-in declarations may have changed since then.
+		if err != nil || !present || journal == nil || workspace.ActivationAdmission.State != workspacemodel.WorkspaceActivationEligible ||
 			workspace.DeliverableDirectory != candidate.ResolvedProjectWorkspaceDirectory ||
 			goal.ID != journal.Goal.ID || goal.DefinitionRevision != journal.Goal.DefinitionRevision || goal.Text != journal.Goal.Text ||
 			dod.ID != journal.DoD.ID || dod.DefinitionRevision != journal.DoD.DefinitionRevision || !slices.Equal(dod.Items, journal.DoD.Items) ||

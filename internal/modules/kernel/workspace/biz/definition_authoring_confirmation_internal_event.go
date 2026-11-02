@@ -166,7 +166,7 @@ func (m *Biz) driveDefinitionAuthoringConfirmation(ctx context.Context, cmd work
 		return workspaceevents.ConfirmDefinitionAuthoringResult{}, common.ErrConflict
 	}
 	journal := initial.DefinitionAuthoringConfirmation.Clone()
-	if journal.InputHash != cmd.InputHash || journal.DerivationPermitID != cmd.DerivationPermitID || journal.ProposalHash != cmd.ProposalHash || journal.SpecificationHash != cmd.SpecificationHash || journal.Validate(initial.DefinitionAuthoring, initial.ID) != nil || workspace.WorkspaceConfigurationHash(initial) != journal.ConfigurationHash {
+	if journal.InputHash != cmd.InputHash || journal.DerivationPermitID != cmd.DerivationPermitID || journal.ProposalHash != cmd.ProposalHash || journal.SpecificationHash != cmd.SpecificationHash || journal.Validate(initial.DefinitionAuthoring, initial.ID) != nil || journal.Phase == workspace.DefinitionAuthoringConfirmationPrepared && workspace.WorkspaceConfigurationHash(initial) != journal.ConfigurationHash {
 		return workspaceevents.ConfirmDefinitionAuthoringResult{}, common.ErrConflict
 	}
 	if err := validateConfirmationAdmissionReplay(initial, journal); err != nil {
@@ -195,7 +195,7 @@ func (m *Biz) driveDefinitionAuthoringConfirmation(ctx context.Context, cmd work
 		return workspaceevents.ConfirmDefinitionAuthoringResult{}, err
 	}
 	current, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
-	if err != nil || current == nil || current.DefinitionAuthoringConfirmation == nil || !reflect.DeepEqual(*current.DefinitionAuthoringConfirmation, journal) || workspace.WorkspaceConfigurationHash(current) != journal.ConfigurationHash {
+	if err != nil || current == nil || current.DefinitionAuthoringConfirmation == nil || !reflect.DeepEqual(*current.DefinitionAuthoringConfirmation, journal) || journal.Phase == workspace.DefinitionAuthoringConfirmationPrepared && workspace.WorkspaceConfigurationHash(current) != journal.ConfigurationHash {
 		return workspaceevents.ConfirmDefinitionAuthoringResult{}, common.ErrConflict
 	}
 	if err := workspaceDeletionRejectsMutation(current); err != nil {

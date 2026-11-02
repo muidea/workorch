@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationports"
 	definitionadmission "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/definitionadmission"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -144,6 +145,46 @@ func TestSpecificationLedgerBeginDoesNotAdmitAndReservesBeforePermit(t *testing.
 	duplicate, err := f.owner.reserveDefinitionSpecificationRequest(f.ctx, workspaceevents.ReserveDefinitionSpecificationRequestCommand{Identity: id})
 	if err != nil || duplicate.Disposition != workspaceevents.DefinitionSpecificationAlreadyReserved || duplicate.PermitID != "" || duplicate.Consumed != 1 {
 		t.Fatalf("duplicate permit escaped: %+v err=%v", duplicate, err)
+	}
+}
+
+func TestSpecificationPreparationUsesCurrentDefaultsWithoutMaterialization(t *testing.T) {
+	f, close := openSpecificationLedgerFixture(t, t.TempDir())
+	defer close()
+	if err := f.owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := f.owner.workspaces.Get(f.ctx, f.workspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template, err := f.owner.templates.Get(f.ctx, before.TemplateID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template.DefaultSoulID = "new-builtin-soul"
+	if err := f.owner.templates.Update(f.ctx, template); err != nil {
+		t.Fatal(err)
+	}
+	command, err := activationports.PrepareDefinitionSpecification(f.ctx, f.owner.EventHub(), f.workspaceID, nil, f.begin.Dimensions)
+	if err != nil {
+		t.Fatalf("current declaration required project materialization: %v", err)
+	}
+	unchanged, err := f.owner.workspaces.Get(f.ctx, f.workspaceID)
+	if err != nil || !reflect.DeepEqual(before, unchanged) {
+		t.Fatal("pure compilation changed Workspace", err)
+	}
+	first, err := f.owner.beginDefinitionSpecification(f.ctx, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := f.owner.beginDefinitionSpecification(f.ctx, command)
+	if err != nil || !reflect.DeepEqual(first, second) {
+		t.Fatal("same transaction failed exact replay", err)
+	}
+	// A stale candidate from before the update cannot claim the new selection.
+	if _, err := f.owner.beginDefinitionSpecification(f.ctx, f.begin); err == nil {
+		t.Fatal("stale selected declaration accepted")
 	}
 }
 func TestSpecificationLedgerCompletionReplaysTypedResultsAndCriticIsGrounded(t *testing.T) {

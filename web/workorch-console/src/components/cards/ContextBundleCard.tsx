@@ -1,3 +1,4 @@
+import { formatLocalDateTime } from '../../utils/time';
 import React from 'react';
 import { Space, Empty, Descriptions, Tabs } from 'antd';
 import { ProTable } from '../proCompat';
@@ -90,7 +91,7 @@ export const ContextBundleCard = React.memo(function ContextBundleCard({ bundle 
                   { title: '类型', dataIndex: 'kind', width: 180 },
                   { title: '状态', dataIndex: 'state', width: 120, render: (_, item) => item.state ? <StateTag state={item.state} /> : '-' },
                   { title: '摘要', dataIndex: 'summary', ellipsis: true },
-                  { title: '时间', dataIndex: 'occurredAt', width: 190 }
+                  { title: '时间', dataIndex: 'occurredAt', width: 210, render: (_, item) => formatLocalDateTime(item.occurredAt) }
                 ]}
                 dataSource={bundle.recentEvidence ?? []}
               />

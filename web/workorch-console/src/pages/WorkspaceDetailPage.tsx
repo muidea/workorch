@@ -1,3 +1,4 @@
+import { formatLocalDateTime } from '../utils/time';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, App as AntApp, Button, Checkbox, Descriptions, Dropdown, Empty, FloatButton, Form, Input, List, Modal, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, PageContainer, ProCard, ProTable } from '../components/proCompat';
@@ -1738,7 +1739,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                               { title: '主体', render: (_, item) => eventRecordSubject(item), ellipsis: true },
                               { title: '步骤', dataIndex: 'stepId', ellipsis: true },
                               { title: '摘要', render: (_, item) => eventRecordSummary(item), ellipsis: true },
-                              { title: '发生时间', dataIndex: 'occurredAt', width: 210, render: (_, item) => item.occurredAt || '-' }
+                              { title: '发生时间', dataIndex: 'occurredAt', width: 210, render: (_, item) => formatLocalDateTime(item.occurredAt) }
                             ]}
                             expandable={{
                               expandedRowRender: (item) => (

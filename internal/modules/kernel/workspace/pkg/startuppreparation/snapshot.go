@@ -35,14 +35,15 @@ func FromOwnerPersistence(w *workspace.Workspace, goal *workspace.Goal, dod *wor
 	journal := w.DefinitionAuthoringConfirmation
 	if journal.Phase != workspace.DefinitionAuthoringConfirmationMaterialized ||
 		!reflect.DeepEqual(*goal, journal.Goal) || !reflect.DeepEqual(*dod, journal.DoD) ||
-		workspace.WorkspaceConfigurationHash(w) != journal.ConfigurationHash ||
 		w.DeliverableDirectory != w.StartupInput.ResolvedProjectWorkspaceDirectory ||
 		w.TemplateID != candidate.WorkspaceTemplateSnapshot.TemplateRef || w.InternalDirectory == "" {
 		return ExactConfirmedStartupSnapshot{}, common.ErrConflict
 	}
 	snapshot := ExactConfirmedStartupSnapshot{
 		SchemaVersion: SchemaVersion, WorkspaceID: w.ID, WorkspaceRevision: w.Revision,
-		AuthoringRef: *candidate.AuthoringRef, AuthoringConfigurationHash: journal.ConfigurationHash,
+		// Bind this preparation observation, not the historical confirmation
+		// configuration. System-derived defaults are allowed between transactions.
+		AuthoringRef: *candidate.AuthoringRef, AuthoringConfigurationHash: workspace.WorkspaceConfigurationHash(w),
 		InternalDirectory: w.InternalDirectory, Candidate: candidate.Clone(), StartupInput: w.StartupInput.Clone(),
 		ActivationAdmission: *w.ActivationAdmission, Goal: *goal, DoD: *workspace.CloneDoD(dod),
 	}

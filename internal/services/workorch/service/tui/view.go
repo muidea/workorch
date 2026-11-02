@@ -730,21 +730,6 @@ func renderRecentActivityCompact(feed projectioncontract.WorkspaceActivityFeed, 
 	return b.String()
 }
 
-func activityTimeLabel(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	// Prefer clock portion when ISO timestamps are present.
-	if len(value) >= 19 && value[10] == 'T' {
-		return value[11:16]
-	}
-	if len(value) >= 5 && value[2] == ':' {
-		return value[:5]
-	}
-	return value
-}
-
 func convergenceStatusText(item *projectioncontract.ConvergenceStatus) string {
 	if item == nil {
 		return ""
@@ -886,7 +871,7 @@ func convergenceHeartbeatText(item *projectioncontract.ConvergenceStatus) string
 		progressAt = strings.TrimSpace(item.LatestEffectiveProgressAt)
 	}
 	if strings.TrimSpace(progressAt) != "" {
-		parts = append(parts, "progress "+strings.TrimSpace(progressAt))
+		parts = append(parts, "progress "+localDateTime(progressAt))
 	}
 	return strings.Join(parts, " ")
 }

@@ -29,6 +29,7 @@ import (
 	workspacetestkit "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/testkit"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
+	"github.com/muidea/workorch/internal/pkg/runtimeprojection"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	management "github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -340,9 +341,22 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 				}
 			}
 			if mutation == "policy" || mutation == "profile" {
-				if _, err := definitionconfiguration.Compile(&current, &template); err != nil {
+				compiled, err := definitionconfiguration.Compile(&current, &template)
+				if err != nil {
 					t.Fatalf("漂移 fixture 必须结构合法: %v", err)
 				}
+				// Current-policy authentication belongs to the execution owner
+				// gate, not equality with the old confirmation configuration.
+				injected := first.Clone().Activation
+				injected.ExecutionContract.ProfileContracts = compiled.ProfileContracts
+				injected.EvidencePolicies, err = runtimeprojection.CompileRuntimeEvidencePolicies("Workspace", current.EvidencePolicies)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if definitionconfiguration.ValidateExecutionActivation(stored, &template, injected) == nil {
+					t.Fatal("执行门禁接受了非 owner 当前声明")
+				}
+				return
 			}
 			// A detached Workspace cannot substitute another template binding for the owner current template.
 			if mutation == "template" {
@@ -416,5 +430,26 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 	runs, err = repositories.Runs.List(ctx)
 	if err != nil || len(runs) != 0 {
 		t.Fatalf("未消费准备就创建了 Run: %v %v", runs, err)
+	}
+	// Fixture for the metadata produced by the private first-activation event
+	// (covered by Workspace owner tests). Recompile the complete production
+	// bootstrap from owner reads, including separately stored Soul bindings.
+	selection := runtimecontract.ProviderInferenceSelection{Target: first.Activation.ProviderSelection.Target}
+	current.DefaultLLMSelection = &selection
+	if err := repositories.Workspaces.CompareAndSwap(ctx, current, current.Revision); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := repositories.Workspaces.Get(ctx, stored.ID)
+	if err != nil || workspace.WorkspaceConfigurationHash(changed) == changed.DefinitionAuthoringConfirmation.ConfigurationHash {
+		t.Fatal("模型默认值未形成独立于确认的配置", err)
+	}
+	for range 2 {
+		recompiled, err := activationports.CompileWorkspaceExecutionRestartBootstrap(ctx, activation)
+		if err != nil || recompiled.Definition.StartupInputHash != first.Definition.StartupInputHash || !reflect.DeepEqual(recompiled.DefinitionSeed.SourceObligations, first.DefinitionSeed.SourceObligations) {
+			t.Fatalf("正常默认值更新阻塞后续编译或改写原规格: %v", err)
+		}
+	}
+	if calls != 8 {
+		t.Fatal("配置重编发起额外模型调用")
 	}
 }

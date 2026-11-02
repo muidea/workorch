@@ -2,7 +2,6 @@ package activationports
 
 import (
 	"context"
-	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
@@ -33,10 +32,9 @@ func PrepareDefinitionSpecification(ctx context.Context, hub magicevent.Hub, wor
 	if err != nil {
 		return workspaceevents.BeginDefinitionSpecificationCommand{}, err
 	}
-	// Begin 不物化配置；配置必须与 owner 当前值一致，否则先走显式配置更新。
-	if workspace.WorkspaceConfigurationHash(effective) != workspace.WorkspaceConfigurationHash(current) {
-		return workspaceevents.BeginDefinitionSpecificationCommand{}, fmt.Errorf("%w: current template configuration requires materialization before compilation", common.ErrConflict)
-	}
+	// Compile current defaults without requiring a persisted project copy.
+	// ExpectedConfigurationHash below fences this transaction's owner preimage,
+	// independently of the current declaration used to build the candidate.
 	revision := uint64(1)
 	for _, archived := range current.DefinitionAdmissionCandidates {
 		if archived.CandidateID != "workspace-definition" || archived.CandidateRevision == ^uint64(0) {

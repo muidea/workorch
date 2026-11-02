@@ -73,12 +73,12 @@ func (m AppModel) renderInspectStatus() string {
 		b.WriteString("\n")
 		if m.runHeartbeat.LatestActivityAt != "" {
 			b.WriteString("- latest activity: ")
-			b.WriteString(m.runHeartbeat.LatestActivityAt)
+			b.WriteString(localDateTime(m.runHeartbeat.LatestActivityAt))
 			b.WriteString("\n")
 		}
 		if m.runHeartbeat.LatestEffectiveProgressAt != "" {
 			b.WriteString("- latest progress: ")
-			b.WriteString(m.runHeartbeat.LatestEffectiveProgressAt)
+			b.WriteString(localDateTime(m.runHeartbeat.LatestEffectiveProgressAt))
 			b.WriteString("\n")
 		}
 	}
@@ -428,7 +428,7 @@ func renderInspectActivityFeed(feed projectioncontract.WorkspaceActivityFeed, li
 		if line == "" {
 			line = string(item.Kind)
 		}
-		if ts := strings.TrimSpace(item.OccurredAt); ts != "" {
+		if ts := localDateTime(item.OccurredAt); ts != "" {
 			line = ts + " " + line
 		}
 		b.WriteString("- ")
