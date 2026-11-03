@@ -9,7 +9,7 @@ func TestImplementationRepetitionUsesFullOriginalStateNotRevisionsOrModelClaims(
 	m, _ := progressPurposeFixture(t)
 	w := m.ProofObligations[0].ImplementationWork
 	preview := RuntimeImplementationWorkScopePreview{Request: w.Scope.Request, Observation: &w.Scope}
-	round := RuntimeImplementationWorkRound{WorkspaceID: m.WorkspaceID, RunID: m.RunID, CoverageWorkItemID: w.Scope.Request.CoverageWorkItemID, PolicyHash: w.PolicyHash, ScopeObservation: &w.Scope, CompletedReceiptSetHash: "trusted-original-set"}
+	round := RuntimeImplementationWorkRound{WorkspaceID: m.WorkspaceID, RunID: m.RunID, CoverageWorkItemID: w.Scope.Request.CoverageWorkItemID, PolicyHash: w.PolicyHash, ScopeRequest: w.Scope.Request, ScopeObservation: &w.Scope, CompletedReceiptSetHash: "trusted-original-set"}
 	rounds := []RuntimeImplementationWorkRound{round}
 	if got := RuntimeImplementationRepeatedWorkStates(preview, rounds); got != 1 {
 		t.Fatal(got)
@@ -20,6 +20,25 @@ func TestImplementationRepetitionUsesFullOriginalStateNotRevisionsOrModelClaims(
 	changed.Observation.Content.ManifestRevision = "another-tree-revision"
 	if got := RuntimeImplementationRepeatedWorkStates(changed, rounds); got != 1 {
 		t.Fatal("identity refreshed repeat guard", got)
+	}
+	changed.Request.Policy.MaxInputRevisionsPerCWI = 4
+	changed.Request.Policy.MaxTargetsPerRound = 2
+	if got := RuntimeImplementationRepeatedWorkStates(changed, rounds); got != 1 {
+		t.Fatal("method metadata reset physical guard", got)
+	}
+	foreign := changed.Clone()
+	foreign.Request.Policy.OwnerModuleID = "another-owner"
+	if got := RuntimeImplementationRepeatedWorkStates(foreign, rounds); got != 0 {
+		t.Fatal("borrowed another owner's state", got)
+	}
+	foreign = changed.Clone()
+	foreign.Request.Policy.TargetSelectorSubjectRef = "another-scope"
+	if got := RuntimeImplementationRepeatedWorkStates(foreign, rounds); got != 1 {
+		t.Fatal("declaration name reset physical guard", got)
+	}
+	foreign.Observation.Content.Snapshots[0].TargetRef = "another-physical-target"
+	if got := RuntimeImplementationRepeatedWorkStates(foreign, rounds); got != 0 {
+		t.Fatal("borrowed another physical scope", got)
 	}
 	raw, _ := json.Marshal(rounds)
 	var restored []RuntimeImplementationWorkRound

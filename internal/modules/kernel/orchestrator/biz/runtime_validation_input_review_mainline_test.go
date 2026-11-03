@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -185,9 +186,9 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 	bootstrap := validationInputAdditionMainlineBootstrap()
 	if strings.HasPrefix(mode, "input_revision") {
 		configureRuntimeInputRevisionMainline(&bootstrap)
-		if mode == "input_revision_exhausted" {
-			bootstrap.DefinitionFocuses[1].ImplementationWorkPolicy.MaxInputRevisionsPerCWI = 1
-		}
+		if mode == "input_revision_long" {
+			bootstrap.DefinitionFocuses[1].ImplementationWorkPolicy.MaxInputRevisionsPerCWI = 4
+		} // Original source metadata, not a current configuration option.
 	}
 	bootstrap.Activation.EvidencePolicies[0].RecipeAdapterRef = options.Adapter
 	bootstrap.Activation.EvidencePolicies[0].RecipeInputReviewProtocolRef = options.ProtocolRef
@@ -233,6 +234,15 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 	}
 	bootstrap.Definition.CapabilityContract = append(bootstrap.Definition.CapabilityContract, runtimecontract.RuntimeBlockKindDecisionRequest)
 	bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleDecision, CapabilityClass: runtimecontract.RuntimeCapabilityClassGovernance, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindDecisionRequest}})
+	if mode == "input_revision_budget" {
+		limits := &runtimecontract.RuntimeExecutionLimits{ProtocolRef: runtimecontract.RuntimeExecutionLimitsV1, MaxProviderCalls: 256, MaxCapabilityOperations: 3}
+		bootstrap.Activation.ExecutionContract.ExecutionLimits = limits
+		var budgetErr error
+		bootstrap.ExecutionBudgetPolicy, budgetErr = runtimecontract.RuntimeExecutionBudgetPolicyWithLimits(bootstrap.ConvergencePolicy, bootstrap.RecoveryPolicy, limits)
+		if budgetErr != nil {
+			t.Fatal(budgetErr)
+		}
+	}
 	bootstrap = runtimeTestBootstrapWithBindings(bootstrap)
 	if projectBehaviorRepair {
 		bootstrap = runtimeTestWithHistoricalPurposeMapping(t, bootstrap, "cwi-1", "cwi-2")
@@ -327,7 +337,10 @@ func %s(t *testing.T) {
 	}
 	if strings.HasPrefix(mode, "input_revision") {
 		for _, target := range inputTargets {
-			if mode == "input_revision_omission" {
+			if mode == "input_revision_long" || mode == "input_revision_budget" {
+				initialFiles[target] = strings.Replace(initialFiles[target], `strings.TrimSpace(string(out))!="4"`, `strings.TrimSpace(string(out))==""`, 1)
+				initialFiles[target] = strings.Replace(initialFiles[target], "\n}\n", "\n"+runtimeLongInputRevisionMarkers()+"\n}\n", 1)
+			} else if mode == "input_revision_omission" {
 				initialFiles[target] = strings.Replace(initialFiles[target], `strings.TrimSpace(string(out))!="4"`, `strings.TrimSpace(string(out))==""`, 1)
 			} else {
 				initialFiles[target] = strings.Replace(initialFiles[target], `!="4"`, `!="5"`, 1)
@@ -426,6 +439,7 @@ func %s(t *testing.T) {
 	t.Cleanup(func() { _ = decisionOwner.Stop(ctx) })
 
 	var calls atomic.Int64
+	logicalCalls := map[string]int{}
 	behaviorRepairs := 0
 	var reviewCalls, validationCalls int
 	var firstReviewManifest string
@@ -439,6 +453,13 @@ func %s(t *testing.T) {
 	provider.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		calls.Add(1)
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		if mode == "input_revision_long" {
+			logicalCalls[command.RequestIdentity.LogicalRequestID]++
+			if logicalCalls[command.RequestIdentity.LogicalRequestID] != 1 {
+				t.Error("recovery repeated an already consumed logical provider request")
+			}
+		}
+
 		if options.DuplicateInitialReview && duplicateSent && !preciseCorrectionSeen {
 			if command.CandidateAttempt != 1 || command.SemanticCorrectionDirective == nil || command.SemanticManifest.Hash != duplicateManifest || command.StablePrefixHash != duplicatePrefix || validationCalls != 0 {
 				t.Error("review correction lost frozen identity or bypassed ordinary validation")
@@ -471,7 +492,7 @@ func %s(t *testing.T) {
 				conclusion := runtimecontract.RuntimeValidationInputConsistent
 				if strings.HasPrefix(mode, "input_revision") {
 					for _, file := range binding.InputReview.Files {
-						if strings.Contains(file.Content, `!="5"`) || strings.Contains(file.Content, `strings.TrimSpace(string(out))==""`) || mode == "input_revision_exhausted" {
+						if strings.Contains(file.Content, `!="5"`) || (strings.Contains(file.Content, `strings.TrimSpace(string(out))==""`) && mode != "input_revision_long" && mode != "input_revision_budget") || mode == "input_revision_cycle" || strings.Contains(file.Content, "// missing assertion ") {
 							conclusion = runtimecontract.RuntimeValidationInputConflict
 						}
 					}
@@ -555,6 +576,7 @@ func %s(t *testing.T) {
 			}
 			payload, err := runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(command.SemanticManifest, document)
 			if err != nil {
+				t.Errorf("scripted semantic fixture violates contract: %v", err)
 				result.Set(nil, cd.NewError(cd.Unexpected, err.Error()))
 				return
 			}
@@ -681,6 +703,14 @@ func %s(t *testing.T) {
 					}
 				}
 				return false
+			case "after_eighth_input_revision_receipt":
+				count := 0
+				for _, r := range a.ImplementationWork.Rounds {
+					if r.ScopeRequest.InputRevision != nil && r.CompletedReceiptSetHash != "" {
+						count++
+					}
+				}
+				return count == 8
 			case "after_input_revision_receipt":
 				for _, r := range a.ImplementationWork.Rounds {
 					if r.ScopeRequest.InputRevision != nil && r.CompletedReceiptSetHash != "" {
@@ -730,6 +760,29 @@ func %s(t *testing.T) {
 			}()
 			if !resolved {
 				_, err = module.driveRuntimeLocked(ctx, orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"})
+				if err != nil && mode == "input_revision_budget" {
+					var exhausted *runtimecontract.RuntimeBudgetExhaustedError
+					if !errors.As(err, &exhausted) || exhausted.Dimension != runtimecontract.RuntimeBudgetDimensionCapabilityOperation {
+						t.Fatalf("wrong budget failure: %v", err)
+					}
+					before, loadErr := module.loadRuntime(ctx, "ws-v2", "run-v2")
+					if loadErr != nil {
+						t.Fatal(loadErr)
+					}
+					callsBefore := calls.Load()
+					retry, handled := module.handleScheduledRuntimeDriveFailure(ctx, scheduledRuntimeDriveRequest{workspaceID: "ws-v2", runID: "run-v2", source: "input-revision-budget-test"}, err)
+					if !handled || retry != nil {
+						t.Fatal("budget exhaustion escaped production terminal boundary")
+					}
+					after, loadErr := module.loadRuntime(ctx, "ws-v2", "run-v2")
+					if loadErr != nil {
+						t.Fatal(loadErr)
+					}
+					if callsBefore != calls.Load() || !reflect.DeepEqual(before.OperationReceipts, after.OperationReceipts) || !reflect.DeepEqual(before.ExecutionBudget, after.ExecutionBudget) {
+						t.Fatal("budget exhaustion generated work or reset budget")
+					}
+					err = nil
+				}
 				if err != nil {
 					t.Fatalf("drive %s: %v", mode, err)
 				}
@@ -982,8 +1035,12 @@ func %s(t *testing.T) {
 	if !reflect.DeepEqual(sealedDefinition, completed.Definition) {
 		t.Fatal("review or ticket rewrote sealed startup definition")
 	}
+	if completed.Decision.Terminal != nil && completed.Decision.Terminal.OriginalDiagnostic != nil {
+		diag, _ := json.Marshal(completed.Decision.Terminal.OriginalDiagnostic)
+		t.Logf("terminal original diagnostic: %s", diag)
+	}
 	submissionUnknown := cut == "after_assessment_submission"
-	success := (mode == "consistent" || mode == "clarify" || (mode == "input_revision" || mode == "input_revision_omission") || projectBehaviorRepair) && !submissionUnknown
+	success := (mode == "consistent" || mode == "clarify" || (mode == "input_revision" || mode == "input_revision_omission" || mode == "input_revision_long") || projectBehaviorRepair) && !submissionUnknown
 	if (completed.Decision.State == runtimecontract.ConvergenceStateComplete) != success {
 		for _, receipt := range completed.OperationReceipts {
 			if receipt.Outcome == runtimecontract.RuntimeOperationOutcomeRejected {
@@ -1069,7 +1126,19 @@ func %s(t *testing.T) {
 		content, err := os.ReadFile(filepath.Join(directory, ref))
 		expectedInput := initialFiles[ref]
 		if strings.HasPrefix(mode, "input_revision") && ref == inputTargets["cwi-2"] {
-			if mode == "input_revision_omission" {
+			if mode == "input_revision_long" || mode == "input_revision_budget" {
+				completedRevisions := 0
+				for _, round := range completed.ImplementationWork.Rounds {
+					if round.CompletedReceiptSetHash != "" {
+						completedRevisions++
+					}
+				}
+				for n := 1; n <= completedRevisions; n++ {
+					expectedInput = strings.Replace(expectedInput, runtimeLongInputRevisionMarker(n), runtimeLongInputRevisionAssertion(n), 1)
+				}
+			} else if mode == "input_revision_cycle" {
+				// Two visits to each full physical preimage are allowed; the next is blocked.
+			} else if mode == "input_revision_omission" {
 				expectedInput = strings.Replace(expectedInput, `strings.TrimSpace(string(out))==""`, `strings.TrimSpace(string(out))!="4"`, 1)
 			} else {
 				expectedInput = strings.Replace(expectedInput, `!="5"`, `!="4"`, 1)
@@ -1090,7 +1159,7 @@ func %s(t *testing.T) {
 			}
 			classifiedReviews-- // Malformed fixture is not an admitted review.
 		}
-		assertRuntimeInputRevisionMainline(t, completed, classifiedReviews)
+		assertRuntimeInputRevisionMainline(t, completed, classifiedReviews, mode)
 	}
 	if projectBehaviorRepair && behaviorRepairs != 1 {
 		t.Fatal("same-binding implementation repair was missing or repeated")

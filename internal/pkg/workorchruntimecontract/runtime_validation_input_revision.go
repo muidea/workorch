@@ -324,7 +324,6 @@ func validateRuntimeInputRevisionState(def RuntimeDefinitionContext, facts Runti
 			return err
 		}
 	}
-	revisionCounts := map[common.CoverageWorkItemID]int{}
 	for _, g := range s.AllHistory() {
 		if g.Reason != RuntimeSemanticPlanningRetirementInputRevision {
 			continue
@@ -333,11 +332,10 @@ func validateRuntimeInputRevisionState(def RuntimeDefinitionContext, facts Runti
 		if err != nil {
 			return err
 		}
-		revisionCounts[v.Binding.CoverageWorkItemID]++
 		declared := false
 		for _, f := range facts.DefinitionFocuses {
 			if len(f.CoverageWorkItemIDs) == 1 && f.CoverageWorkItemIDs[0] == v.Binding.CoverageWorkItemID && f.ImplementationWorkPolicy != nil && f.ImplementationWorkPolicy.InputRevisionProtocolRef == RuntimeValidationInputRevisionProtocolV1 && f.ImplementationWorkPolicy.OwnerModuleID == v.OwnerModuleID {
-				declared = revisionCounts[v.Binding.CoverageWorkItemID] <= f.ImplementationWorkPolicy.MaxInputRevisionsPerCWI
+				declared = true
 			}
 		}
 		if !declared || v.WorkspaceID != facts.WorkspaceID || v.RunID != facts.RunID || v.DefinitionSeedHash != facts.DefinitionSeed.Hash || v.Binding.DefinitionRevision != def.Revision {

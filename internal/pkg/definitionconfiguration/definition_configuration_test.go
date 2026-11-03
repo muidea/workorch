@@ -1,6 +1,7 @@
 package definitionconfiguration
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -135,6 +136,51 @@ func TestCapacityPreflightHonorsSealedPolicyBeforeReview(t *testing.T) {
 		_, err := CompileForItems(&workspacemodel.Workspace{ID: "ws"}, template, items)
 		if (err == nil) != (limit == 128) {
 			t.Fatalf("sealed limit %d: %v", limit, err)
+		}
+	}
+}
+
+func TestCurrentMethodRetiresInheritedInputRevisionAllowanceWithoutRewritingWorkspace(t *testing.T) {
+	current, input, _ := templateProofFixture(t, 1)
+	original := current.Clone()
+	hints := original.ContextHints.Map()
+	declarations := 0
+	for _, raw := range hints["profileContracts"].(map[string]any) {
+		for _, item := range raw.(map[string]any)["evidenceRequirements"].([]any) {
+			if policy, ok := item.(map[string]any)["implementationWorkPolicy"].(map[string]any); ok {
+				policy["maxInputRevisionsPerCWI"] = 4
+				declarations++
+			}
+		}
+	}
+	if declarations == 0 {
+		t.Fatal("fixture has no input revision declaration")
+	}
+	original.ContextHints = payload(t, hints)
+	w := &workspacemodel.Workspace{ID: input.WorkspaceID, TemplateID: current.ID, ContextHints: original.ContextHints.Clone(), DefinitionAuthoring: &workspacemodel.DefinitionAuthoringRecord{Input: input, TemplateSnapshot: original}}
+	before, _ := json.Marshal(w)
+	for range 2 {
+		compiled, err := Compile(w, &current)
+		if err != nil {
+			t.Fatal("inherited allowance blocked current method", err)
+		}
+		seen := 0
+		for _, profile := range compiled.ProfileContracts {
+			for _, requirement := range profile.EvidenceRequirements {
+				if p := requirement.ImplementationWorkPolicy; p != nil {
+					seen++
+					if p.MaxInputRevisionsPerCWI != 0 || p.InputRevisionProtocolRef != runtimecontract.RuntimeValidationInputRevisionProtocolV1 {
+						t.Fatal("current method retained limit or lost permission")
+					}
+				}
+			}
+		}
+		if seen != declarations {
+			t.Fatal("declaration lost during refresh")
+		}
+		after, _ := json.Marshal(w)
+		if string(before) != string(after) {
+			t.Fatal("compilation rewrote original owner/source image")
 		}
 	}
 }

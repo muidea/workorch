@@ -133,7 +133,7 @@ func runtimeImplementationProgress(state runtimecontract.RuntimeStateRecord) *pr
 	for _, focus := range state.Facts.DefinitionFocuses {
 		if len(focus.CoverageWorkItemIDs) == 1 && string(focus.CoverageWorkItemIDs[0]) == ret.CurrentWorkItemID && focus.ImplementationWorkPolicy != nil {
 			ret.RepeatedStateLimit = focus.ImplementationWorkPolicy.MaxRepeatedWorkStates
-			ret.InputRevisionLimit = focus.ImplementationWorkPolicy.MaxInputRevisionsPerCWI
+			ret.InputRevisionEnabled = focus.ImplementationWorkPolicy.InputRevisionProtocolRef == runtimecontract.RuntimeValidationInputRevisionProtocolV1
 		}
 	}
 	// Read complete accepted purpose history, including archived generations.
@@ -170,7 +170,6 @@ func runtimeImplementationProgress(state runtimecontract.RuntimeStateRecord) *pr
 		if ret.CurrentWorkItemID != "" && string(round.CoverageWorkItemID) == ret.CurrentWorkItemID {
 			ret.WorkRoundsUsed++
 			ret.RepeatedStateLimit = round.ScopeRequest.Policy.MaxRepeatedWorkStates
-			ret.InputRevisionLimit = round.ScopeRequest.Policy.MaxInputRevisionsPerCWI
 		}
 		if round.CompletedReceiptSetHash != "" {
 			ret.CompletedRounds++

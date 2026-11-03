@@ -122,8 +122,8 @@ func runtimeProgressSummary(runtime *projectioncontract.RuntimeProgress) string 
 	}
 	if work := runtime.ImplementationWork; work != nil && work.CurrentWorkItemID != "" {
 		parts = append(parts, fmt.Sprintf("current CWI %s cumulative rounds %d | repeated state %d/%d | intent: %s", work.CurrentWorkItemID, work.WorkRoundsUsed, work.RepeatedWorkStates, work.RepeatedStateLimit, work.CurrentIntent))
-		if work.InputRevisionLimit > 0 {
-			parts = append(parts, fmt.Sprintf("input revisions %d/%d", work.InputRevisionsUsed, work.InputRevisionLimit))
+		if work.InputRevisionEnabled {
+			parts = append(parts, fmt.Sprintf("input revisions %d (cumulative)", work.InputRevisionsUsed))
 		}
 		if work.LastIntentReview != nil {
 			parts = append(parts, "intent review: "+string(work.LastIntentReview.Outcome)+" | "+work.LastIntentReview.Reason)

@@ -46,20 +46,20 @@ type RuntimeProgress struct {
 // Counts persisted Runtime facts only. In particular, an owner-local physical
 // effect or saved receipt not admitted to Runtime cannot be inferred here.
 type RuntimeImplementationProgress struct {
-	CurrentWorkItemID   string                                            `json:"currentWorkItemId,omitempty"`
-	CurrentIntent       string                                            `json:"currentIntent,omitempty"`
-	LastIntentReview    *runtimecontract.RuntimeImplementationRoundReview `json:"lastIntentReview,omitempty"`
-	WorkRoundsUsed      int                                               `json:"workRoundsUsed"`
-	RepeatedWorkStates  int                                               `json:"repeatedWorkStates"`
-	InputRevisionsUsed  int                                               `json:"inputRevisionsUsed"`
-	InputRevisionLimit  int                                               `json:"inputRevisionLimit"`
-	RepeatedStateLimit  int                                               `json:"repeatedStateLimit"`
-	ReservedRounds      int                                               `json:"reservedRounds"`
-	CompletedRounds     int                                               `json:"completedRounds"`
-	CommittedReceipts   int                                               `json:"committedReceipts"`
-	UnknownExecutions   int                                               `json:"unknownExecutions"`
-	SemanticGenerations int                                               `json:"semanticGenerations"`
-	ArchivedSegments    int                                               `json:"archivedSegments"`
+	CurrentWorkItemID    string                                            `json:"currentWorkItemId,omitempty"`
+	CurrentIntent        string                                            `json:"currentIntent,omitempty"`
+	LastIntentReview     *runtimecontract.RuntimeImplementationRoundReview `json:"lastIntentReview,omitempty"`
+	WorkRoundsUsed       int                                               `json:"workRoundsUsed"`
+	RepeatedWorkStates   int                                               `json:"repeatedWorkStates"`
+	InputRevisionsUsed   int                                               `json:"inputRevisionsUsed"`
+	InputRevisionEnabled bool                                              `json:"inputRevisionEnabled"`
+	RepeatedStateLimit   int                                               `json:"repeatedStateLimit"`
+	ReservedRounds       int                                               `json:"reservedRounds"`
+	CompletedRounds      int                                               `json:"completedRounds"`
+	CommittedReceipts    int                                               `json:"committedReceipts"`
+	UnknownExecutions    int                                               `json:"unknownExecutions"`
+	SemanticGenerations  int                                               `json:"semanticGenerations"`
+	ArchivedSegments     int                                               `json:"archivedSegments"`
 }
 
 type RuntimeEvidenceCounts struct {

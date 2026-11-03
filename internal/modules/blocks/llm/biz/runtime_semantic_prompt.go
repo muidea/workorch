@@ -33,7 +33,7 @@ func buildRuntimeSemanticPrompt(request llmmodels.RuntimeCandidateRequest, prepa
 	}
 	capabilityJSON, err := json.Marshal(runtimeSemanticCapabilityProjection{
 		CapabilityKinds:   prepared.context.Definition.CapabilityContract,
-		ExecutionContract: prepared.context.Activation.ExecutionContract,
+		ExecutionContract: prepared.context.Activation.ExecutionContract.ExecutionMethod(),
 	})
 	if err != nil {
 		return runtimeSemanticPrompt{}, err

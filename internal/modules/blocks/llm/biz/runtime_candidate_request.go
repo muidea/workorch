@@ -106,7 +106,7 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 	capabilityJSON, err := json.Marshal(struct {
 		Kinds             []string                                 `json:"kinds"`
 		ExecutionContract runtimecontract.RuntimeExecutionContract `json:"executionContract"`
-	}{definitionContext.CapabilityContract, candidateContext.Activation.ExecutionContract})
+	}{definitionContext.CapabilityContract, candidateContext.Activation.ExecutionContract.ExecutionMethod()})
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}

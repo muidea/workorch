@@ -1638,8 +1638,9 @@ SM-2 的 exact complete input-review conflict 私有事件保留旧 generation�
 待修订报告只允许真实 effect purpose，不允许 unchanged re-review 或借用 post-execution repair。未 opt-in 继续原 conflict 失败。
 
 File opt-in edit feasibility 预览同一 edit，核对原输入 before hash、变化后像；候选/最终 seal/dispatch reload 重核。
-修订使用独立 `MaxInputRevisionsPerCWI`，普通开发不消耗该额度；proof/provider/capability budget 保留，真实 accepted receipt 零 CWI/validation credit；
+修订不按累计次数停止；`InputRevisionProtocolRef` 保留精确输入写入许可，原 `MaxInputRevisionsPerCWI` 仅作不可变来源记录，不进入当前方法投影。完整物理状态重复保护与 proof/provider/capability budget 保留，真实 accepted receipt 零 CWI/validation credit；
 资源失效后取得真实当前输入，再独立审查、执行全部原 validation 和终态交付。未知、stale、预算不足或混合/歧义来源不放行。
+真实 capability 预算耗尽可在 dispatch 封存后、claim 前停止：SM-4 按原错误交给 SM-2，原 dispatch invalidated、原轮次保持未完成。fresh-load 必须独立核对 capability remaining=0、原执行记录仍 sealed 且无 claim/receipt；有 claim 或未知结果不得借此关闭。不得伪造失败回执、完成 hash 或 CWI credit。
 Core 不解释语言/框架/项目语义；具体改法来自原 Profile/project 和完整审查反馈。SM-1/4 不获新决策权。
 验证：input-revision 回归、input-review revision drive 回归，后者用真实 File/Shell/Run/Result/Workspace owner，
 仅脚本化 provider，覆盖真实修改→fresh review→validation→ACK 与两处 restart；不等同收费 live 或十分钟公开 fullflow。
@@ -1759,10 +1760,9 @@ conflict. Genuine alternatives/prerequisite gaps retain their existing admission
 SM-2 validates sources, consumes observations and seals existing failure authority atomically. SM-3 preserves the bound
 intent and exact review identities in existing transactions. SM-4 only re-drives those persisted transactions and delivers
 the judged outcome; SM-1 ownership and lifecycle states are unchanged. Ordinary validation, exact repair, all-of CWI
-convergence and Result/Workspace/Run ACK remain mandatory for success. Single-transaction target, provider, capability and repair budgets remain. Input-review revisions have their own sealed
-`MaxInputRevisionsPerCWI` and reload count; completed ordinary work does not spend that allowance. There is no `8*CWI`
+convergence and Result/Workspace/Run ACK remain mandatory for success. Single-transaction target, provider, capability and repair budgets remain. Input-review revisions have no cumulative allowance. The protocol enables exact reviewed-input changes; complete-state cycle guards and original resource budgets still apply. Original source metadata is retained without execution authority; current Profile configuration rejects the retired count field. There is no `8*CWI`
 round/choice ledger capacity or lineage minimum upper bound. Governance dispatch handoffs keep their separate
-`MaxRuntimeImplementationGovernanceDispatches`. Existing Runs are never backfilled, migrated, unlocked or granted new policy.
+`MaxRuntimeImplementationGovernanceDispatches`. Existing Run facts are never backfilled, migrated or revived; current methods apply only at legal new transaction boundaries.
 
 Progress projections expose current intent, last review, cumulative rounds and the distinct repeated-state guard,
 separately from physical receipts, ordinary validation, CWI satisfaction and real execution budgets. Their detached

@@ -26,6 +26,10 @@ func TestCompactSemanticPlanPromptSchemaRemovesProseMetadata(t *testing.T) {
 }
 
 func runtimeSemanticWorkProviderRequestForTest(t *testing.T, purpose bool, revisions ...*runtimecontract.RuntimeValidationInputRevision) llmmodels.RuntimeCandidateRequest {
+	return runtimeSemanticWorkProviderSourceRequestForTest(t, purpose, 0, revisions...)
+}
+
+func runtimeSemanticWorkProviderSourceRequestForTest(t *testing.T, purpose bool, sourceCount int, revisions ...*runtimecontract.RuntimeValidationInputRevision) llmmodels.RuntimeCandidateRequest {
 	t.Helper()
 	request := runtimeSemanticProviderTestRequest(t)
 	ctx := &request.SemanticContext
@@ -37,7 +41,7 @@ func runtimeSemanticWorkProviderRequestForTest(t *testing.T, purpose bool, revis
 	if len(revisions) > 0 {
 		revision = revisions[0].Clone()
 		policy.InputRevisionProtocolRef = runtimecontract.RuntimeValidationInputRevisionProtocolV1
-		policy.MaxInputRevisionsPerCWI = 2
+		policy.MaxInputRevisionsPerCWI = sourceCount
 		policy.AllowedOperations = []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileEdit}}
 		ctx.Definition.CapabilityContract = []string{runtimecontract.StepKindFileEdit}
 	}

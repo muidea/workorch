@@ -13,13 +13,12 @@ func RuntimeImplementationRepeatedWorkStates(preview RuntimeImplementationWorkSc
 	if preview.Observation == nil || preview.Observation.Content == nil {
 		return 0
 	}
-	policyHash := StableRuntimeImplementationWorkPolicyHash(preview.Request.Policy)
 	count := 0
 	for _, round := range rounds {
-		if round.WorkspaceID != preview.Request.WorkspaceID || round.RunID != preview.Request.RunID || round.CoverageWorkItemID != preview.Request.CoverageWorkItemID || round.PolicyHash != policyHash || round.CompletedReceiptSetHash == "" || round.FailedReceiptHash != "" || round.ScopeObservation == nil || round.ScopeObservation.Content == nil {
+		if round.WorkspaceID != preview.Request.WorkspaceID || round.RunID != preview.Request.RunID || round.CoverageWorkItemID != preview.Request.CoverageWorkItemID || round.PolicyHash != StableRuntimeImplementationWorkPolicyHash(round.ScopeRequest.Policy) || round.CompletedReceiptSetHash == "" || round.FailedReceiptHash != "" || round.ScopeObservation == nil || round.ScopeObservation.Content == nil {
 			continue
 		}
-		if sameImplementationResourceState(*preview.Observation.Content, *round.ScopeObservation.Content) {
+		if preview.Request.Policy.OwnerModuleID == round.ScopeRequest.Policy.OwnerModuleID && sameImplementationResourceState(*preview.Observation.Content, *round.ScopeObservation.Content) {
 			count++
 		}
 	}
@@ -29,7 +28,10 @@ func RuntimeImplementationRepeatedWorkStates(preview RuntimeImplementationWorkSc
 func sameImplementationResourceState(a, b RuntimeImplementationWorkContent) bool {
 	// Observed tree revisions intentionally differ after a real successor write.
 	// Compare original target identities and FULL bytes, not revision-sensitive
-	// content hashes or a model's assertion of progress.
+	// content hashes or a model's assertion of progress. The complete target set
+	// defines the physical scope within this owner/CWI; declaration/selector names
+	// and method limits must not erase a visit. Original source hashes remain
+	// independently validated by the work ledger and each transaction.
 	return slices.EqualFunc(a.Snapshots, b.Snapshots, func(a, b TargetSnapshot) bool {
 		return a.TargetRef == b.TargetRef && a.Content == b.Content && a.Size == b.Size && a.ContentHash == b.ContentHash
 	})

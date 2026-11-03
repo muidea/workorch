@@ -105,7 +105,7 @@ func runtimeSemanticImplementationWorkForProvider(work *runtimecontract.RuntimeS
 		InputRevision:              work.Scope.Request.InputRevision.Clone(),
 		PurposeChoiceOnly:          work.PurposeChoiceOnly, EffectAvailable: work.EffectAvailable, RepeatedWorkStates: work.RepeatedWorkStates,
 		RoundHash: work.RoundHash, Ordinal: work.Ordinal, PrecedingReceiptSetHash: work.PrecedingReceiptSetHash,
-		PolicyHash: work.PolicyHash, Policy: work.Scope.Request.Policy.Clone(),
+		PolicyHash: work.PolicyHash, Policy: work.Scope.Request.Policy.ExecutionMethod(),
 		ExcludedTargetRefs: append([]string(nil), work.ExcludedTargetRefs...),
 		Scope: runtimeSemanticImplementationScopeProjection{
 			RequestID: work.Scope.Request.RequestID, SnapshotID: selection.SnapshotID, OwnerModuleID: selection.OwnerModuleID,

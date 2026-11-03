@@ -183,3 +183,31 @@ func TestRuntimeImplementationIntentReviewIsReadOnlyAndFocusScoped(t *testing.T)
 		t.Fatal("projection changes source authority")
 	}
 }
+
+func TestInputRevisionProgressUsesProtocolNotHistoricalAllowance(t *testing.T) {
+	state := runtimecontract.RuntimeStateRecord{
+		Facts: runtimecontract.RuntimeFacts{
+			Focus:             runtimecontract.CoverageFocus{CoverageWorkItemIDs: []common.CoverageWorkItemID{"a"}},
+			DefinitionFocuses: []runtimecontract.RuntimeDefinitionFocus{{CoverageWorkItemIDs: []common.CoverageWorkItemID{"a"}, ImplementationWorkPolicy: &runtimecontract.RuntimeImplementationWorkPolicy{InputRevisionProtocolRef: runtimecontract.RuntimeValidationInputRevisionProtocolV1}}},
+		},
+		ImplementationWork: runtimecontract.RuntimeImplementationWorkLedger{Rounds: []runtimecontract.RuntimeImplementationWorkRound{{CoverageWorkItemID: "a", ScopeRequest: runtimecontract.RuntimeImplementationWorkScopeRequest{Policy: runtimecontract.RuntimeImplementationWorkPolicy{MaxInputRevisionsPerCWI: 4}}}}},
+	}
+	before, _ := json.Marshal(state)
+	progress := mapRuntimeProgress(state)
+	if !progress.ImplementationWork.InputRevisionEnabled || !strings.Contains(runtimeProgressSummary(&progress), "input revisions 0 (cumulative)") {
+		t.Fatal("zero audit count disabled revision protocol")
+	}
+	raw, _ := json.Marshal(progress)
+	if strings.Contains(string(raw), "inputRevisionLimit") {
+		t.Fatal("retired executable limit exposed")
+	}
+	state.Facts.DefinitionFocuses[0].ImplementationWorkPolicy.InputRevisionProtocolRef = ""
+	if mapRuntimeProgress(state).ImplementationWork.InputRevisionEnabled {
+		t.Fatal("historical round restored obsolete permission")
+	}
+	state.Facts.DefinitionFocuses[0].ImplementationWorkPolicy.InputRevisionProtocolRef = runtimecontract.RuntimeValidationInputRevisionProtocolV1
+	after, _ := json.Marshal(state)
+	if string(before) != string(after) {
+		t.Fatal("projection changed owner source")
+	}
+}

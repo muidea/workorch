@@ -115,7 +115,8 @@ func implementationWorkProtocolSupported(policy RuntimeImplementationWorkPolicy)
 // fresh observation and validation. Only the optional versioned input-revision
 // route can open an exact reviewed input; ordinary work keeps it protected.
 type RuntimeImplementationWorkPolicy struct {
-	InputRevisionProtocolRef             string                         `json:"inputRevisionProtocolRef,omitempty"`
+	InputRevisionProtocolRef string `json:"inputRevisionProtocolRef,omitempty"`
+	// Original source-image metadata only. Never an execution allowance.
 	MaxInputRevisionsPerCWI              int                            `json:"maxInputRevisionsPerCWI,omitempty"`
 	ProtocolRef                          string                         `json:"protocolRef"`
 	OwnerModuleID                        string                         `json:"ownerModuleId"`
@@ -131,6 +132,15 @@ type RuntimeImplementationWorkPolicy struct {
 	RequireFreshObservation              bool                           `json:"requireFreshObservation"`
 	RequireFreshValidation               bool                           `json:"requireFreshValidation"`
 	ProtectValidationInputs              bool                           `json:"protectValidationInputs"`
+}
+
+// ExecutionMethod projects the current executable method from its immutable
+// source image. Source hashes and frozen requests retain the original metadata.
+// Input revision is enabled by its protocol, never by a cumulative allowance.
+func (p RuntimeImplementationWorkPolicy) ExecutionMethod() RuntimeImplementationWorkPolicy {
+	p = p.Clone()
+	p.MaxInputRevisionsPerCWI = 0
+	return p
 }
 
 // Clone preserves even invalid raw declarations; admission, not cloning, owns
@@ -192,8 +202,8 @@ func (p RuntimeImplementationWorkPolicy) Validate() error {
 	if p.InputRevisionProtocolRef != "" && p.InputRevisionProtocolRef != RuntimeValidationInputRevisionProtocolV1 {
 		return fmt.Errorf("unsupported input revision protocol")
 	}
-	if p.InputRevisionProtocolRef == "" && p.MaxInputRevisionsPerCWI != 0 || p.InputRevisionProtocolRef != "" && (p.MaxInputRevisionsPerCWI < 1 || p.MaxInputRevisionsPerCWI > 8) {
-		return fmt.Errorf("input revision requires its own declared limit in 1..8; ordinary implementation rounds do not consume it")
+	if p.MaxInputRevisionsPerCWI < 0 || p.InputRevisionProtocolRef == "" && p.MaxInputRevisionsPerCWI != 0 {
+		return fmt.Errorf("input revision source metadata requires a protocol and a nonnegative count")
 	}
 
 	if p.ProtocolRef != RuntimeImplementationWorkProtocolV1 {

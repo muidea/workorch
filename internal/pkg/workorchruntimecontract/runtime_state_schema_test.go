@@ -265,3 +265,19 @@ func runtimeStateJSONField(t *testing.T, object map[string]json.RawMessage, name
 	}
 	return value
 }
+
+func TestInputRevisionSourceMetadataRemainsStrictlyReadable(t *testing.T) {
+	original := []byte(`{"Facts":{"DefinitionFocuses":[{"ImplementationWorkPolicy":{"inputRevisionProtocolRef":"validation/input-revision/v1","maxInputRevisionsPerCWI":4}}]}}`)
+	var state RuntimeStateRecord
+	if err := json.Unmarshal(original, &state); err != nil {
+		t.Fatal(err)
+	}
+	p := state.Facts.DefinitionFocuses[0].ImplementationWorkPolicy
+	if p.MaxInputRevisionsPerCWI != 4 || p.ExecutionMethod().MaxInputRevisionsPerCWI != 0 {
+		t.Fatal("source metadata lost or treated as method")
+	}
+	bad := strings.Replace(string(original), `"maxInputRevisionsPerCWI":4`, `"undeclaredAllowance":4`, 1)
+	if err := json.Unmarshal([]byte(bad), &state); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatal("unknown nested field accepted", err)
+	}
+}

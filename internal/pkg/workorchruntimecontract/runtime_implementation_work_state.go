@@ -494,7 +494,23 @@ func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinition
 					return fmt.Errorf("implementation suspension has no exact governance binding")
 				}
 			} else if dispatch.State != RuntimeDispatchStateSealed {
-				return fmt.Errorf("unsettled implementation round cannot hide a closed dispatch")
+				// Budget admission may stop a sealed operation before any physical
+				// claim. Retain its original uncompleted round and invalidated
+				// dispatch as audit facts; do not manufacture a receipt or credit.
+				remaining, budgetErr := RuntimeBudgetRemaining(budget, RuntimeBudgetDimensionCapabilityOperation)
+				if dispatch.State != RuntimeDispatchStateInvalidated || len(dispatch.OperationExecutions) == 0 || facts.Failure == nil || facts.Failure.Class != FailureClassExecutionBudgetExhausted || budgetErr != nil || remaining != 0 {
+					return fmt.Errorf("unsettled implementation round cannot hide a closed dispatch")
+				}
+				for _, execution := range dispatch.OperationExecutions {
+					if execution.State != OperationExecutionSealed || execution.Validate() != nil {
+						return fmt.Errorf("budget-stopped implementation dispatch must have no physical claim")
+					}
+					for _, receipt := range receipts {
+						if receipt.ExecutionKey == execution.ExecutionKey {
+							return fmt.Errorf("budget-stopped implementation dispatch cannot hide an owner receipt")
+						}
+					}
+				}
 			}
 		}
 		if matches != 1 {

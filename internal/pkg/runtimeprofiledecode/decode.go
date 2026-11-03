@@ -136,7 +136,6 @@ func ImplementationWorkPolicy(input map[string]any) *runtimecontract.RuntimeImpl
 	}
 	policy := &runtimecontract.RuntimeImplementationWorkPolicy{
 		InputRevisionProtocolRef: String(object["inputRevisionProtocolRef"]),
-		MaxInputRevisionsPerCWI:  Int(object["maxInputRevisionsPerCWI"]),
 		ProtocolRef:              String(object["protocolRef"]), OwnerModuleID: String(object["ownerModuleId"]),
 		TargetSelectorRef: String(object["targetSelectorRef"]), TargetSelectorOwnerRef: String(object["targetSelectorOwnerRef"]),
 		TargetSelectorSubjectRef: String(object["targetSelectorSubjectRef"]), TargetSelectorCandidateRefs: Strings(object["targetSelectorCandidateRefs"]),

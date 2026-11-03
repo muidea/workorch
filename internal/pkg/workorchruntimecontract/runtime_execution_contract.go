@@ -42,6 +42,23 @@ type RuntimeCapabilityUsagePolicy struct {
 	Notes              []string
 }
 
+// ExecutionMethod excludes retired source-only metadata from provider method
+// declarations. It never replaces the original contract used for source hashes,
+// permissions, budgets or frozen transaction admission.
+func (c RuntimeExecutionContract) ExecutionMethod() RuntimeExecutionContract {
+	c = cloneRuntimeExecutionContractRaw(c)
+	for i := range c.ProfileContracts {
+		for j := range c.ProfileContracts[i].EvidenceRequirements {
+			r := &c.ProfileContracts[i].EvidenceRequirements[j]
+			if r.ImplementationWorkPolicy != nil {
+				method := r.ImplementationWorkPolicy.ExecutionMethod()
+				r.ImplementationWorkPolicy = &method
+			}
+		}
+	}
+	return c
+}
+
 func (c RuntimeExecutionContract) Normalized() RuntimeExecutionContract {
 	c.OperationContractRevision = strings.TrimSpace(c.OperationContractRevision)
 	c.StateChangePolicy = RuntimeStateChangePolicy(strings.TrimSpace(string(c.StateChangePolicy)))

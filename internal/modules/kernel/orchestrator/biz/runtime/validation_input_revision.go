@@ -32,22 +32,6 @@ func retireRuntimeInputReviewForRevision(a RuntimeAggregate) (RuntimeAggregate, 
 			}
 		}
 	}
-	revisions := 0
-	for _, prior := range a.SemanticPlanning.AllHistory() {
-		if prior.Reason != runtimecontract.RuntimeSemanticPlanningRetirementInputRevision {
-			continue
-		}
-		original, err := runtimecontract.CompileRuntimeValidationInputRevision(prior.Snapshot)
-		if err != nil {
-			return a, false, err
-		}
-		if original.Binding.CoverageWorkItemID == v.Binding.CoverageWorkItemID {
-			revisions++
-		}
-	}
-	if revisions >= policy.MaxInputRevisionsPerCWI {
-		return a, false, nil
-	}
 	if pending, e := runtimecontract.PendingRuntimeValidationInputRevision(a.SemanticPlanning, a.ImplementationWork, v.Binding.CoverageWorkItemID); e != nil || pending != nil {
 		return a, false, nil
 	}

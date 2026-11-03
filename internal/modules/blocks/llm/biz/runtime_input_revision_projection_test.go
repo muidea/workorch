@@ -110,3 +110,31 @@ func TestRuntimeInputRevisionOperationsReceiveFullOriginalInputAndFeedback(t *te
 		t.Fatal("operation projection aliases raw input")
 	}
 }
+
+func TestInputRevisionProviderMethodOmitsAllowanceButRetainsOriginalSources(t *testing.T) {
+	for _, purpose := range []bool{true, false} {
+		request := runtimeSemanticWorkProviderSourceRequestForTest(t, purpose, 4, inputRevisionProviderFixture(t))
+		before, _ := json.Marshal(request)
+		provider, err := runtimeSemanticPlanProviderRequest(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, section := range provider.PromptContext.Sections {
+			if strings.Contains(section.Content, "maxInputRevisionsPerCWI") {
+				t.Fatal("retired allowance leaked into executable projection", section)
+			}
+		}
+		after, _ := json.Marshal(request)
+		if string(before) != string(after) {
+			t.Fatal("provider projection mutated original transaction")
+		}
+		source := request.SemanticManifest.ProofObligations[0].ImplementationWork
+		projected, err := runtimeSemanticImplementationWorkForProvider(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if source.Scope.Request.Policy.MaxInputRevisionsPerCWI != 4 || projected.Policy.MaxInputRevisionsPerCWI != 0 || projected.PolicyHash != source.PolicyHash || !reflect.DeepEqual(projected.InputRevision, source.Scope.Request.InputRevision) {
+			t.Fatal("source authority or full original review changed")
+		}
+	}
+}

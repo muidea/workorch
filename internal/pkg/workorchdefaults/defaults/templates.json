@@ -1018,7 +1018,6 @@
                 ],
                 "maxRepeatedWorkStates": 2,
                 "inputRevisionProtocolRef": "validation/input-revision/v1",
-                "maxInputRevisionsPerCWI": 4,
                 "maxTargetsPerRound": 4,
                 "requireFreshObservation": true,
                 "requireFreshValidation": true,

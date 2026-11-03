@@ -66,16 +66,9 @@ func TestRuntimeImplementationWorkPolicyRejectsUnboundedOrExpandedAuthority(t *t
 		"negative repeated-state guard":   func(p *RuntimeImplementationWorkPolicy) { p.MaxRepeatedWorkStates = -1 },
 		"oversize repeated-state guard":   func(p *RuntimeImplementationWorkPolicy) { p.MaxRepeatedWorkStates = 9 },
 		"input revision without protocol": func(p *RuntimeImplementationWorkPolicy) { p.MaxInputRevisionsPerCWI = 1 },
-		"zero input revision limit": func(p *RuntimeImplementationWorkPolicy) {
-			p.InputRevisionProtocolRef = RuntimeValidationInputRevisionProtocolV1
-		},
 		"negative input revision limit": func(p *RuntimeImplementationWorkPolicy) {
 			p.InputRevisionProtocolRef = RuntimeValidationInputRevisionProtocolV1
 			p.MaxInputRevisionsPerCWI = -1
-		},
-		"oversize input revision limit": func(p *RuntimeImplementationWorkPolicy) {
-			p.InputRevisionProtocolRef = RuntimeValidationInputRevisionProtocolV1
-			p.MaxInputRevisionsPerCWI = 9
 		},
 		"zero targets":      func(p *RuntimeImplementationWorkPolicy) { p.MaxTargetsPerRound = 0 },
 		"oversize targets":  func(p *RuntimeImplementationWorkPolicy) { p.MaxTargetsPerRound = 9 },
@@ -328,6 +321,35 @@ func TestRuntimeImplementationWorkAvailabilityAcceptsOnlyMatchingFileTargetPolic
 		}
 		if err := ValidateRuntimeImplementationWorkAvailability(profiles); err != nil {
 			t.Fatalf("matching File policy %s: %v", policy, err)
+		}
+	}
+}
+
+func TestInputRevisionMethodHasNoCumulativeAllowanceAndPreservesSourceImage(t *testing.T) {
+	p := implementationWorkPolicyFixture()
+	p.InputRevisionProtocolRef = RuntimeValidationInputRevisionProtocolV1
+	for _, count := range []int{0, 4, 12, 64} {
+		p.MaxInputRevisionsPerCWI = count
+		if err := p.Validate(); err != nil {
+			t.Fatal(count, err)
+		}
+		original, err := json.Marshal(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var restored RuntimeImplementationWorkPolicy
+		if err := json.Unmarshal(original, &restored); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(p, restored) || StableRuntimeImplementationWorkPolicyHash(p) != StableRuntimeImplementationWorkPolicyHash(restored) {
+			t.Fatal("source image changed on load")
+		}
+		method := restored.ExecutionMethod()
+		if method.MaxInputRevisionsPerCWI != 0 || method.InputRevisionProtocolRef != p.InputRevisionProtocolRef || restored.MaxInputRevisionsPerCWI != count {
+			t.Fatal("method lost permission or modified original source")
+		}
+		if err := method.Validate(); err != nil {
+			t.Fatal(err)
 		}
 	}
 }
