@@ -260,7 +260,7 @@ func sanitizeLLMContextBudgetAudit(input workorcheventpayload.Payload) workorche
 		fields []string
 	}{
 		{"processing", []string{"includedSections", "normalizedSections", "compressedSections", "omittedSections", "redactedPaths", "protectedFields", "integrityWarnings", "sourceRefs"}},
-		{"cacheObservation", []string{"schemaVersion", "renderer", "renderContractRef", "messageLayout", "stage", "metadataState", "sourceSectionCount", "recordedSectionCount", "requestedHints", "effectiveHints"}},
+		{"cacheObservation", []string{"schemaVersion", "renderer", "renderContractRef", "messageLayout", "stage", "metadataState", "sourceSectionCount", "recordedSectionCount", "requestedHints", "effectiveHints", "wireSchemaHash", "wireCachePrefixHash", "wireCacheMode", "wireCacheBreakpoints"}},
 	} {
 		if object, ok := input.Object(group.name); ok {
 			var safe []workorcheventpayload.Field

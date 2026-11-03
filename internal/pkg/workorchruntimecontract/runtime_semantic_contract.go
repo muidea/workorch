@@ -2065,13 +2065,11 @@ func validateRuntimeSemanticPlanDocumentAgainstValidatedManifestUncached(d Runti
 				proposal.OperationVariantID, nil, nil, err)
 		}
 		if err := validateRuntimeSemanticInputReview(proposal, catalog); err != nil {
-			return runtimeSemanticProposalViolation(proposal, proposalIndex, "validationInputReview", RuntimeSemanticConstraintRelational,
-				"incomplete_or_unbound_review", []string{"complete exact owner-bound input review"}, nil, err)
+			return runtimeSemanticInputReviewViolation(proposal, proposalIndex, err)
 		}
 		if proposal.ValidationInputReview != nil {
 			if err := proposal.ValidationInputReview.ValidateCoverageCriteria(items[proposal.CoverageWorkItemID]); err != nil {
-				return runtimeSemanticProposalViolation(proposal, proposalIndex, "validationInputReview", RuntimeSemanticConstraintRelational,
-					"incomplete_or_foreign_criterion_mapping", []string{"complete exact original criterion excerpts"}, nil, err)
+				return runtimeSemanticInputReviewViolation(proposal, proposalIndex, err)
 			}
 		}
 		if len(catalog.ValidationRecipeRefs) == 0 && containsRuntimeSemanticEvidenceKind(proposal.RequiredEvidenceKinds, EvidenceKindValidation) {

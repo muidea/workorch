@@ -1,6 +1,7 @@
 package workorchruntimecontract
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -19,20 +20,22 @@ func validateRuntimeValidationInputObligations(check RuntimeValidationInputCheck
 // Every report preserves exact content and canonical references.
 func validateRuntimeValidationInputObligationShape(check RuntimeValidationInputCheckReview, canonicalReferences bool) error {
 	if len(check.Obligations) == 0 || len(check.Obligations) > RuntimeValidationInputReviewMaxObligations {
-		return fmt.Errorf("input review requires a complete bounded obligation mapping")
+		return runtimeInputViolation(".obligations", "invalid_obligation_count", fmt.Sprintf("1..%d complete obligation mappings", RuntimeValidationInputReviewMaxObligations), "input review requires a complete bounded obligation mapping")
 	}
-	seen := make(map[string]bool, len(check.Obligations))
+	seen := make(map[string]int, len(check.Obligations))
 	conclusion := RuntimeValidationInputConsistent
-	for _, obligation := range check.Obligations {
-		for _, value := range []string{obligation.CriterionText, obligation.Reason} {
+	for index, obligation := range check.Obligations {
+		path := fmt.Sprintf(".obligations[%d]", index)
+		for _, field := range []struct{ name, value string }{{"criterionText", obligation.CriterionText}, {"reason", obligation.Reason}} {
+			value := field.value
 			if value == "" || value != strings.TrimSpace(value) || !utf8.ValidString(value) || len(value) > RuntimeValidationInputReviewMaxReasonBytes {
-				return fmt.Errorf("input obligation requires bounded exact criterion text and reasoning")
+				return runtimeInputViolation(path+"."+field.name, "invalid_obligation_text", "nonempty bounded UTF-8 text without surrounding whitespace", "input obligation requires bounded exact criterion text and reasoning")
 			}
 		}
-		if seen[obligation.CriterionText] {
-			return fmt.Errorf("input review repeats an obligation excerpt")
+		if previous, exists := seen[obligation.CriterionText]; exists {
+			return runtimeInputViolation(path+".criterionText", "duplicate_criterion_text", fmt.Sprintf("criterionText unique within this check; same excerpt already at obligations[%d]; express joint consumers in one obligation and retain all missing/conflicting/unknown findings in its finding and reason", previous), "input review repeats an obligation excerpt")
 		}
-		seen[obligation.CriterionText] = true
+		seen[obligation.CriterionText] = index
 		switch obligation.Finding {
 		case RuntimeValidationInputCovered:
 		case RuntimeValidationInputMissing, RuntimeValidationInputConflicting:
@@ -42,19 +45,19 @@ func validateRuntimeValidationInputObligationShape(check RuntimeValidationInputC
 				conclusion = RuntimeValidationInputInconclusive
 			}
 		default:
-			return fmt.Errorf("input obligation has an unsupported finding")
+			return runtimeInputViolation(path+".finding", "unsupported_finding", "covered | missing | conflicting | unknown", "input obligation has an unsupported finding")
 		}
 		if len(obligation.InputTargetRefs) == 0 || (canonicalReferences && !reflect.DeepEqual(obligation.InputTargetRefs, normalizeStrings(obligation.InputTargetRefs))) {
-			return fmt.Errorf("input obligation requires canonical observed input references")
+			return runtimeInputViolation(path+".inputTargetRefs", "noncanonical_input_refs", "nonempty unique sorted refs from this check's inputTargetRefs", "input obligation requires canonical observed input references")
 		}
 		for _, ref := range obligation.InputTargetRefs {
 			if !containsString(check.InputTargetRefs, ref) {
-				return fmt.Errorf("input obligation references content outside its check review")
+				return runtimeInputViolation(path+".inputTargetRefs", "foreign_input_ref", "refs from this check's inputTargetRefs only", "input obligation references content outside its check review")
 			}
 		}
 	}
 	if check.Conclusion != conclusion {
-		return fmt.Errorf("input review conclusion contradicts its obligation observations")
+		return runtimeInputViolation(".conclusion", "contradictory_conclusion", conclusion, "input review conclusion contradicts its obligation observations")
 	}
 	return nil
 }
@@ -64,15 +67,16 @@ func validateRuntimeValidationInputObligationShape(check RuntimeValidationInputC
 // from the mapping. The reviewer must still judge the actual assertions;
 // quoting criterion text is not proof.
 func (r RuntimeValidationInputReview) ValidateCriterionText(original string) error {
-	for _, check := range r.Checks {
+	for checkIndex, check := range r.Checks {
+		path := fmt.Sprintf(".checks[%d]", checkIndex)
 		if len(check.Obligations) == 0 {
-			return fmt.Errorf("criterion requires complete obligation excerpts")
+			return runtimeInputViolation(path+".obligations", "missing_criterion_mapping", "complete exact original criterion excerpts", "criterion requires complete obligation excerpts")
 		}
 
 		covered := make([]bool, len(original))
-		for _, obligation := range check.Obligations {
+		for index, obligation := range check.Obligations {
 			if obligation.CriterionText == "" || !strings.Contains(original, obligation.CriterionText) {
-				return fmt.Errorf("input review obligation is not an exact excerpt of the original criterion")
+				return runtimeInputViolation(fmt.Sprintf("%s.obligations[%d].criterionText", path, index), "foreign_criterion_excerpt", "exact excerpt of this check's original criterion", "input review obligation is not an exact excerpt of the original criterion")
 			}
 			for offset := 0; offset < len(original); {
 				index := strings.Index(original[offset:], obligation.CriterionText)
@@ -90,7 +94,7 @@ func (r RuntimeValidationInputReview) ValidateCriterionText(original string) err
 		}
 		for index, character := range original {
 			if !unicode.IsSpace(character) && !covered[index] {
-				return fmt.Errorf("input review obligation mapping omits part of the original criterion")
+				return runtimeInputViolation(path+".obligations", "incomplete_criterion_mapping", "exact excerpts covering every non-whitespace original criterion character", "input review obligation mapping omits part of the original criterion")
 			}
 		}
 	}
@@ -100,7 +104,7 @@ func (r RuntimeValidationInputReview) ValidateCriterionText(original string) err
 // ValidateCoverageCriteria 为每个 exact source check 核对其独立原判据。
 // CWI 自身及 Profile 附加检查仍使用共同 CWI 判据，不能以共同文本替代源义务。
 func (r RuntimeValidationInputReview) ValidateCoverageCriteria(item RuntimeCoverageItem) error {
-	for _, check := range r.Checks {
+	for index, check := range r.Checks {
 		criterion := item.TargetText
 		for _, source := range item.SourceObligationChecks {
 			if source.CheckRef == check.RequiredCheckRef {
@@ -109,7 +113,14 @@ func (r RuntimeValidationInputReview) ValidateCoverageCriteria(item RuntimeCover
 			}
 		}
 		if err := (RuntimeValidationInputReview{Checks: []RuntimeValidationInputCheckReview{check}}).ValidateCriterionText(criterion); err != nil {
-			return fmt.Errorf("input review check %q: %w", check.RequiredCheckRef, err)
+			var violation *runtimeValidationInputViolation
+			if errors.As(err, &violation) {
+				copy := *violation
+				copy.Path = strings.Replace(copy.Path, ".checks[0]", fmt.Sprintf(".checks[%d]", index), 1)
+				copy.Cause = fmt.Errorf("input review check %q: %w", check.RequiredCheckRef, err)
+				return &copy
+			}
+			return err
 		}
 	}
 	return nil

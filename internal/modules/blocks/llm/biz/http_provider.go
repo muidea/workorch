@@ -552,6 +552,7 @@ func (p *HTTPProvider) completeResponses(ctx context.Context, request llmmodels.
 		Reasoning:          responsesReasoningForRequest(request),
 		Text:               responsesTextForRequest(p.config.Capabilities, request),
 	}
+	observeResponsesCacheWire(request.ContextBudget, requestPayload)
 	payload, err := json.Marshal(requestPayload)
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
@@ -699,6 +700,7 @@ func (p *HTTPProvider) streamResponses(ctx context.Context, request llmmodels.Pr
 		Text:               responsesTextForRequest(p.config.Capabilities, request),
 		Stream:             true,
 	}
+	observeResponsesCacheWire(request.ContextBudget, requestPayload)
 	payload, err := json.Marshal(requestPayload)
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err

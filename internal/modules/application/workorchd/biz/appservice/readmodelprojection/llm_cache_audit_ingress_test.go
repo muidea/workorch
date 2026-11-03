@@ -26,7 +26,7 @@ func TestCacheAuditSurvivesRealIngressAndProjection(t *testing.T) {
 					ProviderSubmitted: true, StablePrefixHash: "runtime-prefix", RenderedStablePrefixHash: "rendered-prefix", CacheStrategy: "stable_prefix_dynamic_tail",
 					IncludedSections: []string{"C0", "C1", "C2", "C3", "C4", "C5"}, ProtectedFields: []string{"original-criteria"},
 					IntegrityWarnings: []string{"known-warning"}, SourceRefs: []string{"runtime://definition/rev"},
-					CacheObservation: llmaudit.CacheObservation{Renderer: "workorch.runtime_candidate_prompt/v2", MessageLayout: "section_messages/v1", Stage: "NeedStateChange", MetadataState: "complete", SourceSectionCount: 6, RecordedSectionCount: 6, RequestedHints: "explicit_prefix_breakpoint"},
+					CacheObservation: llmaudit.CacheObservation{WireSchemaHash: "sha256:schema", WireCachePrefixHash: "sha256:" + workspace, WireCacheMode: "explicit", WireCacheBreakpoints: 4, Renderer: "workorch.runtime_candidate_prompt/v2", MessageLayout: "section_messages/v1", Stage: "NeedStateChange", MetadataState: "complete", SourceSectionCount: 6, RecordedSectionCount: 6, RequestedHints: "explicit_prefix_breakpoint"},
 				}
 				for i := 0; i < 6; i++ {
 					budget.SectionHashes = append(budget.SectionHashes, llmaudit.ContextSection{ID: fmt.Sprintf("C%d", i), Hash: fmt.Sprintf("sha256:%s-%d", workspace, i), SizeBytes: 100 + i, BodyBytes: 90 + i, ExpandedBytes: 150 + i, LocalReferences: 2, Applicability: "current_request_authority", Components: []llmaudit.ContextComponent{{Path: "workContext", Bytes: 50, Applicability: "included", Reason: "sealed_work_task", Source: "owner.workContext"}, {Path: "manifest", Bytes: 40, Applicability: "included", Reason: "sealed_task_contract", Source: "owner.manifest"}}, SourceRefs: []string{fmt.Sprintf("runtime://section/%d", i)}})
@@ -67,6 +67,14 @@ func TestCacheAuditSurvivesRealIngressAndProjection(t *testing.T) {
 				}
 				if renderer, _ := observation.String("renderer"); renderer != budget.CacheObservation.Renderer {
 					t.Fatal("renderer lost")
+				}
+				for key, want := range map[string]string{"wireSchemaHash": budget.CacheObservation.WireSchemaHash, "wireCachePrefixHash": budget.CacheObservation.WireCachePrefixHash, "wireCacheMode": "explicit"} {
+					if actual, ok := observation.String(key); !ok || actual != want {
+						t.Fatalf("wire observation %s lost or mixed: %q", key, actual)
+					}
+				}
+				if actual, ok := observation.Int64("wireCacheBreakpoints"); !ok || actual != 4 {
+					t.Fatal("wire breakpoints lost")
 				}
 				if isKnown := llmUsageCacheMeasurementKnown(got.CacheUsage, "cacheReadTokens"); isKnown != known {
 					t.Fatalf("unknown became a known zero: %v", isKnown)

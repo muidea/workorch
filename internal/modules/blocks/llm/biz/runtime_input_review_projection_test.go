@@ -12,6 +12,67 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func TestInputReviewExactCorrectionRendersOnlyInC4(t *testing.T) {
+	request := runtimeInputReviewProviderFixture(t)
+	initial, err := runtimeProviderRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{"criterionText MUST be unique within each check", "one obligation with joint proofConsumerRefs", "A covered consumer cannot cancel"} {
+		if !strings.Contains(initial.PromptContext.Sections[3].Content, rule) {
+			t.Fatalf("missing owner rule: %s", rule)
+		}
+	}
+	if !strings.Contains(initial.Schema, "criterionText must be unique within this check") {
+		t.Fatal("schema omits unique-criterion rule")
+	}
+	violation := runtimecontract.RuntimeSemanticContractViolation{
+		Kind: runtimecontract.RuntimeSemanticContractViolationProposalConstraint, Path: "$.proposals[0].validationInputReview.checks[0].obligations[1].criterionText", CoverageWorkItemID: request.SemanticManifest.CoverageItems[0].ID,
+		ProposalIndex: 0, Rule: runtimecontract.RuntimeSemanticConstraintRelational, Actual: "duplicate_criterion_text", Required: []string{"criterionText unique within this check; same excerpt already at obligations[0]"},
+	}
+	observation := runtimeSemanticCorrectionObservationForProviderTest(&runtimecontract.RuntimeOriginalDiagnostic{
+		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: runtimecontract.RuntimeModuleLLM, OriginalClass: "semantic", OriginalCode: "semantic_plan_invalid", OriginalMessage: "original private bytes must remain outside the correction projection", Signature: "semantic-plan/invalid-document", SemanticViolations: []runtimecontract.RuntimeSemanticContractViolation{violation},
+	})
+	directive := runtimecontract.RuntimeSemanticCorrectionDirective{SchemaVersion: runtimecontract.RuntimeSemanticCorrectionDirectiveSchemaCurrent, PlanStep: request.SemanticContext.PlanStep,
+		ManifestHash: request.SemanticManifest.Hash, DefinitionSeedHash: request.SemanticManifest.DefinitionSeedHash, StablePrefixHash: request.StablePrefixHash, SourceObservationHash: runtimecontract.StableRuntimeSemanticCorrectionObservationHash(*observation), Attempt: 1, Violations: []runtimecontract.RuntimeSemanticContractViolation{violation}}
+	directive.Hash = runtimecontract.StableRuntimeSemanticCorrectionDirectiveHash(directive)
+	request.CandidateAttempt, request.SemanticCorrectionObservation, request.SemanticCorrectionDirective = 1, observation, &directive
+	for range 2 {
+		retry, err := runtimeProviderRequest(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for n := 0; n <= 3; n++ {
+			if initial.PromptContext.Sections[n].Content != retry.PromptContext.Sections[n].Content {
+				t.Fatalf("correction changed frozen C%d", n)
+			}
+		}
+		if initial.ContextBudget.CachePlan.RenderedStablePrefixHash != retry.ContextBudget.CachePlan.RenderedStablePrefixHash {
+			t.Fatal("correction changed stable prefix")
+		}
+		tail := retry.PromptContext.Sections[4].Content
+		for _, value := range []string{violation.Path, violation.Actual, violation.Required[0]} {
+			if !strings.Contains(tail, value) {
+				t.Fatalf("lost precise correction fact: %s", value)
+			}
+		}
+		if strings.Contains(tail, "original private bytes") {
+			t.Fatal("raw diagnostic was used as a correction contract")
+		}
+		var restored runtimecontract.RuntimeSemanticCorrectionDirective
+		bytes, _ := json.Marshal(request.SemanticCorrectionDirective)
+		if err := json.Unmarshal(bytes, &restored); err != nil {
+			t.Fatal(err)
+		}
+		request.SemanticCorrectionDirective = &restored
+	}
+	request.SemanticCorrectionDirective.Violations[0].Path += ".stale"
+	request.SemanticCorrectionDirective.Hash = runtimecontract.StableRuntimeSemanticCorrectionDirectiveHash(*request.SemanticCorrectionDirective)
+	if _, err := runtimeProviderRequest(request); err == nil {
+		t.Fatal("stale precise correction reached provider projection")
+	}
+}
+
 func TestRuntimeInputReviewSelectableProtocolsHaveCompleteOrderIndependentInstructions(t *testing.T) {
 	request := runtimeInputReviewProviderFixture(t)
 	requirement := request.SemanticManifest.ProofObligations[0].ValidationProofRequirement

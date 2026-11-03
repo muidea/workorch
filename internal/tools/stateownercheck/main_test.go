@@ -1,6 +1,7 @@
 package main
 
 import (
+	"go/ast"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1092,6 +1093,19 @@ func TestPreparationObservationDiagnosticsCannotCarryTargetState(t *testing.T) {
 					t.Fatal("foreign command or sibling authority accepted")
 				}
 			})
+		}
+	}
+}
+
+func TestWireCacheObservationDoesNotGrantSiblingStateAuthority(t *testing.T) {
+	c := repositoryTypeDeclaration{PackageDir: "internal/modules/blocks/llm/pkg/models", Spec: &ast.TypeSpec{Name: ast.NewIdent("ProviderContextBudget")}}
+	command := "internal/modules/blocks/llm/pkg/events:CompleteProviderCommand"
+	if !isExplicitObservedStateField(command, c, "WireCacheMode") {
+		t.Fatal("actual wire observation missing")
+	}
+	for _, field := range []string{"State", "TargetState", "TargetMode", "NextMode", "RequestedMode"} {
+		if isExplicitObservedStateField(command, c, field) || !isForbiddenCrossOwnerStateField(field, false) {
+			t.Fatalf("wire audit registration granted sibling %s", field)
 		}
 	}
 }

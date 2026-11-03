@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 	"time"
 
@@ -46,7 +45,7 @@ func (m *Biz) handleLifecycleCommand(ev magicevent.Event, result magicevent.Resu
 		response, executeErr = m.executeLifecycleCommand(guarded, ev)
 		return executeErr
 	})
-	setResultLifecycleResult(result, response, err)
+	setResultLifecycleResult(result, response, resultDeliveryFailure(err, resultevents.TerminalDeliveryStageFence, ""))
 }
 
 func resultEventWorkspaceID(ev magicevent.Event) (common.WorkspaceID, bool) {
@@ -83,40 +82,46 @@ func setResultLifecycleResult(result magicevent.Result, data resultevents.Result
 
 func (m *Biz) executeLifecycleCommand(ctx context.Context, ev magicevent.Event) (resultevents.ResultLifecycleCommandResult, error) {
 	if m == nil || m.service == nil {
-		return resultevents.ResultLifecycleCommandResult{}, common.ErrInvalidArgument
+		return resultevents.ResultLifecycleCommandResult{}, resultDeliveryFailure(common.ErrInvalidArgument, resultevents.TerminalDeliveryStageCommand, "")
 	}
 	if ev.ID() != resultevents.TopicResultFactTerminalDelivery {
-		return resultevents.ResultLifecycleCommandResult{}, common.ErrInvalidArgument
+		return resultevents.ResultLifecycleCommandResult{}, resultDeliveryFailure(common.ErrInvalidArgument, resultevents.TerminalDeliveryStageCommand, "")
 	}
 	cmd, ok := ev.Data().(resultevents.RuntimeTerminalDeliveryFact)
 	if !ok || ev.Source() != "kernel/orchestrator" {
-		return resultevents.ResultLifecycleCommandResult{}, common.ErrInvalidArgument
+		return resultevents.ResultLifecycleCommandResult{}, resultDeliveryFailure(common.ErrInvalidArgument, resultevents.TerminalDeliveryStageCommand, "")
 	}
 	boundCtx, err := resultCommandContext(ctx, cmd.WorkspaceID)
 	if err != nil {
-		return resultevents.ResultLifecycleCommandResult{}, err
+		return resultevents.ResultLifecycleCommandResult{}, resultDeliveryFailure(err, resultevents.TerminalDeliveryStageContext, "")
 	}
-	return m.submitLifecycleInternalEvent(boundCtx, lifecycleInternalEvent{
+	response, err := m.submitLifecycleInternalEvent(boundCtx, lifecycleInternalEvent{
 		Kind:             lifecycleInternalEventTerminalDeliveryObserved,
 		TerminalDelivery: &cmd,
 	})
+	return response, resultDeliveryFailure(err, resultevents.TerminalDeliveryStageInternalEvent, "")
 }
 
-func (m *Biz) applyTerminalDelivery(ctx context.Context, cmd resultevents.RuntimeTerminalDeliveryFact) (resultevents.ResultLifecycleCommandResult, error) {
+func (m *Biz) applyTerminalDelivery(ctx context.Context, cmd resultevents.RuntimeTerminalDeliveryFact) (response resultevents.ResultLifecycleCommandResult, deliveryErr error) {
+	stage := resultevents.TerminalDeliveryStageValidation
+	var resultID common.ResultID
+	defer func() { deliveryErr = resultDeliveryFailure(deliveryErr, stage, resultID) }()
 	if err := cmd.Validate(); err != nil {
 		return resultevents.ResultLifecycleCommandResult{}, err
 	}
 	cmd = cmd.Normalized()
 	material := cmd.Material.Normalized()
+	stage = resultevents.TerminalDeliveryStageMaterialHash
 	materialHash, err := resultevents.CanonicalResultMaterialHash(material)
 	if err != nil {
 		return resultevents.ResultLifecycleCommandResult{}, err
 	}
+	stage = resultevents.TerminalDeliveryStageContext
 	ctx, err = resultCommandContext(ctx, material.WorkspaceID)
 	if err != nil {
 		return resultevents.ResultLifecycleCommandResult{}, err
 	}
-	resultID := canonicalRuntimeResultID(material.WorkspaceID, material.RunID)
+	resultID = canonicalRuntimeResultID(material.WorkspaceID, material.RunID)
 	artifacts := terminalArtifacts(cmd, resultID, material.ArtifactRefs)
 	artifactIDs := make([]common.ArtifactID, 0, len(artifacts))
 	for _, artifact := range artifacts {
@@ -141,14 +146,17 @@ func (m *Biz) applyTerminalDelivery(ctx context.Context, cmd resultevents.Runtim
 	// children use draft as an owner-private pending state until every child is
 	// durable, then complete the explicit draft -> accepted/rejected CAS.
 	if len(artifacts) == 0 {
+		stage = resultevents.TerminalDeliveryStageResultTransition
 		if err := applyTerminalResultTransition(item, targetState, now); err != nil {
 			return resultevents.ResultLifecycleCommandResult{}, err
 		}
 	}
 
 	created := false
+	stage = resultevents.TerminalDeliveryStageResultRead
 	existing, err := m.service.GetResult(ctx, resultID)
 	if errors.Is(err, common.ErrNotFound) {
+		stage = resultevents.TerminalDeliveryStageResultCreate
 		if createErr := m.service.CreateResult(ctx, item); createErr != nil {
 			if !errors.Is(createErr, common.ErrConflict) {
 				return resultevents.ResultLifecycleCommandResult{}, createErr
@@ -156,14 +164,17 @@ func (m *Biz) applyTerminalDelivery(ctx context.Context, cmd resultevents.Runtim
 		} else {
 			created = true
 		}
+		stage = resultevents.TerminalDeliveryStageResultReadBack
 		existing, err = m.service.GetResult(ctx, resultID)
 	}
 	if err != nil {
 		return resultevents.ResultLifecycleCommandResult{}, err
 	}
-	if !sameTerminalResult(existing, item) {
-		return resultevents.ResultLifecycleCommandResult{}, common.ErrConflict
+	stage = resultevents.TerminalDeliveryStageResultCompare
+	if fields := terminalResultMismatchFields(existing, item); len(fields) != 0 {
+		return resultevents.ResultLifecycleCommandResult{}, resultDeliveryFailure(common.ErrConflict, stage, resultID, fields...)
 	}
+	stage = resultevents.TerminalDeliveryStageArtifact
 	if err := m.ensureTerminalArtifacts(ctx, artifacts); err != nil {
 		return resultevents.ResultLifecycleCommandResult{}, err
 	}
@@ -184,20 +195,30 @@ func (m *Biz) applyTerminalDelivery(ctx context.Context, cmd resultevents.Runtim
 		}, nil
 	}
 	if existing.State != common.ResultStateDraft {
-		return resultevents.ResultLifecycleCommandResult{}, common.ErrConflict
+		return resultevents.ResultLifecycleCommandResult{}, resultDeliveryFailure(common.ErrConflict, resultevents.TerminalDeliveryStageResultTransition, resultID, "State")
 	}
 	finalized := resultevents.CloneResult(existing)
+	stage = resultevents.TerminalDeliveryStageResultTransition
 	if err := applyTerminalResultTransition(finalized, targetState, now); err != nil {
 		return resultevents.ResultLifecycleCommandResult{}, err
 	}
 	transitioned := true
+	stage = resultevents.TerminalDeliveryStageResultCAS
 	if err := m.service.UpdateResult(ctx, finalized); err != nil {
 		if !errors.Is(err, common.ErrConflict) {
 			return resultevents.ResultLifecycleCommandResult{}, err
 		}
+		stage = resultevents.TerminalDeliveryStageResultWinner
 		winner, getErr := m.service.GetResult(ctx, resultID)
-		if getErr != nil || !sameTerminalResult(winner, item) || winner.State != targetState {
-			return resultevents.ResultLifecycleCommandResult{}, common.ErrConflict
+		if getErr != nil {
+			return resultevents.ResultLifecycleCommandResult{}, getErr
+		}
+		fields := terminalResultMismatchFields(winner, item)
+		if winner != nil && winner.State != targetState {
+			fields = append(fields, "State")
+		}
+		if len(fields) != 0 {
+			return resultevents.ResultLifecycleCommandResult{}, resultDeliveryFailure(common.ErrConflict, stage, resultID, fields...)
 		}
 		finalized = winner
 		transitioned = false
@@ -332,18 +353,7 @@ func sameTerminalArtifact(left, right *resultmodel.Artifact) bool {
 }
 
 func sameTerminalResult(left, right *resultmodel.Result) bool {
-	return left != nil && right != nil && left.ID == right.ID &&
-		left.WorkspaceID == right.WorkspaceID && left.RunID == right.RunID &&
-		left.GoalID == right.GoalID && left.DoDID == right.DoDID &&
-		left.Title == right.Title && left.Summary == right.Summary &&
-		left.SourceType == right.SourceType && left.SourceRef == right.SourceRef &&
-		reflect.DeepEqual(left.EvidenceRefs, right.EvidenceRefs) &&
-		reflect.DeepEqual(left.ArtifactRefs, right.ArtifactRefs) &&
-		reflect.DeepEqual(left.DoDAssessment, right.DoDAssessment) &&
-		reflect.DeepEqual(left.SummaryDetail, right.SummaryDetail) &&
-		reflect.DeepEqual(left.RuntimeCloseout, right.RuntimeCloseout) &&
-		strings.TrimSpace(left.TerminalMaterialHash) == strings.TrimSpace(right.TerminalMaterialHash) &&
-		sameTerminalDeliveryIdentity(left.TerminalDelivery, right.TerminalDelivery)
+	return len(terminalResultMismatchFields(left, right)) == 0
 }
 
 func resultStateForTerminalOutcome(kind runtimecontract.TerminalOutcomeKind) (common.ResultState, error) {

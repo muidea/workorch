@@ -45,20 +45,21 @@ func validateRuntimeValidationCompositionCheck(check RuntimeValidationInputCheck
 	}
 	allowed := RuntimeValidationProofConsumerRefs(subject)
 	used := make(map[string]bool, len(allowed))
-	for _, obligation := range check.Obligations {
+	for index, obligation := range check.Obligations {
 		refs := obligation.ProofConsumerRefs
+		path := fmt.Sprintf(".obligations[%d].proofConsumerRefs", index)
 		if len(refs) == 0 || len(refs) > len(allowed) {
-			return fmt.Errorf("composite obligation requires nonempty bounded proof consumers")
+			return runtimeInputViolation(path, "invalid_consumer_count", "nonempty bounded subset of declared requiredProofConsumerRefs", "composite obligation requires nonempty bounded proof consumers")
 		}
 		// Consumers are a set, as declared by the provider schema. Preserve the
 		// report's exact order for provenance/hash checks; do not sort or repair it.
 		seen := make(map[string]bool, len(refs))
 		for _, ref := range refs {
 			if ref == "" || ref != strings.TrimSpace(ref) || !slices.Contains(allowed, ref) {
-				return fmt.Errorf("composite obligation references an undeclared proof consumer")
+				return runtimeInputViolation(path, "undeclared_proof_consumer", "exact declared requiredProofConsumerRefs only", "composite obligation references an undeclared proof consumer")
 			}
 			if seen[ref] {
-				return fmt.Errorf("composite obligation repeats a proof consumer")
+				return runtimeInputViolation(path, "duplicate_proof_consumer", "unique proofConsumerRefs in any order", "composite obligation repeats a proof consumer")
 			}
 			seen[ref] = true
 			used[ref] = true
@@ -66,7 +67,7 @@ func validateRuntimeValidationCompositionCheck(check RuntimeValidationInputCheck
 	}
 	for _, ref := range allowed {
 		if !used[ref] {
-			return fmt.Errorf("composite check omits required proof consumer %q", ref)
+			return runtimeInputViolation(".obligations", "missing_proof_consumer", "complete declared requiredProofConsumerRefs across this check's obligations, including "+ref, fmt.Sprintf("composite check omits required proof consumer %q", ref))
 		}
 	}
 	return nil

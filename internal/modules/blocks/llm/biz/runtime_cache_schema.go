@@ -4,130 +4,141 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"sort"
 )
 
-// compactRuntimeParameterSchema factors only identical, self-contained parameter
-// schemas. The strict transport schema and local manifest decoder stay original;
-// this equivalent grammar is only the versioned provider prompt projection.
-func compactRuntimeParameterSchema(raw []byte) ([]byte, error) {
-	var root map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &root); err != nil {
-		return nil, err
+// Visit only JSON Schema positions. Data under const/enum/default/examples and
+// property names themselves are not schemas and must remain byte-value exact.
+func visitPromptSchema(value any, visit func(map[string]any) any) any {
+	node, ok := value.(map[string]any)
+	if !ok {
+		return value
 	}
-	// The compiler currently has no definitions. Do not capture or reinterpret a
-	// future schema's reference namespace without its own rendering contract.
-	if _, found := root["$defs"]; found {
-		return raw, nil
-	}
-	var properties, operations, items map[string]json.RawMessage
-	if json.Unmarshal(root["properties"], &properties) != nil || json.Unmarshal(properties["operations"], &operations) != nil || json.Unmarshal(operations["items"], &items) != nil {
-		return raw, nil
-	}
-	var branches []map[string]json.RawMessage
-	if json.Unmarshal(items["oneOf"], &branches) != nil {
-		return raw, nil
-	}
-	type group struct {
-		schema json.RawMessage
-		slots  []int
-	}
-	var groups []group
-	for i, branch := range branches {
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(branch["properties"], &fields); err != nil {
-			return nil, err
-		}
-		parameter := fields["parameters"]
-		if len(parameter) == 0 || !selfContainedParameterSchema(parameter) {
-			continue
-		}
-		found := false
-		for j := range groups {
-			if bytes.Equal(groups[j].schema, parameter) {
-				groups[j].slots = append(groups[j].slots, i)
-				found = true
-				break
+	mapPromptSchemaChildren(node, func(child any) any { return visitPromptSchema(child, visit) })
+	return visit(node)
+}
+
+func mapPromptSchemaChildren(node map[string]any, rewrite func(any) any) {
+	for _, key := range []string{"properties", "patternProperties", "dependentSchemas", "dependencies"} {
+		if children, ok := node[key].(map[string]any); ok {
+			keys := make([]string, 0, len(children))
+			for name := range children {
+				keys = append(keys, name)
+			}
+			sort.Strings(keys)
+			for _, name := range keys {
+				children[name] = rewrite(children[name])
 			}
 		}
-		if !found {
-			groups = append(groups, group{parameter, []int{i}})
+	}
+	for _, key := range []string{"allOf", "anyOf", "oneOf", "prefixItems"} {
+		if children, ok := node[key].([]any); ok {
+			for i, child := range children {
+				children[i] = rewrite(child)
+			}
 		}
 	}
-	definitions := map[string]json.RawMessage{}
-	for _, g := range groups {
-		if len(g.slots) < 2 {
-			continue
-		}
-		name := fmt.Sprintf("parameters%d", len(definitions))
-		definitions[name] = g.schema
-		ref, _ := json.Marshal(struct {
-			Ref string `json:"$ref"`
-		}{"#/$defs/" + name})
-		for _, i := range g.slots {
-			var fields map[string]json.RawMessage
-			if err := json.Unmarshal(branches[i]["properties"], &fields); err != nil {
-				return nil, err
+	for _, key := range []string{"items", "additionalItems", "additionalProperties", "unevaluatedProperties", "unevaluatedItems", "contains", "propertyNames", "not", "if", "then", "else", "contentSchema"} {
+		if child, found := node[key]; found {
+			if children, ok := child.([]any); ok {
+				for i, c := range children {
+					children[i] = rewrite(c)
+				}
+			} else {
+				node[key] = rewrite(child)
 			}
-			fields["parameters"] = ref
-			body, err := json.Marshal(fields)
-			if err != nil {
-				return nil, err
-			}
-			branches[i]["properties"] = body
 		}
 	}
-	if len(definitions) == 0 {
+}
+
+// Factor exact repeated, self-contained schema subtrees only in the prompt.
+// The transport schema and owner decoder remain complete and unchanged. No
+// existing reference namespace is captured, no literal data is rewritten.
+func compactRuntimePromptSchema(raw []byte) ([]byte, error) {
+	var value any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return nil, fmt.Errorf("trailing prompt schema")
+	}
+	root, ok := value.(map[string]any)
+	if !ok {
 		return raw, nil
 	}
-	encode := func(value any) (json.RawMessage, error) { body, err := json.Marshal(value); return body, err }
-	var err error
-	if items["oneOf"], err = encode(branches); err != nil {
-		return nil, err
+	if !selfContainedPromptSchema(root) {
+		return raw, nil
 	}
-	if operations["items"], err = encode(items); err != nil {
-		return nil, err
+	counts := map[string]int{}
+	visitPromptSchema(value, func(node map[string]any) any {
+		body, _ := json.Marshal(node)
+		if len(body) >= 256 {
+			counts[string(body)]++
+		}
+		return node
+	})
+	defs := map[string]any{}
+	names := map[string]string{}
+	// Select the largest repeated subtree first. Child factoring remains local
+	// to its single definition body, so sharing a parent never duplicates defs.
+	// Original schemas contain no references; these edges are acyclic.
+	var factor func(any) any
+	factor = func(value any) any {
+		node, ok := value.(map[string]any)
+		if !ok {
+			return value
+		}
+		body, _ := json.Marshal(node)
+		key := string(body)
+		if len(body) >= 256 && counts[key] >= 2 {
+			name, exists := names[key]
+			if !exists {
+				name = fmt.Sprintf("schema%d", len(names))
+				names[key] = name
+				mapPromptSchemaChildren(node, factor)
+				defs[name] = node
+			}
+			return map[string]any{"$ref": "#/$defs/" + name}
+		}
+		mapPromptSchemaChildren(node, factor)
+		return node
 	}
-	if properties["operations"], err = encode(operations); err != nil {
-		return nil, err
+	factored := factor(value)
+	result, ok := factored.(map[string]any)
+	if !ok || len(defs) == 0 {
+		return raw, nil
 	}
-	if root["properties"], err = encode(properties); err != nil {
-		return nil, err
-	}
-	if root["$defs"], err = encode(definitions); err != nil {
-		return nil, err
-	}
-	compact, err := json.Marshal(root)
+	result["$defs"] = defs
+	encoded, err := json.Marshal(result)
 	if err != nil {
 		return nil, err
 	}
-	// Replacing a small schema with long reference paths must never inflate it.
-	if len(compact) >= len(raw) {
+	if len(encoded) >= len(raw) {
 		return raw, nil
 	}
-	return compact, nil
+	return encoded, nil
 }
 
-func selfContainedParameterSchema(raw json.RawMessage) bool {
-	var object map[string]json.RawMessage
-	if json.Unmarshal(raw, &object) == nil && object != nil {
-		for key, value := range object {
-			switch key {
-			case "$ref", "$id", "id", "$anchor", "$dynamicRef", "$dynamicAnchor", "$recursiveRef", "$recursiveAnchor", "$schema":
-				return false
-			}
-			if !selfContainedParameterSchema(value) {
-				return false
-			}
-		}
-		return true
-	}
-	var array []json.RawMessage
-	if json.Unmarshal(raw, &array) == nil {
-		for _, v := range array {
-			if !selfContainedParameterSchema(v) {
-				return false
-			}
+// Root identity and dialect declarations stay at the root. Existing reference namespaces
+// are left untouched rather than captured by the prompt-local definitions.
+func selfContainedPromptSchema(root map[string]any) bool {
+	check := make(map[string]any, len(root))
+	for key, value := range root {
+		if key != "$schema" && key != "$id" && key != "id" {
+			check[key] = value
 		}
 	}
-	return true
+	ok := true
+	visitPromptSchema(check, func(node map[string]any) any {
+		for _, key := range []string{"$defs", "definitions", "$ref", "$id", "id", "$anchor", "$dynamicRef", "$dynamicAnchor", "$recursiveRef", "$recursiveAnchor", "$schema"} {
+			if _, exists := node[key]; exists {
+				ok = false
+			}
+		}
+		return node
+	})
+	return ok
 }

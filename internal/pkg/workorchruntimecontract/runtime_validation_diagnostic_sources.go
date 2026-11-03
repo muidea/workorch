@@ -71,17 +71,18 @@ func validateRuntimeDiagnosticSourceSubject(s RuntimeValidationInputReviewSubjec
 func validateRuntimeDiagnosticSourceReview(r RuntimeValidationInputReview, s RuntimeValidationInputReviewSubject) error {
 	if s.DiagnosticSourceContractRef == "" {
 		if r.DiagnosticSources != nil {
-			return fmt.Errorf("review without declared diagnostic sources cannot add source findings")
+			return runtimeInputViolation(".diagnosticSources", "undeclared_diagnostic_sources", "omit diagnosticSources without an owner declaration", "review without declared diagnostic sources cannot add source findings")
 		}
 		return nil
 	}
 	if len(r.DiagnosticSources) != len(s.DiagnosticSources) {
-		return fmt.Errorf("review must independently cover every declared diagnostic source")
+		return runtimeInputViolation(".diagnosticSources", "incomplete_diagnostic_source_set", "exactly one review per declared diagnostic source", "review must independently cover every declared diagnostic source")
 	}
 	seen := map[string]bool{}
-	for _, review := range r.DiagnosticSources {
+	for index, review := range r.DiagnosticSources {
+		path := fmt.Sprintf(".diagnosticSources[%d]", index)
 		if seen[review.SourceRef] || review.Reason == "" || strings.TrimSpace(review.Reason) != review.Reason || !utf8.ValidString(review.Reason) || len(review.Reason) > RuntimeValidationInputReviewMaxReasonBytes {
-			return fmt.Errorf("invalid or duplicate diagnostic source review")
+			return runtimeInputViolation(path, "invalid_diagnostic_source_review", "unique declared sourceRef and bounded nonempty UTF-8 reason without surrounding whitespace", "invalid or duplicate diagnostic source review")
 		}
 		var source *RuntimeValidationDiagnosticSource
 		for i := range s.DiagnosticSources {
@@ -90,7 +91,7 @@ func validateRuntimeDiagnosticSourceReview(r RuntimeValidationInputReview, s Run
 			}
 		}
 		if source == nil || !slices.Contains(review.InputTargetRefs, source.InputTargetRef) || !reflect.DeepEqual(review.InputTargetRefs, normalizeStrings(review.InputTargetRefs)) {
-			return fmt.Errorf("diagnostic source review omits its exact input")
+			return runtimeInputViolation(path+".inputTargetRefs", "missing_diagnostic_input", "unique sorted observed refs including this declared source's exact inputTargetRef", "diagnostic source review omits its exact input")
 		}
 		for _, ref := range review.InputTargetRefs {
 			found := false
@@ -100,13 +101,13 @@ func validateRuntimeDiagnosticSourceReview(r RuntimeValidationInputReview, s Run
 				}
 			}
 			if !found {
-				return fmt.Errorf("diagnostic review references unobserved input")
+				return runtimeInputViolation(path+".inputTargetRefs", "unobserved_diagnostic_input", "refs from selected owner input-review subject.files only", "diagnostic review references unobserved input")
 			}
 		}
 		switch review.Conclusion {
 		case RuntimeValidationInputConsistent, RuntimeValidationInputConflict, RuntimeValidationInputInconclusive:
 		default:
-			return fmt.Errorf("unsupported diagnostic review conclusion")
+			return runtimeInputViolation(path+".conclusion", "unsupported_diagnostic_conclusion", "consistent | conflict | inconclusive", "unsupported diagnostic review conclusion")
 		}
 		seen[review.SourceRef] = true
 	}

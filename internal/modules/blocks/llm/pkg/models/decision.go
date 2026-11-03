@@ -99,9 +99,14 @@ type NormalizationManifest struct {
 }
 
 type ProviderContextBudget struct {
-	RenderContractRef string `json:"renderContractRef,omitempty"`
-	PromptRenderer    string `json:"promptRenderer,omitempty"`
-	MessageLayout     string `json:"messageLayout,omitempty"`
+	// Adapter observations of the outgoing request, never remote cache facts.
+	WireSchemaHash       string `json:"wireSchemaHash,omitempty"`
+	WireCachePrefixHash  string `json:"wireCachePrefixHash,omitempty"`
+	WireCacheMode        string `json:"wireCacheMode,omitempty"`
+	WireCacheBreakpoints int    `json:"wireCacheBreakpoints,omitempty"`
+	RenderContractRef    string `json:"renderContractRef,omitempty"`
+	PromptRenderer       string `json:"promptRenderer,omitempty"`
+	MessageLayout        string `json:"messageLayout,omitempty"`
 	// Sealed provider/model identity and revisions for request audit.
 	ProviderID               string `json:"providerId,omitempty"`
 	ModelID                  string `json:"modelId,omitempty"`

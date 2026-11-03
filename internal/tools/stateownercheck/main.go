@@ -172,9 +172,12 @@ var observedStateCarrierFields = map[string]bool{
 	"internal/modules/kernel/workspace/pkg/models:GoalSpecificationCompletenessReview|Status": true,
 	"internal/modules/kernel/workspace/pkg/models:GoalSpecificationVerification|Status":       true,
 	// 当前 mapping 的 Status 只是 provider 验证声明；owner 重编译与准入仍独立裁决。
-	"internal/modules/kernel/workspace/pkg/models:DefinitionAuthoringVerificationMapping|Status":            true,
-	"internal/modules/blocks/llm/pkg/models:ProviderAdapterCacheHint|Mode":                                  true,
-	"internal/modules/blocks/llm/pkg/models:ProviderContextBudget|ProfileMode":                              true,
+	"internal/modules/kernel/workspace/pkg/models:DefinitionAuthoringVerificationMapping|Status": true,
+	"internal/modules/blocks/llm/pkg/models:ProviderAdapterCacheHint|Mode":                       true,
+	"internal/modules/blocks/llm/pkg/models:ProviderContextBudget|ProfileMode":                   true,
+	// Actual adapter cache mode is an immutable local wire observation. This
+	// registration grants no sibling field permission and no remote cache fact.
+	"internal/modules/blocks/llm/pkg/models:ProviderContextBudget|WireCacheMode":                            true,
 	"internal/modules/blocks/llm/pkg/models:ProviderContextProfile|ProfileMode":                             true,
 	"internal/modules/blocks/llm/pkg/models:ProviderObservedRequestShape|ProviderFacingMode":                true,
 	"internal/modules/blocks/mcpregistry/pkg/events:CapabilityQuery|Stage":                                  true,

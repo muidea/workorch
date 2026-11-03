@@ -613,19 +613,8 @@ func (p *implementationWorkFullflowProvider) serveHTTP(w http.ResponseWriter, r 
 		}
 		_ = json.Unmarshal(authority["context"], &c3)
 		if c3.Intent != nil {
-			var source *runtimecontract.RuntimeCandidateWorkContent
-			attempt := -1
-			for _, line := range strings.Split(string(request.Input), "\n") {
-				var tail struct {
-					Attempt *int                                         `json:"candidateAttempt"`
-					Source  *runtimecontract.RuntimeCandidateWorkContent `json:"implementationWorkContent"`
-				}
-				if json.Unmarshal([]byte(line), &tail) == nil && tail.Attempt != nil {
-					source = tail.Source
-					attempt = *tail.Attempt
-				}
-			}
-			if c3.Intent.Intent == nil || source == nil || source.ContentHash != c3.Intent.Intent.ContentHash || source.ScopeRequestID != c3.Intent.Source.ScopeRequestID || len(source.Snapshots) != 1 || source.Snapshots[0].TargetRef != "internal/logic/logic.go" || source.Snapshots[0].ContentHash != runtimecontract.RuntimeValidationInputContentHash(source.Snapshots[0].Content) {
+			source, attempt, sourceErr := fixtureFrozenWorkSource(request.Input, authority["context"])
+			if sourceErr != nil || c3.Intent.Intent == nil || source == nil || source.ContentHash != c3.Intent.Intent.ContentHash || source.ScopeRequestID != c3.Intent.Source.ScopeRequestID || len(source.Snapshots) != 1 || source.Snapshots[0].TargetRef != "internal/logic/logic.go" || source.Snapshots[0].ContentHash != runtimecontract.RuntimeValidationInputContentHash(source.Snapshots[0].Content) {
 				err = fmt.Errorf("operations request lost exact selected frozen work bytes")
 				kind = "runtime/frozen_source_missing"
 			} else if !p.exhaustWork && !p.omissionInjected && attempt == 0 {
@@ -762,7 +751,18 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 			} `json:"ownerCatalogs"`
 		} `json:"manifest"`
 	}
-	data, err := json.Marshal(raw)
+	// Prompt-local schema definitions preserve the full output grammar. The
+	// synthetic model must resolve them before selecting exact const/enum values.
+	expanded, err := fixtureExpandPromptSchema(raw["schema"])
+	if err != nil {
+		return nil, "runtime/semantic", err
+	}
+	decoded := make(map[string]json.RawMessage, len(raw))
+	for key, value := range raw {
+		decoded[key] = value
+	}
+	decoded["schema"] = expanded
+	data, err := json.Marshal(decoded)
 	if err != nil {
 		return nil, "runtime/semantic", err
 	}

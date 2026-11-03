@@ -22,6 +22,11 @@ Last Verified: 2026-09-10
 | projection consumers | `ResultChangedData` on `created/accepted/rejected/superseded` | 提交后或启动恢复通知，不授予 authority。 |
 
 canonical Result ID 由 workspace/run 派生；Artifact ID 由 Result ID 与 sealed source ref 派生。相同 terminal identity/material 是幂等重放，任一 identity 或 material 漂移均 conflict。每个 EventHub topic 使用 `pkg/events` 中的具体 result。
+terminal failure 通过 `pkg/events.TerminalDeliveryFailure` 保留 receiving-owner 的具体阶段、Result ID、
+owner 计算的 immutable mismatch 字段路径及原始 cause。阶段区分 workspace fence/context、fact validation、material hash、
+Result read/create/read-back/compare、Artifact reconcile、transition/CAS/winner；外层 fence 不覆盖内部精确阶段。
+错误跨同步 EventHub 后仍可解包，原文继续进入 Orchestrator 的受限诊断存储，不输出业务字段值或无关配置。
+诊断不授予 overwrite、retry、Result/Workspace/Run ACK 或验收 credit；缺 ACK 的同材料交付仍走原幂等路径。
 生产 `Configure` 只接受通过 `Validate()` 的 canonical `ResultOwnerRepositories` 与 EventHub；公开面没有 generic create/update/delete。
 
 后台 Timer 注册失败由 `Start` 原样返回；已经取得的订阅、service 与 cancel 句柄必须保留用于清理，不能把任务提交失败当作启动成功。失败后先完成 owner 清理再重新启动。该任务错误合同不单独证明完整的进程输入／排空／释放屏障。

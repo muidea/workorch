@@ -1,8 +1,10 @@
 package llm
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 
@@ -10,7 +12,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func validateRuntimeSemanticContextIntegrity(context runtimecontract.RuntimeSemanticPlanRequestContext, manifest runtimecontract.RuntimeSemanticPlanManifest, attempt int, previous *runtimecontract.RuntimeSemanticCorrectionObservation, directive *runtimecontract.RuntimeSemanticCorrectionDirective, budget *llmmodels.ProviderContextBudget, prompt *llmmodels.PromptContext) error {
+func validateRuntimeSemanticRenderedIntegrity(schema string, context runtimecontract.RuntimeSemanticPlanRequestContext, manifest runtimecontract.RuntimeSemanticPlanManifest, attempt int, previous *runtimecontract.RuntimeSemanticCorrectionObservation, directive *runtimecontract.RuntimeSemanticCorrectionDirective, budget *llmmodels.ProviderContextBudget, prompt *llmmodels.PromptContext) error {
 	if budget == nil || prompt == nil {
 		return fmt.Errorf("runtime semantic context integrity requires prompt and budget metadata")
 	}
@@ -53,6 +55,9 @@ func validateRuntimeSemanticContextIntegrity(context runtimecontract.RuntimeSema
 	var authority runtimeSemanticAuthorityProjection
 	tailErr := json.Unmarshal([]byte(contents["C4"]), &tail)
 	authorityErr := json.Unmarshal([]byte(contents["C3"]), &authority)
+	if authorityErr != nil || !samePromptSchemaJSON(authority.Schema, compactSemanticPlanPromptSchema([]byte(schema))) {
+		missing = append(missing, "P0.semantic_output_schema")
+	}
 	if authorityErr != nil || authority.ContextEncoding != runtimecontract.RuntimeSemanticContextEncoding || tail.WorkContext != nil || (expectedWorkContext != nil && tail.WorkContextRef != semanticWorkContextRef) || (expectedWorkContext == nil && tail.WorkContextRef != "") {
 		missing = append(missing, "P4.semantic_work_reference")
 	} else {
@@ -147,4 +152,27 @@ func runtimeRequestScope(request llmmodels.RuntimeCandidateRequest) (string, str
 		return string(request.SemanticContext.WorkspaceID), string(request.SemanticContext.RunID)
 	}
 	return string(request.CandidateContext.WorkspaceID), string(request.CandidateContext.RunID)
+}
+
+// Object member order is a rendering choice; every schema value and array
+// position must still equal the owner-compiled prompt schema.
+func samePromptSchemaJSON(actual, expected []byte) bool {
+	decode := func(raw []byte) (any, error) {
+		var value any
+		d := json.NewDecoder(bytes.NewReader(raw))
+		d.UseNumber()
+		if err := d.Decode(&value); err != nil {
+			return nil, err
+		}
+		if err := d.Decode(new(any)); err != io.EOF {
+			return nil, fmt.Errorf("trailing schema JSON")
+		}
+		return value, nil
+	}
+	a, err := decode(actual)
+	if err != nil {
+		return false
+	}
+	b, err := decode(expected)
+	return err == nil && reflect.DeepEqual(a, b)
 }

@@ -392,3 +392,21 @@ Memories 无 stage selector，保留原授权激活快照，不按内容关键�
 body/expanded bytes 与引用数，经 Eventstream/readmodel 保全；冻结/纠正按实际原物理块观察断点，不从新 renderer 推测。
 回归：`runtime_input_applicability_test.go`、`runtime_provider_input_test.go`、`provider_section_messages_test.go`、
 `runtime_request_metrics_test.go` 及 readmodel `llm_cache_audit_ingress_test.go`；真实 gateway 收益须另行部署观察。
+
+### Prompt schema 与出站缓存证据
+
+新请求的 semantic/operations prompt schema 对精确重复的、自包含 schema 子树使用本请求 `$defs` 引用；
+native transport schema 和本地 decoder 保持完整原合同。遍历只进入 schema 位置，不删除 `const`/`enum` 中
+同名 `title`、`description`、`id` 或 `$ref` 业务值，JSON 数值保持精确。已有 reference namespace 不重新捕获，
+无重复或不能缩小的 schema 保持原样。semantic 渲染后按 owner 编译结果逐值核对 schema，允许对象键重排，
+不允许字段缺失、数组重排或规则弱化。固定回归同时核对展开等价、有效/无效输出与本地 decoder。
+
+当前 prerequisite acquisition 说明只在本次精确选择的 proof obligations 含 `OwnerFactAcquisition` 时附加；
+coverage order 与无该责任的 batch 不附加此分支。C0–C2、原义务、适用源码和独立审查输入保持完整。
+这些渲染优化仅用于新请求，冻结请求、same-contract correction 和恢复继续使用原 schema/messages/key。
+
+Responses adapter 在完整/流式请求构造后记录 `wireSchemaHash`、`wireCachePrefixHash`、`wireCacheMode` 与
+`wireCacheBreakpoints`，通过既有 usage audit 传递。schema 指纹包括实际 `text.format`；prefix 指纹包含实际
+model、reasoning、text.format、cache key/options 及最后一个请求断点以前的角色/正文/断点。
+无断点时 prefix 指纹不可用；这些是本地出站证据，不是远端转发、路由、命中或执行权威。
+`effectiveHints` 仍为 unknown，native cache-read 的 known/unknown 独立保留；没有增加探测调用或改变远端协议。

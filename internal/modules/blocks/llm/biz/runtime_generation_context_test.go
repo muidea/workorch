@@ -209,16 +209,27 @@ func TestRuntimeGenerationContextIntegrityRejectsLostForgedAndForeignSource(t *t
 	}
 	context.Resources.ProviderCeiling = semantic.SemanticContext.ProviderCeiling
 	context.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{{
-		PrerequisiteID: "generation", OwnerModuleID: runtimecontract.RuntimeModuleShell, ObservedRevision: "r1", SnapshotID: "catalog",
-		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{ID: "recipe",
-			ProofRequirementPreparations: []runtimecontract.RuntimeValidationProofPreparation{{CoverageWorkItemID: "cwi-001", RequirementHash: "original-requirement"}},
+		PrerequisiteID: "generation", OwnerModuleID: runtimecontract.RuntimeModuleShell, ObservedRevision: "r1", SnapshotID: "catalog", OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{ID: "recipe", OwnerModuleID: runtimecontract.RuntimeModuleShell, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			InputSchemaHash: "schema", Readiness: runtimecontract.RuntimeValidationSurfaceReady, InputBindingRef: "input-binding", ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+			EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+			ProofRequirementPreparations: []runtimecontract.RuntimeValidationProofPreparation{{CoverageWorkItemID: "cwi-001", RequirementHash: "original-requirement",
+				DefinitionRevision: "definition", DeclarationRef: "definition/dodItem/original", ValidationRecipeID: "recipe", TargetRef: "checks/input.spec",
+				CheckAttestations: []runtimecontract.RuntimeValidationCheckAttestationBinding{{RequiredCheckRef: "check", ObservationProtocolRef: "owner/behavior", NativeCheckRef: "native"}},
+				ProspectiveTargetSatisfactionConstraint: runtimecontract.RuntimeProspectiveTargetSatisfactionConstraint{SchemaVersion: runtimecontract.RuntimeProspectiveTargetSatisfactionConstraintSchemaCurrent,
+					OwnerModuleID: runtimecontract.RuntimeModuleShell, ProspectiveSatisfactionContractRef: "owner/prepare", ValidationSurfaceID: "recipe", ValidationRecipeID: "recipe", InputSchemaHash: "schema", CatalogObservedRevision: "r1",
+					AllOf: []runtimecontract.RuntimeProspectiveTargetClause{{ID: "input", AllOf: []runtimecontract.RuntimeProspectiveTargetPredicate{{Kind: runtimecontract.RuntimeProspectiveTargetPredicatePathExact, Value: "checks/input.spec"}}}}},
+			}},
 			GenerationContext: &runtimecontract.RuntimeValidationGenerationContext{Version: runtimecontract.RuntimeValidationGenerationContextVersion,
 				ContractRef: "owner/selection/v1", ObservedRevision: "r1", Outcome: "complete",
 				Files: []runtimecontract.RuntimeValidationInputReviewFile{{TargetRef: "project/source.txt", Content: "原始实现\r\n", ContentHash: runtimecontract.RuntimeValidationInputContentHash("原始实现\r\n")}}},
 		}},
 	}}
-	// This gate compares the rendered bytes to already-admitted typed facts;
-	// catalog/manifest admission is tested at the owner contract boundary.
+	context.Resources.OperationAdmissibilities[0].SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(context.Resources.OperationAdmissibilities[0])
+	if err := context.Resources.OperationAdmissibilities[0].Validate(); err != nil {
+		t.Fatal(err)
+	}
+	// Rendered facts and schema must both retain this complete owner catalog.
 	for _, scenario := range []string{"unchanged", "missing", "changed bytes and hash", "foreign owner", "foreign requirement", "invented source", "lost coverage inventory", "changed coverage instruction"} {
 		t.Run(scenario, func(t *testing.T) {
 			actual := runtimeCandidateAuthorityContextProjection(context, runtimecontract.RuntimeCandidateContractManifest{})
@@ -257,16 +268,25 @@ func TestRuntimeGenerationContextIntegrityRejectsLostForgedAndForeignSource(t *t
 				t.Fatalf("integrity result for %s: %v", scenario, err)
 			}
 			manifest := semantic.SemanticManifest.Clone()
-			manifest.OwnerFactDependencyCatalogs = context.Resources.OperationAdmissibilities
+			manifest.OwnerCatalogs = append(manifest.OwnerCatalogs, context.Resources.OperationAdmissibilities...)
+			manifest.AllowedOwnerModuleIDs = append(manifest.AllowedOwnerModuleIDs, runtimecontract.RuntimeModuleShell)
+			manifest.AllowedOperationKinds = append(manifest.AllowedOperationKinds, runtimecontract.RuntimeBlockKindManagedValidationSession)
 			projection, err := runtimeSemanticManifestForProvider(manifest, semantic.SemanticContext.PlanStep, semantic.SemanticContext.BatchCoverageWorkItemIDs)
 			if err != nil {
 				t.Fatal(err)
 			}
 			projection.ValidationGenerationContexts = actual.ValidationGenerationContexts
 			if scenario == "invented source" {
-				manifest.OwnerFactDependencyCatalogs = nil
+				manifest.OwnerCatalogs = manifest.OwnerCatalogs[:len(manifest.OwnerCatalogs)-1]
+				manifest.AllowedOwnerModuleIDs = manifest.AllowedOwnerModuleIDs[:len(manifest.AllowedOwnerModuleIDs)-1]
+				manifest.AllowedOperationKinds = manifest.AllowedOperationKinds[:len(manifest.AllowedOperationKinds)-1]
 			}
-			data, err = json.Marshal(runtimeSemanticAuthorityProjection{ContextEncoding: runtimecontract.RuntimeSemanticContextEncoding, Manifest: projection, OutputInstruction: runtimeSemanticOutputInstruction(semantic.SemanticContext, manifest)})
+			manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
+			schema, err := runtimecontract.RuntimeSemanticPlanJSONSchemaForRequest(manifest, semantic.SemanticContext.PlanStep, semantic.SemanticContext.BatchID, semantic.SemanticContext.BatchSequence, semantic.SemanticContext.BatchCoverageWorkItemIDs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err = json.Marshal(runtimeSemanticAuthorityProjection{ContextEncoding: runtimecontract.RuntimeSemanticContextEncoding, Manifest: projection, Schema: compactSemanticPlanPromptSchema([]byte(schema)), OutputInstruction: runtimeSemanticOutputInstruction(semantic.SemanticContext, manifest)})
 			if err != nil {
 				t.Fatal(err)
 			}

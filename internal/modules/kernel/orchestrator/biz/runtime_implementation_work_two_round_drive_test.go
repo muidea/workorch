@@ -109,10 +109,12 @@ func testImplementationWorkProductionDriverTargetsWithCardinality(t *testing.T, 
 	})
 	provider := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	semanticCalls, operationCalls := 0, 0
+	var semanticSteps []runtimecontract.RuntimeSemanticPlanStep
 	provider.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		if command.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
 			semanticCalls++
+			semanticSteps = append(semanticSteps, command.SemanticContext.PlanStep)
 			manifest := command.SemanticManifest
 			if work := manifest.ProofObligations[0].ImplementationWork; work != nil && work.Scope.Content != nil {
 				context := command.SemanticContext.WorkContext
@@ -252,8 +254,14 @@ func testImplementationWorkProductionDriverTargetsWithCardinality(t *testing.T, 
 	if injectCardinality {
 		expectedOperationCalls++
 	}
-	if len(aggregate.ImplementationWork.Rounds) != 2 || aggregate.ImplementationWork.Rounds[0].CompletedReceiptSetHash == "" || aggregate.ImplementationWork.Rounds[1].CompletedReceiptSetHash == "" || operationCalls != expectedOperationCalls || semanticCalls != 6 || committedReceipts != 2*len(targets) {
-		t.Fatalf("two-round production chain incomplete: rounds=%+v semantic=%d operations=%d failure=%+v", aggregate.ImplementationWork.Rounds, semanticCalls, operationCalls, aggregate.Facts.Failure)
+	// Each work round selects its purpose/order, then proposes its proof batch.
+	// Same-contract operation correction must not regenerate semantic planning.
+	expectedSemanticSteps := []runtimecontract.RuntimeSemanticPlanStep{
+		runtimecontract.RuntimeSemanticPlanStepCoverageOrder, runtimecontract.RuntimeSemanticPlanStepProofBatch,
+		runtimecontract.RuntimeSemanticPlanStepCoverageOrder, runtimecontract.RuntimeSemanticPlanStepProofBatch,
+	}
+	if len(aggregate.ImplementationWork.Rounds) != 2 || aggregate.ImplementationWork.Rounds[0].CompletedReceiptSetHash == "" || aggregate.ImplementationWork.Rounds[1].CompletedReceiptSetHash == "" || operationCalls != expectedOperationCalls || !reflect.DeepEqual(semanticSteps, expectedSemanticSteps) || committedReceipts != 2*len(targets) {
+		t.Fatalf("two-round production chain incomplete: rounds=%+v semantic=%d steps=%v operations=%d failure=%+v", aggregate.ImplementationWork.Rounds, semanticCalls, semanticSteps, operationCalls, aggregate.Facts.Failure)
 	}
 	first, second := aggregate.ImplementationWork.Rounds[0], aggregate.ImplementationWork.Rounds[1]
 	if first.CoverageWorkItemID != second.CoverageWorkItemID || second.PrecedingReceiptSetHash != first.CompletedReceiptSetHash || first.ScopeObservation.Selection.ObservedRevision == second.ScopeObservation.Selection.ObservedRevision {

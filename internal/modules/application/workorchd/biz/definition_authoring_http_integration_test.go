@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -491,7 +492,23 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 						return
 					}
 					sections := command.Request.PromptContext.Sections
-					if len(sections) != 3 || sections[2].ID != "C4.authoring-feedback" || !strings.Contains(sections[2].Content, feedback.ContentHash()) || !strings.Contains(sections[2].Content, feedback.IssueRefs()[0]) {
+					feedbackCount := 0
+					for _, section := range sections {
+						if section.ID != "C4.authoring-feedback" {
+							continue
+						}
+						feedbackCount++
+						var actual struct {
+							Previous     workspace.GoalSpecification           `json:"previous"`
+							Feedback     workspace.DefinitionAuthoringFeedback `json:"feedback"`
+							FeedbackHash string                                `json:"feedbackHash"`
+							IssueRefs    []string                              `json:"issueRefs"`
+						}
+						if json.Unmarshal([]byte(section.Content), &actual) != nil || !reflect.DeepEqual(actual.Previous, *first) || !reflect.DeepEqual(actual.Feedback, feedback) || actual.FeedbackHash != feedback.ContentHash() || !slices.Equal(actual.IssueRefs, feedback.IssueRefs()) {
+							t.Error("revision lost exact complete feedback")
+						}
+					}
+					if feedbackCount != 1 {
 						t.Error("revision lost exact complete feedback")
 					}
 					mapping.DesignDecisions = []workspace.GoalSpecificationDesignDecision{{CandidateItemRef: mapping.Obligations[0].CandidateItemRef, Decision: "Use exact equality for fixed input", VerificationBasis: "Independent expected output rejects altered input"}}

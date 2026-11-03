@@ -74,7 +74,7 @@ type RuntimeValidationInputCheckReview struct {
 	Conclusion       string   `json:"conclusion"`
 	Reason           string   `json:"reason"`
 	InputTargetRefs  []string `json:"inputTargetRefs"`
-	// Decompose the immutable criterion into exact excerpts and describe
+	// Decompose the immutable criterion into unique exact excerpts and describe
 	// input coverage. These are observations, not new acceptance criteria or a
 	// repair authorization.
 	Obligations []RuntimeValidationInputObligationReview `json:"obligations,omitempty"`
@@ -266,7 +266,7 @@ func (s RuntimeValidationInputReviewSubject) ValidateAgainstBinding(b RuntimeVal
 
 func (r RuntimeValidationInputReview) ValidateAgainstBinding(b RuntimeValidationProofRequirementBinding) error {
 	if b.InputReview == nil || r.SubjectHash != b.InputReview.Hash {
-		return fmt.Errorf("validation input review has no exact owner subject")
+		return runtimeInputViolation(".subjectHash", "unbound_subject", "exact selected owner input-review subject hash", "validation input review has no exact owner subject")
 	}
 	if err := b.InputReview.ValidateAgainstBinding(b); err != nil {
 		return err
@@ -275,37 +275,38 @@ func (r RuntimeValidationInputReview) ValidateAgainstBinding(b RuntimeValidation
 		return err
 	}
 	if len(r.Checks) != len(b.RequiredCheckRefs) {
-		return fmt.Errorf("validation input review must cover every original required check")
+		return runtimeInputViolation(".checks", "incomplete_check_set", "exactly one check for every selected binding.requiredCheckRefs", "validation input review must cover every original required check")
 	}
 	seen := make(map[string]bool, len(r.Checks))
-	for _, check := range r.Checks {
+	for index, check := range r.Checks {
+		path := fmt.Sprintf(".checks[%d]", index)
 		if !containsString(b.RequiredCheckRefs, check.RequiredCheckRef) || seen[check.RequiredCheckRef] ||
 			check.Reason != strings.TrimSpace(check.Reason) || check.Reason == "" || !utf8.ValidString(check.Reason) ||
 			len(check.Reason) > RuntimeValidationInputReviewMaxReasonBytes {
-			return fmt.Errorf("validation input review has missing, duplicate or invalid per-check reasoning")
+			return runtimeInputViolation(path, "invalid_check_identity_or_reason", "unique declared requiredCheckRef and nonempty bounded UTF-8 reason without surrounding whitespace", "validation input review has missing, duplicate or invalid per-check reasoning")
 		}
 		seen[check.RequiredCheckRef] = true
 		switch check.Conclusion {
 		case RuntimeValidationInputConsistent, RuntimeValidationInputConflict, RuntimeValidationInputInconclusive:
 		default:
-			return fmt.Errorf("validation input review has an unsupported conclusion")
+			return runtimeInputViolation(path+".conclusion", "unsupported_conclusion", "consistent | conflict | inconclusive", "validation input review has an unsupported conclusion")
 		}
 		refs := normalizeStrings(check.InputTargetRefs)
 		if len(refs) == 0 || !reflect.DeepEqual(refs, check.InputTargetRefs) {
-			return fmt.Errorf("validation input review requires canonical exact input references for every check")
+			return runtimeInputViolation(path+".inputTargetRefs", "noncanonical_input_refs", "nonempty sorted unique owner-observed input refs", "validation input review requires canonical exact input references for every check")
 		}
 		for _, ref := range refs {
 			idx := sort.Search(len(b.InputReview.Files), func(i int) bool { return b.InputReview.Files[i].TargetRef >= ref })
 			if idx == len(b.InputReview.Files) || b.InputReview.Files[idx].TargetRef != ref {
-				return fmt.Errorf("validation input review references an unobserved input")
+				return runtimeInputViolation(path+".inputTargetRefs", "unobserved_input_ref", "target refs from selected input-review subject.files only", "validation input review references an unobserved input")
 			}
 		}
 		if err := validateRuntimeValidationInputObligations(check); err != nil {
-			return err
+			return runtimeInputViolationAt(path, err)
 		}
 
 		if err := validateRuntimeValidationCompositionCheck(check, *b.InputReview); err != nil {
-			return err
+			return runtimeInputViolationAt(path, err)
 		}
 	}
 	// Every current report observes the same explicit capacity bound.
@@ -313,7 +314,7 @@ func (r RuntimeValidationInputReview) ValidateAgainstBinding(b RuntimeValidation
 	encoded, err := json.Marshal(r)
 	_, _, maxReport := RuntimeValidationInputReviewBounds(*b.InputReview)
 	if err != nil || len(encoded) > maxReport {
-		return fmt.Errorf("validation input review report capacity exceeded")
+		return runtimeInputViolation("", "report_capacity_exceeded", fmt.Sprintf("complete report within %d bytes", maxReport), "validation input review report capacity exceeded")
 	}
 
 	return nil
@@ -399,12 +400,12 @@ func validateRuntimeSemanticInputReview(p RuntimeSemanticProofProposal, catalog 
 	binding, required := RuntimeSemanticValidationInputReviewBinding(p, []RuntimeOperationAdmissibility{catalog})
 	if !required {
 		if p.ValidationInputReview != nil {
-			return fmt.Errorf("semantic proposal cannot introduce an undeclared input review")
+			return runtimeInputViolation("", "undeclared_input_review", "omit input review unless declared by the exact selected owner binding", "semantic proposal cannot introduce an undeclared input review")
 		}
 		return nil
 	}
 	if p.ValidationInputReview == nil {
-		return fmt.Errorf("semantic proposal requires an independent complete input review")
+		return runtimeInputViolation("", "missing_input_review", "independent complete review for the selected owner input subject", "semantic proposal requires an independent complete input review")
 	}
 	return p.ValidationInputReview.ValidateAgainstBinding(binding)
 }

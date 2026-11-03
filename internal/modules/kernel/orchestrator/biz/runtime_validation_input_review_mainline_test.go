@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -70,6 +71,18 @@ type validationInputReviewMainlineOptions struct {
 	TerminalSnapshot                   bool
 	AdditionalTerminalSnapshotConsumer bool
 	SubmittedSettlementFault           string
+	DuplicateInitialReview             bool
+}
+
+func TestDriveRuntimeCorrectedReviewStillRequiresInputRevision(t *testing.T) {
+	for _, cut := range []string{"", "after_input_revision_retirement"} {
+		t.Run("corrected_missing/"+cut, func(t *testing.T) {
+			runValidationInputReviewMainline(t, "input_revision_omission", cut, validationInputReviewMainlineOptions{
+				Adapter: shellcommon.ValidationRecipeAdapterIsolatedEntrypoint, ValidationCount: 1,
+				ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, DuplicateInitialReview: true,
+			})
+		})
+	}
 }
 
 func TestDriveRuntimeInputReviewOmissionAndRestart(t *testing.T) {
@@ -416,6 +429,8 @@ func %s(t *testing.T) {
 	behaviorRepairs := 0
 	var reviewCalls, validationCalls int
 	var firstReviewManifest string
+	var duplicateSent, preciseCorrectionSeen bool
+	var duplicateManifest, duplicatePrefix string
 	var snapshotPaths []string
 	if options.TerminalSnapshot {
 		snapshotPaths = runtimeReviewedGitSnapshotPaths(t, directory)
@@ -424,6 +439,17 @@ func %s(t *testing.T) {
 	provider.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		calls.Add(1)
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		if options.DuplicateInitialReview && duplicateSent && !preciseCorrectionSeen {
+			if command.CandidateAttempt != 1 || command.SemanticCorrectionDirective == nil || command.SemanticManifest.Hash != duplicateManifest || command.StablePrefixHash != duplicatePrefix || validationCalls != 0 {
+				t.Error("review correction lost frozen identity or bypassed ordinary validation")
+			} else {
+				violations := command.SemanticCorrectionDirective.Violations
+				if len(violations) != 1 || violations[0].Actual != "duplicate_criterion_text" || !strings.Contains(violations[0].Path, ".obligations[1].criterionText") || !strings.Contains(strings.Join(violations[0].Required, " "), "obligations[0]") {
+					t.Errorf("imprecise review correction: %+v", violations)
+				}
+			}
+			preciseCorrectionSeen = true
+		}
 		if command.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
 			document := validationInputAdditionMainlineSemanticDocument(command)
 			if strings.HasPrefix(mode, "input_revision") {
@@ -534,6 +560,36 @@ func %s(t *testing.T) {
 			}
 			if mode == "malformed" && reviewCalls > 0 {
 				payload = []byte(strings.ReplaceAll(string(payload), `"consistent"`, `"approved"`))
+			}
+			if options.DuplicateInitialReview && !duplicateSent && reviewCalls > 0 {
+				// Script a malformed provider fixture, retaining the real missing
+				// finding. The next valid report must still require input work.
+				var wire map[string]json.RawMessage
+				if err := json.Unmarshal(payload, &wire); err != nil {
+					t.Error(err)
+					return
+				}
+				var proposals []map[string]json.RawMessage
+				if err := json.Unmarshal(wire["proposals"], &proposals); err != nil {
+					t.Error(err)
+					return
+				}
+				for _, proposal := range proposals {
+					var review runtimecontract.RuntimeValidationInputReview
+					if len(proposal["validationInputReview"]) == 0 {
+						continue
+					}
+					if err := json.Unmarshal(proposal["validationInputReview"], &review); err != nil {
+						t.Error(err)
+						return
+					}
+					review.Checks[0].Obligations = append(review.Checks[0].Obligations, review.Checks[0].Obligations[0])
+					proposal["validationInputReview"], _ = json.Marshal(review)
+					break
+				}
+				wire["proposals"], _ = json.Marshal(proposals)
+				payload, _ = json.Marshal(wire)
+				duplicateSent, duplicateManifest, duplicatePrefix = true, command.SemanticManifest.Hash, command.StablePrefixHash
 			}
 			result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), DocumentOutcome: runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload)}), nil)
 			return
@@ -1027,7 +1083,14 @@ func %s(t *testing.T) {
 		t.Fatalf("restart cut not reached: %s", cut)
 	}
 	if strings.HasPrefix(mode, "input_revision") {
-		assertRuntimeInputRevisionMainline(t, completed, reviewCalls)
+		classifiedReviews := reviewCalls
+		if options.DuplicateInitialReview {
+			if !duplicateSent || !preciseCorrectionSeen {
+				t.Fatal("review structural correction was not exercised")
+			}
+			classifiedReviews-- // Malformed fixture is not an admitted review.
+		}
+		assertRuntimeInputRevisionMainline(t, completed, classifiedReviews)
 	}
 	if projectBehaviorRepair && behaviorRepairs != 1 {
 		t.Fatal("same-binding implementation repair was missing or repeated")

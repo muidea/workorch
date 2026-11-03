@@ -1832,3 +1832,16 @@ operations 的 generation/preparation 仅属于封存 state-change task，InputR
 证据/assessment 按当前 focus、CWI、允许引用及精确失败选择，不能以 recent-N 替代原因果。工作正文可精确引用
 同一 frozen request 的 C3 corpus，展开后的两个来源均独立校验。SM-3 仅 fresh 请求使用新分段/选择，SM-4 的原冻结
 消息、schema、cache key 和已发操作不重渲染；SM-1/SM-2、权限/预算、原验收、receipt/终态事实与三 ACK 不变。
+
+验证输入报告的同一 check 内 criterionText 必须唯一；同一 excerpt 的联合消费者使用单条 obligation，finding/reason
+保留全部适用缺项、冲突和 unknown，不以某一消费者 covered 抵消其它责任。SM-3 的严格 decoder 从纯 validator
+保留精确 checks/obligations 路径、闭合 actual 分类和 owner 规则（重复时包括首次 occurrence 的位置），沿原 semantic
+violation/observation/directive 传递到 C4；不以 generic incomplete_or_unbound_review 替代具体报告错误，也不把原始
+诊断正文当纠正 authority。schema 说明、初始 C3 规则与 owner 校验一致；同请求 correction/恢复不改变冻结 C0–C3。
+SM-2 仍只消费合法报告：真实 missing/conflict 走适用输入修订或明确失败，unknown 走原有有界事实澄清；结构通过
+不授 proof binding、普通 validation、CWI 或终态 credit。真实 owner mainline 覆盖重复结构纠正后仍需修订输入、
+独立复审/验证及修订退休后的恢复；原 Goal/DoD、预算与历史原件不变。
+
+SM-4 的 Result 错误可保留 receiving-owner typed TerminalDeliveryFailure 阶段和 immutable mismatch 字段路径，
+原始 cause 不丢失；同一交付的写入/返回/ACK 仍按原事务和三 owner 顺序处理。该诊断不新增重试、修改 material、
+复活 Runtime 或 SM-1 终态权限；生产具体 conflict 根因须由现场原件及确定性重放证明，不能以隔离成功替代。

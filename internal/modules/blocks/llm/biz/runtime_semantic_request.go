@@ -91,7 +91,7 @@ func finalizeRuntimeSemanticProviderRequest(request llmmodels.RuntimeCandidateRe
 		providerRequest.ContextBudget.CachePlan.StablePrefixHash = prepared.stablePrefix
 	}
 	populateRuntimeCandidateContextBudget(providerRequest.ContextBudget, providerRequest.PromptContext)
-	if err := validateRuntimeSemanticContextIntegrity(prepared.context, prepared.manifest, request.CandidateAttempt, request.SemanticCorrectionObservation, request.SemanticCorrectionDirective, providerRequest.ContextBudget, providerRequest.PromptContext); err != nil {
+	if err := validateRuntimeSemanticRenderedIntegrity(prepared.schema, prepared.context, prepared.manifest, request.CandidateAttempt, request.SemanticCorrectionObservation, request.SemanticCorrectionDirective, providerRequest.ContextBudget, providerRequest.PromptContext); err != nil {
 		providerRequest.ContextBudget.ContextGateAction = "fail_fast"
 		providerRequest.ContextBudget.ContextGateReason = "runtime_semantic_context_integrity_failed"
 		providerRequest.ContextBudget.BudgetFailureClass = "context_integrity"

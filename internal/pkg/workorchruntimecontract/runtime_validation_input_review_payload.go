@@ -109,6 +109,7 @@ func addRuntimeSemanticInputReviewSchema(proposal map[string]any, manifest Runti
 				checkSchema["required"] = append(checkSchema["required"].([]string), "obligations")
 				checkSchema["properties"].(map[string]any)["obligations"] = map[string]any{
 					"type": "array", "minItems": 1, "maxItems": RuntimeValidationInputReviewMaxObligations,
+					"description": "criterionText must be unique within this check. Use one obligation per exact excerpt with joint proofConsumerRefs; retain all missing/conflicting/unknown responsibilities in finding and reason. Coverage of one consumer cannot discharge another.",
 					"items": map[string]any{
 						"type": "object", "additionalProperties": false,
 						"required": []string{"criterionText", "finding", "reason", "inputTargetRefs"},

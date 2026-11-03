@@ -57,7 +57,7 @@ func TestCacheParameterSchemaKeepsExactGrammarAndCardinality(t *testing.T) {
 			manifest := runtimeCandidateManifestForSchema(t, rc.RuntimeDecision{State: rc.ConvergenceStateNeedStateChange, RequiredOutput: rc.RequiredOutputContract{AcceptedKinds: []string{kind}, TargetRefs: []string{"a", "b"}, RequiredOperationSequence: []rc.RuntimeRequiredOperationVariant{{RequirementID: "first", Kind: kind, TargetRef: "a"}, {RequirementID: "second", Kind: kind, TargetRef: "b", DependsOnRequirementIDs: []string{"first"}}}}}, nil)
 			wire := runtimeCandidateWireForTest(t, manifest)
 			original := []byte(runtimeCandidateCardinalitySchema(manifest, wire))
-			compact, err := compactRuntimeParameterSchema(original)
+			compact, err := compactRuntimePromptSchema(original)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -143,14 +143,16 @@ func TestCacheParameterSchemaDoesNotCaptureReferencesOrInflate(t *testing.T) {
 		`{"properties":{"operations":{"items":{"oneOf":[{"properties":{"parameters":{"$ref":"#/original"}}},{"properties":{"parameters":{"$ref":"#/original"}}}]}}}}`,
 		`{"properties":{"operations":{"items":{"oneOf":[{"properties":{"parameters":{"$id":"https://example.invalid/a","type":"array"}}},{"properties":{"parameters":{"$id":"https://example.invalid/a","type":"array"}}}]}}}}`,
 	} {
-		got, err := compactRuntimeParameterSchema([]byte(raw))
+		got, err := compactRuntimePromptSchema([]byte(raw))
 		if err != nil || !bytes.Equal(got, []byte(raw)) {
 			t.Fatal("unrecognized namespace or non-repeated schema changed", err)
 		}
 	}
 	for _, key := range []string{"$ref", "$id", "id", "$anchor", "$dynamicRef", "$dynamicAnchor", "$recursiveRef", "$recursiveAnchor", "$schema"} {
-		body, _ := json.Marshal(map[string]any{"nested": map[string]any{key: "identity"}})
-		if selfContainedParameterSchema(body) {
+		body, _ := json.Marshal(map[string]any{"properties": map[string]any{"nested": map[string]any{key: "identity"}}})
+		var schema map[string]any
+		_ = json.Unmarshal(body, &schema)
+		if selfContainedPromptSchema(schema) {
 			t.Fatal("schema namespace was factored", key)
 		}
 	}

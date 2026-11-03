@@ -809,6 +809,10 @@ func providerContextBudgetAudit(budget *llmmodels.ProviderContextBudget) llmaudi
 		IntegrityWarnings:  boundedLLMAuditStrings(budget.IntegrityWarnings),
 		SourceRefs:         boundedLLMAuditStrings(budget.SourceRefs),
 	}
+	ret.CacheObservation.WireSchemaHash = budget.WireSchemaHash
+	ret.CacheObservation.WireCachePrefixHash = budget.WireCachePrefixHash
+	ret.CacheObservation.WireCacheMode = budget.WireCacheMode
+	ret.CacheObservation.WireCacheBreakpoints = budget.WireCacheBreakpoints
 	if budget.CachePlan != nil {
 		ret.StablePrefixHash = budget.CachePlan.StablePrefixHash
 		ret.RenderedStablePrefixHash = budget.CachePlan.RenderedStablePrefixHash

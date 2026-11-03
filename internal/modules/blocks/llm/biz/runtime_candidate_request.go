@@ -59,7 +59,7 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 	outputContract.StructuredOutputInstruction = "Apply the operation parameter cardinality contract in C0 to this exact outputContract; all request-specific values remain mandatory."
 	outputContract.Schema = json.RawMessage(runtimeCandidateCardinalitySchema(manifest, wire))
 	strictSchema := string(outputContract.Schema)
-	compact, err := compactRuntimeParameterSchema(outputContract.Schema)
+	compact, err := compactRuntimePromptSchema(outputContract.Schema)
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}

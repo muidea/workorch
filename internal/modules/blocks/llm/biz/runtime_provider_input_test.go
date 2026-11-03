@@ -3,6 +3,7 @@ package llm
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -254,5 +255,62 @@ func TestFrozenPhysicalLayoutSurvivesCurrentBreakpointOptimization(t *testing.T)
 	b, _ := json.Marshal(messages[:4])
 	if !bytes.Equal(a, b) {
 		t.Fatal("correction replaced original physical layout")
+	}
+}
+
+func TestFrozenPromptSchemaIsNotRecompactedOnSubmissionOrCorrection(t *testing.T) {
+	r, current := frozenProviderFixture(t)
+	raw, _, err := freezeRuntimeProviderInput(r, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var frozen runtimeFrozenProviderInput
+	if err := json.Unmarshal(raw, &frozen); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate the original complete, unshared prompt grammar. The original
+	// transaction stays frozen even though a fresh render now shares subtrees.
+	var authority runtimeSemanticAuthorityProjection
+	if err := json.Unmarshal([]byte(frozen.Request.PromptContext.Sections[3].Content), &authority); err != nil {
+		t.Fatal(err)
+	}
+	authority.Schema = json.RawMessage(frozen.Request.Schema)
+	body, _ := json.Marshal(authority)
+	frozen.Request.PromptContext.Sections[3].Content = string(body)
+	var messages []responsesInputMessage
+	if err := json.Unmarshal(frozen.Messages, &messages); err != nil {
+		t.Fatal(err)
+	}
+	messages[3].Content = []responsesInputContent{{Type: "input_text", Text: "### C3.semantic-authority\n" + string(body), PromptCacheBreakpoint: &responsesCacheBreakpoint{Mode: "explicit"}}}
+	frozen.Messages, _ = json.Marshal(messages)
+	raw, _ = json.Marshal(frozen)
+	r.FrozenInput = raw
+	r.FrozenInputRef = &rc.RuntimeProviderInputRef{Hash: rc.RuntimeProviderInputHash(raw), Bytes: len(raw)}
+	restored, err := runtimeProviderRequestForSubmission(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(responsesWireInputForRequest(&restored), frozen.Messages) {
+		t.Fatal("submission recompiled original prompt schema")
+	}
+	r.BaseFrozenInput, r.BaseFrozenInputRef = raw, r.FrozenInputRef
+	e := r.ExpectedDocument.Clone()
+	e.CorrectionAttempt, e.LogicalRequestID = 1, "schema-correction"
+	e.Hash = rc.StableRuntimeExpectedDocumentHash(e)
+	r.ExpectedDocument, r.RequestIdentity.LogicalRequestID = &e, e.LogicalRequestID
+	corrected, _, err := freezeRuntimeProviderInput(r, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result runtimeFrozenProviderInput
+	if err := json.Unmarshal(corrected, &result); err != nil {
+		t.Fatal(err)
+	}
+	var actual []responsesInputMessage
+	if err := json.Unmarshal(result.Messages, &actual); err != nil {
+		t.Fatal(err)
+	}
+	if result.Request.PromptContext.Sections[3].Content != string(body) || !reflect.DeepEqual(actual[:4], messages[:4]) || result.Request.Schema != frozen.Request.Schema {
+		t.Fatal("correction recompiled original prompt/transport schema")
 	}
 }

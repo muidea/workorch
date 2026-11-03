@@ -211,6 +211,10 @@ type PromptStage string
 // CacheObservation describes the actual owner rendering, never cache support
 // inferred from a model name or endpoint. Empty metadata remains unavailable.
 type CacheObservation struct {
+	WireSchemaHash       string
+	WireCachePrefixHash  string
+	WireCacheMode        string
+	WireCacheBreakpoints int
 	RenderContractRef    string
 	Stage                PromptStage
 	Renderer             string
@@ -227,6 +231,10 @@ func (v CacheObservation) Payload() workorcheventpayload.Payload {
 		state = "unavailable"
 	}
 	return workorcheventpayload.New(
+		workorcheventpayload.StringField("wireSchemaHash", v.WireSchemaHash),
+		workorcheventpayload.StringField("wireCachePrefixHash", v.WireCachePrefixHash),
+		workorcheventpayload.StringField("wireCacheMode", v.WireCacheMode),
+		workorcheventpayload.IntField("wireCacheBreakpoints", int64(v.WireCacheBreakpoints)),
 		workorcheventpayload.StringField("schemaVersion", "workorch.cache_observation/v1"),
 		workorcheventpayload.StringField("stage", string(v.Stage)),
 		workorcheventpayload.StringField("renderer", v.Renderer),

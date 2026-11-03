@@ -1,7 +1,9 @@
 package llm
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -12,37 +14,26 @@ import (
 // projection is compacted.
 func compactSemanticPlanPromptSchema(raw []byte) []byte {
 	var value any
-	if err := json.Unmarshal(raw, &value); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
 		return raw
 	}
-	var compact func(any) any
-	compact = func(item any) any {
-		switch typed := item.(type) {
-		case map[string]any:
-			ret := make(map[string]any, len(typed))
-			for key, child := range typed {
-				switch key {
-				case "description", "title", "$comment", "examples":
-					continue
-				default:
-					ret[key] = compact(child)
-				}
-			}
-			return ret
-		case []any:
-			ret := make([]any, len(typed))
-			for idx, child := range typed {
-				ret[idx] = compact(child)
-			}
-			return ret
-		default:
-			return item
-		}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return raw
 	}
-	value = compact(value)
+	value = visitPromptSchema(value, func(node map[string]any) any {
+		for _, key := range []string{"description", "title", "$comment", "examples"} {
+			delete(node, key)
+		}
+		return node
+	})
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return raw
+	}
+	if shared, err := compactRuntimePromptSchema(encoded); err == nil {
+		return shared
 	}
 	return encoded
 }
@@ -75,9 +66,9 @@ func runtimeSemanticBaseOutputInstructionWithoutWorkContent(context runtimecontr
 		return "Return exactly one complete compact semantic_plan JSON object with planStep=coverage_order, a complete coverageOrder, and proposals=[], and finish it in this response. Emit every schema-required field and only schema fields; do not add prose, preface, suffix, markdown fences, unknown fields, or repeated Goal, DoD, manifest, authority, or input context. If and only if a complete all-of order cannot be stated because the sealed Definition implies alternatives, truly omits a prerequisite, or is semantically ambiguous, return the definition_clarification_required schema branch instead. For an undeclared prerequisite, include exact typed prerequisiteClaims as required by the schema; an existing exact C2 owner-fact declaration is not undeclared. The proposals field must be present and empty; do not return any proposal item or any operation, target, recipe, feasibility, action, credit, terminal, retry, governance, ticket, or receipt field."
 	}
 	if context.BatchID != "" {
-		return "Return exactly one complete compact semantic_plan JSON object with planStep=proof_batch and proposals only for the supplied batch coverage IDs, and finish it in this response. Emit only schema fields; do not add prose, preface, suffix, markdown fences, unknown fields, unrequested proposals, or repeated Goal, DoD, manifest, authority, or input context. Echo the sealed batch identity exactly. A proofObligation with evidencePurpose=definition_proof must have one proof for every terminalRequiredEvidenceKinds value, and each proposal has exactly one requiredEvidenceKinds value. When a proposal uses target.policy=prospective_owner_target and its proofObligation carries declarationProspectiveTargetAllOfConstraintRefs, target.prospectiveConstraintRefs must equal that complete mandatory set; never choose a subset or alternative. Specialized current-prerequisite rule: when evidencePurpose=owner_fact_acquisition and ownerFactAcquisition is present, currentRequiredEvidenceKinds and that object define the exact current acquisition proof for this generation and replace the terminal-evidence proposal rule for that CWI. Return exactly one proposal with ownerModuleId=acquisitionOwnerModuleId, operationKind=acquisitionOperationKind, operationVariantId=acquisitionOperationVariantId when present, target.policy=acquisitionTargetPolicy, target.ownerSelectorRefs=[acquisitionTargetSelectorRef], target.prospectiveConstraintRefs=acquisitionConstraintRefs when required, a non-empty bounded target.prospectiveTargetRefs set selected within the declaration selector constraints and declarationTargetSelectorCandidateRefs when that bounded set is present, and requiredEvidenceKinds=[\"state_change\"]. When prospectiveTargetConstraint is present, every allOf target clause must be covered by the proposed set; do not invent an alternative, weaken a predicate, or derive a target from an owner message. The proposed prospectiveTargetRefs are not Definition authority: the required fact owners must evaluate that exact proposal and only an SM-2 CoverageEvidenceBinding may seal it as Runtime authority before dispatch. The final validation surface and validationRecipeId are expected to be unavailable until that acquisition is executed and its required owner is reobserved; do not return gapKind=undeclared_prerequisite solely because either is not currently selectable. The acquisition proposal proves only the prerequisite state change: terminalEvidenceCredit=false, so it does not grant terminal validation evidence or coverage credit, and you must not also propose the terminal validation proof in this generation. Match every operation kind, variant and target policy to the referenced ownerCatalog fact; never apply a prospective/create-only operation fact to a target already listed by the owner catalog. For terminal validation evidence use only mcp/tool_call or validation/managed_session and select a validationRecipeId published by the same ownerCatalog; an unpublished prerequisite-required identity is never terminal validation proof. Never use file/read, file/write, shell/command, git/write, or patch/apply as terminal validation evidence. If and only if the supplied batch cannot form a complete all-of proof plan because the sealed Definition implies alternatives, truly has no declared prerequisite, or is semantically ambiguous, return the definition_clarification_required schema branch with the exact batch identity instead. An undeclared-prerequisite branch must include exact typed prerequisiteClaims; any matching C2 owner-fact declaration makes that claim invalid, including when C3 shows a selectable ownerCatalog fact or ownerFactAcquisition. Do not return coverageOrder, add or omit batch coverage, claim coverage outside the batch, or invent a ticket/action." + repairInstruction
+		return "Return exactly one complete compact semantic_plan JSON object with planStep=proof_batch and proposals only for the supplied batch coverage IDs, and finish it in this response. Emit only schema fields; do not add prose, preface, suffix, markdown fences, unknown fields, unrequested proposals, or repeated Goal, DoD, manifest, authority, or input context. Echo the sealed batch identity exactly. A proofObligation with evidencePurpose=definition_proof must have one proof for every terminalRequiredEvidenceKinds value, and each proposal has exactly one requiredEvidenceKinds value. When a proposal uses target.policy=prospective_owner_target and its proofObligation carries declarationProspectiveTargetAllOfConstraintRefs, target.prospectiveConstraintRefs must equal that complete mandatory set; never choose a subset or alternative." + runtimeSemanticAcquisitionInstruction(context, manifest) + " Match every operation kind, variant and target policy to the referenced ownerCatalog fact; never apply a prospective/create-only operation fact to a target already listed by the owner catalog. For terminal validation evidence use only mcp/tool_call or validation/managed_session and select a validationRecipeId published by the same ownerCatalog; an unpublished prerequisite-required identity is never terminal validation proof. Never use file/read, file/write, shell/command, git/write, or patch/apply as terminal validation evidence. If and only if the supplied batch cannot form a complete all-of proof plan because the sealed Definition implies alternatives, truly has no declared prerequisite, or is semantically ambiguous, return the definition_clarification_required schema branch with the exact batch identity instead. An undeclared-prerequisite branch must include exact typed prerequisiteClaims; any matching C2 owner-fact declaration makes that claim invalid, including when C3 shows a selectable ownerCatalog fact or ownerFactAcquisition. Do not return coverageOrder, add or omit batch coverage, claim coverage outside the batch, or invent a ticket/action." + repairInstruction
 	}
-	return "Return exactly one complete compact semantic_plan JSON object and finish it in this response. Emit only schema fields; do not add prose, preface, suffix, markdown fences, unknown fields, unrequested proposals, and do not repeat the Goal, DoD, manifest, authority, or input context. For every manifest coverage item with evidencePurpose=definition_proof, return one bounded proof declaration for each terminalRequiredEvidenceKinds value. Each proposal has exactly one requiredEvidenceKinds value. For an item with evidencePurpose=owner_fact_acquisition, return only its exact current prerequisite acquisition proposal using currentRequiredEvidenceKinds=[\"state_change\"]; when prospectiveTargetConstraint is present, every allOf target clause must be covered by target.prospectiveTargetRefs. The temporarily unavailable final validation surface is not by itself an undeclared prerequisite, and this acquisition grants no terminal validation evidence or coverage credit. Omit optional arrays and fields when empty. Match operationKind, operationVariantId and target.policy to one ownerCatalog operation fact; an exact or existing target must use a kind/variant whose allowedTargetPolicies includes that policy, while a prospective policy is only for absent owner-authorized targets. A terminal validation evidence proof must use only operationKind=mcp/tool_call or operationKind=validation/managed_session and a validationRecipeId published by the same ownerCatalog. File/read, file/write, shell/command, git/write, and patch/apply cannot claim terminal validation evidence. Do not return operations, runtime actions, coverage credit, terminal state, retry policy, governance tickets, receipts, or owner results." + repairInstruction
+	return "Return exactly one complete compact semantic_plan JSON object and finish it in this response. Emit only schema fields; do not add prose, preface, suffix, markdown fences, unknown fields, unrequested proposals, and do not repeat the Goal, DoD, manifest, authority, or input context. For every manifest coverage item with evidencePurpose=definition_proof, return one bounded proof declaration for each terminalRequiredEvidenceKinds value. Each proposal has exactly one requiredEvidenceKinds value." + runtimeSemanticAcquisitionInstruction(context, manifest) + " Omit optional arrays and fields when empty. Match operationKind, operationVariantId and target.policy to one ownerCatalog operation fact; an exact or existing target must use a kind/variant whose allowedTargetPolicies includes that policy, while a prospective policy is only for absent owner-authorized targets. A terminal validation evidence proof must use only operationKind=mcp/tool_call or operationKind=validation/managed_session and a validationRecipeId published by the same ownerCatalog. File/read, file/write, shell/command, git/write, and patch/apply cannot claim terminal validation evidence. Do not return operations, runtime actions, coverage credit, terminal state, retry policy, governance tickets, receipts, or owner results." + repairInstruction
 }
 
 func runtimeSemanticRequestHasValidationFailureRepair(context runtimecontract.RuntimeSemanticPlanRequestContext, manifest runtimecontract.RuntimeSemanticPlanManifest) bool {
@@ -127,3 +118,24 @@ func runtimeSemanticBaseOutputInstruction(context runtimecontract.RuntimeSemanti
 	}
 	return base + " Use C4 workContext exact current contents, trusted prior rounds and original purpose intent only for the current proof vocabulary and its required dependencies. File hashes and earlier modifications alone never prove semantic completeness."
 }
+
+func runtimeSemanticAcquisitionInstruction(context runtimecontract.RuntimeSemanticPlanRequestContext, manifest runtimecontract.RuntimeSemanticPlanManifest) string {
+	if context.PlanStep == runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
+		return ""
+	}
+	visible := map[string]bool{}
+	for _, id := range context.BatchCoverageWorkItemIDs {
+		visible[string(id)] = true
+	}
+	for _, obligation := range manifest.ProofObligations {
+		if len(visible) > 0 && !visible[string(obligation.CoverageWorkItemID)] {
+			continue
+		}
+		if obligation.OwnerFactAcquisition != nil {
+			return semanticAcquisitionInstruction
+		}
+	}
+	return ""
+}
+
+const semanticAcquisitionInstruction = " Specialized current-prerequisite rule: when evidencePurpose=owner_fact_acquisition and ownerFactAcquisition is present, currentRequiredEvidenceKinds and that object define the exact current acquisition proof for this generation and replace the terminal-evidence proposal rule for that CWI. Return exactly one proposal with ownerModuleId=acquisitionOwnerModuleId, operationKind=acquisitionOperationKind, operationVariantId=acquisitionOperationVariantId when present, target.policy=acquisitionTargetPolicy, target.ownerSelectorRefs=[acquisitionTargetSelectorRef], target.prospectiveConstraintRefs=acquisitionConstraintRefs when required, a non-empty bounded target.prospectiveTargetRefs set selected within the declaration selector constraints and declarationTargetSelectorCandidateRefs when that bounded set is present, and requiredEvidenceKinds=[\"state_change\"]. When prospectiveTargetConstraint is present, every allOf target clause must be covered by the proposed set; do not invent an alternative, weaken a predicate, or derive a target from an owner message. The proposed prospectiveTargetRefs are not Definition authority: the required fact owners must evaluate that exact proposal and only an SM-2 CoverageEvidenceBinding may seal it as Runtime authority before dispatch. The final validation surface and validationRecipeId are expected to be unavailable until that acquisition is executed and its required owner is reobserved; do not return gapKind=undeclared_prerequisite solely because either is not currently selectable. The acquisition proposal proves only the prerequisite state change: terminalEvidenceCredit=false, so it does not grant terminal validation evidence or coverage credit, and you must not also propose the terminal validation proof in this generation."
