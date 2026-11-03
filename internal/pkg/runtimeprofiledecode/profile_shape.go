@@ -22,6 +22,17 @@ type InputFields struct {
 // ValidateInputShape rejects lossy or unsupported Profile values before
 // sources are merged or converted into typed Runtime contracts.
 func ValidateInputShape(input map[string]any) error {
+	return validateInputShape(input, false)
+}
+
+// ValidateSourceShape checks an immutable owner source image. The retired count
+// is audit metadata only; current configuration still uses ValidateInputShape.
+// All other fields retain the same closed shape and exact type checks.
+func ValidateSourceShape(input map[string]any) error {
+	return validateInputShape(input, true)
+}
+
+func validateInputShape(input map[string]any, source bool) error {
 	raw, found := input["profileContracts"]
 	if !found {
 		return nil
@@ -46,7 +57,7 @@ func ValidateInputShape(input map[string]any) error {
 		if !ok || profile == nil {
 			return fmt.Errorf("%w: profileContracts[%q] must be an object", common.ErrInvalidArgument, id)
 		}
-		if err := ValidateObject(profile, "profile", "profileContracts["+id+"]"); err != nil {
+		if err := validateObject(profile, "profile", "profileContracts["+id+"]", source); err != nil {
 			return err
 		}
 	}
@@ -106,6 +117,10 @@ func Fields(kind string) InputFields {
 
 // ValidateObject recursively validates one Profile-owned declaration object.
 func ValidateObject(object map[string]any, kind, subject string) error {
+	return validateObject(object, kind, subject, false)
+}
+
+func validateObject(object map[string]any, kind, subject string, source bool) error {
 	fields := Fields(kind)
 	keys := make([]string, 0, len(object))
 	for key := range object {
@@ -127,7 +142,7 @@ func ValidateObject(object map[string]any, kind, subject string) error {
 				if item == nil {
 					return fmt.Errorf("%w: %s[%d] must be an object", common.ErrInvalidArgument, path, i)
 				}
-				if err := ValidateObject(item, child, fmt.Sprintf("%s[%d]", path, i)); err != nil {
+				if err := validateObject(item, child, fmt.Sprintf("%s[%d]", path, i), source); err != nil {
 					return err
 				}
 			}
@@ -135,12 +150,17 @@ func ValidateObject(object map[string]any, kind, subject string) error {
 		}
 		valid, expected := false, ""
 		switch {
+		case source && kind == "implementationWork" && key == "maxInputRevisionsPerCWI":
+			if !IntegerHasExactShape(raw) || Int(raw) < 0 || String(object["inputRevisionProtocolRef"]) == "" {
+				return fmt.Errorf("%w: %s source metadata requires an exact nonnegative integer and input revision protocol", common.ErrInvalidArgument, path)
+			}
+			continue
 		case kind == "evidence" && key == "implementationWorkPolicy":
 			value, ok := raw.(map[string]any)
 			if !ok || value == nil {
 				return fmt.Errorf("%w: %s must be an object", common.ErrInvalidArgument, path)
 			}
-			if err := ValidateObject(value, "implementationWork", path); err != nil {
+			if err := validateObject(value, "implementationWork", path, source); err != nil {
 				return err
 			}
 			continue

@@ -10,6 +10,17 @@ import (
 // typed Runtime Profile contracts. It decodes the current declarations with explicit coercion
 // behavior; callers validate exact shape before merging or admission.
 func Decode(value any) []runtimecontract.RuntimeProfileContract {
+	return decode(value, false)
+}
+
+// DecodeSource retains original audit metadata for source hash reproduction.
+// Callers validate the complete immutable source with ValidateSourceShape first;
+// this does not select a historical execution method or grant admission.
+func DecodeSource(value any) []runtimecontract.RuntimeProfileContract {
+	return decode(value, true)
+}
+
+func decode(value any, source bool) []runtimecontract.RuntimeProfileContract {
 	profiles := Map(value)
 	ids := make([]string, 0, len(profiles))
 	for id := range profiles {
@@ -99,7 +110,7 @@ func Decode(value any) []runtimecontract.RuntimeProfileContract {
 				}
 			}
 			repair := ValidationFailureRepairConvergence(item)
-			implementation := ImplementationWorkPolicy(item)
+			implementation := implementationWorkPolicy(item, source)
 			contract.EvidenceRequirements = append(contract.EvidenceRequirements, runtimecontract.RuntimeProfileEvidenceRequirement{
 				ID: String(item["id"]), Scope: String(item["scope"]), EvidenceRole: String(item["evidenceRole"]),
 				TargetRole: String(item["targetRole"]), TargetRefs: Strings(item["targetRefs"]), TargetDiscoverySources: Strings(item["targetDiscoverySources"]),
@@ -123,6 +134,10 @@ func Decode(value any) []runtimecontract.RuntimeProfileContract {
 }
 
 func ImplementationWorkPolicy(input map[string]any) *runtimecontract.RuntimeImplementationWorkPolicy {
+	return implementationWorkPolicy(input, false)
+}
+
+func implementationWorkPolicy(input map[string]any, source bool) *runtimecontract.RuntimeImplementationWorkPolicy {
 	raw, present := input["implementationWorkPolicy"]
 	if !present {
 		return nil
@@ -131,7 +146,7 @@ func ImplementationWorkPolicy(input map[string]any) *runtimecontract.RuntimeImpl
 	if !ok || object == nil {
 		return &runtimecontract.RuntimeImplementationWorkPolicy{}
 	}
-	if err := ValidateObject(object, "implementationWork", "implementationWorkPolicy"); err != nil {
+	if err := validateObject(object, "implementationWork", "implementationWorkPolicy", source); err != nil {
 		return &runtimecontract.RuntimeImplementationWorkPolicy{}
 	}
 	policy := &runtimecontract.RuntimeImplementationWorkPolicy{
@@ -143,6 +158,9 @@ func ImplementationWorkPolicy(input map[string]any) *runtimecontract.RuntimeImpl
 		MaxRepeatedWorkStates:                Int(object["maxRepeatedWorkStates"]), MaxTargetsPerRound: Int(object["maxTargetsPerRound"]),
 		RequireFreshObservation: Bool(object["requireFreshObservation"]), RequireFreshValidation: Bool(object["requireFreshValidation"]),
 		ProtectValidationInputs: Bool(object["protectValidationInputs"]),
+	}
+	if source {
+		policy.MaxInputRevisionsPerCWI = Int(object["maxInputRevisionsPerCWI"])
 	}
 	policy.AllowedOperations = make([]runtimecontract.RuntimeOperationVariantRef, 0)
 	for _, item := range MapSlice(object["allowedOperations"]) {

@@ -4290,7 +4290,7 @@ if grep -q -F -- 'byKey[value.Scope+"|"+value.ID] = value' <<<"$runtime_profile_
 	echo "boundary contract violation: Profile evidence normalization restored last-wins scope+id semantics" >&2
 	exit 1
 fi
-runtime_bootstrap_artifact_parser="$(sed -n '/^func Decode(/,/^}/p' internal/pkg/runtimeprofiledecode/decode.go)"
+runtime_bootstrap_artifact_parser="$(sed -n '/^func decode(/,/^}/p' internal/pkg/runtimeprofiledecode/decode.go)"
 if ! grep -q -F 'runtimecontract.RuntimeBootstrapArtifact{' <<<"$runtime_bootstrap_artifact_parser" ||
 	! grep -q -F 'AllowedOperationKinds: Strings(artifact["allowedOperationKinds"])' <<<"$runtime_bootstrap_artifact_parser" ||
 	grep -q -i -E -- 'artifact\[[^]]*"(prospective)?targetRef"|[[:space:]](Prospective)?TargetRef[[:space:]]*:' <<<"$runtime_bootstrap_artifact_parser"; then
@@ -4385,12 +4385,15 @@ for marker in \
 done
 runtime_preseal_input_guard="$({
 	sed -n '/^func ValidateRuntimePresealTargetDeclarations(/,/^}/p' internal/pkg/runtimeprojection/projection.go
+	sed -n '/^func validateRuntimePresealTargetDeclarations(/,/^}/p' internal/pkg/runtimeprojection/projection.go
 	sed -n '/^func RuntimeExecutionContractContainsBootstrapArtifactField(/,/^}/p' internal/pkg/runtimeprojection/projection.go
 	sed -n '/^func RuntimeValueContainsField(/,/^}/p' internal/pkg/runtimeprojection/projection.go
 	sed -n '/^func RuntimePayloadFieldsContainField(/,/^}/p' internal/pkg/runtimeprojection/projection.go
 	sed -n '/^func RuntimePayloadValueContainsField(/,/^}/p' internal/pkg/runtimeprojection/projection.go
 })"
 for marker in \
+	'return validateRuntimePresealTargetDeclarations(executionContract, evidencePolicies, false)' \
+	'validate := runtimeprofiledecode.ValidateInputShape' \
 	'prospectiveTargetRef' \
 	'targetRef' \
 	'RuntimeExecutionContractContainsBootstrapArtifactField' \
@@ -4424,11 +4427,14 @@ done
 definition_configuration_source="$({
 	sed -n '/^func Compile(/,/^}/p' internal/pkg/definitionconfiguration/definition_configuration.go
 	sed -n '/^func CompileForItems(/,/^}/p' internal/pkg/definitionconfiguration/definition_configuration.go
+	sed -n '/^func compileForItems(/,/^}/p' internal/pkg/definitionconfiguration/definition_configuration.go
 	sed -n '/^func validateEvidencePolicies(/,/^}/p' internal/pkg/definitionconfiguration/definition_configuration.go
 	sed -n '/^func evidencePolicyBindings(/,/^}/p' internal/pkg/definitionconfiguration/definition_configuration.go
 })"
 for marker in \
 	'return CompileForItems(current, template, items)' \
+	'return compileForItems(workspace, template, items, false)' \
+	'validate := runtimeprofiledecode.ValidateInputShape' \
 	'compileTemplateProofBindings(template, workspaceHints, rawProfiles, items)' \
 	'validateEvidencePolicies("Template ' \
 	'validateEvidencePolicies("Workspace ' \

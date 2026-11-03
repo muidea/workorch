@@ -36,6 +36,16 @@ Workspace owner 的同一有效 catalog：内置 ID 保留给程序，持久 rep
 内置 ID 的 Create/Update/Delete 拒绝，自定义模板以独立 ID 持久化并可继承内置父模板。
 Get/List 的 `Builtin` 只为只读来源展示；模型 query provenance 不序列化、不计入 hash，创建历史快照时丢弃。
 原 authoring/确认/StartupInput/Run 中的封存 Template/Profile 快照保持原值；新版本不会自动补关系或改写旧验收。
+原 owner 来源的完整性复编译与当前配置准入使用同一编译规则，但保全来源中已经封存的审计字段。
+`AuthoringProfileContracts`、`CompileAuthoring` 和 preparation 的原归档复编译通过 source decoder 保留
+`MaxInputRevisionsPerCWI` 原值，以反证原 profile/hash、确认谱系与准备材料；该值不进入 `ExecutionMethod`，
+不恢复累计修订停止。当前配置的 `ValidateInputShape` / `CompileForItems` 继续拒绝该已退役字段。
+source decoder 只放行此原字段的精确非负整数与协议绑定，未知字段、目标、预算及原 hash 门禁仍完整校验。
+后续合法事务仍由 owner 取得当前内置方法，不把保全的原值当成新配置或执行授权。只读 Get/List/reopen
+不得清洗、迁移、回填或写回历史 Workspace；原 Run、Result、封存输入和失败事实不变。
+`repository/file/workspace_source_metadata_test.go` 使用完整合成 owner 原件固定真实 Get/List/reopen、来源 hash
+重现及损坏拒绝，不包含 live 数据或 provider 调用。本收口不增加 SM-1～SM-4 转换或执行权限。
+
 旧内置模板升级 ingress 仅允许 expected/target 均为当前精确 hash 的只读 no-op，`Upgraded=false`；
 不再使用历史指纹表作为当前模板刷新条件。无新 topic、跨 owner facade、Runtime SM-1～SM-4 迁移或执行权限。
 

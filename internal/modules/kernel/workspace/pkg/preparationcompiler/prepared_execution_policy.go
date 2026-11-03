@@ -122,11 +122,11 @@ func CompilePreparedExecutionPolicy(snapshot startuppreparation.ExactConfirmedSt
 	// no call to it, since it reads today's process configuration.
 	contract["maxRepairAttemptsPerFocus"] = p.MaxRuntimeRepairAttempts
 	contract["candidateDocumentRecovery"] = map[string]any{"maxAttempts": p.MaxDocumentRecoveryAttempts}
-	if err := runtimeprojection.ValidateRuntimePresealTargetDeclarations(contract, nil); err != nil {
+	if err := runtimeprojection.ValidateRuntimeSourceTargetDeclarations(contract, nil); err != nil {
 		return PreparedExecutionPolicy{}, err
 	}
 	execution := runtimeprojection.RuntimeExecutionContract(contract)
-	compiled, err := definitionconfiguration.CompileForItems(w, &inputs.Template, snapshot.Candidate.DoDInputs)
+	compiled, err := definitionconfiguration.CompileSourceForItems(w, &inputs.Template, snapshot.Candidate.DoDInputs)
 	if err != nil {
 		return PreparedExecutionPolicy{}, err
 	}

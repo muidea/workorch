@@ -17,10 +17,24 @@ import (
 )
 
 func ValidateRuntimePresealTargetDeclarations(executionContract map[string]any, evidencePolicies []workorcheventpayload.Payload) error {
+	return validateRuntimePresealTargetDeclarations(executionContract, evidencePolicies, false)
+}
+
+// ValidateRuntimeSourceTargetDeclarations rechecks an immutable original
+// declaration. Source-only audit metadata does not relax target or budget gates.
+func ValidateRuntimeSourceTargetDeclarations(executionContract map[string]any, evidencePolicies []workorcheventpayload.Payload) error {
+	return validateRuntimePresealTargetDeclarations(executionContract, evidencePolicies, true)
+}
+
+func validateRuntimePresealTargetDeclarations(executionContract map[string]any, evidencePolicies []workorcheventpayload.Payload, source bool) error {
 	if err := ValidateRuntimeExecutionLimitsInput(executionContract); err != nil {
 		return err
 	}
-	if err := validateRuntimeProfileInputShape(executionContract); err != nil {
+	validate := runtimeprofiledecode.ValidateInputShape
+	if source {
+		validate = runtimeprofiledecode.ValidateSourceShape
+	}
+	if err := validate(executionContract); err != nil {
 		return err
 	}
 	if RuntimeValueContainsField(executionContract, "prospectiveTargetRef") {

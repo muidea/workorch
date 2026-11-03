@@ -20,7 +20,7 @@ func TestRuntimeProfileShapeMatchesTypedDecoderFields(t *testing.T) {
 	}
 	var decoder *ast.FuncDecl
 	for _, declaration := range file.Decls {
-		if f, ok := declaration.(*ast.FuncDecl); ok && f.Name.Name == "Decode" {
+		if f, ok := declaration.(*ast.FuncDecl); ok && f.Name.Name == "decode" {
 			decoder = f
 		}
 	}
@@ -65,14 +65,14 @@ func TestRuntimeProfileShapeMatchesTypedDecoderFields(t *testing.T) {
 				}
 				return false
 			}
-			if call, ok := node.(*ast.CallExpr); ok && len(call.Args) == 1 {
+			if call, ok := node.(*ast.CallExpr); ok && len(call.Args) >= 1 {
 				if fn, ok := call.Fun.(*ast.Ident); ok {
 					if fn.Name == "ValidationFailureRepairConvergence" {
 						if arg, ok := call.Args[0].(*ast.Ident); ok && arg.Name == variable {
 							actual["validationFailureRepairConvergence"] = "repair"
 						}
 					}
-					if fn.Name == "ImplementationWorkPolicy" {
+					if fn.Name == "implementationWorkPolicy" {
 						if arg, ok := call.Args[0].(*ast.Ident); ok && arg.Name == variable {
 							actual["implementationWorkPolicy"] = "implementationWork"
 						}

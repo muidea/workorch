@@ -18,30 +18,36 @@ func AuthoringProfileContracts(d DefinitionDerivationRequest) ([]runtimecontract
 		return nil, fmt.Errorf("profile source requires completed derivation")
 	}
 	hints := d.Template.ContextHints.Map()
-	if err := runtimeprofiledecode.ValidateInputShape(hints); err != nil {
+	if err := runtimeprofiledecode.ValidateSourceShape(hints); err != nil {
 		return nil, err
 	}
 	items, err := d.Proposal.CandidateItems(d.Input, &d.Template)
 	if err != nil {
 		return nil, err
 	}
-	profiles, err := CompileTemplateProofProfiles(&d.Template, nil, runtimeprofiledecode.Map(hints["profileContracts"]), items)
+	profiles, err := compileTemplateProofProfiles(&d.Template, nil, runtimeprofiledecode.Map(hints["profileContracts"]), items, false, true)
 	if err != nil {
 		return nil, err
 	}
-	return runtimeprofiledecode.Decode(profiles), nil
+	return runtimeprofiledecode.DecodeSource(profiles), nil
 }
 func CompileTemplateProofProfiles(t *WorkspaceTemplate, workspaceHints, profiles map[string]any, items []DefinitionCandidateItem) (map[string]any, error) {
-	return compileTemplateProofProfiles(t, workspaceHints, profiles, items, false)
+	return compileTemplateProofProfiles(t, workspaceHints, profiles, items, false, false)
 }
 
 // Original business items remain fixed when system proof methods change.
 // Only exact original text can receive a current method; new template criteria
 // are not appended to an already confirmed business inventory.
 func CompileCurrentTemplateProofProfiles(t *WorkspaceTemplate, workspaceHints, profiles map[string]any, items []DefinitionCandidateItem) (map[string]any, error) {
-	return compileTemplateProofProfiles(t, workspaceHints, profiles, items, true)
+	return compileTemplateProofProfiles(t, workspaceHints, profiles, items, true, false)
 }
-func compileTemplateProofProfiles(t *WorkspaceTemplate, workspaceHints, profiles map[string]any, items []DefinitionCandidateItem, sealed bool) (map[string]any, error) {
+
+// CompileSourceTemplateProofProfiles reproduces a frozen owner declaration,
+// preserving source metadata without enabling it in current configuration.
+func CompileSourceTemplateProofProfiles(t *WorkspaceTemplate, workspaceHints, profiles map[string]any, items []DefinitionCandidateItem, sealed bool) (map[string]any, error) {
+	return compileTemplateProofProfiles(t, workspaceHints, profiles, items, sealed, true)
+}
+func compileTemplateProofProfiles(t *WorkspaceTemplate, workspaceHints, profiles map[string]any, items []DefinitionCandidateItem, sealed, source bool) (map[string]any, error) {
 	raw, present := t.ContextHints.Map()["templateProofBindings"]
 	if other, exists := workspaceHints["templateProofBindings"]; exists && (!present || !reflect.DeepEqual(other, raw)) {
 		return nil, fmt.Errorf("Workspace cannot replace template proof source contract")
@@ -159,10 +165,16 @@ func compileTemplateProofProfiles(t *WorkspaceTemplate, workspaceHints, profiles
 
 		profile["evidenceRequirements"] = append(requirements, duplicate)
 	}
-	if err := runtimeprofiledecode.ValidateInputShape(map[string]any{"profileContracts": result}); err != nil {
+	validate := runtimeprofiledecode.ValidateInputShape
+	decode := runtimeprofiledecode.Decode
+	if source {
+		validate = runtimeprofiledecode.ValidateSourceShape
+		decode = runtimeprofiledecode.DecodeSource
+	}
+	if err := validate(map[string]any{"profileContracts": result}); err != nil {
 		return nil, err
 	}
-	for _, p := range runtimeprofiledecode.Decode(result) {
+	for _, p := range decode(result) {
 		for _, r := range p.EvidenceRequirements {
 			if err := runtimecontract.ValidateRuntimeLineageAssertionRules(r.LineageAssertions); err != nil {
 				return nil, err

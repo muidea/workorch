@@ -184,3 +184,59 @@ func TestCurrentMethodRetiresInheritedInputRevisionAllowanceWithoutRewritingWork
 		}
 	}
 }
+
+func TestFrozenSourceRecompilationPreservesRetiredMetadataAndCurrentMethodDiffers(t *testing.T) {
+	current, input, _ := templateProofFixture(t, 1)
+	original := current.Clone()
+	hints := original.ContextHints.Map()
+	for _, raw := range hints["profileContracts"].(map[string]any) {
+		for _, item := range raw.(map[string]any)["evidenceRequirements"].([]any) {
+			if p, ok := item.(map[string]any)["implementationWorkPolicy"].(map[string]any); ok {
+				p["maxInputRevisionsPerCWI"] = 4
+			}
+		}
+	}
+	original.ContextHints = payload(t, hints)
+	w := &workspacemodel.Workspace{ID: input.WorkspaceID, TemplateID: current.ID, ContextHints: original.ContextHints.Clone(), DefinitionAuthoring: &workspacemodel.DefinitionAuthoringRecord{Input: input, TemplateSnapshot: original}}
+	items, err := configurationDoDItems(w, &original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := json.Marshal(w)
+	if _, err = CompileForItems(w, &original, items); err == nil {
+		t.Fatal("fresh configuration accepted retired count")
+	}
+	first, err := CompileSourceForItems(w, &original, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := CompileSourceForItems(w, &original, items)
+	if err != nil || !reflect.DeepEqual(first, second) {
+		t.Fatal("source reload changed", err)
+	}
+	seen := 0
+	for _, p := range first.ProfileContracts {
+		for _, r := range p.EvidenceRequirements {
+			if policy := r.ImplementationWorkPolicy; policy != nil {
+				seen++
+				if policy.MaxInputRevisionsPerCWI != 4 {
+					t.Fatal("original source metadata removed")
+				}
+			}
+		}
+	}
+	if seen == 0 {
+		t.Fatal("source fixture lacks work policy")
+	}
+	fresh, err := Compile(w, &current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.ProfileContractsHash == first.ProfileContractsHash {
+		t.Fatal("original metadata hash not preserved")
+	}
+	after, _ := json.Marshal(w)
+	if string(before) != string(after) {
+		t.Fatal("source compilation mutated owner")
+	}
+}

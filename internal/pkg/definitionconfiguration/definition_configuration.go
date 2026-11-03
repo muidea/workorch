@@ -55,15 +55,32 @@ func Compile(workspace *workspacemodel.Workspace, template *workspacemodel.Works
 }
 
 func CompileForItems(workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate, items []workspacemodel.DefinitionCandidateItem) (Bindings, error) {
+	return compileForItems(workspace, template, items, false)
+}
+
+// CompileSourceForItems reproduces original owner declarations and their hashes.
+// It does not resolve current defaults or authorize a new transaction. Fresh
+// execution/configuration must use Compile/CompileForItems instead.
+func CompileSourceForItems(workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate, items []workspacemodel.DefinitionCandidateItem) (Bindings, error) {
+	return compileForItems(workspace, template, items, true)
+}
+
+func compileForItems(workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate, items []workspacemodel.DefinitionCandidateItem, source bool) (Bindings, error) {
 	if workspace == nil || template == nil {
 		return Bindings{}, common.ErrInvalidArgument
 	}
 	workspaceHints, templateHints := workspace.ContextHints.Map(), template.ContextHints.Map()
+	validate := runtimeprofiledecode.ValidateInputShape
+	decode := runtimeprofiledecode.Decode
+	if source {
+		validate = runtimeprofiledecode.ValidateSourceShape
+		decode = runtimeprofiledecode.DecodeSource
+	}
 	for _, input := range []map[string]any{templateHints, workspaceHints} {
 		if err := validateExecutionLimitsInput(input); err != nil {
 			return Bindings{}, err
 		}
-		if err := runtimeprofiledecode.ValidateInputShape(input); err != nil {
+		if err := validate(input); err != nil {
 			return Bindings{}, err
 		}
 	}
@@ -108,7 +125,9 @@ func CompileForItems(workspace *workspacemodel.Workspace, template *workspacemod
 	}
 	rawProfiles := runtimeprofiledecode.Map(effective["profileContracts"])
 	var err error
-	if workspace.StartupInput != nil || workspace.DefinitionAuthoringConfirmation != nil {
+	if source {
+		rawProfiles, err = workspacemodel.CompileSourceTemplateProofProfiles(template, workspaceHints, rawProfiles, items, workspace.StartupInput != nil || workspace.DefinitionAuthoringConfirmation != nil)
+	} else if workspace.StartupInput != nil || workspace.DefinitionAuthoringConfirmation != nil {
 		rawProfiles, err = workspacemodel.CompileCurrentTemplateProofProfiles(template, workspaceHints, rawProfiles, items)
 	} else {
 		rawProfiles, err = compileTemplateProofBindings(template, workspaceHints, rawProfiles, items)
@@ -116,7 +135,7 @@ func CompileForItems(workspace *workspacemodel.Workspace, template *workspacemod
 	if err != nil {
 		return Bindings{}, err
 	}
-	profiles := runtimeprofiledecode.Decode(rawProfiles)
+	profiles := decode(rawProfiles)
 	maxFocuses := runtimecontract.RuntimeAcceptanceFocusMaxCount
 	if policy := runtimeprofiledecode.Map(effective["acceptanceSlicePolicy"]); len(policy) > 0 {
 		maxFocuses = integer(policy["maxFocuses"])
