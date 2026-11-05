@@ -22,6 +22,16 @@ func saveMapWithPermissions[K comparable, V any](path string, items map[K]V, per
 	if err != nil {
 		return err
 	}
+	return publishMapBytes(path, items, data, perm, commit)
+}
+
+// publishMapBytes is the single publication/cache fence for both ordinary map
+// encoding and the Runtime CAS's frozen physical encoding. Callers own the
+// isolated items and encode them before entering this publication boundary.
+func publishMapBytes[K comparable, V any](path string, items map[K]V, data []byte, perm os.FileMode, commit atomicFileCommitFunc) error {
+	if perm != 0o644 && perm != 0o600 {
+		return fmt.Errorf("file repository permissions invalid")
+	}
 	if commit == nil {
 		return fmt.Errorf("file repository commit is nil")
 	}

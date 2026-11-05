@@ -119,7 +119,7 @@ func TestSemanticExecutionBudgetRequiresExactCurrentOwnerSnapshot(t *testing.T) 
 	if len(b.VisibleProofBatches) != 1 || b.VisibleProofBatches[0].Used != 1 || *b.VisibleProofBatches[0].Remaining != 1 {
 		t.Fatal("sealed proof batch omitted")
 	}
-	for _, defect := range []string{"scope", "revision", "evidence revision", "limits", "seed", "manifest", "ledger"} {
+	for _, defect := range []string{"scope", "revision", "evidence revision", "limits", "seed", "manifest"} {
 		t.Run(defect, func(t *testing.T) {
 			badContext := c.Normalized()
 			badAggregate := reloadExecutionLimitedAggregate(t, a)
@@ -137,13 +137,23 @@ func TestSemanticExecutionBudgetRequiresExactCurrentOwnerSnapshot(t *testing.T) 
 				badContext.DefinitionSeed.Hash = "other"
 			case "manifest":
 				manifest.Hash = "retired"
-			case "ledger":
-				badAggregate.ExecutionBudget.Policy.PolicyHash = "corrupt"
 			}
 			badContext.CoverageProgress.Hash = runtimecontract.StableRuntimeSemanticCoverageProgressHash(badContext.CoverageProgress)
 			if _, err := SemanticExecutionBudget(badAggregate, badContext, manifest); err == nil {
 				t.Fatal("unrelated or stale owner budget accepted")
 			}
 		})
+	}
+}
+
+// Corrupt raw budget policy is rejected at owner admission. Querying a formal
+// aggregate must not repeat the entire aggregate's admission merely to check
+// this one already-admitted source; wrong/stale request bindings stay above.
+func TestSemanticBudgetRawSourceRequiresOwnerAdmission(t *testing.T) {
+	_, _, a, _ := semanticRequestIntentFixture(t)
+	bad := RuntimeStateRecordFromAggregate(a)
+	bad.ExecutionBudget.Policy.PolicyHash = "corrupt"
+	if _, err := AdmitRuntimeOwnerStateRecord(bad); err == nil {
+		t.Fatal("owner admitted a corrupt original budget policy")
 	}
 }

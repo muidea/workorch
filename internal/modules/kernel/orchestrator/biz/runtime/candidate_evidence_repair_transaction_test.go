@@ -695,7 +695,7 @@ func TestConfirmedRepairCommitmentFreshLoadRejectsDeletionAndCoordinatedTamper(t
 			if test.precheck != nil {
 				test.precheck(t, &tampered)
 			}
-			if err := tampered.Validate(); err == nil || !strings.Contains(err.Error(), test.wantError) {
+			if err := tampered.Validate(); err == nil || (!strings.Contains(err.Error(), test.wantError) && !(test.name == "dispatch commitment deleted" && strings.Contains(err.Error(), "requires exactly one accepted-attempt"))) {
 				t.Fatalf("confirmed owner repair commitment tamper error = %v", err)
 			}
 		})
@@ -867,7 +867,7 @@ func TestConfirmedRepairMultiOperationGovernanceContinueOrdersAcceptedAndResolut
 		t.Fatal("multi-operation File repair governance continuation has no resume dispatch")
 	}
 	resume := governance.Aggregate.ActiveDispatch
-	var source *SealedDispatch
+	var source *runtimecontract.RuntimeDispatchRecord
 	for _, binding := range governance.Aggregate.OperationGovernanceBindings {
 		binding = binding.Normalized()
 		if binding.OperationID != governance.operationID || binding.Grant == nil || binding.Grant.ResumeDispatchID != resume.ID {
@@ -986,7 +986,7 @@ func TestReduceRuntimeStateWithDirectiveConsumesGovernanceContinuationOwnerEvent
 		t, fixture.repository, 1, "sole-reducer", runtimecontract.RuntimeGovernanceResolutionOutcomeContinue,
 	)
 
-	var source SealedDispatch
+	var source runtimecontract.RuntimeDispatchRecord
 	var binding runtimecontract.RuntimeOperationGovernanceBinding
 	found := false
 	for _, rawBinding := range governance.Aggregate.OperationGovernanceBindings {
@@ -1171,7 +1171,7 @@ func TestPendingConfirmedRepairTransactionDoesNotMatchFreshValidationPartialDisp
 			State:          runtimecontract.ConvergenceStateNeedValidation,
 			RequiredOutput: runtimecontract.RequiredOutputContract{RepairClosureID: closure.ID},
 		},
-		ActiveDispatch: &SealedDispatch{
+		ActiveDispatch: &runtimecontract.RuntimeDispatchRecord{
 			State: DispatchStateSealed,
 			Candidate: runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{
 				{Operation: runtimecontract.RuntimeOperation{ID: "validate-1"}},

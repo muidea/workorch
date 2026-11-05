@@ -71,7 +71,7 @@ func NextRuntimeCWIBindingRetirementFact(aggregate RuntimeAggregate) (RuntimeCWI
 		if err := runtimecontract.ValidateRuntimeCWIBindingRetirementsAgainstExecution(
 			probe,
 			nil,
-			sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches),
+			(aggregate.CompletedDispatches),
 			aggregate.OperationReceipts,
 		); err != nil {
 			continue
@@ -928,9 +928,9 @@ func projectRuntimeCWIExecutionFocus(facts runtimecontract.RuntimeFacts, accepte
 
 // projectRuntimeCWIExecutionFocusForGeneration applies an accepted order whose
 // complete eligible closure was already derived from the active semantic
-// generation. It differs from the global contract helper only for a one-CWI
-// validation-repair generation; unrelated globally eligible Definition rows
-// remain in their existing queue order and cannot enter that generation.
+// generation. Ordinary request groups and one-CWI work/repair generations do
+// not absorb unrelated globally eligible Definition rows; those rows remain
+// in their existing queue for a subsequent legal generation.
 func projectRuntimeCWIExecutionFocusForGeneration(facts runtimecontract.RuntimeFacts, acceptedOrder, generationEligible []common.CoverageWorkItemID, completedCurrent *runtimecontract.CoverageFocus) (runtimecontract.RuntimeFacts, error) {
 	eligibleSet := make(map[common.CoverageWorkItemID]struct{}, len(generationEligible))
 	for _, id := range generationEligible {
@@ -1056,7 +1056,7 @@ func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, wo
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -1094,7 +1094,7 @@ func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, wo
 	var generationEligible []common.CoverageWorkItemID
 	semanticGenerationProjection := false
 	if manifestHash != "" {
-		ledger := aggregate.SemanticPlanning.Clone()
+		ledger := aggregate.SemanticPlanning.CloneRaw()
 		if ledger.Manifest == nil || ledger.Manifest.Hash != manifestHash || ledger.CoverageOrderDocument == nil ||
 			!sameCoverageIDs(ledger.CoverageOrderDocument.CoverageOrder, acceptedOrder) {
 			return RuntimeAggregate{}, fmt.Errorf("%w: eligible focus projection semantic order is stale", common.ErrConflict)
@@ -1115,9 +1115,7 @@ func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, wo
 			}
 			aggregate.Facts, aggregate.Decision = facts, decision
 			aggregate.StateRevision++
-			if err := c.validateAggregate(aggregate); err != nil {
-				return RuntimeAggregate{}, err
-			}
+
 			if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 				return RuntimeAggregate{}, err
 			}
@@ -1158,9 +1156,7 @@ func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, wo
 	}
 	aggregate.Facts, aggregate.Decision = facts, decision
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -1270,7 +1266,7 @@ func runtimeSemanticGenerationEligibleClosure(facts runtimecontract.RuntimeFacts
 		scopedCoverageID, scopedKind = obligation.CoverageWorkItemID, kind
 	}
 	if scopedCoverageID == "" {
-		return eligible, nil
+		return runtimeOrdinarySemanticEligibleClosure(facts, manifest, eligible), nil
 	}
 	if len(manifest.CoverageItems) != 1 || manifest.CoverageItems[0].ID != scopedCoverageID || len(manifest.ProofObligations) != 1 {
 		return nil, fmt.Errorf("%w: %s semantic generation is not scoped to exactly one CWI", common.ErrConflict, scopedKind)
@@ -1473,7 +1469,7 @@ func (c *authorityComponent) retireRuntimeCWIBinding(ctx context.Context, worksp
 	if err := fact.validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -1494,9 +1490,7 @@ func (c *authorityComponent) retireRuntimeCWIBinding(ctx context.Context, worksp
 	}
 	expectedRevision := aggregate.StateRevision
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -1539,7 +1533,7 @@ func applyRuntimeCWIBindingRetirement(aggregate *RuntimeAggregate, fact RuntimeC
 	if _, err := supersedeActiveReconciliationForCurrentContract(aggregate); err != nil {
 		return err
 	}
-	if err := runtimecontract.ValidateRuntimeCWIBindingRetirementsAgainstExecution(aggregate.Facts, nil, sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches), aggregate.OperationReceipts); err != nil {
+	if err := runtimecontract.ValidateRuntimeCWIBindingRetirementsAgainstExecution(aggregate.Facts, nil, (aggregate.CompletedDispatches), aggregate.OperationReceipts); err != nil {
 		return fmt.Errorf("%w: %v", common.ErrConflict, err)
 	}
 	facts, decision, err := reduceRuntimeAggregateWithDirective(*aggregate, aggregate.Facts, nil)

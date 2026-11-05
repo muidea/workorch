@@ -18,6 +18,9 @@ func independentOwnerStateImage(record *runtimecontract.RuntimeStateRecord, aggr
 			return fmt.Errorf("load Runtime state: %w", err)
 		}
 	}
+	if record != nil && !reflect.DeepEqual(*record, ownerStateRecord(aggregate)) {
+		return fmt.Errorf("runtime owner record conversion changed original data")
+	}
 	return aggregate.Validate()
 }
 
@@ -28,7 +31,6 @@ func TestOwnerStateTransactionCompleteImagesMatchIndependentGates(t *testing.T) 
 			r := runtimeStateRecordForTerminalNonterminalRecoveryTest(t, a)
 			originalA, originalR := a.CloneRaw(), r.Clone()
 			err := runtimecontract.CompileRuntimeOwnerStateTransaction(func(validate func(runtimecontract.RuntimeOwnerStateSourceImage) error) error {
-				compiler := &ownerStateInvariantCompiler{}
 				// Full first Load, after-image and actual Commit reload all use
 				// the same compiler, including their complete owner continuations.
 				for phase := range 3 {
@@ -55,7 +57,7 @@ func TestOwnerStateTransactionCompleteImagesMatchIndependentGates(t *testing.T) 
 						case "budget":
 							checked.ExecutionBudget.Policy.PolicyRevision = "drift"
 						case "dispatch":
-							checked.CompletedDispatches = append(checked.CompletedDispatches, SealedDispatch{})
+							checked.CompletedDispatches = append(checked.CompletedDispatches, runtimecontract.RuntimeDispatchRecord{})
 						case "header order":
 							raw.Facts.RunID = ""
 							checked.ResultFeedbackVersion = 0
@@ -63,7 +65,7 @@ func TestOwnerStateTransactionCompleteImagesMatchIndependentGates(t *testing.T) 
 							checked.Decision.AuthoritySnapshot.RunID = "wrong-run"
 						}
 					}
-					got := validate(ownerStateSourceImageInCompiler(record, checked, compiler))
+					got := validate(ownerStateSourceImageInCompiler(record, checked))
 					want := independentOwnerStateImage(record, checked)
 					if fmt.Sprint(got) != fmt.Sprint(want) {
 						t.Fatalf("phase %d first error differs: %v != %v", phase, got, want)
@@ -109,7 +111,7 @@ func TestOwnerStateTransactionRevokesFullGateAndRetainsErrorOrder(t *testing.T) 
 				}
 				if exit == "failure" {
 					bad := image
-					bad.AfterSemantic = func(*runtimecontract.RuntimeOwnerInvariantSourceGate) error { return sentinel }
+					bad.AggregateJoins = func(*runtimecontract.RuntimeOwnerInvariantSourceGate) error { return sentinel }
 					if !errors.Is(validate(bad), sentinel) {
 						t.Fatal("remaining invariant skipped")
 					}
@@ -140,8 +142,8 @@ type ownerStateTransactionTestRepository struct {
 	previous              RuntimeAggregate
 	raw                   runtimecontract.RuntimeStateRecord
 	loads, rereads, saves int
-	request               RuntimeTransitionPreimageRequest
-	preimageMutation      func(*runtimecontract.RuntimeStateRecord, *RuntimeAggregate)
+	beforeCAS             func()
+	responseLost          bool
 	saveErr               error
 }
 
@@ -154,77 +156,73 @@ func (r *ownerStateTransactionTestRepository) LoadOwnerStateOriginal(context.Con
 	r.loads++
 	return r.raw.Clone(), r.previous.CloneRaw(), nil
 }
-func (r *ownerStateTransactionTestRepository) LoadTransitionPreimage(_ context.Context, request RuntimeTransitionPreimageRequest) (RuntimeTransitionPreimage, error) {
-	r.rereads++
-	r.request = request
-	raw, a := r.raw.Clone(), r.previous.CloneRaw()
-	if r.preimageMutation != nil {
-		r.preimageMutation(&raw, &a)
+
+func (r *ownerStateTransactionTestRepository) Save(_ context.Context, a RuntimeAggregate, expected uint64) error {
+	if r.beforeCAS != nil {
+		r.beforeCAS()
 	}
-	return request.CompileOwnerRecord(raw, a)
-}
-func (r *ownerStateTransactionTestRepository) Save(_ context.Context, a RuntimeAggregate, _ uint64) error {
+	if r.previous.StateRevision != expected {
+		return &RuntimeCASConflictError{ExpectedRevision: expected, ObservedRevision: r.previous.StateRevision}
+	}
 	r.saves++
 	if r.saveErr != nil {
 		return r.saveErr
 	}
 	r.previous, r.raw = a.CloneRaw(), runtimeStateRecordForTransactionTest(a)
+	if r.responseLost {
+		r.responseLost = false
+		return errors.New("response lost after CAS")
+	}
 	return nil
 }
 func runtimeStateRecordForTransactionTest(a RuntimeAggregate) runtimecontract.RuntimeStateRecord {
-	// Only fields used by this fixture; do not normalize malformed raw sources.
-	return runtimecontract.RuntimeStateRecord{ResultFeedbackVersion: a.ResultFeedbackVersion, StateRevision: a.StateRevision, EvidenceSequence: a.EvidenceSequence,
-		Definition: a.Definition, Facts: a.Facts, SemanticPlanning: a.SemanticPlanning, ImplementationWork: a.ImplementationWork, Reconciliation: a.Reconciliation,
-		CoverageProofLineage: a.CoverageProofLineage, Decision: a.Decision, ExecutionBudget: a.ExecutionBudget, CompletedDispatches: sealedDispatchesToRuntimeRecords(a.CompletedDispatches)}
+	return RuntimeStateRecordFromAggregate(a)
 }
 
-func TestOwnerStateTransactionPrivateEventReadsAgainAndDoesNotEscape(t *testing.T) {
-	for _, scenario := range []string{"normal", "bad raw", "stale", "scope", "save failure"} {
+func TestOwnerStateTransactionUsesOnePreimageAndAtomicCAS(t *testing.T) {
+	for _, scenario := range []string{"normal", "bad raw", "stale CAS", "scope", "save failure", "response loss"} {
 		t.Run(scenario, func(t *testing.T) {
 			a := stateChangeAggregate(t)
 			repo := &ownerStateTransactionTestRepository{previous: a, raw: runtimeStateRecordForTerminalNonterminalRecoveryTest(t, a)}
 			switch scenario {
 			case "bad raw":
-				repo.preimageMutation = func(r *runtimecontract.RuntimeStateRecord, _ *RuntimeAggregate) { r.ResultFeedbackVersion = 0 }
-			case "stale":
-				repo.preimageMutation = func(r *runtimecontract.RuntimeStateRecord, a *RuntimeAggregate) { r.StateRevision++; a.StateRevision++ }
+				repo.raw.ResultFeedbackVersion = 0
 			case "scope":
-				repo.preimageMutation = func(_ *runtimecontract.RuntimeStateRecord, a *RuntimeAggregate) { a.Facts.RunID = "wrong" }
+				repo.raw.Facts.RunID = "other"
+			case "stale CAS":
+				repo.beforeCAS = func() { repo.previous.StateRevision++ }
 			case "save failure":
 				repo.saveErr = errors.New("exact CAS failure")
+			case "response loss":
+				repo.responseLost = true
 			}
 			c, _ := NewRuntimeController(repo)
 			failure := runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_drive_failed", Signature: "runtime-drive-failed", Message: "exact owner fact"}
 			event := RuntimeInternalEvent{Kind: RuntimeInternalEventFailureObserved, Scope: RuntimeInternalEventScope{WorkspaceID: a.Facts.WorkspaceID, RunID: a.Facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{FailureFact: &failure}}
-			result, err := c.ApplyInternalEvent(context.Background(), event)
-			if repo.loads != 1 || repo.rereads != 1 {
-				t.Fatalf("actual read counts=%d/%d err=%v", repo.loads, repo.rereads, err)
+			_, err := c.ApplyInternalEvent(context.Background(), event)
+			if repo.loads != 1 || repo.rereads != 0 {
+				t.Fatalf("reads=%d/%d: %v", repo.loads, repo.rereads, err)
 			}
 			if scenario == "normal" {
-				if err != nil || repo.saves != 1 || result.Aggregate.Validate() != nil {
-					t.Fatalf("valid event: %v saves=%d", err, repo.saves)
+				if err != nil || repo.saves != 1 {
+					t.Fatal("valid event", err)
 				}
 			} else if err == nil {
-				t.Fatal("invalid transaction accepted")
+				t.Fatal("invalid/unacknowledged transaction accepted")
 			}
-			if scenario != "normal" && scenario != "save failure" && repo.saves != 0 {
-				t.Fatal("drift reached CAS")
+			if (scenario == "bad raw" || scenario == "scope" || scenario == "stale CAS") && repo.saves != 0 {
+				t.Fatal("invalid preimage overwrote CAS state")
 			}
 			if c.transitions.ownerTransaction != nil {
 				t.Fatal("shared controller retained transaction")
 			}
-			if _, err := repo.request.CompileOwnerRecord(repo.raw, repo.previous); err == nil {
-				t.Fatal("request survived event")
-			}
-			if repo.request.call.compiler.Load() != nil {
-				t.Fatal("closed request retained raw invariant compiler")
-			}
-			if scenario == "normal" {
-				if _, err := c.ApplyInternalEvent(context.Background(), event); err != nil || repo.saves != 1 || repo.loads != 2 || repo.rereads != 1 {
-					t.Fatalf("duplicate changed CAS/budget/effect: %v", err)
+			if scenario == "normal" || scenario == "response loss" {
+				fresh, _ := NewRuntimeController(repo)
+				if _, err := fresh.ApplyInternalEvent(context.Background(), event); err != nil || repo.saves != 1 {
+					t.Fatalf("recovery/duplicate repeated CAS: %v saves=%d", err, repo.saves)
 				}
 				repo.raw.ResultFeedbackVersion = 0
-				if _, err := c.ApplyInternalEvent(context.Background(), event); err == nil || repo.saves != 1 || repo.rereads != 1 {
+				if _, err := fresh.ApplyInternalEvent(context.Background(), event); err == nil || repo.saves != 1 {
 					t.Fatal("new event borrowed previous success")
 				}
 			}
@@ -232,47 +230,12 @@ func TestOwnerStateTransactionPrivateEventReadsAgainAndDoesNotEscape(t *testing.
 	}
 }
 
-func TestOwnerStateInvariantCompilerRequiresExactDetachedRawAndSeparateGates(t *testing.T) {
-	a := stateChangeAggregate(t)
-	c := &ownerStateInvariantCompiler{}
-	before, after := 0, 0
-	for range 2 {
-		if err := c.validate(a, false, func() error { before++; return nil }); err != nil {
-			t.Fatal(err)
-		}
-		if err := c.validate(a, true, func() error { after++; return nil }); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if before != 1 || after != 1 {
-		t.Fatalf("ordered continuations did not independently compile once: %d/%d", before, after)
-	}
-	original := a.CloneRaw()
-	a.Facts.Coverage[0].TargetText = "same hash raw mutation"
-	sentinel := errors.New("actual changed subtree rejected")
-	for range 2 {
-		if err := c.validate(a, true, func() error { after++; return sentinel }); !errors.Is(err, sentinel) {
-			t.Fatal("raw mutation borrowed prior success")
-		}
-	}
-	if after != 3 || !reflect.DeepEqual(c.images[0].raw, original) {
-		t.Fatal("failure cached or successful preimage aliases caller")
-	}
-	// A successful before-semantic result cannot grant the after-semantic gate.
-	if err := c.validate(a, false, func() error { before++; return nil }); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.validate(a, true, func() error { after++; return sentinel }); !errors.Is(err, sentinel) || after != 4 {
-		t.Fatal("one ordered gate substituted for another")
-	}
-}
-
 func TestOwnerStateTransactionRejectsReentrantOrConcurrentGate(t *testing.T) {
 	a := stateChangeAggregate(t)
 	if err := runtimecontract.CompileRuntimeOwnerStateTransaction(func(validate func(runtimecontract.RuntimeOwnerStateSourceImage) error) error {
 		image := ownerStateSourceImage(nil, a)
-		originalBefore := image.BeforeSemantic
-		image.BeforeSemantic = func() error {
+		originalBefore := image.AggregateJoins
+		image.AggregateJoins = func(gate *runtimecontract.RuntimeOwnerInvariantSourceGate) error {
 			if err := validate(ownerStateSourceImage(nil, a)); err == nil {
 				t.Fatal("recursive gate admitted")
 			}
@@ -281,7 +244,7 @@ func TestOwnerStateTransactionRejectsReentrantOrConcurrentGate(t *testing.T) {
 			if err := <-result; err == nil {
 				t.Fatal("concurrent gate admitted")
 			}
-			return originalBefore()
+			return originalBefore(gate)
 		}
 		return validate(image)
 	}); err != nil {
@@ -300,8 +263,7 @@ func FuzzOwnerStateTransactionImageOracle(f *testing.F) {
 		a := stateChangeAggregate(t)
 		r := runtimeStateRecordForTerminalNonterminalRecoveryTest(t, a)
 		err := runtimecontract.CompileRuntimeOwnerStateTransaction(func(validate func(runtimecontract.RuntimeOwnerStateSourceImage) error) error {
-			compiler := &ownerStateInvariantCompiler{}
-			if err := validate(ownerStateSourceImageInCompiler(&r, a, compiler)); err != nil {
+			if err := validate(ownerStateSourceImageInCompiler(&r, a)); err != nil {
 				return err
 			}
 			switch arm % 8 {
@@ -322,7 +284,7 @@ func FuzzOwnerStateTransactionImageOracle(f *testing.F) {
 			case 7:
 				a.ProcessedEventIDs = append(a.ProcessedEventIDs, raw)
 			}
-			got := validate(ownerStateSourceImageInCompiler(&r, a, compiler))
+			got := validate(ownerStateSourceImageInCompiler(&r, a))
 			want := independentOwnerStateImage(&r, a)
 			if fmt.Sprint(got) != fmt.Sprint(want) {
 				t.Fatalf("raw drift first error: %v != %v", got, want)

@@ -10,7 +10,7 @@ import (
 // Only the receipt CAS consumes the exact target-free semantic handoff.
 // Current applicability remains an independent sampling debt: consumption
 // cannot settle a CWI, restore stale credit or authorize another validation.
-func consumeSemanticRepairFreshValidationReceipt(aggregate *RuntimeAggregate, dispatch SealedDispatch, fact runtimecontract.EvidenceFact) error {
+func consumeSemanticRepairFreshValidationReceipt(aggregate *RuntimeAggregate, dispatch runtimecontract.RuntimeDispatchRecord, fact runtimecontract.EvidenceFact) error {
 	facts := aggregate.Facts
 	if !runtimeValidationFailureRepairOwnsFreshValidationDirective(facts) || fact.Kind != runtimecontract.EvidenceKindValidation {
 		return nil

@@ -16,7 +16,7 @@ func (c *candidateDispatchComponent) beginCandidateAttempt(ctx context.Context, 
 	if err := validateBeginCandidateAttemptInput(c, workspaceID, runID, attempt, stablePrefixHash, logicalRequestID); err != nil {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -50,9 +50,7 @@ func (c *candidateDispatchComponent) beginCandidateAttempt(ctx context.Context, 
 	aggregate.CandidateRequestSessions[sessionIndex].CandidateManifest = &manifestCopy
 	applyCandidateAttemptBegin(&aggregate, plan, contractID, transaction, attempt, stablePrefixHash, manifest.Hash, logicalRequestID)
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -108,7 +106,7 @@ func validateCandidateAttemptBeginAuthority(aggregate RuntimeAggregate) error {
 	if err := validateRuntimeCandidatePurposeFence(aggregate); err != nil {
 		return fmt.Errorf("%w: candidate request binding fence: %v", common.ErrConflict, err)
 	}
-	if _, required, err := NextRuntimeEvidenceApplicabilityRequest(aggregate); err != nil || required {
+	if _, required, err := nextRuntimeEvidenceApplicabilityRequest(aggregate); err != nil || required {
 		return fmt.Errorf("%w: candidate awaits current-generation applicability: %v", common.ErrConflict, err)
 	}
 	return nil
@@ -215,7 +213,7 @@ func (c *candidateDispatchComponent) rejectCompletedCandidateDocument(ctx contex
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) || strings.TrimSpace(stablePrefixHash) == "" || strings.TrimSpace(logicalRequestID) == "" || failure.Class == "" || strings.TrimSpace(failure.Reason) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -268,9 +266,7 @@ func (c *candidateDispatchComponent) rejectCompletedCandidateDocument(ctx contex
 		return RuntimeAggregate{}, err
 	}
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -337,7 +333,7 @@ func (c *candidateDispatchComponent) admitCandidateProposal(ctx context.Context,
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) || strings.TrimSpace(logicalRequestID) == "" {
 		return CandidateAdmissionCommitResult{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
@@ -385,9 +381,7 @@ func (c *candidateDispatchComponent) admitCandidateProposal(ctx context.Context,
 			return CandidateAdmissionCommitResult{}, err
 		}
 		aggregate.StateRevision++
-		if err := c.validateAggregate(aggregate); err != nil {
-			return CandidateAdmissionCommitResult{}, err
-		}
+
 		if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 			return CandidateAdmissionCommitResult{}, err
 		}
@@ -423,9 +417,7 @@ func (c *candidateDispatchComponent) admitCandidateProposal(ctx context.Context,
 		aggregate.CandidateRequestSessions[sessionIndex].RepairCommitmentHash = runtimecontract.StableRuntimeDispatchRepairCommitmentHash(*repairCommitment)
 	}
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return CandidateAdmissionCommitResult{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
@@ -443,7 +435,7 @@ func (c *candidateDispatchComponent) recordCandidateFeasibility(ctx context.Cont
 	if err := runtimecontract.ValidateRuntimeCandidateFeasibilityRecords([]runtimecontract.RuntimeCandidateFeasibilityRecord{record}); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -478,7 +470,7 @@ func (c *candidateDispatchComponent) recordCandidateFeasibility(ctx context.Cont
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := validateCandidateFeasibilityObservationBinding(aggregate.Facts.Resources.OperationAdmissibilities, operation, record, manifest); err != nil {
+	if err := validateCandidateFeasibilityObservationBinding(aggregate.Facts.Resources.OperationAdmissibilities, operation, record, manifest, attemptRecord.Transaction); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	for _, persisted := range attemptRecord.Feasibilities {
@@ -534,9 +526,7 @@ func (c *candidateDispatchComponent) recordCandidateFeasibility(ctx context.Cont
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -578,7 +568,10 @@ func duplicateCandidateFeasibilityDisposition(attempts []runtimecontract.Runtime
 	return false
 }
 
-func validateCandidateFeasibilityObservationBinding(catalogs []runtimecontract.RuntimeOperationAdmissibility, operation runtimecontract.RuntimeOperation, record runtimecontract.RuntimeCandidateFeasibilityRecord, manifest runtimecontract.RuntimeCandidateContractManifest) error {
+func validateCandidateFeasibilityObservationBinding(catalogs []runtimecontract.RuntimeOperationAdmissibility, operation runtimecontract.RuntimeOperation, record runtimecontract.RuntimeCandidateFeasibilityRecord, manifest runtimecontract.RuntimeCandidateContractManifest, transaction runtimecontract.AuthorityTransaction) error {
+	if err := runtimecontract.ValidateRuntimeInputStructureRecord(manifest, operation, record, transaction); err != nil {
+		return err
+	}
 	for _, authorization := range manifest.Operations {
 		if authorization.Kind == operation.Kind && authorization.InputRevision != nil && record.Observation != nil && record.Observation.Outcome == runtimecontract.RuntimeOwnerFeasibilityFeasible && !authorization.InputRevision.MatchesReplayProof(record.ReplayProof) {
 			return fmt.Errorf("%w: input revision feasibility lost exact reviewed preimage", common.ErrConflict)
@@ -697,7 +690,7 @@ func (c *candidateDispatchComponent) admitAndSealCandidateAttempt(ctx context.Co
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) || strings.TrimSpace(logicalRequestID) == "" {
 		return CandidateAdmissionCommitResult{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
@@ -742,9 +735,7 @@ func (c *candidateDispatchComponent) admitAndSealCandidateAttempt(ctx context.Co
 			return CandidateAdmissionCommitResult{}, err
 		}
 		aggregate.StateRevision++
-		if err := c.validateAggregate(aggregate); err != nil {
-			return CandidateAdmissionCommitResult{}, err
-		}
+
 		if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 			return CandidateAdmissionCommitResult{}, err
 		}
@@ -797,7 +788,7 @@ func (c *candidateDispatchComponent) admitAndSealCandidateAttempt(ctx context.Co
 	if record.Proposal != nil && runtimecontract.StableRuntimeCandidateHash(*record.Proposal) != runtimecontract.StableRuntimeCandidateHash(candidate) {
 		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: accepted candidate does not match the persisted proposal", common.ErrConflict)
 	}
-	if err := runtimecontract.CheckRuntimeDurableDispatchBudget(aggregate.Facts.Activation.ExecutionContract.ExecutionLimits, sealedDispatchRecord(aggregate.ActiveDispatch), sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches), aggregate.CandidateAttempts, sealedDispatchToRuntimeRecord(dispatch)); err != nil {
+	if err := runtimecontract.CheckRuntimeDurableDispatchBudget(aggregate.Facts.Activation.ExecutionContract.ExecutionLimits, sealedDispatchRecord(aggregate.ActiveDispatch), (aggregate.CompletedDispatches), aggregate.CandidateAttempts, (dispatch)); err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
 	expectedRevision := aggregate.StateRevision
@@ -831,9 +822,7 @@ func (c *candidateDispatchComponent) admitAndSealCandidateAttempt(ctx context.Co
 	}
 	aggregate.ActiveDispatch = &dispatch
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return CandidateAdmissionCommitResult{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
@@ -848,7 +837,7 @@ func (c *candidateDispatchComponent) sealGovernanceDispatch(ctx context.Context,
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -883,9 +872,7 @@ func (c *candidateDispatchComponent) sealGovernanceDispatch(ctx context.Context,
 	expectedRevision := aggregate.StateRevision
 	aggregate.ActiveDispatch = &dispatch
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -897,9 +884,9 @@ func (c *candidateDispatchComponent) sealGovernanceDispatch(ctx context.Context,
 // ledgers, but both cross the same manifest, active-dispatch and sealed-builder
 // fence. It is pure and owner-local; callers commit the returned value only
 // through the corresponding private internal event and one aggregate CAS.
-func admitRuntimeDispatch(aggregate RuntimeAggregate, manifest runtimecontract.RuntimeCandidateContractManifest, candidate runtimecontract.RuntimeCandidate, attempt *runtimecontract.RuntimeCandidateAttemptRecord, evaluated *CandidateAdmissionResult, repairCommitment *runtimecontract.RuntimeDispatchRepairCommitment) (SealedDispatch, runtimecontract.RuntimeCompleteAdmissionDecision, error) {
+func admitRuntimeDispatch(aggregate RuntimeAggregate, manifest runtimecontract.RuntimeCandidateContractManifest, candidate runtimecontract.RuntimeCandidate, attempt *runtimecontract.RuntimeCandidateAttemptRecord, evaluated *CandidateAdmissionResult, repairCommitment *runtimecontract.RuntimeDispatchRepairCommitment) (runtimecontract.RuntimeDispatchRecord, runtimecontract.RuntimeCompleteAdmissionDecision, error) {
 	if aggregate.ActiveDispatch != nil {
-		return SealedDispatch{}, runtimecontract.RuntimeCompleteAdmissionDecision{
+		return runtimecontract.RuntimeDispatchRecord{}, runtimecontract.RuntimeCompleteAdmissionDecision{
 			Disposition: runtimecontract.RuntimeCompleteAdmissionStaleConflict,
 			Code:        "active_dispatch_conflict",
 			Message:     "runtime authority already has an active dispatch",
@@ -915,7 +902,7 @@ func admitRuntimeDispatch(aggregate RuntimeAggregate, manifest runtimecontract.R
 		if admission.Failure != nil {
 			message = admission.Failure.Reason
 		}
-		return SealedDispatch{}, runtimecontract.RuntimeCompleteAdmissionDecision{
+		return runtimecontract.RuntimeDispatchRecord{}, runtimecontract.RuntimeCompleteAdmissionDecision{
 			Disposition: runtimecontract.RuntimeCompleteAdmissionCorrectableOnce,
 			Code:        "candidate_document_rejected",
 			Message:     message,
@@ -928,7 +915,7 @@ func admitRuntimeDispatch(aggregate RuntimeAggregate, manifest runtimecontract.R
 			Facts: aggregate.Facts, Decision: aggregate.Decision, SemanticPlanning: aggregate.SemanticPlanning, ImplementationWork: aggregate.ImplementationWork,
 			Reconciliation: aggregate.Reconciliation, Manifest: manifest, Candidate: candidate, Attempt: *attempt,
 			ActiveDispatch:      sealedDispatchRecord(aggregate.ActiveDispatch),
-			CompletedDispatches: sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches),
+			CompletedDispatches: (aggregate.CompletedDispatches),
 			OperationReceipts:   aggregate.OperationReceipts,
 			ProofLineage:        aggregate.CoverageProofLineage, Governance: aggregate.OperationGovernanceBindings,
 			Budget: aggregate.ExecutionBudget, EvidenceSequence: aggregate.EvidenceSequence,
@@ -936,7 +923,7 @@ func admitRuntimeDispatch(aggregate RuntimeAggregate, manifest runtimecontract.R
 			Sessions: aggregate.CandidateRequestSessions, Confirmations: aggregate.RepairSurfaceConfirmations,
 		})
 		if !complete.Admitted() {
-			return SealedDispatch{}, complete, nil
+			return runtimecontract.RuntimeDispatchRecord{}, complete, nil
 		}
 		feasibilities = attempt.Feasibilities
 	}
@@ -946,35 +933,34 @@ func admitRuntimeDispatch(aggregate RuntimeAggregate, manifest runtimecontract.R
 	if manifest.ImplementationWorkingBinding != nil {
 		round, workErr := CurrentRuntimeImplementationWorkReservation(aggregate)
 		if workErr != nil || round == nil || round.WorkingBinding == nil || round.WorkingBinding.Hash != manifest.ImplementationWorkingBinding.Hash {
-			return SealedDispatch{}, runtimecontract.RuntimeCompleteAdmissionDecision{Disposition: runtimecontract.RuntimeCompleteAdmissionTerminalContractFailure, Code: "implementation_work_commitment_missing"}, fmt.Errorf("implementation dispatch has no original round")
+			return runtimecontract.RuntimeDispatchRecord{}, runtimecontract.RuntimeCompleteAdmissionDecision{Disposition: runtimecontract.RuntimeCompleteAdmissionTerminalContractFailure, Code: "implementation_work_commitment_missing"}, fmt.Errorf("implementation dispatch has no original round")
 		}
 		preSealAuthority.ImplementationWorkCommitment = cloneImplementationWorkCommitment(round)
 	}
 	if candidate.Assessment != nil {
-		if _, required, readErr := NextRuntimeEvidenceApplicabilityRequest(aggregate); readErr != nil || required {
+		if _, required, readErr := nextRuntimeEvidenceApplicabilityRequest(aggregate); readErr != nil || required {
 			err := fmt.Errorf("%w: assessment requires current-generation owner applicability observations: %v", common.ErrConflict, readErr)
-			return SealedDispatch{}, runtimecontract.RuntimeCompleteAdmissionDecision{Disposition: runtimecontract.RuntimeCompleteAdmissionTerminalContractFailure, Code: "assessment_source_invalid", Message: err.Error()}, err
+			return runtimecontract.RuntimeDispatchRecord{}, runtimecontract.RuntimeCompleteAdmissionDecision{Disposition: runtimecontract.RuntimeCompleteAdmissionTerminalContractFailure, Code: "assessment_source_invalid", Message: err.Error()}, err
 		}
 		source, sourceErr := runtimecontract.RuntimeAssessmentSourceProjection(aggregate.Facts, aggregate.Decision.Focus.ID, candidate.Assessment.CoverageWorkItemIDs)
 		if sourceErr != nil {
-			return SealedDispatch{}, runtimecontract.RuntimeCompleteAdmissionDecision{
+			return runtimecontract.RuntimeDispatchRecord{}, runtimecontract.RuntimeCompleteAdmissionDecision{
 				Disposition: runtimecontract.RuntimeCompleteAdmissionTerminalContractFailure,
 				Code:        "assessment_source_invalid", Message: sourceErr.Error(),
 			}, sourceErr
 		}
-		purpose, purposeErr := runtimecontract.ResolveRuntimeAssessmentPurposePreimage(
-			aggregate.SemanticPlanning,
-			aggregate.Decision.Focus.CoverageEvidenceBindings,
+		purpose, purposeErr := runtimecontract.RuntimeAssessmentPurposeForCurrentFocus(
+			aggregate.Facts, aggregate.SemanticPlanning, aggregate.Decision.Focus,
 		)
 		if purposeErr != nil {
-			return SealedDispatch{}, runtimecontract.RuntimeCompleteAdmissionDecision{
+			return runtimecontract.RuntimeDispatchRecord{}, runtimecontract.RuntimeCompleteAdmissionDecision{
 				Disposition: runtimecontract.RuntimeCompleteAdmissionTerminalContractFailure,
 				Code:        "assessment_purpose_invalid", Message: purposeErr.Error(),
 			}, purposeErr
 		}
 		if manifest.AssessmentPurpose != purpose.Purpose || manifest.AssessmentPurposeManifestHash != purpose.SemanticManifestHash {
 			err := fmt.Errorf("runtime assessment purpose does not match its pre-seal semantic manifest")
-			return SealedDispatch{}, runtimecontract.RuntimeCompleteAdmissionDecision{
+			return runtimecontract.RuntimeDispatchRecord{}, runtimecontract.RuntimeCompleteAdmissionDecision{
 				Disposition: runtimecontract.RuntimeCompleteAdmissionTerminalContractFailure,
 				Code:        "assessment_purpose_manifest_mismatch", Message: err.Error(),
 			}, err
@@ -1009,7 +995,7 @@ func admitRuntimeDispatch(aggregate RuntimeAggregate, manifest runtimecontract.R
 		preSealAuthority,
 	)
 	if err != nil {
-		return SealedDispatch{}, runtimecontract.RuntimeCompleteAdmissionDecision{
+		return runtimecontract.RuntimeDispatchRecord{}, runtimecontract.RuntimeCompleteAdmissionDecision{
 			Disposition: runtimecontract.RuntimeCompleteAdmissionTerminalContractFailure,
 			Code:        "dispatch_seal_invalid",
 			Message:     err.Error(),
@@ -1026,11 +1012,11 @@ func GovernanceDependencyForAggregate(aggregate RuntimeAggregate) (runtimecontra
 	return governancecheck.DependencyForFacts(aggregate.Facts, aggregate.OperationGovernanceBindings)
 }
 
-func sealedDispatchRecord(value *SealedDispatch) *runtimecontract.RuntimeDispatchRecord {
+func sealedDispatchRecord(value *runtimecontract.RuntimeDispatchRecord) *runtimecontract.RuntimeDispatchRecord {
 	if value == nil {
 		return nil
 	}
-	record := sealedDispatchToRuntimeRecord(*value)
+	record := (*value)
 	return &record
 }
 
@@ -1100,7 +1086,7 @@ func (c *candidateDispatchComponent) failCandidateAttempt(ctx context.Context, w
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) || failure.Class == "" || strings.TrimSpace(failure.Reason) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -1114,9 +1100,7 @@ func (c *candidateDispatchComponent) failCandidateAttempt(ctx context.Context, w
 		return RuntimeAggregate{}, err
 	}
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -1367,12 +1351,12 @@ func sameRejectedCandidateSemanticShape(failure *runtimecontract.RuntimeCandidat
 func acceptedCandidateAdmissionDuplicate(aggregate RuntimeAggregate, attempt int, manifestHash, logicalRequestID string, candidate runtimecontract.RuntimeCandidate) bool {
 	var active *runtimecontract.RuntimeDispatchRecord
 	if aggregate.ActiveDispatch != nil {
-		value := sealedDispatchToRuntimeRecord(*aggregate.ActiveDispatch)
+		value := (*aggregate.ActiveDispatch)
 		active = &value
 	}
 	if err := runtimecontract.ValidateRuntimeAcceptedCandidateManifestLineage(
 		active,
-		sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches),
+		(aggregate.CompletedDispatches),
 		aggregate.CandidateAttempts,
 		aggregate.CandidateRequestSessions,
 	); err != nil {
@@ -1385,12 +1369,12 @@ func acceptedCandidateAdmissionDuplicate(aggregate RuntimeAggregate, attempt int
 		}
 		if aggregate.ActiveDispatch != nil && aggregate.ActiveDispatch.Transaction == record.Transaction &&
 			record.CandidateHash == wanted && aggregate.ActiveDispatch.ID == record.DispatchID &&
-			runtimecontract.RuntimeAcceptedCandidateAttemptMatchesDispatch(record, sealedDispatchToRuntimeRecord(*aggregate.ActiveDispatch)) {
+			runtimecontract.RuntimeAcceptedCandidateAttemptMatchesDispatch(record, (*aggregate.ActiveDispatch)) {
 			return true
 		}
 		for _, dispatch := range aggregate.CompletedDispatches {
 			if dispatch.Transaction == record.Transaction && record.CandidateHash == wanted && dispatch.ID == record.DispatchID &&
-				runtimecontract.RuntimeAcceptedCandidateAttemptMatchesDispatch(record, sealedDispatchToRuntimeRecord(dispatch)) {
+				runtimecontract.RuntimeAcceptedCandidateAttemptMatchesDispatch(record, (dispatch)) {
 				return true
 			}
 		}

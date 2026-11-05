@@ -24,21 +24,20 @@ func runtimeSemanticBatch(values []runtimecontract.RuntimeSemanticPlanBatch, bat
 	return semanticplan.BatchByID(values, batchID)
 }
 
-func validateSemanticManifestIdentity(aggregate RuntimeAggregate, manifest runtimecontract.RuntimeSemanticPlanManifest) error {
-	manifest = manifest.Normalized()
-	if err := manifest.Validate(); err != nil {
-		return err
-	}
+// semanticManifestIdentity is the sole SM-2 compiler for generation scope and
+// applicable original inputs. Drive transports its typed result; it does not
+// choose an independent eligible set or repair/work interpretation.
+func semanticManifestIdentity(aggregate RuntimeAggregate) (semanticplan.ManifestIdentity, error) {
 	if aggregate.Facts.CWILedgerSchemaVersion != runtimecontract.RuntimeCWILedgerSchemaCurrent {
-		return fmt.Errorf("%w: runtime semantic manifest requires the current CWI ledger", common.ErrConflict)
+		return semanticplan.ManifestIdentity{}, fmt.Errorf("%w: runtime semantic manifest requires the current CWI ledger", common.ErrConflict)
 	}
-	eligible := runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts)
+	eligible := runtimeSemanticPlanningFrontier(aggregate.Facts)
 	if len(eligible) == 0 {
-		return fmt.Errorf("%w: runtime semantic manifest has no eligible CWI", common.ErrConflict)
+		return semanticplan.ManifestIdentity{}, fmt.Errorf("%w: runtime semantic manifest has no eligible CWI", common.ErrConflict)
 	}
 	repairInput, repairRequired, err := CurrentRuntimeValidationFailureRepairGenerationInput(aggregate)
 	if err != nil {
-		return err
+		return semanticplan.ManifestIdentity{}, err
 	}
 	identity := semanticplan.ManifestIdentity{
 		WorkspaceID:       aggregate.Facts.WorkspaceID,
@@ -52,17 +51,17 @@ func validateSemanticManifestIdentity(aggregate RuntimeAggregate, manifest runti
 	}
 	identity.InputReviewInformation, err = RuntimeInputReviewInformation(aggregate)
 	if err != nil {
-		return err
+		return semanticplan.ManifestIdentity{}, err
 	}
 	if repairRequired {
 		identity.EligibleCoverage = []common.CoverageWorkItemID{repairInput.CoverageWorkItemID}
 		identity.ValidationFailureRepair = &repairInput
 	}
 	if current, workErr := CurrentRuntimeImplementationWorkReservation(aggregate); workErr != nil {
-		return workErr
+		return semanticplan.ManifestIdentity{}, workErr
 	} else if current != nil {
 		if repairRequired || current.ScopeObservation == nil {
-			return fmt.Errorf("%w: semantic work has no settled scope or conflicts with exact repair", common.ErrConflict)
+			return semanticplan.ManifestIdentity{}, fmt.Errorf("%w: semantic work has no settled scope or conflicts with exact repair", common.ErrConflict)
 		}
 		reservation := current.Clone()
 		reservation.WorkingBinding = nil
@@ -76,11 +75,30 @@ func validateSemanticManifestIdentity(aggregate RuntimeAggregate, manifest runti
 	}
 	if preview := aggregate.ImplementationWork.ScopePreview; preview != nil {
 		if repairRequired || preview.Observation == nil {
-			return fmt.Errorf("%w: implementation purpose preview is incomplete or conflicts with exact repair", common.ErrConflict)
+			return semanticplan.ManifestIdentity{}, fmt.Errorf("%w: implementation purpose preview is incomplete or conflicts with exact repair", common.ErrConflict)
 		}
 		identity.ImplementationPurposePreview = preview
 		identity.ImplementationWorkRounds = aggregate.ImplementationWork.Rounds
 		identity.EligibleCoverage = []common.CoverageWorkItemID{preview.Request.CoverageWorkItemID}
+	}
+	return identity, nil
+}
+
+// CompileRuntimeSemanticManifest compiles a proposal at the current owner
+// boundary. Sealing compares it against this same compiler on the actual CAS
+// preimage; a stale proposal never chooses a new scope in the transport layer.
+func CompileRuntimeSemanticManifest(aggregate RuntimeAggregate) (runtimecontract.RuntimeSemanticPlanManifest, error) {
+	identity, err := semanticManifestIdentity(aggregate)
+	if err != nil {
+		return runtimecontract.RuntimeSemanticPlanManifest{}, err
+	}
+	return semanticplan.CompileManifest(identity)
+}
+
+func validateSemanticManifestIdentity(aggregate RuntimeAggregate, manifest runtimecontract.RuntimeSemanticPlanManifest) error {
+	identity, err := semanticManifestIdentity(aggregate)
+	if err != nil {
+		return err
 	}
 	return semanticplan.ValidateManifestIdentity(identity, manifest)
 }
@@ -155,7 +173,7 @@ func retireSemanticPlanningGeneration(aggregate *RuntimeAggregate, reason runtim
 	if aggregate == nil {
 		return common.ErrInvalidArgument
 	}
-	ledger := aggregate.SemanticPlanning.Clone()
+	ledger := aggregate.SemanticPlanning.CloneRaw()
 	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningRequired {
 		return nil
 	}
@@ -175,16 +193,13 @@ func retireSemanticPlanningGeneration(aggregate *RuntimeAggregate, reason runtim
 	if err := ledger.ValidateHistoryStorage(); err != nil {
 		return err
 	}
-	snapshot := ledger.WithoutHistory().Clone()
+	snapshot := ledger.WithoutHistory().CloneRaw()
 	history := runtimecontract.RuntimeSemanticPlanningGeneration{
 		RetiredAtStateRevision: aggregate.StateRevision + 1,
 		Reason:                 reason,
 		InvalidationSignatures: signatures,
 		PrerequisiteIDs:        ids,
 		Snapshot:               snapshot,
-	}
-	if err := history.Validate(); err != nil {
-		return err
 	}
 	newLedger := runtimecontract.RuntimeSemanticPlanningLedger{
 		SchemaVersion:          ledger.SchemaVersion,
@@ -198,9 +213,6 @@ func retireSemanticPlanningGeneration(aggregate *RuntimeAggregate, reason runtim
 		return err
 	} else {
 		newLedger = appended
-	}
-	if err := newLedger.Validate(); err != nil {
-		return err
 	}
 	if err := retireSemanticPlanningRequestSessions(aggregate, ledger, "semantic_catalog_invalidated"); err != nil {
 		return err
@@ -275,7 +287,7 @@ func retireSemanticPlanningGenerationForCWIReopen(aggregate *RuntimeAggregate, r
 	if aggregate == nil {
 		return common.ErrInvalidArgument
 	}
-	ledger := aggregate.SemanticPlanning.Clone()
+	ledger := aggregate.SemanticPlanning.CloneRaw()
 	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningRequired {
 		return nil
 	}
@@ -315,16 +327,13 @@ func retireSemanticPlanningGenerationForCWIReopen(aggregate *RuntimeAggregate, r
 	}
 	sort.SliceStable(ids, func(i, j int) bool { return string(ids[i]) < string(ids[j]) })
 	sort.Strings(triggerRefs)
-	snapshot := ledger.WithoutHistory().Clone()
+	snapshot := ledger.WithoutHistory().CloneRaw()
 	history := runtimecontract.RuntimeSemanticPlanningGeneration{
 		RetiredAtStateRevision: aggregate.StateRevision + 1,
 		Reason:                 runtimecontract.RuntimeSemanticPlanningRetirementCWIReopened,
 		ReopenedCoverageIDs:    ids,
 		ReopenTriggerRefs:      triggerRefs,
 		Snapshot:               snapshot,
-	}
-	if err := history.Validate(); err != nil {
-		return err
 	}
 	newLedger := runtimecontract.RuntimeSemanticPlanningLedger{
 		SchemaVersion:          ledger.SchemaVersion,
@@ -337,9 +346,6 @@ func retireSemanticPlanningGenerationForCWIReopen(aggregate *RuntimeAggregate, r
 		return err
 	} else {
 		newLedger = appended
-	}
-	if err := newLedger.Validate(); err != nil {
-		return err
 	}
 	if err := retireSemanticPlanningRequestSessions(aggregate, ledger, "semantic_cwi_reopened"); err != nil {
 		return err
@@ -355,7 +361,7 @@ func retireSemanticPlanningGenerationForBindingContradiction(aggregate *RuntimeA
 	if aggregate == nil || coverageID == "" || strings.TrimSpace(causationRef) == "" {
 		return common.ErrInvalidArgument
 	}
-	ledger := aggregate.SemanticPlanning.Clone()
+	ledger := aggregate.SemanticPlanning.CloneRaw()
 	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningRequired {
 		return nil
 	}
@@ -370,16 +376,13 @@ func retireSemanticPlanningGenerationForBindingContradiction(aggregate *RuntimeA
 		item.BindingRetirementLineage[len(item.BindingRetirementLineage)-1].CausationRef != strings.TrimSpace(causationRef) {
 		return fmt.Errorf("%w: semantic binding contradiction has no canonical retirement lineage", common.ErrConflict)
 	}
-	snapshot := ledger.WithoutHistory().Clone()
+	snapshot := ledger.WithoutHistory().CloneRaw()
 	history := runtimecontract.RuntimeSemanticPlanningGeneration{
 		RetiredAtStateRevision: aggregate.StateRevision + 1,
 		Reason:                 runtimecontract.RuntimeSemanticPlanningRetirementBindingContradiction,
 		ReopenedCoverageIDs:    []common.CoverageWorkItemID{coverageID},
 		ReopenTriggerRefs:      []string{strings.TrimSpace(causationRef)},
 		Snapshot:               snapshot,
-	}
-	if err := history.Validate(); err != nil {
-		return err
 	}
 	newLedger := runtimecontract.RuntimeSemanticPlanningLedger{
 		SchemaVersion:          ledger.SchemaVersion,
@@ -393,9 +396,6 @@ func retireSemanticPlanningGenerationForBindingContradiction(aggregate *RuntimeA
 	} else {
 		newLedger = appended
 	}
-	if err := newLedger.Validate(); err != nil {
-		return err
-	}
 	if err := retireSemanticPlanningRequestSessions(aggregate, ledger, "semantic_binding_contradiction"); err != nil {
 		return err
 	}
@@ -404,14 +404,15 @@ func retireSemanticPlanningGenerationForBindingContradiction(aggregate *RuntimeA
 }
 
 // retireSemanticPlanningGenerationForEligibilityChange retires an immutable
-// order when settled prerequisite bindings unlock CWI outside its manifest.
-// The exact changed rows and their prerequisite binding refs are audit
-// lineage; the next action is still derived by the normal SM-2 reducer.
+// order when prerequisite bindings unlock outside CWI, or when its complete
+// frontier has finished and the current focus moves to another ready branch.
+// The exact rows and prerequisite/completion binding refs are audit lineage;
+// the next action is still derived by the normal SM-2 reducer.
 func retireSemanticPlanningGenerationForEligibilityChange(aggregate *RuntimeAggregate, changed []common.CoverageWorkItemID) error {
 	if aggregate == nil {
 		return common.ErrInvalidArgument
 	}
-	ledger := aggregate.SemanticPlanning.Clone()
+	ledger := aggregate.SemanticPlanning.CloneRaw()
 	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningRequired {
 		return nil
 	}
@@ -429,6 +430,8 @@ func retireSemanticPlanningGenerationForEligibilityChange(aggregate *RuntimeAggr
 	seen := make(map[common.CoverageWorkItemID]struct{}, len(changed))
 	ids := make([]common.CoverageWorkItemID, 0, len(changed))
 	triggerRefs := make([]string, 0)
+	completedRefs := runtimeSemanticCompletedFrontierRefs(*aggregate)
+	frontierCompleted := false
 	for _, id := range changed {
 		if id == "" {
 			continue
@@ -440,8 +443,15 @@ func retireSemanticPlanningGenerationForEligibilityChange(aggregate *RuntimeAggr
 			return fmt.Errorf("%w: semantic closure change %q is not currently eligible", common.ErrConflict, id)
 		}
 		item, found := coverage[id]
-		if !found || len(item.PrerequisiteCoverageWorkItemIDs) == 0 {
+		if !found {
 			return fmt.Errorf("%w: semantic closure change %q has no prerequisite lineage", common.ErrConflict, id)
+		}
+		if len(item.PrerequisiteCoverageWorkItemIDs) == 0 {
+			if len(completedRefs) == 0 {
+				return fmt.Errorf("%w: semantic closure change %q has no completed frontier or prerequisite lineage", common.ErrConflict, id)
+			}
+			frontierCompleted = true
+			triggerRefs = append(triggerRefs, completedRefs...)
 		}
 		for _, prerequisiteID := range item.PrerequisiteCoverageWorkItemIDs {
 			prerequisite, prerequisiteFound := coverage[prerequisiteID]
@@ -465,16 +475,17 @@ func retireSemanticPlanningGenerationForEligibilityChange(aggregate *RuntimeAggr
 		}
 	}
 	triggerRefs = uniqueTriggerRefs
-	snapshot := ledger.WithoutHistory().Clone()
+	reason := runtimecontract.RuntimeSemanticPlanningRetirementEligibleClosureChanged
+	if frontierCompleted {
+		reason = runtimecontract.RuntimeSemanticPlanningRetirementFrontierCompleted
+	}
+	snapshot := ledger.WithoutHistory().CloneRaw()
 	history := runtimecontract.RuntimeSemanticPlanningGeneration{
 		RetiredAtStateRevision:   aggregate.StateRevision + 1,
-		Reason:                   runtimecontract.RuntimeSemanticPlanningRetirementEligibleClosureChanged,
+		Reason:                   reason,
 		ChangedCoverageIDs:       ids,
 		ClosureChangeTriggerRefs: triggerRefs,
 		Snapshot:                 snapshot,
-	}
-	if err := history.Validate(); err != nil {
-		return err
 	}
 	newLedger := runtimecontract.RuntimeSemanticPlanningLedger{
 		SchemaVersion: ledger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningRequired,
@@ -486,9 +497,6 @@ func retireSemanticPlanningGenerationForEligibilityChange(aggregate *RuntimeAggr
 		return err
 	} else {
 		newLedger = appended
-	}
-	if err := newLedger.Validate(); err != nil {
-		return err
 	}
 	if err := retireSemanticPlanningRequestSessions(aggregate, ledger, "semantic_eligible_closure_changed"); err != nil {
 		return err
@@ -768,12 +776,12 @@ func currentRuntimeCWIBindingExecutionLocked(aggregate RuntimeAggregate) bool {
 		})
 		var active *runtimecontract.RuntimeDispatchRecord
 		if aggregate.ActiveDispatch != nil {
-			value := sealedDispatchToRuntimeRecord(*aggregate.ActiveDispatch)
+			value := (*aggregate.ActiveDispatch)
 			active = &value
 		}
 		return runtimecontract.ValidateRuntimeCWIBindingRetirementsAgainstExecution(
 			probe, active,
-			sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches), aggregate.OperationReceipts,
+			(aggregate.CompletedDispatches), aggregate.OperationReceipts,
 		) != nil
 	}
 	return false
@@ -1401,7 +1409,7 @@ func (c *planningTransactionComponent) observeSemanticFeasibility(ctx context.Co
 				return RuntimeAggregate{}, reduceErr
 			}
 			transaction.aggregate.Facts, transaction.aggregate.Decision = facts, decision
-			transaction.ledger = transaction.aggregate.SemanticPlanning.Clone()
+			transaction.ledger = transaction.aggregate.SemanticPlanning.CloneRaw()
 			catalogRetired = true
 		}
 	}
@@ -1710,11 +1718,21 @@ func semanticPendingFocuses(facts runtimecontract.RuntimeFacts, pending []common
 // next focus has not yet received a binding.  It is called only inside the
 // same Orchestrator CAS that advanced SM-2 focus; it does not issue provider
 // I/O, mutate a capability owner, or create another state machine.
-func prepareSemanticPlanningForAdvancedFocus(aggregate *RuntimeAggregate) error {
+func prepareSemanticPlanningForAdvancedFocus(aggregate *RuntimeAggregate) (err error) {
+	defer func() {
+		if err == nil && aggregate != nil {
+			updated, _, e := retainRuntimeOwnerInputRevision(*aggregate)
+			if e != nil {
+				err = e
+			} else {
+				*aggregate = updated
+			}
+		}
+	}()
 	if aggregate == nil || len(aggregate.Facts.Focus.CoverageEvidenceBindings) != 0 {
 		return nil
 	}
-	ledger := aggregate.SemanticPlanning.Clone()
+	ledger := aggregate.SemanticPlanning.CloneRaw()
 	if ledger.Phase != runtimecontract.RuntimeSemanticPlanningSealed {
 		return nil
 	}
@@ -1753,7 +1771,7 @@ func prepareSemanticPlanningForAdvancedFocus(aggregate *RuntimeAggregate) error 
 	if retired {
 		return nil
 	}
-	ledger = aggregate.SemanticPlanning.Clone()
+	ledger = aggregate.SemanticPlanning.CloneRaw()
 	if ledger.Phase != runtimecontract.RuntimeSemanticPlanningSealed {
 		return nil
 	}

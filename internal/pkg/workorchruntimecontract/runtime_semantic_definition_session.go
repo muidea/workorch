@@ -43,12 +43,24 @@ func ValidateRuntimeSemanticLedgerDefinitionSources(ledger RuntimeSemanticPlanni
 }
 
 func validateRuntimeSemanticLedgerDefinitionSourcesInSession(ledger RuntimeSemanticPlanningLedger, seed RuntimeDefinitionSeed, focuses []RuntimeDefinitionFocus, session *runtimeSemanticValidationSession) error {
-	if ledger.Manifest != nil {
+	if ledger.Manifest != nil && !committedRuntimeSemanticManifestDefinition(session.committedPreimage, *ledger.Manifest, seed, focuses) {
 		if err := validateRuntimeSemanticManifestDefinitionInSession(*ledger.Manifest, seed, focuses, session); err != nil {
 			return fmt.Errorf("runtime aggregate semantic active manifest: %w", err)
 		}
 	}
 	for i, generation := range ledger.AllHistory() {
+		if session.committedGeneration(generation) && runtimeRawEqual(seed, session.committedPreimage.Facts.DefinitionSeed) && runtimeRawEqual(focuses, session.committedPreimage.Facts.DefinitionFocuses) {
+			continue
+		}
+		if v := generation.OwnerInputRevision; v != nil {
+			requirements, err := CompileRuntimeValidationProofRequirements(seed.DefinitionRevision, seed.CoverageItems, focuses)
+			if err != nil {
+				return err
+			}
+			if err := ValidateRuntimeValidationProofRequirementCatalogApplicability(requirements, []RuntimeOperationAdmissibility{v.OwnerObservation.Catalog}); err != nil {
+				return err
+			}
+		}
 		if generation.Snapshot.Manifest == nil {
 			continue
 		}
@@ -57,4 +69,21 @@ func validateRuntimeSemanticLedgerDefinitionSourcesInSession(ledger RuntimeSeman
 		}
 	}
 	return nil
+}
+
+// The immutable Definition and this exact manifest have already been joined
+// by the owner. Ledger phase/request changes do not create a new proof task.
+func committedRuntimeSemanticManifestDefinition(previous *RuntimeStateRecord, manifest RuntimeSemanticPlanManifest, seed RuntimeDefinitionSeed, focuses []RuntimeDefinitionFocus) bool {
+	if previous == nil || !runtimeRawEqual(seed, previous.Facts.DefinitionSeed) || !runtimeRawEqual(focuses, previous.Facts.DefinitionFocuses) {
+		return false
+	}
+	if previous.SemanticPlanning.Manifest != nil && runtimeRawEqual(*previous.SemanticPlanning.Manifest, manifest) {
+		return true
+	}
+	for _, generation := range previous.SemanticPlanning.AllHistory() {
+		if generation.Snapshot.Manifest != nil && runtimeRawEqual(*generation.Snapshot.Manifest, manifest) {
+			return true
+		}
+	}
+	return false
 }

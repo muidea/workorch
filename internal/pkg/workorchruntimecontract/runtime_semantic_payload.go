@@ -19,18 +19,18 @@ var (
 )
 
 type runtimeSemanticPlanPayload struct {
-	DocumentKind             RuntimeProviderDocumentKind      `json:"documentKind"`
-	SchemaVersion            string                           `json:"schemaVersion"`
-	ManifestHash             string                           `json:"manifestHash"`
-	DefinitionSeedHash       string                           `json:"definitionSeedHash"`
-	PlanStep                 RuntimeSemanticPlanStep          `json:"planStep,omitempty"`
-	BatchID                  string                           `json:"batchId,omitempty"`
-	BatchSequence            *int                             `json:"batchSequence,omitempty"`
-	BatchCoverageWorkItemIDs []common.CoverageWorkItemID      `json:"batchCoverageWorkItemIds,omitempty"`
-	CoverageOrder            []common.CoverageWorkItemID      `json:"coverageOrder,omitempty"`
-	ImplementationPurpose    RuntimeImplementationWorkPurpose `json:"implementationPurpose,omitempty"`
-	ImplementationIntent     *RuntimeImplementationIntent     `json:"implementationIntent,omitempty"`
-	Proposals                []runtimeSemanticProposalPayload `json:"proposals"`
+	DocumentKind             RuntimeProviderDocumentKind         `json:"documentKind"`
+	SchemaVersion            string                              `json:"schemaVersion"`
+	ManifestHash             string                              `json:"manifestHash"`
+	DefinitionSeedHash       string                              `json:"definitionSeedHash"`
+	PlanStep                 RuntimeSemanticPlanStep             `json:"planStep,omitempty"`
+	BatchID                  string                              `json:"batchId,omitempty"`
+	BatchSequence            *int                                `json:"batchSequence,omitempty"`
+	BatchCoverageWorkItemIDs []common.CoverageWorkItemID         `json:"batchCoverageWorkItemIds,omitempty"`
+	CoverageOrder            []common.CoverageWorkItemID         `json:"coverageOrder,omitempty"`
+	ImplementationPurpose    RuntimeImplementationWorkPurpose    `json:"implementationPurpose,omitempty"`
+	ImplementationIntent     *runtimeImplementationIntentPayload `json:"implementationIntent,omitempty"`
+	Proposals                []runtimeSemanticProposalPayload    `json:"proposals"`
 }
 
 type runtimeSemanticProposalPayload struct {
@@ -129,9 +129,14 @@ func DecodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 		PlanStep:              wire.PlanStep,
 		CoverageOrder:         wire.CoverageOrder,
 		ImplementationPurpose: wire.ImplementationPurpose,
-		ImplementationIntent:  wire.ImplementationIntent.Clone(),
+		ImplementationIntent:  nil,
 		Proposals:             make([]RuntimeSemanticProofProposal, 0, len(wire.Proposals)),
 	}
+	intent, err := wire.ImplementationIntent.compile(manifest)
+	if err != nil {
+		return RuntimeSemanticPlanDocument{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.implementationIntent", Actual: "unbound_work_source", Cause: err}
+	}
+	document.ImplementationIntent = intent
 	for _, value := range wire.Proposals {
 		document.Proposals = append(document.Proposals, RuntimeSemanticProofProposal{
 			CoverageWorkItemID: value.CoverageWorkItemID, OwnerModuleID: value.OwnerModuleID,
@@ -187,7 +192,7 @@ func EncodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 		BatchID: document.BatchID, BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), document.BatchCoverageWorkItemIDs...),
 		PlanStep:              document.PlanStep,
 		ImplementationPurpose: document.ImplementationPurpose,
-		ImplementationIntent:  document.ImplementationIntent.Clone(),
+		ImplementationIntent:  runtimeImplementationIntentToWire(document.ImplementationIntent),
 		Proposals:             make([]runtimeSemanticProposalPayload, 0, len(document.Proposals)),
 	}
 	if document.PlanStep == RuntimeSemanticPlanStepCoverageOrder {
@@ -247,7 +252,7 @@ func validateRuntimeSemanticPayloadFields(payload []byte) error {
 		if err := json.Unmarshal(raw, &intent); err != nil {
 			return &RuntimeCandidatePayloadDiagnostic{Path: "$.implementationIntent", Actual: "non_object", Cause: err}
 		}
-		if err := validateRuntimeSemanticObjectFields("$.implementationIntent", intent, []string{"declarationRef", "contentHash", "remainingWork", "reason", "requirementReviews", "selectedRequirementRefs", "previousRoundReview"}, []string{"declarationRef", "contentHash", "remainingWork", "reason"}); err != nil {
+		if err := validateRuntimeSemanticObjectFields("$.implementationIntent", intent, []string{"remainingWork", "reason", "requirementReviews", "selectedRequirementRefs", "previousRoundReview"}, []string{"remainingWork", "reason"}); err != nil {
 			return err
 		}
 		if rawReview, exists := intent["previousRoundReview"]; exists {
@@ -255,7 +260,7 @@ func validateRuntimeSemanticPayloadFields(payload []byte) error {
 			if err := json.Unmarshal(rawReview, &review); err != nil || review == nil {
 				return fmt.Errorf("previous implementation review must be an object")
 			}
-			if err := validateRuntimeSemanticObjectFields("$.implementationIntent.previousRoundReview", review, []string{"dispatchId", "receiptSetHash", "outcome", "reason"}, []string{"dispatchId", "receiptSetHash", "outcome", "reason"}); err != nil {
+			if err := validateRuntimeSemanticObjectFields("$.implementationIntent.previousRoundReview", review, []string{"outcome", "reason"}, []string{"outcome", "reason"}); err != nil {
 				return err
 			}
 		}
@@ -353,6 +358,16 @@ func validateRuntimeSemanticObjectFields(path string, object map[string]json.Raw
 // RuntimeSemanticPlanJSONSchema renders the request-specific semantic schema
 // exclusively from the sealed manifest.
 func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string, error) {
+	coverageIDs := make([]common.CoverageWorkItemID, 0, len(manifest.CoverageItems))
+	for _, item := range manifest.CoverageItems {
+		coverageIDs = append(coverageIDs, item.ID)
+	}
+	return runtimeSemanticPlanJSONSchema(manifest, coverageIDs)
+}
+
+// The sealed manifest stays complete. Only the selected request members can
+// require input-review output; unrelated catalog bindings are owner history.
+func runtimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest, reviewCoverageIDs []common.CoverageWorkItemID) (string, error) {
 	manifest = manifest.Normalized()
 	if err := manifest.Validate(); err != nil {
 		return "", err
@@ -621,7 +636,7 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 			}
 		}
 	}
-	addRuntimeSemanticInputReviewSchema(proposalItems, manifest)
+	addRuntimeSemanticInputReviewSchema(proposalItems, manifest, reviewCoverageIDs)
 	encoded, err := json.Marshal(schema)
 	return string(encoded), err
 }
@@ -645,7 +660,15 @@ func RuntimeSemanticPurposeChoice(manifest RuntimeSemanticPlanManifest, step Run
 // the evaluator; this projection only prevents an order or proof-batch request
 // from authorizing fields and coverage outside its current step.
 func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifest, step RuntimeSemanticPlanStep, batchID string, batchSequence int, batchCoverageIDs []common.CoverageWorkItemID) (string, error) {
-	full, err := RuntimeSemanticPlanJSONSchema(manifest)
+	var reviewCoverageIDs []common.CoverageWorkItemID
+	if step == RuntimeSemanticPlanStepProofBatch {
+		reviewCoverageIDs = batchCoverageIDs
+	} else if step != RuntimeSemanticPlanStepCoverageOrder {
+		for _, item := range manifest.CoverageItems {
+			reviewCoverageIDs = append(reviewCoverageIDs, item.ID)
+		}
+	}
+	full, err := runtimeSemanticPlanJSONSchema(manifest, reviewCoverageIDs)
 	if err != nil || step == "" {
 		return full, err
 	}
@@ -680,7 +703,7 @@ func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifes
 				properties["implementationPurpose"] = map[string]any{"type": "string", "enum": purposes}
 				normalRequired = append(normalRequired, "implementationPurpose")
 				if work.Scope.Content != nil {
-					properties["implementationIntent"] = map[string]any{"type": "object", "additionalProperties": false, "required": []string{"declarationRef", "contentHash", "remainingWork", "reason"}, "properties": map[string]any{"declarationRef": map[string]any{"const": obligation.DeclarationRef}, "contentHash": map[string]any{"const": work.Scope.Content.Hash()}, "remainingWork": map[string]any{"type": "string", "minLength": 1, "maxLength": 2048}, "reason": map[string]any{"type": "string", "minLength": 1, "maxLength": 2048}}}
+					properties["implementationIntent"] = map[string]any{"type": "object", "additionalProperties": false, "required": []string{"remainingWork", "reason"}, "properties": map[string]any{"remainingWork": map[string]any{"type": "string", "minLength": 1, "maxLength": 2048}, "reason": map[string]any{"type": "string", "minLength": 1, "maxLength": 2048}}}
 					{
 						intent := properties["implementationIntent"].(map[string]any)
 						refs := RuntimeImplementationRequirementRefs(manifest, *work, obligation.DeclarationRef)

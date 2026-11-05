@@ -218,16 +218,13 @@ func (p runtimeTargetAuthorityPlan) grounded() bool {
 // may diagnose. A selector-only catalog has no finite diagnostic scope, so the
 // validation owner cannot publish a structured repair observation for it.
 // Current workspace facts and owner inventories never participate after seal.
-func runtimeValidationScopeTargetRefs(dispatch SealedDispatch, operation runtimecontract.RuntimeOperation) ([]string, error) {
+func runtimeValidationScopeTargetRefs(dispatch runtimecontract.RuntimeDispatchRecord, operation runtimecontract.RuntimeOperation) ([]string, error) {
 	if runtimecontract.CanonicalRuntimeBlockKind(operation.Kind) != runtimecontract.RuntimeBlockKindManagedValidationSession {
 		return nil, nil
 	}
-	if _, err := runtimeValidationTargetAuthorization(dispatch, operation); err != nil {
+	execution, err := runtimeValidationScopeExecution(dispatch, operation)
+	if err != nil {
 		return nil, err
-	}
-	execution, found := operationExecutionRecord(dispatch.OperationExecutions, operation.ID)
-	if !found || execution.OperationHash != runtimecontract.StableRuntimeOperationHash(operation) || execution.AdmissibilitySnapshotID == "" {
-		return nil, fmt.Errorf("sealed managed-validation operation %q has no exact owner catalog authority", operation.ID)
 	}
 	catalog := runtimeOwnerCatalogForOperation(
 		dispatch.OperationAdmissibilities,
@@ -236,10 +233,39 @@ func runtimeValidationScopeTargetRefs(dispatch SealedDispatch, operation runtime
 		execution.AdmissibilitySnapshotID,
 		execution.AcquisitionBinding,
 	)
-	if catalog == nil {
+	return runtimeValidationScopeForExecutionCatalog(operation, execution, catalog)
+}
+
+// Consume the same-call selected, normalized owner catalog. Target authorization,
+// operation identity, sealed catalog identity and diagnostic containment remain
+// this join's responsibility; no source or validation-success cache is retained.
+func runtimeValidationScopeFromOwnerCatalog(dispatch runtimecontract.RuntimeDispatchRecord, operation runtimecontract.RuntimeOperation, catalog *runtimecontract.RuntimeOperationAdmissibility) ([]string, error) {
+	if runtimecontract.CanonicalRuntimeBlockKind(operation.Kind) != runtimecontract.RuntimeBlockKindManagedValidationSession {
+		return nil, nil
+	}
+	execution, err := runtimeValidationScopeExecution(dispatch, operation)
+	if err != nil {
+		return nil, err
+	}
+	return runtimeValidationScopeForExecutionCatalog(operation, execution, catalog)
+}
+
+func runtimeValidationScopeExecution(dispatch runtimecontract.RuntimeDispatchRecord, operation runtimecontract.RuntimeOperation) (runtimecontract.RuntimeOperationExecutionRecord, error) {
+	if _, err := runtimeValidationTargetAuthorization(dispatch, operation); err != nil {
+		return runtimecontract.RuntimeOperationExecutionRecord{}, err
+	}
+	execution, found := operationExecutionRecord(dispatch.OperationExecutions, operation.ID)
+	if !found || execution.OperationHash != runtimecontract.StableRuntimeOperationHash(operation) || execution.AdmissibilitySnapshotID == "" {
+		return runtimecontract.RuntimeOperationExecutionRecord{}, fmt.Errorf("sealed managed-validation operation %q has no exact owner catalog authority", operation.ID)
+	}
+	return execution, nil
+}
+
+func runtimeValidationScopeForExecutionCatalog(operation runtimecontract.RuntimeOperation, execution runtimecontract.RuntimeOperationExecutionRecord, catalog *runtimecontract.RuntimeOperationAdmissibility) ([]string, error) {
+	if catalog == nil || catalog.SnapshotID != strings.TrimSpace(execution.AdmissibilitySnapshotID) || catalog.AcquisitionBinding != strings.TrimSpace(execution.AcquisitionBinding) || catalog.OwnerModuleID != runtimecontract.RuntimeModuleForOperationKind(operation.Kind) {
 		return nil, fmt.Errorf("sealed managed-validation operation %q has no complete owner catalog preimage", operation.ID)
 	}
-	scope := append([]string(nil), catalog.Normalized().TargetRefs...)
+	scope := append([]string(nil), catalog.TargetRefs...)
 	if !runtimeValidationTargetsWithinScope(operation.TargetRefs, scope) {
 		return nil, fmt.Errorf("sealed managed-validation operation %q target is outside owner diagnostic scope", operation.ID)
 	}
@@ -262,7 +288,7 @@ func runtimeValidationTargetsWithinScope(values, scope []string) bool {
 	return true
 }
 
-func runtimeValidationTargetAuthorization(dispatch SealedDispatch, operation runtimecontract.RuntimeOperation) (runtimecontract.RuntimeDispatchOperationTargetAuthorization, error) {
+func runtimeValidationTargetAuthorization(dispatch runtimecontract.RuntimeDispatchRecord, operation runtimecontract.RuntimeOperation) (runtimecontract.RuntimeDispatchOperationTargetAuthorization, error) {
 	if runtimecontract.CanonicalRuntimeBlockKind(operation.Kind) != runtimecontract.RuntimeBlockKindManagedValidationSession {
 		return runtimecontract.RuntimeDispatchOperationTargetAuthorization{}, fmt.Errorf("operation %q is not managed validation", operation.ID)
 	}

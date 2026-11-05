@@ -468,19 +468,24 @@ func validateRuntimeSemanticProposalDeclarationTargetSurface(coverageID common.C
 	)
 }
 
-func compileRuntimeSemanticFocus(validated runtimeValidatedSemanticManifest, generationID string, item RuntimeCoverageItem, proofSet RuntimeSemanticCWIProofSet, facts map[string]RuntimeSemanticProofFeasibility, source *CoverageFocus, evidenceObligation RuntimeSemanticEvidenceObligation) (CoverageFocus, error) {
-	manifest := validated.manifest
-	proofSetHash := StableRuntimeSemanticCWIProofSetHash(proofSet.CoverageWorkItemID, proofSet.Proposals)
+// This is source identity only, not compilation, admission or proof credit.
+// Producers and formal consumers use the same CWI/request identity rule.
+func runtimeSemanticProofFocusIdentity(generationID string, coverageID common.CoverageWorkItemID, proposals []RuntimeSemanticProofProposal) (string, string, error) {
+	proofSetHash := StableRuntimeSemanticCWIProofSetHash(coverageID, proposals)
 	idSuffix := strings.TrimPrefix(proofSetHash, "runtime-semantic-cwi-proof-set-")
 	generationSuffix := strings.TrimPrefix(strings.TrimSpace(generationID), "runtime-semantic-generation-")
 	if generationSuffix == "" {
-		return CoverageFocus{}, fmt.Errorf("runtime semantic focus requires an exact semantic generation identity")
+		return "", "", fmt.Errorf("runtime semantic focus requires an exact semantic generation identity")
 	}
-	// The proposal set is CWI-scoped. A generation-specific focus/binding ID
-	// therefore cannot be reused after catalog re-acquisition, even when every
-	// provider proof text happens to be identical.
-	focusID := "semantic-focus-" + idSuffix + "-" + generationSuffix
-	bindingID := "semantic-binding-" + idSuffix + "-" + generationSuffix
+	return "semantic-focus-" + idSuffix + "-" + generationSuffix, "semantic-binding-" + idSuffix + "-" + generationSuffix, nil
+}
+
+func compileRuntimeSemanticFocus(validated runtimeValidatedSemanticManifest, generationID string, item RuntimeCoverageItem, proofSet RuntimeSemanticCWIProofSet, facts map[string]RuntimeSemanticProofFeasibility, source *CoverageFocus, evidenceObligation RuntimeSemanticEvidenceObligation) (CoverageFocus, error) {
+	manifest := validated.manifest
+	focusID, bindingID, identityErr := runtimeSemanticProofFocusIdentity(generationID, proofSet.CoverageWorkItemID, proofSet.Proposals)
+	if identityErr != nil {
+		return CoverageFocus{}, identityErr
+	}
 
 	proofs := make([]CoverageEvidenceProof, 0, len(proofSet.Proposals))
 	acceptedKinds := make([]string, 0, len(proofSet.Proposals))

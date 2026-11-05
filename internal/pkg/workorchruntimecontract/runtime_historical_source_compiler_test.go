@@ -2,7 +2,6 @@ package workorchruntimecontract
 
 import (
 	"encoding/json"
-	"errors"
 	"reflect"
 	"testing"
 )
@@ -16,45 +15,16 @@ func TestHistoricalSourceCompilerFullRawCloneAndEveryFieldFence(t *testing.T) {
 		t.Fatal("full source raw copier omitted or normalized a field")
 	}
 	assertRuntimeStateRawCloneDetached(t, reflect.ValueOf(source), reflect.ValueOf(cloned), "lineage sources")
-	compiler := &runtimeHistoricalSourceCompiler{}
-	calls := 0
-	body := func() error { calls++; return nil }
-	if err := compiler.validate(source, false, body); err != nil {
-		t.Fatal(err)
-	}
-	if err := compiler.validate(cloned, false, body); err != nil || calls != 1 {
-		t.Fatal("identical detached source did not reuse its own consumer", err)
-	}
-	if err := compiler.validate(cloned, true, body); err != nil || calls != 2 {
-		t.Fatal("behavior success certified a different consumer", err)
-	}
 	for i := 0; i < reflect.TypeOf(source).NumField(); i++ {
 		changed := cloneRuntimeLineageSourcesRaw(source)
 		field := reflect.ValueOf(&changed).Elem().Field(i)
 		field.Set(reflect.Zero(field.Type()))
 		if reflect.DeepEqual(changed, source) {
-			t.Fatalf("unpopulated field %s", reflect.TypeOf(source).Field(i).Name)
+			t.Fatalf("unpopulated source field %s", reflect.TypeOf(source).Field(i).Name)
 		}
-		before := calls
-		if err := compiler.validate(changed, false, body); err != nil || calls != before+1 {
-			t.Fatalf("field %s borrowed prior success: %v", reflect.TypeOf(source).Field(i).Name, err)
+		if !reflect.DeepEqual(changed, cloneRuntimeLineageSourcesRaw(changed)) {
+			t.Fatalf("raw clone changed field %d", i)
 		}
-	}
-	// Mutating the caller's nested storage must not mutate the detached key.
-	source.ProcessedEventIDs[0] = "changed without changing any hash"
-	before := calls
-	if err := compiler.validate(source, false, body); err != nil || calls != before+1 {
-		t.Fatal("raw alias borrowed old success", err)
-	}
-	want := errors.New("original consumer failure")
-	failedCalls := 0
-	for range 2 {
-		if got := compiler.validate(RuntimeLineageAssertionSources{}, true, func() error { failedCalls++; return want }); got != want {
-			t.Fatal("failure changed", got)
-		}
-	}
-	if failedCalls != 2 {
-		t.Fatal("failed validation registered a successful preimage")
 	}
 }
 
@@ -63,12 +33,12 @@ func compareHistoricalSourceCompiler(t testing.TB, initial, changed RuntimeLinea
 	session := &runtimeHistoricalPreimageSession{sourceCompiler: &runtimeHistoricalSourceCompiler{}}
 	for _, source := range []RuntimeLineageAssertionSources{initial, initial, changed, changed, initial} {
 		before := cloneRuntimeLineageSourcesRaw(source)
-		got := validateRuntimeHistoricalBehaviorCompletionsInSession(source, session)
+		got := auditCommittedHistoricalResults(source, session)
 		want := referenceHistoricalCompletionsBeforePreimageSession(source)
 		if cwiFocusBindingsError(got) != cwiFocusBindingsError(want) {
 			t.Fatalf("historical consumer first error differs: %v != %v", got, want)
 		}
-		got = validateRuntimeAssessmentAdjudicationsInSession(source.Facts, source.Completed, source.ProofLineage, source, session)
+		got = auditCommittedAssessmentAdjudicationsInSession(source.Facts, source.Completed, source.ProofLineage, source, session)
 		want = referenceLineagePreimageValidateRuntimeAssessmentAdjudications(source.Facts, source.Completed, source.ProofLineage, source)
 		if cwiFocusBindingsError(got) != cwiFocusBindingsError(want) {
 			t.Fatalf("adjudication consumer first error differs: %v != %v", got, want)
@@ -100,7 +70,7 @@ func TestHistoricalSourceCompilerCompleteConsumerOracle(t *testing.T) {
 func TestHistoricalSourceCompilerExplicitAssessmentInputsRemainIndependent(t *testing.T) {
 	s := historicalSessionFixture(t)
 	session := &runtimeHistoricalPreimageSession{sourceCompiler: &runtimeHistoricalSourceCompiler{}}
-	if err := validateRuntimeAssessmentAdjudicationsInSession(s.Facts, s.Completed, s.ProofLineage, s, session); err != nil {
+	if err := auditCommittedAssessmentAdjudicationsInSession(s.Facts, s.Completed, s.ProofLineage, s, session); err != nil {
 		t.Fatal(err)
 	}
 	for arm := range 3 {
@@ -113,7 +83,7 @@ func TestHistoricalSourceCompilerExplicitAssessmentInputsRemainIndependent(t *te
 		case 2:
 			changed.ProofLineage = append(changed.ProofLineage, RuntimeCoverageProofLineage{})
 		}
-		got := validateRuntimeAssessmentAdjudicationsInSession(changed.Facts, changed.Completed, changed.ProofLineage, s, session)
+		got := auditCommittedAssessmentAdjudicationsInSession(changed.Facts, changed.Completed, changed.ProofLineage, s, session)
 		want := referenceLineagePreimageValidateRuntimeAssessmentAdjudications(changed.Facts, changed.Completed, changed.ProofLineage, s)
 		if cwiFocusBindingsError(got) != cwiFocusBindingsError(want) {
 			t.Fatalf("explicit argument %d borrowed source success: %v != %v", arm, got, want)

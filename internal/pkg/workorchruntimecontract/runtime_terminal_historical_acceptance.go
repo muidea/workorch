@@ -6,19 +6,15 @@ import (
 )
 
 // This is a read-only material consumer, not another settlement authority.
-// Every mapped endpoint is reconstructed from the immutable original sources;
+// Every mapped endpoint consumes its committed result and exact source references;
 // the ordinary consumer retains its own native checks, receipt and binding.
 func runtimeTerminalHistoricalAcceptance(source RuntimeStateRecord, coverage RuntimeCoverageItemFact) (RuntimeHistoricalAcceptanceProof, CoverageEvidenceBinding, bool) {
 	if coverage.HistoricalBehavior == nil || coverage.State != RuntimeCoverageItemStateSatisfied || coverage.CWIConvergenceState != RuntimeCWIConvergenceStateSettled || len(coverage.HistoricalAcceptanceProofs) == 0 {
 		return RuntimeHistoricalAcceptanceProof{}, CoverageEvidenceBinding{}, false
 	}
 	proof := coverage.HistoricalAcceptanceProofs[len(coverage.HistoricalAcceptanceProofs)-1]
-	sources := runtimeLineageSourcesFromRecord(source)
-	if validateRuntimeHistoricalAcceptanceProofs(sources, coverage) != nil {
-		return RuntimeHistoricalAcceptanceProof{}, CoverageEvidenceBinding{}, false
-	}
-	compiled, err := CompileRuntimeHistoricalAcceptanceProof(sources, coverage.ID, proof.AssessmentDispatchID)
-	if err != nil || !reflect.DeepEqual(proof, compiled) {
+	if validateRuntimeHistoricalBehaviorResult(source.Facts, source.CompletedDispatches, coverage) != nil ||
+		validateRuntimeHistoricalAcceptanceResults(source.Facts, source.CompletedDispatches, coverage) != nil {
 		return RuntimeHistoricalAcceptanceProof{}, CoverageEvidenceBinding{}, false
 	}
 	var consumer RuntimeCoverageItemFact

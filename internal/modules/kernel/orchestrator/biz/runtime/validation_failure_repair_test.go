@@ -378,7 +378,7 @@ func TestRejectedValidationObservationWaitsForFileConfirmationBeforeSemanticRepa
 	if err != nil {
 		t.Fatal(err)
 	}
-	var validationDispatch *SealedDispatch
+	var validationDispatch *runtimecontract.RuntimeDispatchRecord
 	for index := range committed.Aggregate.CompletedDispatches {
 		if committed.Aggregate.CompletedDispatches[index].ID == sealed.ActiveDispatch.ID {
 			validationDispatch = &committed.Aggregate.CompletedDispatches[index]
@@ -1109,19 +1109,21 @@ func TestValidationFailureRepairMultiTargetSettlementUsesOneCompletedAllOfDispat
 		t.Fatalf("complete repair all-of set did not reopen for fresh validation: %+v", completed.Aggregate.Facts)
 	}
 
-	// The final owner event is still idempotent at the normal event ingress; a
-	// second completed-dispatch event cannot create another repair generation.
+	// This pure settlement fixture injects a repair directive after execution;
+	// it has no sealed semantic repair/pre-seal closure. Canonical owner admission
+	// must reject it, rather than letting an apparent duplicate skip the source gate.
 	repository.aggregate = completed.Aggregate
-	restartedAfterSettlement, err := NewDispatchCoordinator(repository)
+	restartedAfterSettlement, err := NewDispatchCoordinator(unacceptedRepairSnapshotRepository{repository})
 	if err != nil {
 		t.Fatal(err)
 	}
-	settledRevision := repository.aggregate.StateRevision
-	completedDuplicate, err := restartedAfterSettlement.commitEvidence(context.Background(), second)
-	if err != nil || completedDuplicate.Disposition != CommitDispositionDuplicate || completedDuplicate.Aggregate.StateRevision != settledRevision ||
-		len(completedDuplicate.Aggregate.Facts.Coverage[0].ReopenLineage) != 1 {
-		t.Fatalf("complete repair duplicate changed fresh-validation reopen: %+v err=%v", completedDuplicate, err)
+	before := repository.aggregate.CloneRaw()
+	_, err = restartedAfterSettlement.commitEvidence(context.Background(), second)
+	if err == nil || !strings.Contains(err.Error(), "closure differs from the retired semantic repair contract") ||
+		!reflect.DeepEqual(ownerStateRecord(before), ownerStateRecord(repository.aggregate)) {
+		t.Fatalf("incomplete synthetic repair bypassed owner admission: %v", err)
 	}
+
 }
 
 func runtimeSemanticValidationFailureRepairForTest(operationKind string, maxAttempts int) runtimecontract.RuntimeSemanticValidationFailureRepair {
@@ -1202,4 +1204,19 @@ func installRuntimeValidationFailureRepairDirectiveForTest(
 		},
 	}.Normalized()
 	aggregate.Facts.RepairDirective = &directive
+}
+
+// This fixture deliberately injects an unaccepted snapshot. It owns its cold
+// admission; a formal repository never exposes injected raw state as committed.
+type unacceptedRepairSnapshotRepository struct{ RuntimeStateRepository }
+
+func (r unacceptedRepairSnapshotRepository) Load(ctx context.Context, ws common.WorkspaceID, run common.RunID) (RuntimeAggregate, error) {
+	a, err := r.RuntimeStateRepository.Load(ctx, ws, run)
+	if err != nil {
+		return a, err
+	}
+	if err := a.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return a, nil
 }

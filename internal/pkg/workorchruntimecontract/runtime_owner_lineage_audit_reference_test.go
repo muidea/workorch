@@ -1,6 +1,6 @@
 package workorchruntimecontract
 
-// runtime-owner-lineage-subgraph-compiler/v1. Only complete, detached raw
+// Offline reference only; never used by the current owner transaction. Only complete, detached raw
 // historical nodes are retained. Keys select candidates, never certify them;
 // every hit compares the entire node, including nil/empty and original bytes.
 // No current Facts, budget, collection success or cross-node join is cached.
@@ -14,23 +14,6 @@ type runtimeOwnerLineageIndex struct {
 type runtimeOwnerLineageReceipt struct {
 	raw  RuntimeOperationReceipt
 	hash string // pure product of this exact raw node, never a lookup credential
-}
-
-func runtimeOwnerLineageIndexFor(s *runtimeSemanticValidationSession) *runtimeOwnerLineageIndex {
-	if s == nil || s.ownerHistory == nil {
-		return nil
-	}
-	if s.ownerHistory.lineage == nil {
-		s.ownerHistory.lineage = &runtimeOwnerLineageIndex{}
-	}
-	return s.ownerHistory.lineage
-}
-
-func (s *runtimeHistoricalPreimageSession) lineageIndex() *runtimeOwnerLineageIndex {
-	if s == nil {
-		return nil
-	}
-	return runtimeOwnerLineageIndexFor(s.semantic)
 }
 
 func (c *runtimeOwnerLineageIndex) count() int {
@@ -56,14 +39,14 @@ func (c *runtimeOwnerLineageIndex) count() int {
 func (c *runtimeOwnerLineageIndex) dispatch(d RuntimeDispatchRecord) error {
 	// Active execution progress is never retained as a historical node.
 	if c == nil || d.State != RuntimeDispatchStateCommitted && d.State != RuntimeDispatchStateInvalidated {
-		return d.validateIntrinsicInLineageIndex(c)
+		return d.ValidateIntrinsic()
 	}
 	for _, prior := range c.dispatches[d.ID] {
 		if runtimeRawEqual(prior, d) {
 			return nil
 		}
 	}
-	if err := d.validateIntrinsicInLineageIndex(c); err != nil {
+	if err := d.ValidateIntrinsic(); err != nil {
 		return err
 	}
 	if c.dispatches == nil {

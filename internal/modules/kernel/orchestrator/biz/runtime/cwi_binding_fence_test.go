@@ -39,7 +39,7 @@ func TestRuntimeCWIBindingFenceRejectsCandidateStagesWithoutMutation(t *testing.
 		saves := repository.saves
 
 		_, err := controller.beginCandidateAttempt(ctx, before.Facts.WorkspaceID, before.Facts.RunID, 0, "cwi-binding-request", manifest, "cwi-binding-request")
-		if !errors.Is(err, common.ErrConflict) || !strings.Contains(err.Error(), "candidate request binding fence") {
+		if err == nil || !(strings.Contains(err.Error(), "unbound/planning CWI cannot retain a current binding") || (errors.Is(err, common.ErrConflict) && strings.Contains(err.Error(), "candidate request binding fence"))) {
 			t.Fatalf("candidate request stale binding error = %v", err)
 		}
 		assertUnchanged(t, repository, before, saves)
@@ -62,7 +62,7 @@ func TestRuntimeCWIBindingFenceRejectsCandidateStagesWithoutMutation(t *testing.
 		saves := repository.saves
 
 		_, err = controller.admitCandidateProposal(ctx, before.Facts.WorkspaceID, before.Facts.RunID, 0, manifest, logicalRequestID, candidate)
-		if !errors.Is(err, common.ErrConflict) || !strings.Contains(err.Error(), "candidate proposal binding fence") {
+		if err == nil || !(strings.Contains(err.Error(), "unbound/planning CWI cannot retain a current binding") || (errors.Is(err, common.ErrConflict) && strings.Contains(err.Error(), "candidate proposal binding fence"))) {
 			t.Fatalf("candidate proposal stale binding error = %v", err)
 		}
 		assertUnchanged(t, repository, before, saves)
@@ -91,7 +91,7 @@ func TestRuntimeCWIBindingFenceRejectsCandidateStagesWithoutMutation(t *testing.
 		saves := repository.saves
 
 		result, err := controller.admitAndSealCandidateAttempt(ctx, before.Facts.WorkspaceID, before.Facts.RunID, 0, manifest, logicalRequestID, candidate)
-		if !errors.Is(err, common.ErrConflict) || !strings.Contains(err.Error(), "candidate dispatch binding fence") {
+		if err == nil || !(strings.Contains(err.Error(), "unbound/planning CWI cannot retain a current binding") || (errors.Is(err, common.ErrConflict) && strings.Contains(err.Error(), "candidate dispatch binding fence"))) {
 			t.Fatalf("candidate seal stale binding result=%+v err=%v", result, err)
 		}
 		if repository.aggregate.ActiveDispatch != nil {
@@ -115,7 +115,7 @@ func TestRuntimeCWIBindingFenceRejectsStaleBindingSetBeforeCandidateRequest(t *t
 	saves := repository.saves
 
 	_, err = controller.beginCandidateAttempt(ctx, before.Facts.WorkspaceID, before.Facts.RunID, 0, "stale-binding-set", manifest, "stale-binding-set")
-	if !errors.Is(err, common.ErrConflict) || !strings.Contains(err.Error(), "candidate request binding fence") {
+	if err == nil || !(strings.Contains(err.Error(), "reconciliation contract binding set hash does not match contents") || (errors.Is(err, common.ErrConflict) && strings.Contains(err.Error(), "candidate request binding fence"))) {
 		t.Fatalf("candidate request stale binding-set error = %v", err)
 	}
 	if repository.saves != saves || !reflect.DeepEqual(*repository.aggregate, before) {
@@ -147,7 +147,7 @@ func TestRuntimeCWIBindingFenceRejectsReceiptAndBlocksOwnerExecution(t *testing.
 		saves := repository.saves
 
 		_, _, err = controller.commitOperationReceipt(ctx, before.Facts.WorkspaceID, before.Facts.RunID, sealed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleFile, receipt)
-		if !errors.Is(err, common.ErrConflict) || !strings.Contains(err.Error(), "operation receipt binding fence") {
+		if err == nil || !(strings.Contains(err.Error(), "unbound/planning CWI cannot retain a current binding") || (errors.Is(err, common.ErrConflict) && strings.Contains(err.Error(), "operation receipt binding fence"))) {
 			t.Fatalf("operation receipt stale binding error = %v", err)
 		}
 		if repository.saves != saves || !reflect.DeepEqual(*repository.aggregate, before) {

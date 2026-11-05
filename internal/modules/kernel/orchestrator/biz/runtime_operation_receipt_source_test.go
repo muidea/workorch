@@ -64,7 +64,7 @@ func runtimeReceiptSourceTestOwner(t *testing.T, fixture runtimeReceiptSourceFix
 	operationID := "operation-" + fixture.name
 	repository := &runtimeReceiptSourceGuardRepository{aggregate: runtime.RuntimeAggregate{
 		Facts: runtimecontract.RuntimeFacts{WorkspaceID: "workspace-receipt-source", RunID: "run-receipt-source"},
-		ActiveDispatch: &runtime.SealedDispatch{
+		ActiveDispatch: &runtimecontract.RuntimeDispatchRecord{
 			ID: "dispatch-receipt-source",
 			Candidate: runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{
 				Operation: runtimecontract.RuntimeOperation{ID: operationID, Kind: fixture.kind},

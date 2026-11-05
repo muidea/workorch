@@ -58,7 +58,7 @@ type runtimeSemanticManifestProjection struct {
 type runtimeSemanticImplementationWorkProjection struct {
 	InputCoverageRevisionTasks []runtimeInputCoverageRevisionTask                      `json:"inputCoverageRevisionTasks,omitempty"`
 	PreviousRound              *runtimecontract.RuntimeImplementationRoundReviewSource `json:"previousRound,omitempty"`
-	InputRevision              *runtimecontract.RuntimeValidationInputRevision         `json:"inputRevision,omitempty"`
+	InputRevision              *runtimeInputRevisionProjection                         `json:"inputRevision,omitempty"`
 	CoverageWorkItemID         common.CoverageWorkItemID                               `json:"coverageWorkItemId"`
 	PurposeChoiceOnly          bool                                                    `json:"purposeChoiceOnly"`
 	RepeatedWorkStates         int                                                     `json:"repeatedWorkStates"`
@@ -102,7 +102,7 @@ func runtimeSemanticImplementationWorkForProvider(work *runtimecontract.RuntimeS
 		InputCoverageRevisionTasks: runtimeInputCoverageRevisionTasks(work.Scope.Request.InputRevision),
 		PreviousRound:              work.PreviousRound.Clone(),
 		CoverageWorkItemID:         work.Scope.Request.CoverageWorkItemID,
-		InputRevision:              work.Scope.Request.InputRevision.Clone(),
+		InputRevision:              inputRevisionForProvider(work.Scope.Request.InputRevision),
 		PurposeChoiceOnly:          work.PurposeChoiceOnly, EffectAvailable: work.EffectAvailable, RepeatedWorkStates: work.RepeatedWorkStates,
 		RoundHash: work.RoundHash, Ordinal: work.Ordinal, PrecedingReceiptSetHash: work.PrecedingReceiptSetHash,
 		PolicyHash: work.PolicyHash, Policy: work.Scope.Request.Policy.ExecutionMethod(),
@@ -175,7 +175,8 @@ func runtimeSemanticSourceObligationChecksForProvider(values []runtimecontract.R
 }
 
 type runtimeSemanticInputReviewProjection struct {
-	ProofResponsibilities []runtimeInputProofResponsibility `json:"proofResponsibilities"`
+	ProofResponsibilities []runtimeInputProofResponsibility        `json:"proofResponsibilities"`
+	Recipe                *runtimecontract.RuntimeValidationRecipe `json:"recipe,omitempty"`
 	// Pure requirement projection, not a model conclusion or proof receipt.
 	RequiredProofConsumerRefs   []string                                                  `json:"requiredProofConsumerRefs,omitempty"`
 	OwnerModuleID               string                                                    `json:"ownerModuleId"`

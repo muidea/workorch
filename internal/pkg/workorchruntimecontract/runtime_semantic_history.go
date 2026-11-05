@@ -90,6 +90,12 @@ func (l RuntimeSemanticPlanningLedger) ValidateHistoryStorage() error {
 func ValidateRuntimeSemanticHistoryScope(l RuntimeSemanticPlanningLedger, workspace common.WorkspaceID, run common.RunID) error {
 
 	for i, generation := range l.AllHistory() {
+		if v := generation.OwnerInputRevision; v != nil {
+			if v.WorkspaceID != workspace || v.RunID != run {
+				return fmt.Errorf("runtime input observation scope mismatch")
+			}
+			continue
+		}
 		manifest := generation.Snapshot.Manifest
 		if manifest == nil || manifest.WorkspaceID != workspace || manifest.RunID != run {
 			return fmt.Errorf("runtime semantic history %d scope mismatch", i)
@@ -117,6 +123,6 @@ func (l RuntimeSemanticPlanningLedger) AppendHistory(g RuntimeSemanticPlanningGe
 		archive.GenerationCount = len(archive.Segments) * RuntimeSemanticPlanningHistoryLimit
 		l.HistoryArchive, l.History = &archive, nil
 	}
-	l.History = append(append([]RuntimeSemanticPlanningGeneration(nil), l.History...), g.Clone())
+	l.History = append(append([]RuntimeSemanticPlanningGeneration(nil), l.History...), cloneRuntimeSemanticPlanningGenerationRaw(g))
 	return l, nil
 }

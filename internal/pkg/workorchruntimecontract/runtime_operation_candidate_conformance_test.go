@@ -69,7 +69,7 @@ func TestDynamicEditConstraintCannotBypassOwnerFeasibilityWithStaticSeal(t *test
 			Kind: kind, OwnerModuleID: RuntimeModuleFile, Parameters: contract.Parameters, Variants: contract.Variants, CandidateConstraints: contract.CandidateConstraints,
 		}}}.Normalized()
 		candidate := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: operation}}}}
-		decision := evaluateRuntimeCompleteAdmissionFeasibility(RuntimeFacts{}, manifest, candidate, nil)
+		decision := evaluateRuntimeCompleteAdmissionFeasibility(RuntimeFacts{}, manifest, candidate, nil, AuthorityTransaction{})
 		if decision.Admitted() || decision.Code != "owner_catalog_missing" {
 			t.Fatalf("%s bypassed dynamic constraint: %+v", kind, decision)
 		}

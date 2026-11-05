@@ -19,7 +19,8 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-const runtimeDriveTransitionLimit = 1024
+// A batch bounds one worker turn, not the Run's cumulative useful work.
+const runtimeDriveTransitionBatchSize = 1024
 const runtimeInternalDriveSource = ModuleID
 
 // runtimePersistedDrivePendingError means an owner-local transition was
@@ -271,14 +272,16 @@ func (m *Biz) driveRuntimeLocked(ctx context.Context, command orchestratorevents
 	if err != nil {
 		return orchestratorevents.DriveRuntimeResult{}, err
 	}
+	lifecycle := runtimeLifecycleView(run)
 	stablePrefixHash := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
-	for transition := 0; transition < runtimeDriveTransitionLimit; transition++ {
+	batchStartRevision := aggregate.StateRevision
+	for transition := 0; transition < runtimeDriveTransitionBatchSize; transition++ {
 		if transition != 0 {
 			// Runtime aggregate projection updates Run's opaque lifecycle fence on
 			// every persisted transition. Re-read that owner state before comparing
 			// a later aggregate revision; retaining the initialization pointer would
 			// falsely reject a valid exact resolution after the first CAS.
-			run, err = (runSnapshotReader{hub: m.EventHub()}).Read(ctx, command.WorkspaceID, command.RunID)
+			lifecycle, err = (runSnapshotReader{hub: m.EventHub()}).ReadLifecycle(ctx, command.WorkspaceID, command.RunID)
 			if err != nil {
 				return orchestratorevents.DriveRuntimeResult{}, err
 			}
@@ -289,7 +292,7 @@ func (m *Biz) driveRuntimeLocked(ctx context.Context, command orchestratorevents
 		// this drive loaded that aggregate. Never let such an old drive cross into
 		// SM-2/SM-3/provider/capability work until the Run owner proves the exact
 		// persisted continuation resolution in its own lifecycle fence.
-		if err := runtimeDriveContinuationFence(aggregate, run); err != nil {
+		if err := runtimeDriveContinuationFenceFromLifecycle(aggregate, lifecycle); err != nil {
 			return orchestratorevents.DriveRuntimeResult{}, err
 		}
 		outcome, err := m.driveOneRuntimeTransition(ctx, run, aggregate, command, stablePrefixHash)
@@ -301,14 +304,28 @@ func (m *Biz) driveRuntimeLocked(ctx context.Context, command orchestratorevents
 		}
 		aggregate = outcome.aggregate
 	}
-	return orchestratorevents.DriveRuntimeResult{}, &runtimeInvariantError{Message: fmt.Sprintf("Runtime drive exceeded %d persisted transitions", runtimeDriveTransitionLimit)}
+	return orchestratorevents.DriveRuntimeResult{}, runtimeDriveBatchYield(batchStartRevision, aggregate.StateRevision)
+}
+
+// The existing persisted-pending path mounts the next SM-4 lease from this
+// actual committed revision. It does not consume a recovery attempt, repeat an
+// effect, or turn the scheduling batch ordinal into an execution budget.
+func runtimeDriveBatchYield(start, current uint64) error {
+	if start == 0 || current <= start {
+		return &runtimeInvariantError{Message: "Runtime drive batch made no persisted progress"}
+	}
+	return &runtimePersistedDrivePendingError{Revision: current}
 }
 
 func runtimeDriveContinuationFence(aggregate runtime.RuntimeAggregate, run *runmodel.Run) error {
+	return runtimeDriveContinuationFenceFromLifecycle(aggregate, runtimeLifecycleView(run))
+}
+
+func runtimeDriveContinuationFenceFromLifecycle(aggregate runtime.RuntimeAggregate, lifecycle runmodel.RuntimeLifecycleState) error {
 	if aggregate.Termination != nil || runtimeConvergenceTerminal(aggregate.Decision.State) || aggregate.Decision.State == runtimecontract.ConvergenceStateNeedGovernance {
 		return nil
 	}
-	record := runtimeStateRecordFromAggregate(aggregate)
+	record := runtimecontract.RuntimeStateRecord(aggregate)
 	handoff, governed, err := runtimeGovernanceLifecycleHandoffFromState(&record)
 	if err != nil {
 		return err
@@ -333,9 +350,7 @@ func runtimeDriveContinuationFence(aggregate runtime.RuntimeAggregate, run *runm
 	// This is a read-only proof against Run-owned state. It neither delivers a
 	// lifecycle command nor writes Run state: failure returns to the current
 	// SM-4 gate owner, which retains the same persisted handoff in DriveLease.
-	return runtimeLifecycleOwnerDeliveryFailureForHandoff(handoff, validateRunContinuationAcknowledgement(
-		runevents.RunLifecycleCommandResult{Run: run}, fact, aggregate.StateRevision,
-	))
+	return runtimeLifecycleOwnerDeliveryFailureForHandoff(handoff, validateRunContinuationLifecycle(lifecycle, fact, aggregate.StateRevision))
 }
 
 type runtimeDriveTransitionOutcome struct {
@@ -360,14 +375,6 @@ func (m *Biz) driveOneRuntimeTransition(ctx context.Context, run *runmodel.Run, 
 	defer region.End()
 	previousRevision := aggregate.StateRevision
 	previousConvergence := runtime.RuntimeConvergenceProgressSignature(aggregate)
-	// A catalog retirement can persist a fresh SM-3 semantic generation before
-	// SM-2 has a binding for the newly eligible CWI. The reducer decision stored
-	// in that same owner-local CAS is not operation authority until the semantic
-	// generation is sealed. In particular, a target-grounding terminal produced
-	// from the binding-free focus must not cross into SM-4 delivery. A terminal
-	// is final at this gate only when semantic operation authority is already
-	// usable, or when the semantic transaction itself has failed.
-	semanticAuthorityPending := runtimeSemanticAuthorityPending(aggregate)
 	if runtimeTerminalDeliveryReady(aggregate) {
 		return terminalRuntimeDriveTransition(aggregate), nil
 	}
@@ -414,7 +421,12 @@ func (m *Biz) driveOneRuntimeTransition(ctx context.Context, run *runmodel.Run, 
 	} else if changed {
 		return runtimeDriveTransitionOutcome{aggregate: updated}, nil
 	}
-	if semanticAuthorityPending && aggregate.Decision.State != runtimecontract.ConvergenceStateNeedGovernance {
+	// Only a new semantic task needs the operation-authority readiness query.
+	// Terminal delivery, waits, submitted calls and clarification above resume
+	// their original transactions without rebuilding that unrelated decision.
+	// A retired catalog's binding-free target-grounding terminal remains behind
+	// runtimeTerminalDeliveryReady's exact semantic re-drive fence.
+	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedGovernance && runtimeSemanticAuthorityPending(aggregate) {
 		return m.driveOneRuntimeSemanticTransition(ctx, aggregate, previousRevision, previousConvergence)
 	}
 	if aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningFailed {
@@ -662,7 +674,7 @@ func (m *Biz) driveAndProjectRuntimeLockedWithCommand(ctx context.Context, comma
 		if aggregateErr != nil {
 			return runtimeLifecycleOwnerDeliveryFailure(result, aggregateErr)
 		}
-		record := runtimeStateRecordFromAggregate(aggregate)
+		record := runtimecontract.RuntimeStateRecord(aggregate)
 		handoff, governed, handoffErr := runtimeGovernanceLifecycleHandoffFromState(&record)
 		if handoffErr != nil || !governed || (handoff.Kind != runtimeGovernanceLifecycleWaitDefinitionClarification && handoff.Kind != runtimeGovernanceLifecycleWaitDecision && handoff.Kind != runtimeGovernanceLifecycleWaitApproval) {
 			if handoffErr == nil {
@@ -724,7 +736,7 @@ func (m *Biz) deliverPersistedRuntimeGovernanceContinuation(ctx context.Context,
 	if aggregate.Decision.State == runtimecontract.ConvergenceStateComplete || aggregate.Decision.State == runtimecontract.ConvergenceStateFailed || aggregate.Decision.State == runtimecontract.ConvergenceStateNeedGovernance {
 		return false, nil
 	}
-	record := runtimeStateRecordFromAggregate(aggregate)
+	record := runtimecontract.RuntimeStateRecord(aggregate)
 	handoff, governed, err := runtimeGovernanceLifecycleHandoffFromState(&record)
 	if err != nil {
 		return false, err
@@ -732,7 +744,7 @@ func (m *Biz) deliverPersistedRuntimeGovernanceContinuation(ctx context.Context,
 	if !governed || (handoff.Kind != runtimeGovernanceLifecycleContinuationDecision && handoff.Kind != runtimeGovernanceLifecycleContinuationApproval) {
 		return false, nil
 	}
-	run, err := (runSnapshotReader{hub: m.EventHub()}).Read(ctx, workspaceID, runID)
+	run, err := (runSnapshotReader{hub: m.EventHub()}).ReadLifecycle(ctx, workspaceID, runID)
 	if err != nil {
 		return false, runtimeLifecycleOwnerDeliveryFailureForHandoff(handoff, err)
 	}
@@ -747,9 +759,7 @@ func (m *Biz) deliverPersistedRuntimeGovernanceContinuation(ctx context.Context,
 		// Response loss is acknowledged only by the exact persisted Run-owned
 		// lifecycle fence. Active state alone is insufficient because an older
 		// resolution for the same governance fence must fail closed.
-		return false, runtimeLifecycleOwnerDeliveryFailureForHandoff(handoff, validateRunContinuationAcknowledgement(
-			runevents.RunLifecycleCommandResult{Run: run}, fact, aggregate.StateRevision,
-		))
+		return false, runtimeLifecycleOwnerDeliveryFailureForHandoff(handoff, validateRunContinuationLifecycle(run, fact, aggregate.StateRevision))
 	}
 	exactBlocked := (handoff.Kind == runtimeGovernanceLifecycleContinuationDecision && run.State == common.RunStateBlockedOnDecision && run.BlockingTicketID == handoff.TicketID && run.BlockingApprovalID == "") ||
 		(handoff.Kind == runtimeGovernanceLifecycleContinuationApproval && run.State == common.RunStateBlockedOnApproval && run.BlockingApprovalID == handoff.ApprovalID && run.BlockingTicketID == "")
@@ -777,7 +787,7 @@ func runtimeTerminalDriveResult(aggregate runtime.RuntimeAggregate) orchestrator
 }
 
 func runtimeGovernedWaitDriveResult(aggregate runtime.RuntimeAggregate) (orchestratorevents.DriveRuntimeResult, error) {
-	record := runtimeStateRecordFromAggregate(aggregate)
+	record := runtimecontract.RuntimeStateRecord(aggregate)
 	handoff, governed, err := runtimeGovernanceLifecycleHandoffFromState(&record)
 	if err != nil {
 		return orchestratorevents.DriveRuntimeResult{}, err
@@ -809,7 +819,7 @@ func runtimeDefinitionClarificationWaitDriveResult(aggregate runtime.RuntimeAggr
 	if err != nil {
 		return orchestratorevents.DriveRuntimeResult{}, err
 	}
-	record := runtimeStateRecordFromAggregate(aggregate)
+	record := runtimecontract.RuntimeStateRecord(aggregate)
 	handoff, governed, handoffErr := runtimeGovernanceLifecycleHandoffFromState(&record)
 	if handoffErr != nil || !governed || handoff.Kind != runtimeGovernanceLifecycleWaitDefinitionClarification {
 		if handoffErr != nil {

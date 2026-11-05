@@ -18,7 +18,7 @@ func (c *authorityComponent) recordValidationFailureObservation(ctx context.Cont
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || observation.Validate() != nil || observation.WorkspaceID != workspaceID || observation.RunID != runID {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -37,7 +37,7 @@ func (c *authorityComponent) recordRepairSurfaceConfirmation(ctx context.Context
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	confirmation = confirmation.Normalized()
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -211,9 +211,7 @@ func (c *authorityComponent) recordRepairSurfaceConfirmation(ctx context.Context
 		return RuntimeAggregate{}, fmt.Errorf("%w: repair surface confirmation record revision does not match its owner transition", common.ErrConflict)
 	}
 	aggregate.RepairSurfaceConfirmations = append(aggregate.RepairSurfaceConfirmations, record)
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expected); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -282,7 +280,7 @@ func sealedValidationFailureObservationMatches(aggregate RuntimeAggregate, obser
 // boundaries apply the same entry authorization and execution-bound catalog
 // diagnostic scope as the outbound owner handoff. No current inventory may
 // supplement a missing or retired dispatch seal.
-func sealedValidationFailureObservationMatchesDispatch(dispatch SealedDispatch, observation runtimecontract.RuntimeValidationFailureObservation) bool {
+func sealedValidationFailureObservationMatchesDispatch(dispatch runtimecontract.RuntimeDispatchRecord, observation runtimecontract.RuntimeValidationFailureObservation) bool {
 	if dispatch.Candidate.Validation == nil {
 		return false
 	}
@@ -324,7 +322,7 @@ func runtimeValidationFailureObservationHasPersistedReceipt(aggregate RuntimeAgg
 // invariants must use this receipt lineage: the mutable SM-2 Failure is
 // intentionally retired after repair and therefore cannot remain provenance.
 func runtimeValidationFailurePersistedDiagnostic(aggregate RuntimeAggregate, observation runtimecontract.RuntimeValidationFailureObservation) (runtimecontract.ValidationFailureDiagnostic, bool) {
-	var completed *SealedDispatch
+	var completed *runtimecontract.RuntimeDispatchRecord
 	for idx := range aggregate.CompletedDispatches {
 		dispatch := &aggregate.CompletedDispatches[idx]
 		if dispatch.ID == observation.DispatchID && dispatch.State == DispatchStateCommitted &&

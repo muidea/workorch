@@ -235,9 +235,9 @@ func (payload Payload) Equal(other Payload) bool {
 }
 
 func (payload Payload) CanonicalString() string {
-	var builder strings.Builder
-	appendCanonicalFields(&builder, payload.sortedFields())
-	return builder.String()
+	var encoder canonicalEncoder
+	encoder.appendFields(payload.sortedFields())
+	return encoder.builder.String()
 }
 
 func (payload Payload) Map() map[string]any {
@@ -522,39 +522,55 @@ func (payload Payload) sortedFields() []Field {
 	return fields
 }
 
-func appendCanonicalFields(builder *strings.Builder, fields []Field) {
+// One encoding owns its scratch buffer. Reusing scalar encoding storage avoids
+// allocating a quoted string for every key/value without retaining any input or
+// result between calls. strconv still defines the exact canonical scalar bytes.
+type canonicalEncoder struct {
+	builder strings.Builder
+	scratch []byte
+}
+
+func (e *canonicalEncoder) writeQuoted(value string) {
+	e.scratch = strconv.AppendQuote(e.scratch[:0], value)
+	e.builder.Write(e.scratch)
+}
+
+func (e *canonicalEncoder) appendFields(fields []Field) {
 	for _, field := range fields {
-		builder.WriteString(strconv.Quote(field.Name))
-		builder.WriteByte(':')
-		appendCanonicalValue(builder, field.Value)
-		builder.WriteByte(';')
+		e.writeQuoted(field.Name)
+		e.builder.WriteByte(':')
+		e.appendValue(field.Value)
+		e.builder.WriteByte(';')
 	}
 }
 
-func appendCanonicalValue(builder *strings.Builder, value Value) {
-	builder.WriteString(string(value.Kind))
-	builder.WriteByte('=')
+func (e *canonicalEncoder) appendValue(value Value) {
+	e.builder.WriteString(string(value.Kind))
+	e.builder.WriteByte('=')
 	switch value.Kind {
 	case ValueString:
-		builder.WriteString(strconv.Quote(value.String))
+		e.writeQuoted(value.String)
 	case ValueBool:
-		builder.WriteString(strconv.FormatBool(value.Bool))
+		e.builder.WriteString(strconv.FormatBool(value.Bool))
 	case ValueInt:
-		builder.WriteString(strconv.FormatInt(value.Int, 10))
+		e.scratch = strconv.AppendInt(e.scratch[:0], value.Int, 10)
+		e.builder.Write(e.scratch)
 	case ValueUint:
-		builder.WriteString(strconv.FormatUint(value.Uint, 10))
+		e.scratch = strconv.AppendUint(e.scratch[:0], value.Uint, 10)
+		e.builder.Write(e.scratch)
 	case ValueFloat:
-		builder.WriteString(strconv.FormatFloat(value.Float, 'g', -1, 64))
+		e.scratch = strconv.AppendFloat(e.scratch[:0], value.Float, 'g', -1, 64)
+		e.builder.Write(e.scratch)
 	case ValueObject:
-		builder.WriteByte('{')
-		appendCanonicalFields(builder, Payload{Fields: value.Object}.sortedFields())
-		builder.WriteByte('}')
+		e.builder.WriteByte('{')
+		e.appendFields(Payload{Fields: value.Object}.sortedFields())
+		e.builder.WriteByte('}')
 	case ValueArray:
-		builder.WriteByte('[')
+		e.builder.WriteByte('[')
 		for _, item := range value.Array {
-			appendCanonicalValue(builder, item)
-			builder.WriteByte(',')
+			e.appendValue(item)
+			e.builder.WriteByte(',')
 		}
-		builder.WriteByte(']')
+		e.builder.WriteByte(']')
 	}
 }

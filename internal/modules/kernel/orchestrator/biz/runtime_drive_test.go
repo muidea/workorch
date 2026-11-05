@@ -7308,8 +7308,45 @@ func runRuntimeFileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testing.
 			t.Fatalf("init receipt was replayed or replaced: before=%+v after=%+v", initReceipt, receipt)
 		}
 	}
-	if initReceipts != 1 || len(persisted.RuntimeState.PrerequisiteInvalidations) != 1 || strings.TrimSpace(runtimeGitOutput(t, deliverable, "rev-list", "--count", "HEAD")) != "1" {
+	if initReceipts != 1 || strings.TrimSpace(runtimeGitOutput(t, deliverable, "rev-list", "--count", "HEAD")) != "1" {
 		t.Fatalf("resource-change restart replayed init or duplicated invalidations: receipts=%d invalidations=%+v", initReceipts, persisted.RuntimeState.PrerequisiteInvalidations)
+	}
+	// Init, stage and commit each contribute their own original resource
+	// changes. Recovery must preserve exactly one journal per changed receipt,
+	// not restrict the complete ledger to the first (init) operation.
+	changedReceipts := 0
+	for _, receipt := range persisted.RuntimeState.OperationReceipts {
+		if len(receipt.ResourceChanges) == 0 {
+			continue
+		}
+		changedReceipts++
+		hash := runtimecontract.StableRuntimeOperationReceiptHash(receipt)
+		matches := 0
+		for _, invalidation := range persisted.RuntimeState.PrerequisiteInvalidations {
+			if invalidation.ReceiptHash != hash {
+				continue
+			}
+			matches++
+			if invalidation.DispatchID != sealed.ActiveDispatch.ID || invalidation.OperationID != receipt.OperationID ||
+				invalidation.Signature != runtimecontract.StableRuntimeResourceChangeInvalidationSignature(hash, receipt.ResourceChanges) ||
+				!reflect.DeepEqual(invalidation.ResourceChanges, receipt.ResourceChanges) {
+				t.Fatalf("resource-change journal lost original receipt provenance: receipt=%+v invalidation=%+v", receipt, invalidation)
+			}
+		}
+		if matches != 1 {
+			t.Fatalf("changed receipt has %d journals: %+v", matches, receipt)
+		}
+	}
+	if changedReceipts != 3 || len(persisted.RuntimeState.PrerequisiteInvalidations) != changedReceipts {
+		t.Fatalf("incomplete or foreign resource-change ledger: receipts=%d journals=%+v", changedReceipts, persisted.RuntimeState.PrerequisiteInvalidations)
+	}
+	if _, err := DriveRuntime(ctx, restartedHub, orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"}); err != nil {
+		t.Fatal(err)
+	}
+	duplicate, err := restartedRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || candidateCalls != 0 || !reflect.DeepEqual(persisted.RuntimeState, duplicate.RuntimeState) ||
+		strings.TrimSpace(runtimeGitOutput(t, deliverable, "rev-list", "--count", "HEAD")) != "1" {
+		t.Fatalf("duplicate drive changed original Git effects, journals or budget: candidateCalls=%d err=%v", candidateCalls, err)
 	}
 }
 
@@ -8290,7 +8327,7 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 	// same persisted key/fence receipt. It must neither reapply the durable
 	// patch nor mutate the Run aggregate after the first recovered evidence
 	// commit.
-	var sealedDispatch runtime.SealedDispatch
+	var sealedDispatch runtimecontract.RuntimeDispatchRecord
 	for _, value := range completed.CompletedDispatches {
 		if value.ID == sealedDispatchID {
 			sealedDispatch = value
@@ -9831,7 +9868,6 @@ func (r *runtimeTwoFocusCandidateTrace) record(command llmevents.RequestRuntimeC
 func (r *runtimeTwoFocusCandidateTrace) assertComplete(t *testing.T) {
 	t.Helper()
 	expected := []runtimeTwoFocusCandidateStage{
-		{documentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, semanticStep: runtimecontract.RuntimeSemanticPlanStepCoverageOrder},
 		{documentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, semanticStep: runtimecontract.RuntimeSemanticPlanStepProofBatch, coverageID: "cwi-1"},
 		{documentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, semanticStep: runtimecontract.RuntimeSemanticPlanStepProofBatch, coverageID: "cwi-2"},
 		{documentKind: runtimecontract.RuntimeProviderDocumentOperations, coverageID: "cwi-1", decision: runtimecontract.ConvergenceStateNeedStateChange, acquisition: true},
@@ -9847,6 +9883,11 @@ func (r *runtimeTwoFocusCandidateTrace) assertComplete(t *testing.T) {
 	defer r.mu.Unlock()
 	if len(r.identityErrors) != 0 {
 		t.Fatalf("two-focus candidate identity lineage errors: %v", r.identityErrors)
+	}
+	for stage := range r.stages {
+		if stage.documentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan && stage.semanticStep == runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
+			t.Fatal("singleton current frontier requested a redundant model ordering decision")
+		}
 	}
 	for _, stage := range expected {
 		if _, found := r.stages[stage]; !found {
@@ -12660,7 +12701,7 @@ func TestRuntimeDecisionTerminatesBeforeProviderWhenShellConfirmsNoValidationRec
 	}
 }
 
-func TestRuntimeDecisionRejectsPersistedHistoricalAuthorityBeforeProvider(t *testing.T) {
+func TestRuntimeUnacceptedHistoricalAuthorityRejectedBeforeAdmission(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
 		Activation: runtimecontract.RuntimeActivationContext{
 			ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
@@ -12773,14 +12814,16 @@ func TestRuntimeDecisionRejectsPersistedHistoricalAuthorityBeforeProvider(t *tes
 	observer := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	observer.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providerCalls++ })
 	t.Cleanup(func() { observer.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
-	module := newTestBiz(biz, hub, nil)
 
 	before := repository.aggregate.CloneRaw()
 	if err := before.Validate(); err == nil {
 		t.Fatal("损坏持久前像未触发 invariant")
 	}
-	if _, err := module.driveRuntimeDecision(context.Background(), before.CloneRaw(), "unused-prefix"); err == nil || !strings.Contains(err.Error(), "reconciliation preimage invariant") {
-		t.Fatalf("损坏前像未在 provider 前拒绝: %v", err)
+	// This fixture is an unaccepted external struct, not a value read from the
+	// integrity-checked owner. Admission must reject it; ordinary drive must not
+	// be given a second responsibility to replay historical business decisions.
+	if _, err := runtime.AdmitRuntimeOwnerStateRecord(runtimeStateRecordFromAggregate(before)); err == nil {
+		t.Fatal("损坏外部快照通过正式接纳")
 	}
 	if providerCalls != 0 || !reflect.DeepEqual(before, repository.aggregate) {
 		t.Fatal("拒绝损坏前像仍调用 provider 或改写持久材料")
@@ -13301,7 +13344,13 @@ func TestRuntimeSynchronousIngressSingleGateBlocksDuplicateRepairSurfaceQuery(t 
 	runObserver.Subscribe(runevents.TopicRunCommandGet, func(_ magicevent.Event, result magicevent.Result) {
 		result.Set(runevents.GetRunResult{Run: run}, nil)
 	})
-	t.Cleanup(func() { runObserver.Unsubscribe(runevents.TopicRunCommandGet) })
+	runObserver.Subscribe(runevents.TopicRunCommandRuntimeLifecycle, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(runevents.QueryRuntimeLifecycleResult{Lifecycle: runtimeLifecycleView(run)}, nil)
+	})
+	t.Cleanup(func() {
+		runObserver.Unsubscribe(runevents.TopicRunCommandGet)
+		runObserver.Unsubscribe(runevents.TopicRunCommandRuntimeLifecycle)
+	})
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
 		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
@@ -13427,6 +13476,9 @@ func TestRuntimeSynchronousIngressCanceledExitMountsLatchedLifecycleLease(t *tes
 	runObserver.Subscribe(runevents.TopicRunCommandGet, func(_ magicevent.Event, result magicevent.Result) {
 		result.Set(runevents.GetRunResult{Run: run}, nil)
 	})
+	runObserver.Subscribe(runevents.TopicRunCommandRuntimeLifecycle, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(runevents.QueryRuntimeLifecycleResult{Lifecycle: runtimeLifecycleView(run)}, nil)
+	})
 	runObserver.Subscribe(runevents.TopicRunCommandWorkspaceRetirementFact, func(event magicevent.Event, result magicevent.Result) {
 		retirementObservations <- runtimeSynchronousIngressRetirementObservation{
 			lifecycle: event.Context().Value(runtimeSynchronousIngressLifecycleContextKey{}) == true,
@@ -13436,6 +13488,7 @@ func TestRuntimeSynchronousIngressCanceledExitMountsLatchedLifecycleLease(t *tes
 	})
 	t.Cleanup(func() {
 		runObserver.Unsubscribe(runevents.TopicRunCommandGet)
+		runObserver.Unsubscribe(runevents.TopicRunCommandRuntimeLifecycle)
 		runObserver.Unsubscribe(runevents.TopicRunCommandWorkspaceRetirementFact)
 	})
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)

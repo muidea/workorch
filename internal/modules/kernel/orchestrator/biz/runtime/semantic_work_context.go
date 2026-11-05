@@ -6,7 +6,9 @@ import (
 )
 
 // SemanticWorkContext compiles trusted original ledgers; no I/O, new plan,
-// guessed completion, or domain-specific filename rules are involved.
+// guessed completion, or domain-specific filename rules are involved. The
+// aggregate is a formal owner result; raw admission belongs to the owner, not
+// this consumer. Exact current intent and receipt joins remain below.
 func SemanticWorkContext(a RuntimeAggregate, m contract.RuntimeSemanticPlanManifest) (*contract.RuntimeSemanticWorkContext, error) {
 	var work *contract.RuntimeSemanticImplementationWork
 	for _, o := range m.ProofObligations {
@@ -16,9 +18,6 @@ func SemanticWorkContext(a RuntimeAggregate, m contract.RuntimeSemanticPlanManif
 	}
 	if work == nil {
 		return nil, nil
-	}
-	if err := a.Validate(); err != nil {
-		return nil, err
 	}
 	if a.SemanticPlanning.Manifest == nil || a.SemanticPlanning.Manifest.Hash != m.Hash || a.Facts.WorkspaceID != m.WorkspaceID || a.Facts.RunID != m.RunID {
 		return nil, fmt.Errorf("semantic work source differs from original scope")

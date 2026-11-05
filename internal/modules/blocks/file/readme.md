@@ -261,3 +261,11 @@ lost-receipt recovery 若确认 sealed 后像，只保留本次实际读取的 `
 
 验证：`biz/mutation_result_delivery_test.go` 覆盖三种真实 File handler、原回执重交、CAS 响应丢失、fresh owner、
 提交前真正进程退出及新进程原材料交付、无原材料、语义拒绝、取消、次数保全、restricted storage 与双 Workspace 并发；不等同已部署服务验收。
+
+
+### 输入修订拟写入事实
+
+仅当冻结 manifest 声明结构要求时，现有 input-revision feasibility 在精确 replay proof 外返回完整拟写入后像；复用 File 自身同一 patch
+执行算法的 preview，不解释语言结构、不新增业务写入。二次 preview 必须匹配原 before/after hash，
+Orchestrator 通过 Shell typed query 解释结构。实际 effect 仍受原 CAS、权限、封存 replay proof 与 receipt
+恢复门禁约束；写前结构通过不授 readiness、语义或执行 credit。

@@ -3,6 +3,7 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	goruntime "runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -160,6 +162,7 @@ func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 	var first *runmodel.Run
 	var initialBootstrap []byte
 	var lastRevision uint64
+	started := time.Now()
 	for deadline := time.Now().Add(10 * time.Minute); time.Now().Before(deadline); {
 		if observed := provider.snapshot(); len(observed.Failures) != 0 {
 			t.Fatalf("scripted provider 合同失败: %+v", observed)
@@ -175,7 +178,7 @@ func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 			first = runs[0]
 			if first.Revision != lastRevision {
 				lastRevision = first.Revision
-				t.Logf("Runtime revision=%d state=%s provider=%+v", first.Revision, first.State, provider.snapshot())
+				implementationWorkFullflowLogProgress(t, first, started)
 			}
 			if first.State == common.RunStateBlockedOnDecision || first.State == common.RunStateBlockedOnApproval {
 				implementationWorkFullflowSaveFailureSnapshot(t, first)
@@ -221,8 +224,8 @@ func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 	}
 	if first == nil || first.RuntimeState == nil || first.State != common.RunStateCompleted {
 		if first != nil && first.RuntimeState != nil {
-			t.Logf("未完成原 aggregate invariant: %v", first.RuntimeState.Validate())
 			implementationWorkFullflowSaveFailureSnapshot(t, first)
+			t.Logf("未完成原 aggregate invariant: %v", first.RuntimeState.Validate())
 		}
 		t.Fatalf("完整公开 DriveRuntime 未完成: run=%+v provider=%+v", first, provider.snapshot())
 	}
@@ -311,6 +314,26 @@ func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 	}
 }
 
+// Diagnostic counts are not progress credit. Keep Run and Runtime revisions
+// distinct, and expose the persisted stage so a timeout is not inferred from
+// provider call growth. Complete owner/provider originals stay in the archive.
+func implementationWorkFullflowLogProgress(t *testing.T, run *runmodel.Run, started time.Time) {
+	t.Helper()
+	if run.RuntimeState == nil {
+		return
+	}
+	r := run.RuntimeState
+	satisfied := 0
+	for _, row := range r.Facts.Coverage {
+		if row.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
+			satisfied++
+		}
+	}
+	var memory goruntime.MemStats
+	goruntime.ReadMemStats(&memory)
+	t.Logf("elapsed=%s RunRevision=%d RuntimeRevision=%d state=%s convergence=%s semantic=%s CWI=%d/%d completedDispatches=%d receipts=%d assessments=%d totalAllocBytes=%d heapAllocBytes=%d gc=%d", time.Since(started).Round(time.Millisecond), run.Revision, r.StateRevision, run.State, r.Decision.State, r.SemanticPlanning.Phase, satisfied, len(r.Facts.Coverage), len(r.CompletedDispatches), len(r.OperationReceipts), len(r.Facts.Assessments), memory.TotalAlloc, memory.HeapAlloc, memory.NumGC)
+}
+
 // This is project configuration through the real HTTP/Workspace owner, before
 // authoring or confirmation. It retains every default obligation. The original
 // synthetic Goal requires Runtime facts which engineering tests cannot prove;
@@ -386,18 +409,48 @@ func implementationWorkFullflowSaveFailureSnapshot(t *testing.T, run *runmodel.R
 	if target == "" || run == nil {
 		return
 	}
-	if filepath.Dir(target) != os.TempDir() || !strings.HasPrefix(filepath.Base(target), "workorch-public-work-") {
-		t.Error("failure snapshot requires exact test temporary path; original failure remains failed")
-		return
+	if err := implementationWorkFullflowWriteFailureSnapshot(target, run); err != nil {
+		t.Errorf("complete failure snapshot not saved; original failure remains failed: %v", err)
+	}
+}
+
+// Test artifacts use the explicit validation root even when Go's build TMPDIR
+// differs. Neither a custom build directory nor shutdown may overwrite the
+// exact failure-poll snapshot with a later owner revision.
+func implementationWorkFullflowWriteFailureSnapshot(target string, run *runmodel.Run) error {
+	root := "/tmp/workorch-validation"
+	clean := filepath.Clean(target)
+	rel, err := filepath.Rel(root, clean)
+	if err != nil || !filepath.IsAbs(target) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) ||
+		!strings.HasPrefix(filepath.Base(clean), "workorch-public-work-") || run == nil {
+		return fmt.Errorf("failure snapshot requires explicit validation temporary path and original Run")
 	}
 	body, err := json.Marshal(map[string]*runmodel.Run{string(run.ID): run})
 	if err != nil {
-		t.Errorf("complete failure snapshot not saved: %v", err)
-		return
+		return err
 	}
-	if err := os.WriteFile(target, body, 0o600); err != nil {
-		t.Errorf("complete failure snapshot not saved: %v", err)
+	if err := os.WriteFile(clean, body, 0o600); err != nil {
+		return err
 	}
+	index := struct {
+		Bytes           int
+		SHA256          string
+		RunID           common.RunID
+		RunRevision     uint64
+		RuntimeRevision uint64
+	}{Bytes: len(body), SHA256: fmt.Sprintf("%x", sha256.Sum256(body)), RunID: run.ID, RunRevision: run.Revision}
+	if run.RuntimeState != nil {
+		index.RuntimeRevision = run.RuntimeState.StateRevision
+	}
+	indexBody, err := json.Marshal(index)
+	if err != nil {
+		return fmt.Errorf("complete snapshot saved but index not saved: %w", err)
+	}
+	if err := os.WriteFile(clean+".index.json", indexBody, 0o600); err != nil {
+		return fmt.Errorf("complete snapshot saved but index not saved: %w", err)
+	}
+	return nil
+
 }
 
 func implementationWorkFullflowAuthoringMapping(record *workspace.DefinitionAuthoringRecord) (workspace.DefinitionAuthoringMapping, error) {
@@ -522,6 +575,22 @@ operations = ["responses"]
 		t.Fatal(err)
 	}
 	hub, background := magicevent.NewHub(1024), task.NewBackgroundRoutine(1024)
+	// Registered before owner cleanup, so this observes the stopped file owner
+	// after all driver shutdown callbacks, independently from the failure poll.
+	t.Cleanup(func() {
+		target := os.Getenv("WORKORCH_PUBLIC_WORK_TEST_FAILURE_SNAPSHOT")
+		if !t.Failed() || target == "" {
+			return
+		}
+		runs, err := repos.Runs.List(context.Background())
+		if err != nil || len(runs) != 1 {
+			t.Errorf("after-stop owner snapshot unavailable: runs=%d err=%v", len(runs), err)
+			return
+		}
+		if err := implementationWorkFullflowWriteFailureSnapshot(target+".after-stop.json", runs[0]); err != nil {
+			t.Errorf("complete after-stop owner snapshot not saved: %v", err)
+		}
+	})
 	startProductionOwners(t, ctx, hub, background, repos, storage, cfg)
 	app := application.New()
 	if err := app.Setup(ctx, hub, background); err != nil {
@@ -714,12 +783,6 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 			Properties struct {
 				Intent *struct {
 					Properties struct {
-						Declaration struct {
-							Value string `json:"const"`
-						} `json:"declarationRef"`
-						Content struct {
-							Value string `json:"const"`
-						} `json:"contentHash"`
 						Reviews *struct {
 							Items struct {
 								Properties struct {
@@ -818,7 +881,18 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 			document["implementationPurpose"] = purpose
 			if request.Schema.Properties.Intent != nil {
 				decl := request.Schema.Properties.Intent.Properties
-				intent := runtimecontract.RuntimeImplementationIntent{DeclarationRef: decl.Declaration.Value, ContentHash: decl.Content.Value, RemainingWork: "scripted original requirement implementation or independent validation", Reason: "bounded deterministic fixture purpose bound to exact supplied content"}
+				// The provider proposes judgments only. Frozen declaration/content
+				// and preceding receipt identities are compiled by the owner.
+				intent := struct {
+					RemainingWork           string                                                   `json:"remainingWork"`
+					Reason                  string                                                   `json:"reason"`
+					RequirementReviews      []runtimecontract.RuntimeImplementationRequirementReview `json:"requirementReviews,omitempty"`
+					SelectedRequirementRefs []string                                                 `json:"selectedRequirementRefs,omitempty"`
+					PreviousRoundReview     *struct {
+						Outcome runtimecontract.RuntimeImplementationRoundReviewOutcome `json:"outcome"`
+						Reason  string                                                  `json:"reason"`
+					} `json:"previousRoundReview,omitempty"`
+				}{RemainingWork: "scripted original requirement implementation or independent validation", Reason: "bounded deterministic fixture purpose bound to exact supplied content"}
 				if decl.Reviews != nil {
 					for _, ref := range decl.Reviews.Items.Properties.Ref.Values {
 						intent.RequirementReviews = append(intent.RequirementReviews, runtimecontract.RuntimeImplementationRequirementReview{RequirementRef: ref, WorkRequired: purpose == runtimecontract.RuntimeImplementationWorkPurposeEffect || purpose == runtimecontract.RuntimeImplementationWorkPurposeStalled})
@@ -827,8 +901,11 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 						}
 					}
 				}
-				if p := work.PreviousRound; p != nil {
-					intent.PreviousRoundReview = &runtimecontract.RuntimeImplementationRoundReview{DispatchID: p.DispatchID, ReceiptSetHash: p.ReceiptSetHash, Outcome: "addressed", Reason: "actual deterministic fixture change implements the preceding task"}
+				if work.PreviousRound != nil {
+					intent.PreviousRoundReview = &struct {
+						Outcome runtimecontract.RuntimeImplementationRoundReviewOutcome `json:"outcome"`
+						Reason  string                                                  `json:"reason"`
+					}{Outcome: "addressed", Reason: "actual deterministic fixture change implements the preceding task"}
 					if purpose == runtimecontract.RuntimeImplementationWorkPurposeStalled {
 						intent.PreviousRoundReview.Outcome = "partial"
 						intent.PreviousRoundReview.Reason = "the change returns 3 but original goal requires 4; implementation remains incomplete"
@@ -1032,23 +1109,20 @@ func (p *implementationWorkFullflowProvider) candidate(raw map[string]json.RawMe
 	if err := json.Unmarshal(wire, &request); err != nil {
 		return nil, "runtime/candidate", err
 	}
-	// The v4 renderer publishes a single current focus at context.focus and
-	// references it from decision. A scripted provider must consume that exact
-	// published reference, rather than treating an omitted duplicate as empty.
+	// The current renderer publishes one focus at context.focus. Reject a
+	// missing reference as well as duplicated inline data: accepting either
+	// would hide a request-rendering regression in this public-flow fixture.
 	var decisionReference struct{ FocusRef string }
 	if err := json.Unmarshal(raw["decision"], &decisionReference); err != nil {
 		return nil, "runtime/candidate", err
 	}
-	switch decisionReference.FocusRef {
-	case "": // Earlier renderer with an inline focus.
-	case "context.focus":
-		if !reflect.DeepEqual(request.Decision.Focus, runtimecontract.CoverageFocus{}) {
-			return nil, "runtime/candidate", fmt.Errorf("duplicate inline focus alongside context.focus reference")
-		}
-		request.Decision.Focus = request.Context.Focus
-	default:
+	if decisionReference.FocusRef != "context.focus" {
 		return nil, "runtime/candidate", fmt.Errorf("unsupported focus reference %q", decisionReference.FocusRef)
 	}
+	if !reflect.DeepEqual(request.Decision.Focus, runtimecontract.CoverageFocus{}) {
+		return nil, "runtime/candidate", fmt.Errorf("duplicate inline focus alongside context.focus reference")
+	}
+	request.Decision.Focus = request.Context.Focus
 	kind := "runtime/" + string(request.Contract.State)
 	if request.Contract.State == runtimecontract.ConvergenceStateNeedAssessment {
 		if request.Decision.Focus.ID == "" || len(request.Decision.Focus.CoverageWorkItemIDs) == 0 {

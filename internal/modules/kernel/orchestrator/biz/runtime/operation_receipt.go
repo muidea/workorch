@@ -26,7 +26,7 @@ func (c *RuntimeController) QueryOperationReceipt(ctx context.Context, workspace
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(dispatchID) == "" || strings.TrimSpace(operationID) == "" || strings.TrimSpace(executionKey) == "" || fence == 0 || !exactOperationReceiptOwnerSource(ownerModuleID) {
 		return runtimecontract.RuntimeOperationReceipt{}, false, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return runtimecontract.RuntimeOperationReceipt{}, false, err
 	}
@@ -119,7 +119,7 @@ func (c *candidateDispatchComponent) commitOperationReceipt(ctx context.Context,
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, common.ErrInvalidArgument
 	}
 	receipt = receipt.Normalized()
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
 	}
@@ -229,7 +229,7 @@ func (c *candidateDispatchComponent) commitOperationReceipt(ctx context.Context,
 
 // commitArchivedImplementationWorkReceipt 仅接收关闭前已 claim 的原 owner callback。
 // 不授新调用、不重新打开 round、不产生 terminal/effect credit；结算与资源退休同 CAS。
-func (c *candidateDispatchComponent) commitArchivedImplementationWorkReceipt(ctx context.Context, aggregate RuntimeAggregate, dispatch SealedDispatch, ownerModuleID string, receipt runtimecontract.RuntimeOperationReceipt) (RuntimeAggregate, runtimecontract.RuntimeOperationReceipt, error) {
+func (c *candidateDispatchComponent) commitArchivedImplementationWorkReceipt(ctx context.Context, aggregate RuntimeAggregate, dispatch runtimecontract.RuntimeDispatchRecord, ownerModuleID string, receipt runtimecontract.RuntimeOperationReceipt) (RuntimeAggregate, runtimecontract.RuntimeOperationReceipt, error) {
 	if dispatch.State != DispatchStateInvalidated && dispatch.State != DispatchStateCommitted {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("%w: archived implementation receipt requires a closed original dispatch", common.ErrConflict)
 	}
@@ -325,7 +325,7 @@ func validateOperationReceiptFeedback(aggregate RuntimeAggregate, workspaceID co
 	return validateOperationReceiptFeedbackAgainstDispatch(aggregate, *dispatch, workspaceID, runID, receipt)
 }
 
-func validateOperationReceiptFeedbackAgainstDispatch(aggregate RuntimeAggregate, dispatch SealedDispatch, workspaceID common.WorkspaceID, runID common.RunID, receipt runtimecontract.RuntimeOperationReceipt) error {
+func validateOperationReceiptFeedbackAgainstDispatch(aggregate RuntimeAggregate, dispatch runtimecontract.RuntimeDispatchRecord, workspaceID common.WorkspaceID, runID common.RunID, receipt runtimecontract.RuntimeOperationReceipt) error {
 	feedback := receipt.Feedback.Normalized()
 	if feedback.WorkspaceID != workspaceID || feedback.RunID != runID || feedback.DispatchID != dispatch.ID {
 		return fmt.Errorf("operation receipt feedback does not match receipt scope")
@@ -372,7 +372,7 @@ func validateOperationReceiptFeedbackAgainstDispatch(aggregate RuntimeAggregate,
 // causation boundary. The outer feedback owner alone is insufficient because
 // authority-shaped nested facts could otherwise claim another capability
 // owner's observation or a different dispatch's target authorization.
-func validateOperationReceiptDiagnosticOwner(aggregate RuntimeAggregate, dispatch SealedDispatch, operation runtimecontract.RuntimeOperation, diagnostic runtimecontract.RuntimeOriginalDiagnostic) error {
+func validateOperationReceiptDiagnosticOwner(aggregate RuntimeAggregate, dispatch runtimecontract.RuntimeDispatchRecord, operation runtimecontract.RuntimeOperation, diagnostic runtimecontract.RuntimeOriginalDiagnostic) error {
 	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
 	if !found {
 		return fmt.Errorf("operation receipt diagnostic has no sealed operation descriptor")
@@ -518,7 +518,7 @@ func failureFactFromOperationReceiptFeedback(receipt runtimecontract.RuntimeOper
 	return failure
 }
 
-func operationReceiptDispatch(aggregate RuntimeAggregate, dispatchID string) (SealedDispatch, bool, bool) {
+func operationReceiptDispatch(aggregate RuntimeAggregate, dispatchID string) (runtimecontract.RuntimeDispatchRecord, bool, bool) {
 	dispatchID = strings.TrimSpace(dispatchID)
 	if aggregate.ActiveDispatch != nil && aggregate.ActiveDispatch.ID == dispatchID {
 		return *aggregate.ActiveDispatch, true, true
@@ -528,5 +528,5 @@ func operationReceiptDispatch(aggregate RuntimeAggregate, dispatchID string) (Se
 			return dispatch, false, true
 		}
 	}
-	return SealedDispatch{}, false, false
+	return runtimecontract.RuntimeDispatchRecord{}, false, false
 }

@@ -41,7 +41,7 @@ func TestDispatchCommitAdvancesEvidenceAndReducerExactlyOnce(t *testing.T) {
 	if sealed.ActiveDispatch == nil || sealed.ActiveDispatch.Transaction != repository.aggregate.Decision.AuthorityTransaction() || sealed.ActiveDispatch.CandidateHash != runtimecontract.StableRuntimeCandidateHash(sealed.ActiveDispatch.Candidate) {
 		t.Fatalf("sealed dispatch = %+v", sealed.ActiveDispatch)
 	}
-	stepInput := sealed.ActiveDispatch.StepInput()
+	stepInput := runtimeDispatchStepInput(*sealed.ActiveDispatch)
 	if stepInput.DispatchID == "" || stepInput.Transaction != sealed.ActiveDispatch.Transaction || stepInput.CandidateHash != sealed.ActiveDispatch.CandidateHash {
 		t.Fatalf("dispatch step input did not persist complete transaction: %+v", stepInput)
 	}

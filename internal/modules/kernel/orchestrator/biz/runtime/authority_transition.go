@@ -15,13 +15,11 @@ func (c *authorityComponent) reconcileAuthorityBeforeCandidate(ctx context.Conte
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, fmt.Errorf("runtime authority reconciliation preimage invariant: %w", err)
-	}
+
 	if aggregate.ActiveDispatch != nil || isTerminalConvergenceState(aggregate.Decision.State) {
 		return aggregate, nil
 	}
@@ -53,9 +51,7 @@ func (c *authorityComponent) reconcileAuthorityBeforeCandidate(ctx context.Conte
 	aggregate.Facts = facts
 	aggregate.Decision = decision
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -70,7 +66,7 @@ func (c *authorityComponent) recordFeasibilityFact(ctx context.Context, workspac
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -101,9 +97,7 @@ func (c *authorityComponent) recordFeasibilityFact(ctx context.Context, workspac
 	aggregate.Facts = facts
 	aggregate.Decision = decision
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -135,7 +129,7 @@ func (c *authorityComponent) commitFailureFact(ctx context.Context, workspaceID 
 	if runtimeGenericFailureCarriesOwnerAuthority(fact) {
 		return RuntimeAggregate{}, fmt.Errorf("%w: generic failure ingress cannot carry capability-owner authority", common.ErrInvalidArgument)
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -148,9 +142,7 @@ func (c *authorityComponent) commitFailureFact(ctx context.Context, workspaceID 
 		return RuntimeAggregate{}, err
 	}
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -221,7 +213,7 @@ func (c *authorityComponent) commitPrerequisite(ctx context.Context, workspaceID
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -255,9 +247,7 @@ func (c *authorityComponent) commitPrerequisite(ctx context.Context, workspaceID
 		}
 		if expired {
 			aggregate.StateRevision++
-			if err := c.validateAggregate(aggregate); err != nil {
-				return RuntimeAggregate{}, err
-			}
+
 			if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 				return RuntimeAggregate{}, err
 			}
@@ -317,6 +307,15 @@ func (c *authorityComponent) commitPrerequisite(ctx context.Context, workspaceID
 		}
 		facts = aggregate.Facts
 	}
+	aggregate.Facts = facts
+	// Retain the exact current structural source before the reducer classifies
+	// owner unavailability. All permission, no-progress and active-work guards
+	// run in this same private prerequisite CAS.
+	aggregate, _, err = retainRuntimeOwnerInputRevision(aggregate)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	facts = aggregate.Facts
 	facts, decision, err := reduceRuntimeAggregateWithDirective(aggregate, facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
 		return RuntimeAggregate{}, err
@@ -324,9 +323,7 @@ func (c *authorityComponent) commitPrerequisite(ctx context.Context, workspaceID
 	aggregate.Facts = facts
 	aggregate.Decision = decision
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}

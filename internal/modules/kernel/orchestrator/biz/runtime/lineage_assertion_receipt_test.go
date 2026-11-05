@@ -127,7 +127,7 @@ func TestRuntimeLineageOwnerReceiptCASFailureAndResponseLoss(t *testing.T) {
 			if err := persisted.Validate(); err != nil {
 				t.Fatal(err)
 			}
-			if !afterCommit && !reflect.DeepEqual(persisted, claimed) {
+			if !afterCommit && !reflect.DeepEqual(ownerStateRecord(persisted), ownerStateRecord(claimed)) {
 				t.Fatal("CAS 前失败污染持久前像")
 			}
 			if afterCommit && (persisted.StateRevision != claimed.StateRevision+1 || len(persisted.OperationReceipts) != 1) {
@@ -185,7 +185,7 @@ func TestRuntimeLineageOwnerReceiptNoOpNoChangeAndStale(t *testing.T) {
 				bad.Fence++
 				saves := repository.saves
 				_, err := controller.ApplyInternalEvent(context.Background(), lineageReceiptEvent(claimed, bad))
-				if !errors.Is(err, common.ErrConflict) || repository.saves != saves || !reflect.DeepEqual(*repository.aggregate, claimed) {
+				if !errors.Is(err, common.ErrConflict) || repository.saves != saves || !reflect.DeepEqual(ownerStateRecord(*repository.aggregate), ownerStateRecord(claimed)) {
 					t.Fatalf("stale fence 未零写入拒绝: %v", err)
 				}
 				if runtimecontract.RuntimeExecutionLineageAssertionsSatisfied(binding, runtimeLineageAssertionSources(claimed), claimed.Facts.EvidenceRevision) {
@@ -335,7 +335,7 @@ func lineageReceiptSealedAggregateWithRule(t *testing.T, rule runtimecontract.Ru
 		return result
 	}
 	manifest, document, feasibility := semanticPlanningFixture(t, aggregate)
-	order := runtimecontract.RuntimeSemanticPlanDocument{SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: runtimecontract.RuntimeSemanticPlanStepCoverageOrder, CoverageOrder: []common.CoverageWorkItemID{"cwi-v2", otherItem.ID}}
+	order := runtimecontract.RuntimeSemanticPlanDocument{SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: runtimecontract.RuntimeSemanticPlanStepCoverageOrder, CoverageOrder: []common.CoverageWorkItemID{"cwi-v2"}}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, Transaction: &RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: "receipt-semantic-prefix", LogicalRequestID: "receipt-semantic-order"}})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &order, LogicalRequestID: "receipt-semantic-order"}})
 	batch, err := semanticplan.CompileFocusBatch(manifest, order, 0, "receipt-semantic-proof", aggregate.Facts.Focus.CoverageWorkItemIDs, aggregate.SemanticPlanning.PendingCoverageIDs, 1)
@@ -363,16 +363,29 @@ func lineageReceiptSealedAggregateWithRule(t *testing.T, rule runtimecontract.Ru
 		t.Fatal("exact semantic seal 未生成唯一 binding")
 	}
 	binding := aggregate.Facts.Focus.CoverageEvidenceBindings[0].Clone()
-	// 同一个原始 manifest 对另一个 exact CWI 的纯编译结果仅作查询输入，绝不写入 authority。
+	// Another exact CWI is outside the current production request group.
+	// Compile its original declaration independently for the negative query;
+	// it is never admitted as current authority or granted receipt credit.
+	otherManifest, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverage(
+		aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Definition,
+		aggregate.Facts.DefinitionSeed, aggregate.Facts.DefinitionFocuses,
+		aggregate.Facts.Activation.ExecutionContract, aggregate.Facts.Resources.OperationAdmissibilities,
+		[]common.CoverageWorkItemID{otherItem.ID},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	otherDocument := document.Clone()
+	otherDocument.ManifestHash = otherManifest.Hash
 	otherDocument.BatchID, otherDocument.BatchCoverageWorkItemIDs = "receipt-other-query", []common.CoverageWorkItemID{otherItem.ID}
 	otherDocument.Proposals[0].CoverageWorkItemID = otherItem.ID
 	otherDocument.Proposals[0].Target.ExactTargetRefs = []string{"other.txt"}
-	otherDocument.Proposals[0].DeclarationRef = runtimeTestSemanticDeclarationRef(manifest, otherItem.ID)
+	otherDocument.Proposals[0].DeclarationRef = runtimeTestSemanticDeclarationRef(otherManifest, otherItem.ID)
 	otherFeasibility := feasibility.Clone()
+	otherFeasibility.ManifestHash = otherManifest.Hash
 	otherFeasibility.CoverageWorkItemID, otherFeasibility.TargetRefs = otherItem.ID, []string{"other.txt"}
 	otherFeasibility.ProposalHash = runtimecontract.StableRuntimeSemanticProofProposalHash(otherDocument.Proposals[0])
-	otherFocuses, _, err := runtimecontract.CompileRuntimeSemanticBindings(manifest, "receipt-other-query", otherDocument, []runtimecontract.RuntimeSemanticProofFeasibility{otherFeasibility})
+	otherFocuses, _, err := runtimecontract.CompileRuntimeSemanticBindings(otherManifest, "receipt-other-query", otherDocument, []runtimecontract.RuntimeSemanticProofFeasibility{otherFeasibility})
 	if err != nil || len(otherFocuses) != 1 || len(otherFocuses[0].CoverageEvidenceBindings) != 1 {
 		t.Fatalf("另一 exact source query binding: %v", err)
 	}

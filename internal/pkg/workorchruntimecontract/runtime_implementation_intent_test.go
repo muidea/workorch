@@ -120,7 +120,7 @@ func assertImplementationSchemaAndParser(t *testing.T, m RuntimeSemanticPlanMani
 	if err != nil {
 		t.Fatal(err)
 	}
-	wire := map[string]any{"documentKind": RuntimeProviderDocumentSemanticPlan, "schemaVersion": d.SchemaVersion, "manifestHash": d.ManifestHash, "definitionSeedHash": d.DefinitionSeedHash, "planStep": d.PlanStep, "coverageOrder": d.CoverageOrder, "proposals": []any{}, "implementationPurpose": d.ImplementationPurpose, "implementationIntent": d.ImplementationIntent}
+	wire := map[string]any{"documentKind": RuntimeProviderDocumentSemanticPlan, "schemaVersion": d.SchemaVersion, "manifestHash": d.ManifestHash, "definitionSeedHash": d.DefinitionSeedHash, "planStep": d.PlanStep, "coverageOrder": d.CoverageOrder, "proposals": []any{}, "implementationPurpose": d.ImplementationPurpose, "implementationIntent": runtimeImplementationIntentToWire(d.ImplementationIntent)}
 	encoded, _ := json.Marshal(wire)
 	v, err := jsonschema.UnmarshalJSON(strings.NewReader(string(encoded)))
 	if err != nil {
@@ -146,14 +146,17 @@ func TestImplementationPreviousIntentReviewAndTruthfulBudgetOutcome(t *testing.T
 		}
 		for name, mutate := range map[string]func(*RuntimeSemanticPlanDocument){
 			"missing": func(v *RuntimeSemanticPlanDocument) { v.ImplementationIntent.PreviousRoundReview = nil },
-			"stale": func(v *RuntimeSemanticPlanDocument) {
-				v.ImplementationIntent.PreviousRoundReview.ReceiptSetHash = "other"
-			},
+
 			"unknown": func(v *RuntimeSemanticPlanDocument) {
 				v.ImplementationIntent.PreviousRoundReview.Outcome = "inconclusive"
 			},
 		} {
 			t.Run(name, func(t *testing.T) { v := d.Clone(); mutate(&v); assertImplementationSchemaAndParser(t, m, v, false) })
+		}
+		stale := d.Clone()
+		stale.ImplementationIntent.PreviousRoundReview.ReceiptSetHash = "other"
+		if stale.ValidateAgainstManifest(m) == nil {
+			t.Fatal("internal stale receipt identity admitted")
 		}
 		v := d.Clone()
 		v.ImplementationPurpose = RuntimeImplementationWorkPurposeTerminal

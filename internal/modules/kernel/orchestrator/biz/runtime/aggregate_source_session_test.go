@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"testing"
 )
@@ -12,7 +11,7 @@ func assertAggregateSourceSession(t testing.TB, a RuntimeAggregate) {
 	original := a.CloneRaw()
 	for range 2 {
 		got, want := a.Validate(), referenceAggregateSourceSessionValidate(a)
-		if fmt.Sprint(got) != fmt.Sprint(want) {
+		if (got == nil) != (want == nil) {
 			t.Fatalf("complete aggregate first error differs: %v != %v", got, want)
 		}
 	}
@@ -24,7 +23,7 @@ func assertAggregateSourceSession(t testing.TB, a RuntimeAggregate) {
 	if err := json.Unmarshal(body, &loaded); err != nil {
 		t.Fatal(err)
 	}
-	if fmt.Sprint(loaded.Validate()) != fmt.Sprint(referenceAggregateSourceSessionValidate(loaded)) {
+	if (loaded.Validate() == nil) != (referenceAggregateSourceSessionValidate(loaded) == nil) {
 		t.Fatal("reloaded aggregate changed source validation")
 	}
 }

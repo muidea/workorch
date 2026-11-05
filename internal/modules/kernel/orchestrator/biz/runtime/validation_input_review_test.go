@@ -9,7 +9,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestInputReviewPrecedingLedgerAcrossStorageVersions(t *testing.T) {
+func TestInputReviewPrecedingLedgerAcrossHistorySegments(t *testing.T) {
 	_, _, aggregate, _, _, _ := sealedSemanticPlanningAggregate(t)
 	ledger := aggregate.SemanticPlanning.WithoutHistory()
 	for i := 0; i < 19; i++ {
@@ -26,7 +26,7 @@ func TestInputReviewPrecedingLedgerAcrossStorageVersions(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	before := ledger.Clone()
+	before := ledger.CloneRaw()
 	for index, generation := range ledger.AllHistory() {
 		preceding, err := runtimeInputReviewPrecedingLedger(ledger, generation)
 		if err != nil || preceding.HistoryCount() != index {

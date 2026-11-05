@@ -56,18 +56,18 @@ func compareHistoricalSession(t *testing.T, s RuntimeLineageAssertionSources) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, want := ValidateRuntimeHistoricalBehaviorCompletions(s), referenceHistoricalCompletionsBeforePreimageSession(s)
+	got, want := auditCommittedHistoricalResults(s, &runtimeHistoricalPreimageSession{}), referenceHistoricalCompletionsBeforePreimageSession(s)
 	if cwiFocusBindingsError(got) != cwiFocusBindingsError(want) {
 		t.Fatalf("historical complete first error differs: %v != %v", got, want)
 	}
-	proof, proofErr := CompileRuntimeHistoricalAcceptanceProof(s, "history", "original-assessment")
+	proof, proofErr := auditCompileRuntimeHistoricalAcceptance(s, "history", "original-assessment", &runtimeHistoricalPreimageSession{})
 	old, oldErr := referenceHistoricalAcceptanceBeforePreimageSession(s, "history", "original-assessment")
 	if cwiFocusBindingsError(proofErr) != cwiFocusBindingsError(oldErr) || !reflect.DeepEqual(proof, old) {
 		t.Fatalf("historical proof differs: %v != %v", proofErr, oldErr)
 	}
 	if proofErr == nil {
 		proof.AcceptanceEvidenceRefs[0], proof.BehaviorEvidenceRefs[0] = "caller", "caller"
-		again, err := CompileRuntimeHistoricalAcceptanceProof(s, "history", "original-assessment")
+		again, err := auditCompileRuntimeHistoricalAcceptance(s, "history", "original-assessment", &runtimeHistoricalPreimageSession{})
 		if err != nil || !reflect.DeepEqual(again, old) {
 			t.Fatal("returned proof polluted later call")
 		}
@@ -143,7 +143,7 @@ func TestHistoricalPreimageSessionExplicitArchiveEquivalence(t *testing.T) {
 	for _, run := range runs {
 		base := run.RuntimeState
 		s := historicalSessionArchiveSources(base)
-		if err := ValidateRuntimeHistoricalBehaviorCompletions(s); err != nil {
+		if err := auditCommittedHistoricalResults(s, &runtimeHistoricalPreimageSession{}); err != nil {
 			t.Fatal(err)
 		}
 		if err := referenceHistoricalCompletionsBeforePreimageSession(s); err != nil {
@@ -163,7 +163,7 @@ func TestHistoricalPreimageSessionExplicitArchiveEquivalence(t *testing.T) {
 			changed := base.Clone()
 			mutate(&changed)
 			s := historicalSessionArchiveSources(changed)
-			got, want := ValidateRuntimeHistoricalBehaviorCompletions(s), referenceHistoricalCompletionsBeforePreimageSession(s)
+			got, want := auditCommittedHistoricalResults(s, &runtimeHistoricalPreimageSession{}), referenceHistoricalCompletionsBeforePreimageSession(s)
 			if cwiFocusBindingsError(got) != cwiFocusBindingsError(want) {
 				t.Fatalf("public archive gate differs: %v != %v", got, want)
 			}
@@ -202,7 +202,7 @@ func BenchmarkHistoricalPreimageSessionPublicArchiveCompleteGate(b *testing.B) {
 					if reference {
 						err = referenceHistoricalCompletionsBeforePreimageSession(s)
 					} else {
-						err = ValidateRuntimeHistoricalBehaviorCompletions(s)
+						err = auditCommittedHistoricalResults(s, &runtimeHistoricalPreimageSession{})
 					}
 					if err != nil {
 						b.Fatal(err)

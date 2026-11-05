@@ -14,7 +14,7 @@ func (c *candidateDispatchComponent) commitEvidence(ctx context.Context, evidenc
 	if err := evidence.Validate(); err != nil {
 		return EvidenceCommitResult{}, err
 	}
-	aggregate, err := c.repository.Load(ctx, evidence.WorkspaceID, evidence.RunID)
+	aggregate, err := c.load(ctx, evidence.WorkspaceID, evidence.RunID)
 	if err != nil {
 		return EvidenceCommitResult{}, err
 	}

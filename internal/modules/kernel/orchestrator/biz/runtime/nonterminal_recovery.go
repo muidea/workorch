@@ -100,7 +100,7 @@ func (c *driveDeliveryComponent) scheduleNonTerminalRecovery(
 	if err := validateRuntimeNonTerminalRecoveryCause(request, cause); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeNonTerminalRecoveryRecord{}, runtimecontract.RuntimeDriveLease{}, false, false, err
 	}
-	aggregate, err := c.repository.Load(ctx, request.WorkspaceID, request.RunID)
+	aggregate, err := c.load(ctx, request.WorkspaceID, request.RunID)
 	if err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeNonTerminalRecoveryRecord{}, runtimecontract.RuntimeDriveLease{}, false, false, err
 	}
@@ -173,10 +173,7 @@ func (c *driveDeliveryComponent) scheduleNonTerminalRecovery(
 	}.Normalized()
 	aggregate.Facts.Recovery.NonTerminalRecovery = record
 	aggregate.DriveLease = &lease
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, runtimecontract.RuntimeNonTerminalRecoveryRecord{}, runtimecontract.RuntimeDriveLease{}, false, false,
-			fmt.Errorf("schedule runtime nonterminal recovery: %w", err)
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeNonTerminalRecoveryRecord{}, runtimecontract.RuntimeDriveLease{}, false, false, err
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 	"hash"
 	"strings"
 	"sync"
@@ -116,5 +117,77 @@ func BenchmarkRuntimeHashWriterShortFields(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+func TestRuntimeHashWriterBlockBoundariesAndHashInterface(t *testing.T) {
+	for _, size := range []int{0, 1, 7, 8, 119, 120, 121, 247, 248, 249, 255, 256, 257, 511, 512, 4095, 4096, 8191, 8192, 8193} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			actual, reference := newRuntimeHashWriter(), sha256.New()
+			if actual.Size() != reference.Size() || actual.BlockSize() != reference.BlockSize() {
+				t.Fatal("hash interface size drift")
+			}
+			for round := range 4 {
+				value := strings.Repeat("x", size) + string([]byte{0xff, 0x00})
+				if round%2 == 0 {
+					writeHashString(actual, value)
+					runtimeWriteHashStringReference(reference, value)
+				} else {
+					n, err := actual.Write([]byte(value))
+					reference.Write([]byte(value))
+					if n != len(value) || err != nil {
+						t.Fatal("Write contract drift")
+					}
+				}
+				prefix := make([]byte, 3, 512)
+				copy(prefix, "pre")
+				want := reference.Sum(append([]byte(nil), prefix...))
+				if got := actual.Sum(prefix); !bytes.Equal(got, want) || !bytes.Equal(actual.Sum(nil), reference.Sum(nil)) {
+					t.Fatal("Sum changed complete bytes or destination prefix")
+				}
+				if round == 2 {
+					actual.Reset()
+					reference.Reset()
+				}
+			}
+			// Reset discards still-buffered bytes without requiring Sum first.
+			writeHashString(actual, "discard")
+			actual.Reset()
+			reference.Reset()
+			actual.Write(nil)
+			reference.Write(nil)
+			if !bytes.Equal(actual.Sum(nil), reference.Sum(nil)) {
+				t.Fatal("Reset retained pending bytes")
+			}
+		})
+	}
+}
+
+func BenchmarkRuntimeHashWriterFieldBatch(b *testing.B) {
+	for _, count := range []int{10, 256, 2048} {
+		values := make([]string, count)
+		for i := range values {
+			values[i] = fmt.Sprintf("source-contract-%04d/原文", i)
+		}
+		for _, mode := range []string{"prior", "buffered"} {
+			b.Run(fmt.Sprintf("fields_%d/%s", count, mode), func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					if mode == "prior" {
+						w := newReferenceFieldRuntimeHashWriter()
+						for _, v := range values {
+							w.writeString(v)
+						}
+						w.Sum(nil)
+					} else {
+						w := newRuntimeHashWriter()
+						for _, v := range values {
+							w.writeString(v)
+						}
+						w.Sum(nil)
+					}
+				}
+			})
+		}
 	}
 }

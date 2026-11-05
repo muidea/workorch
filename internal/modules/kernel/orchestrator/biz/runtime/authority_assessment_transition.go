@@ -15,7 +15,7 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -36,10 +36,6 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 	// disposition disagrees with persisted facts; SM-2 establishes canonical
 	// coverage from owner receipts below.
 	assessment.CoverageWorkItemIDs = runtimeAssessmentCoverageIDs(assessment.CoverageWorkItemIDs)
-	missingOwnerFacts := runtimecontract.RuntimeMissingOwnerFactRequirements(
-		aggregate.Facts.Focus.RequiredOwnerFacts,
-		aggregate.Facts.Resources.OperationAdmissibilities,
-	)
 	ownerFactAcquisition, hasOwnerFactAcquisition, err := currentRuntimeSemanticOwnerFactAcquisition(aggregate)
 	if err != nil {
 		return RuntimeAggregate{}, err
@@ -51,13 +47,18 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 	if hasOwnerFactAcquisition != (assessmentPurpose == runtimecontract.RuntimeAssessmentPurposeOwnerFactAcquisition) {
 		return RuntimeAggregate{}, fmt.Errorf("%w: assessment purpose does not match current semantic obligation", common.ErrConflict)
 	}
-	proofCompleteWithoutOwnerFacts := canonicalAssessmentProofCompleteWithoutOwnerFactsForPurpose(aggregate, assessmentPurpose)
+	evaluation, err := runtimecontract.CompileRuntimeAssessmentEvaluation((*aggregate.ActiveDispatch), aggregate.Facts, (aggregate.CompletedDispatches), aggregate.CoverageProofLineage, runtimeLineageAssertionSources(aggregate))
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	missingOwnerFacts := evaluation.MissingOwnerFacts
+	proofCompleteWithoutOwnerFacts := evaluation.ProofCompleteWithoutOwnerFacts()
 	// Keep this exact owner-private preimage for the post-adjudication owner-fact
 	// handoff. Advancing the assessment sequence is not a new owner observation.
 	assessmentProofPreimage := aggregate.CloneRaw()
 	ownerFactAcquisitionSettled := hasOwnerFactAcquisition && len(missingOwnerFacts) == 0 && proofCompleteWithoutOwnerFacts
 	ownerFactOnlyGap := len(missingOwnerFacts) != 0 && proofCompleteWithoutOwnerFacts
-	canonicalCoverage := applyCanonicalAssessmentCoverage(aggregate, aggregate.ActiveDispatch.ID, assessmentPurpose)
+	canonicalCoverage := applyCanonicalAssessmentCoverage(aggregate, aggregate.ActiveDispatch.ID, evaluation)
 	canonicalGap := canonicalAssessmentCoverageGap(canonicalCoverage, aggregate.Facts.Focus, nil)
 	if ownerFactOnlyGap {
 		canonicalGap = canonicalAssessmentCoverageGap(canonicalCoverage, aggregate.Facts.Focus, missingOwnerFacts)
@@ -105,17 +106,7 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 	}
 	dispatch := *aggregate.ActiveDispatch
 	dispatch.State = DispatchStateCommitted
-	dispatchRecord := sealedDispatchToRuntimeRecord(dispatch)
-	adjudication, err := runtimecontract.DeriveRuntimeAssessmentAdjudication(
-		dispatchRecord,
-		aggregate.Facts,
-		sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches),
-		aggregate.CoverageProofLineage,
-		runtimeLineageAssertionSources(aggregate),
-	)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
+	adjudication := evaluation.Adjudication
 	if adjudication.Disposition != canonicalDisposition {
 		return RuntimeAggregate{}, fmt.Errorf("%w: assessment classifier %q disagrees with immutable adjudication proof %q", common.ErrConflict, canonicalDisposition, adjudication.Disposition)
 	}
@@ -177,12 +168,12 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 	previousFocusID := aggregate.Facts.Focus.ID
 	replanned := false
 	if ownerFactAcquisitionSettled {
-		replanned, err = settleRuntimeOwnerFactAcquisition(&aggregate, fact.ID, ownerFactAcquisition, assessmentProofPreimage)
+		replanned, err = settleRuntimeOwnerFactAcquisition(&aggregate, fact.ID, ownerFactAcquisition, assessmentProofPreimage, evaluation)
 		if err != nil {
 			return RuntimeAggregate{}, err
 		}
 	} else if canonicalDisposition == runtimecontract.AssessmentDispositionRepairableGap && ownerFactOnlyGap {
-		replanned, err = replanRuntimeCWIForUnmetOwnerFacts(&aggregate, fact.ID, assessmentPurpose, assessmentProofPreimage)
+		replanned, err = replanRuntimeCWIForUnmetOwnerFacts(&aggregate, fact.ID, assessmentProofPreimage, evaluation)
 		if err != nil {
 			return RuntimeAggregate{}, err
 		}
@@ -274,7 +265,7 @@ func runtimeAssessmentCoverageIDs(ids []common.CoverageWorkItemID) []common.Cove
 // candidate disposition, item satisfaction, missing kinds, targets and prose
 // are deliberately absent from this classifier: they remain in the committed
 // RuntimeAssessmentFact as producer observation/audit lineage.
-func applyCanonicalAssessmentCoverage(aggregate RuntimeAggregate, assessmentID string, purpose runtimecontract.RuntimeAssessmentPurpose) []runtimecontract.RuntimeCoverageItemFact {
+func applyCanonicalAssessmentCoverage(aggregate RuntimeAggregate, assessmentID string, evaluation runtimecontract.RuntimeAssessmentEvaluation) []runtimecontract.RuntimeCoverageItemFact {
 	coverage := append([]runtimecontract.RuntimeCoverageItemFact(nil), aggregate.Facts.Coverage...)
 	focus := aggregate.Facts.Focus.Normalized()
 	for idx := range coverage {
@@ -285,7 +276,14 @@ func applyCanonicalAssessmentCoverage(aggregate RuntimeAggregate, assessmentID s
 		if !coverageWorkItemIDIncluded(focus.CoverageWorkItemIDs, item.ID) || item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
 			continue
 		}
-		refs, satisfied := canonicalAssessmentEvidenceForCoverageForPurpose(aggregate, item.ID, purpose)
+		var refs []string
+		satisfied := false
+		for _, result := range evaluation.Coverage {
+			if result.CoverageWorkItemID == item.ID {
+				refs = result.EvidenceRefs
+				satisfied = result.ProofComplete && len(evaluation.MissingOwnerFacts) == 0
+			}
+		}
 		item.LastAssessmentID = assessmentID
 		item.EvidenceRefs = append(item.EvidenceRefs, refs...)
 		if satisfied {
@@ -411,26 +409,6 @@ func canonicalAssessmentEvidenceWithoutOwnerFactsForCoverageForPurpose(
 	return refs, true
 }
 
-func canonicalAssessmentProofCompleteWithoutOwnerFacts(aggregate RuntimeAggregate) bool {
-	return canonicalAssessmentProofCompleteWithoutOwnerFactsForPurpose(
-		aggregate,
-		runtimecontract.RuntimeAssessmentPurposeDefinitionProof,
-	)
-}
-
-func canonicalAssessmentProofCompleteWithoutOwnerFactsForPurpose(aggregate RuntimeAggregate, purpose runtimecontract.RuntimeAssessmentPurpose) bool {
-	focus := aggregate.Facts.Focus.Normalized()
-	if len(focus.CoverageWorkItemIDs) == 0 {
-		return false
-	}
-	for _, coverageID := range focus.CoverageWorkItemIDs {
-		if _, satisfied := canonicalAssessmentEvidenceWithoutOwnerFactsForCoverageForPurpose(aggregate, coverageID, purpose); !satisfied {
-			return false
-		}
-	}
-	return true
-}
-
 func coverageEvidenceBindingForCoverage(focus runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID) (runtimecontract.CoverageEvidenceBinding, bool) {
 	return proof.CoverageBindingForCoverage(focus, coverageID)
 }
@@ -478,40 +456,6 @@ func sameRuntimeDefinition(left runtimecontract.RuntimeFacts, right runtimecontr
 		left.DefinitionRevision == right.DefinitionRevision &&
 		runtimecontract.SameRuntimeActivationContext(left.Activation, right.Activation) &&
 		runtimecontract.SameRuntimeExecutionBudgetPolicy(left.ExecutionBudgetPolicy, right.ExecutionBudgetPolicy)
-}
-
-func sealedDispatchesToRuntimeRecords(values []SealedDispatch) []runtimecontract.RuntimeDispatchRecord {
-	ret := make([]runtimecontract.RuntimeDispatchRecord, 0, len(values))
-	for _, value := range values {
-		ret = append(ret, sealedDispatchToRuntimeRecord(value))
-	}
-	return ret
-}
-
-func sealedDispatchToRuntimeRecord(value SealedDispatch) runtimecontract.RuntimeDispatchRecord {
-	return runtimecontract.CloneRuntimeDispatchRecordRaw(runtimecontract.RuntimeDispatchRecord{
-		ID: value.ID, WorkspaceID: value.WorkspaceID, RunID: value.RunID,
-		Transaction: value.Transaction, CandidateHash: value.CandidateHash, Candidate: value.Candidate,
-		CandidateManifestHash:              value.CandidateManifestHash,
-		ImplementationWorkCommitment:       cloneImplementationWorkCommitment(value.ImplementationWorkCommitment),
-		CoverageBindingHash:                value.CoverageBindingHash,
-		CoverageBindings:                   value.CoverageBindings,
-		OperationTargetAuthorizations:      value.OperationTargetAuthorizations,
-		FocusTargetRole:                    value.FocusTargetRole,
-		ValidationRecipes:                  value.ValidationRecipes,
-		RepairCommitmentHash:               value.RepairCommitmentHash,
-		RepairCommitment:                   value.RepairCommitment,
-		AssessmentAuthorityInputHash:       value.AssessmentAuthorityInputHash,
-		AssessmentAuthorityInput:           value.AssessmentAuthorityInput,
-		AssessmentAdjudicationHash:         value.AssessmentAdjudicationHash,
-		AssessmentAdjudication:             value.AssessmentAdjudication,
-		OperationAdmissibilities:           value.OperationAdmissibilities,
-		OperationAdmissibilityObservations: value.OperationAdmissibilityObservations,
-		OperationPolicies:                  value.OperationPolicies,
-		State:                              runtimecontract.RuntimeDispatchState(value.State), CompletedOperationIDs: value.CompletedOperationIDs,
-		OperationExecutions: value.OperationExecutions, OperationAuthorityHash: value.OperationAuthorityHash,
-		DispatchAuthorityHash: value.DispatchAuthorityHash,
-	})
 }
 
 func firstNonEmpty(values ...string) string {

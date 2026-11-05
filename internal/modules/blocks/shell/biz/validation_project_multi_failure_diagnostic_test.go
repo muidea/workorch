@@ -71,7 +71,7 @@ func TestProjectMultiFailureSourcePublicationIsExactAndProtectsOriginalTests(t *
 }
 
 func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
-	for _, scenario := range []string{"exact", "disjoint", "unobserved", "partial-unobserved", "skip", "drift", "missing-source", "changed-assertion", "legacy"} {
+	for _, scenario := range []string{"exact", "disjoint", "unobserved", "partial-unobserved", "skip", "drift", "missing-source", "changed-assertion", "additive-input-test", "legacy"} {
 		t.Run(scenario, func(t *testing.T) {
 			root, internal := t.TempDir(), t.TempDir()
 			recipe := isolatedInputRecipe()
@@ -84,6 +84,12 @@ func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
 			}
 			target := shellValidationNativeCheckTargetRef(requirement, checks...)
 			files := map[string]string{"go.mod": "module fixture\ngo 1.26\n", "delivery/value.go": "package delivery\nfunc Value() int{return 3}\n", target: fmt.Sprintf("package checks\nimport(\"testing\"; delivery \"fixture/delivery\")\nfunc %s(t *testing.T){if delivery.Value()!=4{t.Fatal(\"WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3\")}}\n", checks[0].NativeCheckRef), "delivery/value_test.go": "package delivery\nimport \"testing\"\nfunc TestProduction(t *testing.T){if Value()!=4{t.Fatal(\"WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3\")}}\n"}
+			if scenario == "additive-input-test" {
+				files[target] += "func TestAdditive(t *testing.T){if delivery.Value()!=4{t.Fatal(\"WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3\")}}\n"
+				if inspection := inspectShellNativeValidationChecks(root, nil, checks); inspection.Code == "" {
+					t.Fatal("absent original must not be ready")
+				}
+			}
 			if scenario == "disjoint" {
 				files["delivery/other.go"] = "package delivery\nfunc Other() int{return 2}\n"
 				files["delivery/value_test.go"] = "package delivery\nimport \"testing\"\nfunc TestProduction(t *testing.T){if Other()!=4{t.Fatal(\"WORKORCH_ASSERTION_V1 code=other_mismatch expected=4 actual=2\")}}\n"
@@ -143,7 +149,7 @@ func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
 			if err == nil || result.Conjunction == nil || result.Conjunction.Complete || result.Result.Evidence.Quality == common.EvidenceQualityValid || result.Conjunction.Validate() != nil {
 				t.Fatalf("failed project credited or lost: err=%v conjunction=%+v", err, result.Conjunction)
 			}
-			wantDiagnostic := scenario == "exact" || scenario == "disjoint"
+			wantDiagnostic := scenario == "exact" || scenario == "disjoint" || scenario == "additive-input-test"
 			if (result.Result.ValidationFailureDiagnostic != nil) != wantDiagnostic {
 				t.Fatalf("%s wrong attribution: diagnostic=%+v stages=%+v", scenario, result.Result.ValidationFailureDiagnostic, result.Conjunction.Stages)
 			}
@@ -169,7 +175,11 @@ func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
 				if result.Result.Evidence.Validation == nil || result.Result.Evidence.Validation.ObservationProtocolRef != shellProjectMultiFailureDiagnosticProtocolRef || result.Result.Evidence.Validation.ExecutionConjunction == nil || !reflect.DeepEqual(result.Result.Evidence.Validation.ExecutionConjunction, result.Conjunction) {
 					t.Fatal("receipt projection dropped source-specific conjunction or downgraded protocol")
 				}
-				if len(result.Conjunction.Stages) != 4 || !reflect.DeepEqual(result.Result.ValidationFailureDiagnostic.TargetRefs, wantTargets) || !reflect.DeepEqual(result.Conjunction.BehaviorTargetRefs, wantTargets) {
+				wantStages := 4
+				if scenario == "additive-input-test" {
+					wantStages = 5
+				}
+				if len(result.Conjunction.Stages) != wantStages || !reflect.DeepEqual(result.Result.ValidationFailureDiagnostic.TargetRefs, wantTargets) || !reflect.DeepEqual(result.Conjunction.BehaviorTargetRefs, wantTargets) {
 					t.Fatal("missing independent source attribution")
 				}
 				for _, stage := range result.Conjunction.Stages[2:] {

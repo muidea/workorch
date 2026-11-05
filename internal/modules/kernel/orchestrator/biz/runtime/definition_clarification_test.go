@@ -126,12 +126,13 @@ func TestDefinitionGapPrivateAdmissionRejectsExhaustedImplementationAmbiguity(t 
 	observation.OriginalDiagnostic.OriginalCode = string(observation.GapKind)
 	observation.OriginalDiagnostic.OriginalMessage = "implementation still incomplete but no work allowance remains"
 	observation.ObservationID = runtimecontract.StableRuntimeDefinitionGapObservationID(observation)
-	// This unit fixture isolates the independent private admission fence; the
-	// pure contract and real eight-round tests prove the complete manifest path.
+	// This incomplete manifest must be rejected by the canonical source gate
+	// before any private clarification branch. Pure contract and complete work
+	// tests separately prove the exhausted-work semantic fence.
 	repository.aggregate.SemanticPlanning.Manifest = &runtimecontract.RuntimeSemanticPlanManifest{ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{ImplementationWork: &runtimecontract.RuntimeSemanticImplementationWork{PurposeChoiceOnly: true, EffectAvailable: false}}}}
 	before := repository.saves
 	_, err := controller.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{Kind: RuntimeInternalEventDefinitionGapObserved, Scope: RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{DefinitionGap: &observation}})
-	if !errors.Is(err, common.ErrConflict) || !strings.Contains(err.Error(), "implementation_work_exhausted_review_missing") || repository.saves != before || repository.aggregate.DefinitionClarification != nil {
+	if err == nil || !strings.Contains(err.Error(), "runtime semantic proof obligation") || repository.saves != before || repository.aggregate.DefinitionClarification != nil {
 		t.Fatalf("exhaustion persisted Definition governance: %v", err)
 	}
 }

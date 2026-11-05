@@ -743,14 +743,10 @@ func NormalizeRuntimeOperationReceipts(values []RuntimeOperationReceipt) []Runti
 }
 
 func ValidateRuntimeOperationReceipts(values []RuntimeOperationReceipt) error {
-	return validateRuntimeOperationReceiptsInIndex(values, nil)
-}
-
-func validateRuntimeOperationReceiptsInIndex(values []RuntimeOperationReceipt, index *runtimeOwnerLineageIndex) error {
 	seen := map[string]struct{}{}
 	for _, value := range values {
 		value = value.Normalized()
-		if err := index.receipt(value); err != nil {
+		if err := value.Validate(); err != nil {
 			return err
 		}
 		key := runtimeOperationReceiptIdentity(value.ExecutionKey, value.Fence)

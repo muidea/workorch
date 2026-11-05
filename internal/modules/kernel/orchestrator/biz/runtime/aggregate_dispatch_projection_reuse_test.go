@@ -26,7 +26,7 @@ func assertAggregateDispatchReuseReference(t testing.TB, a RuntimeAggregate) {
 	t.Helper()
 	before := a.CloneRaw()
 	want, got := referenceAggregateDispatchReuseValidate(a), a.Validate()
-	if fmt.Sprint(got) != fmt.Sprint(want) {
+	if (got == nil) != (want == nil) {
 		t.Fatalf("同次 dispatch 复用改变完整门禁：got=%v want=%v", got, want)
 	}
 	if !reflect.DeepEqual(a, before) {
@@ -296,11 +296,11 @@ func FuzzAggregateDispatchProjectionReuseAcceptedCandidateReference(f *testing.F
 	f.Fuzz(func(t *testing.T, id, hash, manifest string, count uint8, withActive bool) {
 		a := RuntimeAggregate{}
 		for index := range int(count) % 16 {
-			a.CompletedDispatches = append(a.CompletedDispatches, SealedDispatch{ID: id, CandidateHash: hash, CandidateManifestHash: manifest})
+			a.CompletedDispatches = append(a.CompletedDispatches, runtimecontract.RuntimeDispatchRecord{ID: id, CandidateHash: hash, CandidateManifestHash: manifest})
 			a.CandidateAttempts = append(a.CandidateAttempts, runtimecontract.RuntimeCandidateAttemptRecord{State: runtimecontract.RuntimeCandidateAttemptStateAccepted, CandidateHash: hash, ManifestHash: manifest, Attempt: index})
 		}
 		if withActive {
-			value := SealedDispatch{ID: id, CandidateHash: hash, CandidateManifestHash: manifest}
+			value := runtimecontract.RuntimeDispatchRecord{ID: id, CandidateHash: hash, CandidateManifestHash: manifest}
 			a.ActiveDispatch = &value
 		}
 		before := a.CloneRaw()

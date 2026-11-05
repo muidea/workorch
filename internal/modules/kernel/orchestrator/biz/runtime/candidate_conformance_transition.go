@@ -23,7 +23,7 @@ func (c *candidateDispatchComponent) recordCandidateConformance(ctx context.Cont
 	if err := runtimecontract.ValidateRuntimeCandidateConformanceRecords([]runtimecontract.RuntimeCandidateConformanceRecord{record}); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -113,9 +113,7 @@ func (c *candidateDispatchComponent) recordCandidateConformance(ctx context.Cont
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}

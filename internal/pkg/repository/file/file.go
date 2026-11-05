@@ -2797,6 +2797,10 @@ func (r *RunRepository) create(item *run.Run, allocatedGeneration uint64, genera
 	if err := run.ValidateRunRuntimeBootstrapsRaw(item); err != nil {
 		return err
 	}
+	digest, err := run.RuntimeStateWriteHash(item)
+	if err != nil {
+		return err
+	}
 	if generationPreallocated && allocatedGeneration == 0 {
 		return common.ErrInvalidArgument
 	}
@@ -2867,6 +2871,7 @@ func (r *RunRepository) create(item *run.Run, allocatedGeneration uint64, genera
 			return err
 		}
 	}
+	item.RuntimeStateHash = digest
 	if item.Revision == 0 {
 		item.Revision = 1
 	}
@@ -2892,17 +2897,18 @@ func (r *RunRepository) workspaceGenerationPath() string {
 }
 
 func loadRunMap(path string) (map[common.RunID]run.Run, error) {
-	items, err := loadMap[common.RunID, run.Run](path)
-	if err != nil {
-		return nil, err
-	}
-	for id, item := range items {
-		current := item
-		if err := run.ValidateRunRuntimeBootstrapsRaw(&current); err != nil {
-			return nil, fmt.Errorf("load Run %q: %w", id, err)
+	return loadMapChecked(path, func(items map[common.RunID]run.Run) error {
+		for id, item := range items {
+			current := item
+			if err := run.ValidateRunRuntimeBootstrapsRaw(&current); err != nil {
+				return fmt.Errorf("load Run %q: %w", id, err)
+			}
+			if err := run.ValidateStoredRuntimeStateIntegrity(&current); err != nil {
+				return fmt.Errorf("load Run %q: %w", id, err)
+			}
 		}
-	}
-	return items, nil
+		return nil
+	})
 }
 
 func validatePersistedRunGenerationWatermarks(items map[common.RunID]run.Run, heads map[common.WorkspaceID]runWorkspacePersistenceHead) error {
@@ -3058,6 +3064,9 @@ func (r *RunRepository) Update(_ context.Context, item *run.Run) error {
 	if err := run.ValidateExecutionIntentReceiptTransition(&current, item, false); err != nil {
 		return err
 	}
+	if err := run.ValidateRuntimeStatePreserved(&current, item); err != nil {
+		return err
+	}
 	items[item.ID] = *cloneRun(item)
 	return saveMap(r.path, items)
 }
@@ -3101,6 +3110,9 @@ func (r *RunRepository) CompareAndSwap(_ context.Context, item *run.Run, expecte
 		return common.ErrConflict
 	}
 	if err := run.ValidateExecutionIntentReceiptTransition(&current, item, true); err != nil {
+		return err
+	}
+	if err := run.ValidateRuntimeStatePreserved(&current, item); err != nil {
 		return err
 	}
 	item.Revision = expectedRevision + 1
@@ -3148,9 +3160,17 @@ func (r *RunRepository) CompareAndSwapRuntimeState(ctx context.Context, item *ru
 	if err := run.ValidateOpaqueRuntimeStateCAS(&current, item, expectedRuntimeStateRevision); err != nil {
 		return err
 	}
-	item.Revision = expectedRevision + 1
-	items[item.ID] = *cloneRun(item)
-	return saveMap(r.path, items)
+	// Take the sole stored copy before encoding. The hash and canonical file
+	// consume this exact frozen value; no second Runtime serialization occurs.
+	stored := cloneRun(item)
+	stored.Revision = expectedRevision + 1
+	body, err := marshalRunRuntimeWrite(items, stored)
+	if err != nil {
+		return err
+	}
+	item.RuntimeStateHash, item.Revision = stored.RuntimeStateHash, stored.Revision
+	items[item.ID] = *stored
+	return publishMapBytes(r.path, items, body, 0o644, commitFileAtomically)
 }
 
 func (r *RunRepository) Delete(_ context.Context, id common.RunID) error {
@@ -4634,6 +4654,13 @@ func (r *ApprovalRepository) list(matches func(approval.Approval) bool) ([]*appr
 }
 
 func loadMap[K comparable, V any](path string) (map[K]V, error) {
+	return loadMapChecked[K, V](path, nil)
+}
+
+// The optional gate checks newly decoded physical originals before publishing
+// the immutable data cache. Cached reads consume those same stored values;
+// writes publish only after their repository invariant and atomic file commit.
+func loadMapChecked[K comparable, V any](path string, check func(map[K]V) error) (map[K]V, error) {
 	cache := mapCacheEntry(path)
 	cache.mu.RLock()
 	if cache.loaded {
@@ -4670,6 +4697,11 @@ func loadMap[K comparable, V any](path string) (map[K]V, error) {
 	items := map[K]V{}
 	if err := decodeCurrentJSON(data, &items); err != nil {
 		return nil, err
+	}
+	if check != nil {
+		if err := check(items); err != nil {
+			return nil, err
+		}
 	}
 	cache.items = cloneStoredMap(items)
 	cache.loaded = true

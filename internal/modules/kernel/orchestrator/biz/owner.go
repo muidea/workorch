@@ -582,7 +582,7 @@ func (m *Biz) recoverRuntimeStartup(ctx context.Context) error {
 
 		// Recovery classification is exclusively an Orchestrator SM-4 concern
 		// after typed aggregate load. The Run inventory remains opaque.
-		record := runtimeStateRecordFromAggregate(aggregate)
+		record := runtimecontract.RuntimeStateRecord(aggregate)
 		lifecycleHandoff, governed, handoffErr := runtimeGovernanceLifecycleHandoffFromState(&record)
 		if handoffErr != nil {
 			return fmt.Errorf("Runtime startup recovery lifecycle identity workspace=%s run=%s: %w", item.WorkspaceID, item.RunID, handoffErr)
@@ -1128,7 +1128,6 @@ func (m *Biz) Stop(ctx context.Context) error {
 		return err
 	}
 	m.started = false
-	m.runtimeController.ReleaseHistoricalCompilation()
 	m.runtimeController = nil
 	m.evidence = RuntimeEvidenceRepositories{}
 	m.evidenceRecords = nil
@@ -2738,7 +2737,7 @@ func (m *Biz) runtimeGovernanceWaitAcknowledged(ctx context.Context, aggregate r
 	if err != nil {
 		return false
 	}
-	record := runtimeStateRecordFromAggregate(aggregate)
+	record := runtimecontract.RuntimeStateRecord(aggregate)
 	handoff, governed, err := runtimeGovernanceLifecycleHandoffFromState(&record)
 	if err != nil || !governed {
 		return false

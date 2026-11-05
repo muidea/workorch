@@ -118,7 +118,7 @@ func TestRuntimeOwnerReadDependenciesSurviveReceiptCASFailureAndReplyLoss(t *tes
 			if err != nil || persisted.Validate() != nil {
 				t.Fatalf("CAS 故障后原 aggregate 无法重载: %v", err)
 			}
-			if !afterCommit && !reflect.DeepEqual(persisted, claimed) {
+			if !afterCommit && !reflect.DeepEqual(ownerStateRecord(persisted), ownerStateRecord(claimed)) {
 				t.Fatal("CAS 前失败污染持久读取前像")
 			}
 			if afterCommit && (len(persisted.OperationReceipts) != 1 || !reflect.DeepEqual(persisted.OperationReceipts[0].Evidence.OwnerRevisionSet, &dependencies)) {

@@ -294,7 +294,7 @@ func TestRejectedGovernanceResumeReceiptRejectsOriginOrUnknownFeedbackDispatch(t
 	}
 }
 
-func rejectedGovernanceResumeReceiptForTest(t *testing.T, fixture *catalogOnlyShellGovernanceFixture) (SealedDispatch, runtimecontract.RuntimeOperationExecutionRecord, runtimecontract.RuntimeOperationReceipt) {
+func rejectedGovernanceResumeReceiptForTest(t *testing.T, fixture *catalogOnlyShellGovernanceFixture) (runtimecontract.RuntimeDispatchRecord, runtimecontract.RuntimeOperationExecutionRecord, runtimecontract.RuntimeOperationReceipt) {
 	t.Helper()
 	if fixture.aggregate.ActiveDispatch == nil {
 		t.Fatal("governance continuation has no resume dispatch")
@@ -427,7 +427,7 @@ func TestSequentialGovernanceResumePreservesCompletedGovernedExecution(t *testin
 	if progressed.Decision.State != runtimecontract.ConvergenceStateNeedGovernance || progressed.ActiveDispatch != nil {
 		t.Fatalf("second operation did not enter governance: %+v", progressed)
 	}
-	var source *SealedDispatch
+	var source *runtimecontract.RuntimeDispatchRecord
 	for idx := range progressed.CompletedDispatches {
 		if progressed.CompletedDispatches[idx].ID == firstResumeID {
 			value := progressed.CompletedDispatches[idx]

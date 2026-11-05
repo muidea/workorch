@@ -137,6 +137,8 @@ func runtimeReviewedProjectExecutionCount(t *testing.T, source runtimecontract.R
 	ordinary, reconciliation := 0, 0
 	reconciled := make(map[common.CoverageWorkItemID]int)
 	seen := make(map[string]bool)
+	physicalReconciliations := 0
+	groups := make(map[string]bool)
 	for _, receipt := range source.OperationReceipts {
 		if receipt.Evidence.Validation != nil && receipt.Evidence.Validation.ExecutionConjunction != nil {
 			if !receipt.Evidence.Validation.ExecutionConjunction.Complete {
@@ -164,6 +166,12 @@ func runtimeReviewedProjectExecutionCount(t *testing.T, source runtimecontract.R
 				}
 				seen[identity] = true
 				reconciliation++
+				if observed.ValidationExecution == nil {
+					physicalReconciliations++
+				} else if !groups[observed.ValidationExecution.GroupID] {
+					groups[observed.ValidationExecution.GroupID] = true
+					physicalReconciliations++
+				}
 				reconciled[observed.CoverageWorkItemID]++
 			}
 		}
@@ -180,7 +188,10 @@ func runtimeReviewedProjectExecutionCount(t *testing.T, source runtimecontract.R
 			t.Fatalf("original CWI reconciliation count: %s got %d want %d", id, count, expectedReconciliations[id])
 		}
 	}
-	return strings.Repeat("executed\n", 2*(ordinary+reconciliation))
+	if expectedOrdinary > 1 && reconciliation > 1 && (len(groups) == 0 || physicalReconciliations >= reconciliation) {
+		t.Fatal("multiple consumers did not reduce actual shared root executions")
+	}
+	return strings.Repeat("executed\n", 2*(ordinary+physicalReconciliations))
 }
 
 func assertRuntimeTerminalSnapshotProof(t *testing.T, source runtimecontract.RuntimeStateRecord, directory string) {

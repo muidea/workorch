@@ -1,7 +1,6 @@
 package workorchruntimecontract
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -181,7 +180,7 @@ func (s RuntimeDefinitionSeed) Validate() error {
 
 func StableRuntimeDefinitionSeedHash(seed RuntimeDefinitionSeed) string {
 	seed = seed.Normalized()
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, RuntimeDefinitionSeedSchemaCurrent)
 	writeHashString(h, seed.DefinitionRevision)
 	writeHashString(h, seed.PolicyHash)
@@ -836,22 +835,28 @@ type runtimeValidatedSemanticManifest struct {
 type runtimeSemanticDocumentValidationSession struct {
 	manifest RuntimeSemanticPlanManifest
 	values   []RuntimeSemanticPlanDocument
+	used     []bool // eviction preference only; never a validation credential
 }
 
 type runtimeSemanticManifestValidationEntry struct {
 	raw       RuntimeSemanticPlanManifest
 	validated runtimeValidatedSemanticManifest
+	used      bool
 }
 
 type runtimeSemanticCatalogValidationEntry struct {
 	raw        RuntimeOperationAdmissibility
 	normalized RuntimeOperationAdmissibility
+	used       bool
 }
 
 // runtimeSemanticValidationSession exists only for one top-level validation
 // call. Exact raw equality is required before a prior result can be reused;
 // matching a caller-supplied hash is never sufficient.
 type runtimeSemanticValidationSession struct {
+	// Exact formal preimage for this one owner transition; never retained or serialized.
+	committedPreimage *RuntimeStateRecord
+
 	manifests         map[string][]runtimeSemanticManifestValidationEntry
 	catalogs          map[string][]runtimeSemanticCatalogValidationEntry
 	workScopes        []runtimeWorkScopeValidationEntry
@@ -860,9 +865,8 @@ type runtimeSemanticValidationSession struct {
 	workRounds        []RuntimeImplementationWorkRound
 	workStates        []RuntimeStateRecord
 	definitionSources []runtimeSemanticDefinitionSourceEntry
-	// Only the owner-private cross-event compiler enables retired-generation
-	// results. Public validators always retain their complete independent path.
-	ownerHistory *runtimeOwnerHistoricalSemanticCompiler
+	definitionProofs  []runtimeDefinitionProofCompilation
+	candidateSources  *runtimeCandidateSourceCompiler
 }
 
 func newRuntimeSemanticValidationSession() *runtimeSemanticValidationSession {
@@ -886,8 +890,10 @@ func validateRuntimeSemanticPlanManifestInSession(m RuntimeSemanticPlanManifest,
 		return runtimeValidatedSemanticManifest{}, err
 	}
 	manifestKey := strings.TrimSpace(m.Hash)
-	for _, entry := range session.manifests[manifestKey] {
+	for i := range session.manifests[manifestKey] {
+		entry := &session.manifests[manifestKey][i]
 		if runtimeRawEqual(entry.raw, m) {
+			entry.used = true
 			return entry.validated, nil
 		}
 	}
@@ -1110,42 +1116,33 @@ func validateRuntimeSemanticPlanManifestInSession(m RuntimeSemanticPlanManifest,
 		ownerCatalogByOwner: ownerCatalogs, dependencyCatalogByOwner: dependencyCatalogs,
 		documents: &runtimeSemanticDocumentValidationSession{},
 	}
-	session.manifests[manifestKey] = append(session.manifests[manifestKey], runtimeSemanticManifestValidationEntry{raw: cloneRuntimeSemanticPlanManifestRaw(rawManifest), validated: validated})
+	session.manifests[manifestKey] = append(session.manifests[manifestKey], runtimeSemanticManifestValidationEntry{raw: cloneRuntimeSemanticPlanManifestRaw(rawManifest), validated: validated, used: true})
 	return validated, nil
 }
 
 func validateRuntimeSemanticOwnerCatalogCollectionInSession(catalogs []RuntimeOperationAdmissibility, session *runtimeSemanticValidationSession) ([]RuntimeOperationAdmissibility, error) {
-	normalized := make([]RuntimeOperationAdmissibility, 0, len(catalogs))
-	seenPrerequisites := make(map[string]struct{}, len(catalogs))
-	seenOwners := make(map[string]struct{}, len(catalogs))
-	for _, raw := range catalogs {
-		value, err := validateRuntimeAdmissibilityInSemanticSession(raw, session)
-		if err != nil {
-			return nil, fmt.Errorf("runtime semantic owner catalogs: %w", err)
-		}
-		if _, duplicate := seenPrerequisites[value.PrerequisiteID]; duplicate {
-			return nil, fmt.Errorf("runtime semantic owner catalogs: runtime operation admissibility duplicates prerequisite %q", value.PrerequisiteID)
-		}
-		seenPrerequisites[value.PrerequisiteID] = struct{}{}
-		if _, duplicate := seenOwners[value.OwnerModuleID]; duplicate {
-			return nil, fmt.Errorf("runtime semantic owner catalogs duplicate owner %q", value.OwnerModuleID)
-		}
-		seenOwners[value.OwnerModuleID] = struct{}{}
-		normalized = append(normalized, value)
-	}
-	sort.SliceStable(normalized, func(i, j int) bool {
-		if normalized[i].PrerequisiteID != normalized[j].PrerequisiteID {
-			return normalized[i].PrerequisiteID < normalized[j].PrerequisiteID
-		}
-		return normalized[i].OwnerModuleID < normalized[j].OwnerModuleID
-	})
-	return nilIfEmpty(normalized), nil
+	return compileRuntimeCatalogCollectionInSession(catalogs, session, runtimeSemanticCatalogCollection)
 }
 
 func validateRuntimeAdmissibilityInSemanticSession(raw RuntimeOperationAdmissibility, session *runtimeSemanticValidationSession) (RuntimeOperationAdmissibility, error) {
+	if session == nil {
+		return validateAndNormalizeRuntimeOperationAdmissibility(raw)
+	}
+	// An unchanged catalog is an already admitted owner input, independent
+	// of unrelated Facts changes. Its normal form is a pure read projection;
+	// new or changed bodies still enter the full catalog gate below.
+	if previous := session.committedPreimage; previous != nil {
+		for _, catalog := range previous.Facts.Resources.OperationAdmissibilities {
+			if catalog.SnapshotID == raw.SnapshotID && runtimeRawEqual(catalog, raw) {
+				return raw.Normalized(), nil
+			}
+		}
+	}
 	key := strings.TrimSpace(raw.SnapshotID)
-	for _, entry := range session.catalogs[key] {
+	for i := range session.catalogs[key] {
+		entry := &session.catalogs[key][i]
 		if runtimeRawEqual(entry.raw, raw) {
+			entry.used = true
 			return entry.normalized, nil
 		}
 	}
@@ -1153,7 +1150,7 @@ func validateRuntimeAdmissibilityInSemanticSession(raw RuntimeOperationAdmissibi
 	if err != nil {
 		return RuntimeOperationAdmissibility{}, err
 	}
-	session.catalogs[key] = append(session.catalogs[key], runtimeSemanticCatalogValidationEntry{raw: cloneRuntimeOperationAdmissibilityRaw(raw), normalized: value})
+	session.catalogs[key] = append(session.catalogs[key], runtimeSemanticCatalogValidationEntry{raw: cloneRuntimeOperationAdmissibilityRaw(raw), normalized: value, used: true})
 	return value, nil
 }
 
@@ -1524,7 +1521,7 @@ func validateRuntimeSemanticManifestDefinitionInSession(manifest RuntimeSemantic
 			return fmt.Errorf("runtime semantic manifest proof obligation coverage %q has no immutable Definition focus", actual.CoverageWorkItemID)
 		}
 		if actual.ImplementationWork != nil {
-			expectedBase, compileErr := compileRuntimeSemanticDefinitionProofObligation(manifest.DefinitionRevision, item, source)
+			expectedBase, compileErr := compileRuntimeDefinitionProofInSession(manifest.DefinitionRevision, item, source, session)
 			if compileErr != nil {
 				return compileErr
 			}
@@ -1544,11 +1541,12 @@ func validateRuntimeSemanticManifestDefinitionInSession(manifest RuntimeSemantic
 				}
 				proofCatalogs = &validated
 			}
-			recompiled, compileErr := compileRuntimeSemanticProofObligationsWithValidatedCatalogs(
+			recompiled, compileErr := compileRuntimeSemanticProofObligationsWithCatalogsInSession(
 				manifest.DefinitionRevision,
 				map[common.CoverageWorkItemID]RuntimeDefinitionFocus{item.ID: source},
 				[]RuntimeCoverageItem{item},
 				*proofCatalogs,
+				session,
 			)
 			if compileErr != nil {
 				return fmt.Errorf("runtime semantic manifest Definition proof obligation coverage %q: %w", actual.CoverageWorkItemID, compileErr)
@@ -1564,7 +1562,7 @@ func validateRuntimeSemanticManifestDefinitionInSession(manifest RuntimeSemantic
 		// declaration directly and verify that the selected repair route comes
 		// from the Profile convergence; never feed the obligation back into the
 		// Definition compiler as self-attestation.
-		expectedBase, compileErr := compileRuntimeSemanticDefinitionProofObligation(manifest.DefinitionRevision, item, source)
+		expectedBase, compileErr := compileRuntimeDefinitionProofInSession(manifest.DefinitionRevision, item, source, session)
 		if compileErr != nil {
 			return fmt.Errorf("runtime semantic manifest repair Definition proof obligation coverage %q: %w", actual.CoverageWorkItemID, compileErr)
 		}
@@ -1642,7 +1640,7 @@ func StableRuntimeSemanticGenerationID(manifestHash, logicalRequestID string) st
 	if manifestHash == "" || logicalRequestID == "" {
 		return ""
 	}
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-semantic-generation")
 	writeHashString(h, manifestHash)
 	writeHashString(h, logicalRequestID)
@@ -1879,8 +1877,12 @@ func validateRuntimeSemanticPlanDocumentAgainstValidatedManifest(d RuntimeSemant
 	if session == nil || len(session.values) != 0 && !runtimeRawEqual(session.manifest, validated.manifest) {
 		return validateRuntimeSemanticPlanDocumentAgainstValidatedManifestUncached(d, validated)
 	}
-	for _, previous := range session.values {
+	for i, previous := range session.values {
 		if runtimeRawEqual(previous, d) {
+			for len(session.used) < len(session.values) {
+				session.used = append(session.used, false)
+			}
+			session.used[i] = true
 			return nil
 		}
 	}
@@ -1891,6 +1893,10 @@ func validateRuntimeSemanticPlanDocumentAgainstValidatedManifest(d RuntimeSemant
 		session.manifest = cloneRuntimeSemanticPlanManifestRaw(validated.manifest)
 	}
 	session.values = append(session.values, cloneRuntimeSemanticPlanDocumentRaw(d))
+	for len(session.used) < len(session.values)-1 {
+		session.used = append(session.used, false)
+	}
+	session.used = append(session.used, true)
 	return nil
 }
 
@@ -2168,7 +2174,7 @@ func StableRuntimeSemanticPlanDocumentHash(document RuntimeSemanticPlanDocument)
 // order without treating it as an authority decision.
 func StableRuntimeSemanticPlanCoverageOrderHash(document RuntimeSemanticPlanDocument) string {
 	document = document.Normalized()
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-semantic-plan-coverage-order")
 	for _, id := range document.CoverageOrder {
 		writeHashString(h, string(id))
@@ -2450,6 +2456,9 @@ const (
 	// coverage order were accepted. The next generation must recompile the
 	// complete closure; the old provider order is audit lineage only.
 	RuntimeSemanticPlanningRetirementEligibleClosureChanged RuntimeSemanticPlanningRetirementReason = "eligible_closure_changed"
+	// An ordinary generation's complete execution focus was consumed. Other
+	// ready branches retain all original obligations and need a fresh manifest.
+	RuntimeSemanticPlanningRetirementFrontierCompleted      RuntimeSemanticPlanningRetirementReason = "planning_frontier_completed"
 	RuntimeSemanticPlanningRetirementImplementationPurpose  RuntimeSemanticPlanningRetirementReason = "implementation_purpose_selected"
 	RuntimeSemanticPlanningRetirementInputReviewInformation RuntimeSemanticPlanningRetirementReason = "input_review_information"
 	RuntimeSemanticPlanningRetirementInputRevision          RuntimeSemanticPlanningRetirementReason = "input_review_revision"
@@ -2553,8 +2562,12 @@ func (g RuntimeSemanticFeasibilityGap) Validate() error {
 // append history because they are still covered by the same retirement
 // snapshot.  This keeps request-session identity and generation identity
 // separate without allowing retired authority to be reused.
+// A structural maintenance source has no semantic request: its identity is the
+// original owner observation ID and exact requirement hash, and its Required
+// snapshot retains the same immutable Definition seed.
 type RuntimeSemanticPlanningGeneration struct {
-	InputReviewResolutionID common.ResolutionID `json:",omitempty"`
+	InputReviewResolutionID common.ResolutionID             `json:",omitempty"`
+	OwnerInputRevision      *RuntimeValidationInputRevision `json:",omitempty"`
 	RetiredAtStateRevision  uint64
 	Reason                  RuntimeSemanticPlanningRetirementReason
 	InvalidationSignatures  []string
@@ -2565,7 +2578,7 @@ type RuntimeSemanticPlanningGeneration struct {
 	ReopenedCoverageIDs []common.CoverageWorkItemID
 	ReopenTriggerRefs   []string
 	// ChangedCoverageIDs and ClosureChangeTriggerRefs bind an eligibility
-	// change to the exact settled prerequisite binding facts that unlocked it.
+	// change to exact prerequisite bindings or a completed ordinary frontier.
 	// They do not select the next focus or grant proof authority.
 	ChangedCoverageIDs       []common.CoverageWorkItemID
 	ClosureChangeTriggerRefs []string
@@ -2574,6 +2587,7 @@ type RuntimeSemanticPlanningGeneration struct {
 
 func (g RuntimeSemanticPlanningGeneration) Normalized() RuntimeSemanticPlanningGeneration {
 
+	g.OwnerInputRevision = g.OwnerInputRevision.Clone()
 	g.Reason = RuntimeSemanticPlanningRetirementReason(strings.TrimSpace(string(g.Reason)))
 	g.InvalidationSignatures = normalizeStrings(g.InvalidationSignatures)
 	g.PrerequisiteIDs = normalizeStrings(g.PrerequisiteIDs)
@@ -2602,22 +2616,10 @@ func (g RuntimeSemanticPlanningGeneration) Validate() error {
 }
 
 func validateRuntimeSemanticPlanningGenerationNormalized(raw, g RuntimeSemanticPlanningGeneration, session *runtimeSemanticValidationSession) error {
-	if session.ownerHistory != nil {
-		for _, entry := range session.ownerHistory.generations {
-			if runtimeRawEqual(entry.raw, raw) && runtimeRawEqual(entry.normalized, g) {
-				return nil
-			}
-		}
+	if session.committedGeneration(raw) && runtimeRawEqual(raw, g) {
+		return nil
 	}
-	if err := validateRuntimeSemanticPlanningGenerationComplete(raw, g, session); err != nil {
-		return err
-	}
-	if session.ownerHistory != nil {
-		session.ownerHistory.generations = append(session.ownerHistory.generations, runtimeOwnerHistoricalGeneration{
-			raw: cloneRuntimeSemanticPlanningGenerationRaw(raw), normalized: cloneRuntimeSemanticPlanningGenerationRaw(g),
-		})
-	}
-	return nil
+	return validateRuntimeSemanticPlanningGenerationComplete(raw, g, session)
 }
 
 func validateRuntimeSemanticPlanningGenerationComplete(raw, g RuntimeSemanticPlanningGeneration, session *runtimeSemanticValidationSession) error {
@@ -2639,7 +2641,7 @@ func validateRuntimeSemanticPlanningGenerationComplete(raw, g RuntimeSemanticPla
 		if g.InputReviewResolutionID != "" || len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 || len(g.ChangedCoverageIDs) != 0 || len(g.ClosureChangeTriggerRefs) != 0 {
 			return fmt.Errorf("input revision retirement cannot carry unrelated authority")
 		}
-		if _, err := CompileRuntimeValidationInputRevision(g.Snapshot); err != nil {
+		if _, err := CompileRuntimeValidationInputRevisionGeneration(g); err != nil {
 			return err
 		}
 	case RuntimeSemanticPlanningRetirementInputReviewInformation:
@@ -2654,9 +2656,12 @@ func validateRuntimeSemanticPlanningGenerationComplete(raw, g RuntimeSemanticPla
 		if len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) == 0 || len(g.ReopenTriggerRefs) == 0 || len(g.ChangedCoverageIDs) != 0 || len(g.ClosureChangeTriggerRefs) != 0 {
 			return fmt.Errorf("runtime semantic CWI reopen retirement requires only CWI lineage")
 		}
-	case RuntimeSemanticPlanningRetirementEligibleClosureChanged:
+	case RuntimeSemanticPlanningRetirementEligibleClosureChanged, RuntimeSemanticPlanningRetirementFrontierCompleted:
 		if len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 || len(g.ChangedCoverageIDs) == 0 || len(g.ClosureChangeTriggerRefs) == 0 {
 			return fmt.Errorf("runtime semantic eligible-closure retirement requires only closure-change lineage")
+		}
+		if g.Reason == RuntimeSemanticPlanningRetirementFrontierCompleted && (g.Snapshot.Phase != RuntimeSemanticPlanningSealed || len(g.Snapshot.PendingCoverageIDs) != 0) {
+			return fmt.Errorf("runtime semantic frontier retirement requires a completely sealed frontier")
 		}
 	default:
 		return fmt.Errorf("runtime semantic planning generation has unsupported retirement reason %q", g.Reason)
@@ -2666,6 +2671,12 @@ func validateRuntimeSemanticPlanningGenerationComplete(raw, g RuntimeSemanticPla
 	}
 	if g.Snapshot.History != nil || g.Snapshot.HistoryArchive != nil {
 		return fmt.Errorf("runtime semantic planning generation snapshot must not contain nested history")
+	}
+	if g.OwnerInputRevision != nil {
+		if g.Reason != RuntimeSemanticPlanningRetirementInputRevision || g.OwnerInputRevision.OwnerObservation == nil || g.Snapshot.Phase != RuntimeSemanticPlanningRequired || g.Snapshot.Manifest != nil || g.Snapshot.DefinitionSeed.Hash != g.OwnerInputRevision.DefinitionSeedHash {
+			return fmt.Errorf("owner input revision requires only its exact observation and required semantic snapshot")
+		}
+		return validateRuntimeSemanticPlanningLedgerNormalized(raw.Snapshot, g.Snapshot, session)
 	}
 	if g.Snapshot.Phase == RuntimeSemanticPlanningRequired || g.Snapshot.Phase == RuntimeSemanticPlanningFailed {
 		return fmt.Errorf("runtime semantic planning generation snapshot is not an active semantic generation")
@@ -2692,7 +2703,7 @@ func validateRuntimeSemanticPlanningGenerationComplete(raw, g RuntimeSemanticPla
 			return fmt.Errorf("runtime semantic planning generation prerequisite %q is outside snapshot manifest", prerequisiteID)
 		}
 	}
-	if g.Reason == RuntimeSemanticPlanningRetirementCWIReopened || g.Reason == RuntimeSemanticPlanningRetirementBindingContradiction || g.Reason == RuntimeSemanticPlanningRetirementEligibleClosureChanged {
+	if g.Reason == RuntimeSemanticPlanningRetirementCWIReopened || g.Reason == RuntimeSemanticPlanningRetirementBindingContradiction || g.Reason == RuntimeSemanticPlanningRetirementEligibleClosureChanged || g.Reason == RuntimeSemanticPlanningRetirementFrontierCompleted {
 		seedCoverage := make(map[common.CoverageWorkItemID]struct{}, len(g.Snapshot.DefinitionSeed.CoverageItems))
 		for _, item := range g.Snapshot.DefinitionSeed.CoverageItems {
 			seedCoverage[item.ID] = struct{}{}
@@ -2769,6 +2780,14 @@ func NewRuntimeSemanticPlanningLedger(seed RuntimeDefinitionSeed) (RuntimeSemant
 }
 
 func (l RuntimeSemanticPlanningLedger) Normalized() RuntimeSemanticPlanningLedger {
+	return l.normalizedForValidation(nil)
+}
+
+// Only the private validator may borrow a retained generation. It consumes
+// history read-only and never returns this graph. Public Normalized/Clone must
+// still detach every generation. The complete ledger and cross-generation
+// gates run below on every invocation, including a normalization hit.
+func (l RuntimeSemanticPlanningLedger) normalizedForValidation(session *runtimeSemanticValidationSession) RuntimeSemanticPlanningLedger {
 	l.SchemaVersion = strings.TrimSpace(l.SchemaVersion)
 	l.Phase = RuntimeSemanticPlanningPhase(strings.TrimSpace(string(l.Phase)))
 	l.DefinitionSeed = l.DefinitionSeed.Clone()
@@ -2835,7 +2854,7 @@ func (l RuntimeSemanticPlanningLedger) Normalized() RuntimeSemanticPlanningLedge
 				if segment != nil {
 					archive.Segments[i] = make([]RuntimeSemanticPlanningGeneration, len(segment))
 					for j, generation := range segment {
-						archive.Segments[i][j] = generation.Clone()
+						archive.Segments[i][j] = normalizeRuntimeSemanticGenerationForValidation(generation, session)
 					}
 				}
 			}
@@ -2846,7 +2865,7 @@ func (l RuntimeSemanticPlanningLedger) Normalized() RuntimeSemanticPlanningLedge
 	if len(l.History) > 0 {
 		values := make([]RuntimeSemanticPlanningGeneration, 0, len(l.History))
 		for _, value := range l.History {
-			values = append(values, value.Normalized())
+			values = append(values, normalizeRuntimeSemanticGenerationForValidation(value, session))
 		}
 		// History is append-only semantic lineage. Preserve its order; sorting
 		// would turn a causal chain into a presentation list.
@@ -2895,6 +2914,12 @@ func (l RuntimeSemanticPlanningLedger) Clone() RuntimeSemanticPlanningLedger {
 	return l
 }
 
+// CloneRaw detaches a committed ledger without canonicalizing accepted results.
+// New-input compilation uses Normalized; mutation and recovery keep originals.
+func (l RuntimeSemanticPlanningLedger) CloneRaw() RuntimeSemanticPlanningLedger {
+	return cloneRuntimeSemanticPlanningLedgerRaw(l)
+}
+
 func normalizeRuntimeSemanticPlanBatches(values []RuntimeSemanticPlanBatch) []RuntimeSemanticPlanBatch {
 	ret := make([]RuntimeSemanticPlanBatch, 0, len(values))
 	for _, value := range values {
@@ -2940,7 +2965,9 @@ func validateRuntimeSemanticPlanningLedger(l RuntimeSemanticPlanningLedger) erro
 
 func validateRuntimeSemanticPlanningLedgerInSession(l RuntimeSemanticPlanningLedger, session *runtimeSemanticValidationSession) error {
 	raw := l
-	return validateRuntimeSemanticPlanningLedgerNormalized(raw, l.Normalized(), session)
+	return runtimeProcessingRegion("semantic_ledger", func() error {
+		return validateRuntimeSemanticPlanningLedgerNormalized(raw, l.normalizedForValidation(session), session)
+	})
 }
 
 func validateRuntimeSemanticPlanningLedgerNormalized(raw, l RuntimeSemanticPlanningLedger, session *runtimeSemanticValidationSession) error {
@@ -2985,7 +3012,7 @@ func validateRuntimeSemanticPlanningLedgerNormalized(raw, l RuntimeSemanticPlann
 		if history.Snapshot.DefinitionSeed.Hash != l.DefinitionSeed.Hash {
 			return fmt.Errorf("runtime semantic planning history %d definition seed mismatch", idx)
 		}
-		if lastRetiredRevision != 0 && history.RetiredAtStateRevision <= lastRetiredRevision {
+		if lastRetiredRevision != 0 && (history.RetiredAtStateRevision < lastRetiredRevision || (history.RetiredAtStateRevision == lastRetiredRevision && (history.OwnerInputRevision == nil || idx == 0 || rawHistory[idx-1].OwnerInputRevision != nil))) {
 			return fmt.Errorf("runtime semantic planning history is not append ordered")
 		}
 		lastRetiredRevision = history.RetiredAtStateRevision
@@ -3000,7 +3027,13 @@ func validateRuntimeSemanticPlanningLedgerNormalized(raw, l RuntimeSemanticPlann
 		// second history entry.  A later request with the same catalog hash is
 		// allowed only when it has a distinct logical identity (resource rollback
 		// recovery); it cannot reuse the old snapshot's request/session lineage.
-		identity := generationIdentity{manifestHash: history.Snapshot.Manifest.Hash, logicalRequestID: history.Snapshot.LogicalRequestID}
+		identity := generationIdentity{}
+		if history.OwnerInputRevision != nil {
+			identity.manifestHash = history.OwnerInputRevision.OwnerObservation.Observation.ObservationID
+			identity.logicalRequestID = history.OwnerInputRevision.Binding.RequirementHash
+		} else {
+			identity = generationIdentity{manifestHash: history.Snapshot.Manifest.Hash, logicalRequestID: history.Snapshot.LogicalRequestID}
+		}
 		if _, duplicate := seenHistory[identity]; duplicate {
 			return fmt.Errorf("runtime semantic planning history duplicates generation %q", identity)
 		}
@@ -3655,7 +3688,7 @@ func validateRuntimeSemanticPendingAfterCompleted(l RuntimeSemanticPlanningLedge
 func StableRuntimeSemanticFeasibilityBatchID(manifest RuntimeSemanticPlanManifest, document RuntimeSemanticPlanDocument) string {
 	manifest = manifest.Normalized()
 	document = document.Normalized()
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-semantic-feasibility-batch")
 	writeHashString(h, manifest.Hash)
 	writeHashString(h, StableRuntimeSemanticPlanDocumentHash(document))
@@ -3670,7 +3703,7 @@ func StableRuntimeSemanticCorrectionObservationHash(observation RuntimeSemanticC
 	if observation.Validate() != nil {
 		return ""
 	}
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-semantic-correction-observation/v1")
 	writeHashString(h, observation.SchemaVersion)
 	writeHashString(h, observation.OwnerModuleID)
@@ -3712,7 +3745,7 @@ func StableRuntimeSemanticFeasibilitySetHash(values []RuntimeSemanticProofFeasib
 	if len(values) == 0 {
 		return ""
 	}
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-semantic-feasibility-set")
 	for _, value := range values {
 		writeHashString(h, value.ManifestHash)
@@ -3881,7 +3914,7 @@ func StableRuntimeSemanticCWIProofSetHash(coverageID common.CoverageWorkItemID, 
 	sort.SliceStable(values, func(i, j int) bool {
 		return StableRuntimeSemanticProofProposalHash(values[i]) < StableRuntimeSemanticProofProposalHash(values[j])
 	})
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-semantic-cwi-proof-set")
 	writeHashString(h, string(coverageID))
 	for _, proposal := range values {

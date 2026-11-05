@@ -203,6 +203,48 @@ func ValidateRuntimeEvidenceApplicabilityObservationSource(o RuntimeEvidenceAppl
 	return nil
 }
 
+// runtimeEvidenceApplicability is a call-local query result, never a retained
+// owner admission or credit. One pass joins the original fact to all applicable
+// observations. A later current observation cannot erase an earlier stale one.
+type runtimeEvidenceApplicability struct {
+	stale, observed, atRevision, fresh bool
+}
+
+func queryRuntimeEvidenceApplicability(fact EvidenceFact, observations []RuntimeEvidenceApplicabilityObservation, cutoff, reconciliationRequestHash string) runtimeEvidenceApplicability {
+	var result runtimeEvidenceApplicability
+	var factHash string
+	for _, observation := range observations {
+		if observation.Request.SourceEvidenceID != fact.ID || (cutoff != "" && observation.Request.EvidenceRevision > cutoff) {
+			continue
+		}
+		// Hash the complete original fact once, only if an observation can
+		// consume it. No digest substitutes for owner source admission.
+		if factHash == "" {
+			factHash = StableRuntimeEvidenceFactHash(fact)
+		}
+		if observation.Request.SourceEvidenceHash != factHash {
+			continue
+		}
+		if observation.Missing || observation.CurrentDependencies == nil {
+			result.stale = true
+			return result
+		}
+		matches, err := RuntimeOwnerRevisionSetMatchesCurrent(fact.ApplicabilityDependencies.OwnerRevisionSet, *observation.CurrentDependencies)
+		if err != nil || !matches {
+			result.stale = true
+			return result
+		}
+		result.observed = true
+		if observation.Request.EvidenceRevision == cutoff {
+			result.atRevision = true
+			if observation.Request.ReconciliationRequestHash == reconciliationRequestHash {
+				result.fresh = true
+			}
+		}
+	}
+	return result
+}
+
 // RuntimeEvidenceHasStaleApplicability is a pure audit predicate. Missing
 // observations do not prove currentness. Once an exact source was observed
 // stale, a later byte restoration cannot silently revive its old credit.
@@ -210,22 +252,7 @@ func RuntimeEvidenceHasStaleApplicability(fact EvidenceFact, observations []Runt
 	if fact.ApplicabilityDependencies == nil {
 		return false
 	}
-	for _, observation := range observations {
-		if observation.Request.SourceEvidenceID != fact.ID || observation.Request.SourceEvidenceHash != StableRuntimeEvidenceFactHash(fact) || (cutoff != "" && observation.Request.EvidenceRevision > cutoff) {
-			continue
-		}
-		if observation.Missing {
-			return true
-		}
-		if observation.CurrentDependencies == nil {
-			return true
-		}
-		matches, err := RuntimeOwnerRevisionSetMatchesCurrent(fact.ApplicabilityDependencies.OwnerRevisionSet, *observation.CurrentDependencies)
-		if err != nil || !matches {
-			return true
-		}
-	}
-	return false
+	return queryRuntimeEvidenceApplicability(fact, observations, cutoff, "").stale
 }
 
 // Evidence with resource dependencies requires an actual matching SM-2 owner
@@ -235,16 +262,8 @@ func RuntimeEvidenceHasObservedCurrentApplicability(fact EvidenceFact, observati
 	if fact.ApplicabilityDependencies == nil {
 		return true
 	}
-	if RuntimeEvidenceHasStaleApplicability(fact, observations, cutoff) {
-		return false
-	}
-	for _, observation := range observations {
-		if observation.Request.SourceEvidenceID == fact.ID && observation.Request.SourceEvidenceHash == StableRuntimeEvidenceFactHash(fact) &&
-			(cutoff == "" || observation.Request.EvidenceRevision <= cutoff) && !observation.Missing && observation.CurrentDependencies != nil {
-			return true
-		}
-	}
-	return false
+	result := queryRuntimeEvidenceApplicability(fact, observations, cutoff, "")
+	return !result.stale && result.observed
 }
 
 // RuntimeEvidenceHasFreshApplicability is the consumption fence, not the
@@ -255,20 +274,11 @@ func RuntimeEvidenceHasFreshApplicability(fact EvidenceFact, observations []Runt
 	if fact.ApplicabilityDependencies == nil {
 		return true
 	}
-	if evidenceRevision == "" || RuntimeEvidenceHasStaleApplicability(fact, observations, evidenceRevision) {
+	if evidenceRevision == "" {
 		return false
 	}
-	for _, observation := range observations {
-		if observation.Request.SourceEvidenceID == fact.ID && observation.Request.SourceEvidenceHash == StableRuntimeEvidenceFactHash(fact) &&
-			observation.Request.EvidenceRevision == evidenceRevision && observation.Request.ReconciliationRequestHash == reconciliationRequestHash &&
-			!observation.Missing && observation.CurrentDependencies != nil {
-			matches, err := RuntimeOwnerRevisionSetMatchesCurrent(fact.ApplicabilityDependencies.OwnerRevisionSet, *observation.CurrentDependencies)
-			if err == nil && matches {
-				return true
-			}
-		}
-	}
-	return false
+	result := queryRuntimeEvidenceApplicability(fact, observations, evidenceRevision, reconciliationRequestHash)
+	return !result.stale && result.fresh
 }
 
 // Facts-only proof predicates have no reconciliation ledger authority. Require
@@ -278,27 +288,49 @@ func RuntimeEvidenceHasObservedApplicabilityAtRevision(fact EvidenceFact, observ
 	if fact.ApplicabilityDependencies == nil {
 		return true
 	}
+	if evidenceRevision == "" {
+		return false
+	}
+	// No exact-revision candidate means this query cannot succeed. Preserve
+	// the original cheap negative path before hashing any earlier evidence.
+	required := false
 	for _, observation := range observations {
-		if observation.Request.SourceEvidenceID == fact.ID && observation.Request.EvidenceRevision == evidenceRevision &&
-			RuntimeEvidenceHasFreshApplicability(fact, observations, evidenceRevision, observation.Request.ReconciliationRequestHash) {
-			return true
+		if observation.Request.SourceEvidenceID == fact.ID && observation.Request.EvidenceRevision == evidenceRevision {
+			required = true
+			break
 		}
 	}
-	return false
+	if !required {
+		return false
+	}
+	result := queryRuntimeEvidenceApplicability(fact, observations, evidenceRevision, "")
+	return !result.stale && result.atRevision
 }
 
 func ValidateRuntimeEvidenceApplicabilityObservations(facts RuntimeFacts, receipts []RuntimeOperationReceipt, stateRevision uint64, ledger RuntimeCWIReconciliationLedger) error {
+	return validateRuntimeEvidenceApplicabilityObservationTransition(facts, receipts, stateRevision, ledger, nil)
+}
+
+// A formal preimage already owns the source judgment of its exact observations.
+// The enclosing committed-history gate protects original evidence and receipts;
+// collection, current revision and reconciliation-reference gates still run.
+// New or changed observations must prove their complete source independently.
+func validateRuntimeEvidenceApplicabilityObservationTransition(facts RuntimeFacts, receipts []RuntimeOperationReceipt, stateRevision uint64, ledger RuntimeCWIReconciliationLedger, previous *RuntimeStateRecord) error {
 	if len(facts.EvidenceApplicabilityObservations) > RuntimeEvidenceApplicabilityObservationLimit {
 		return fmt.Errorf("evidence applicability observation ledger exceeds bound")
 	}
 	seen := make(map[string]bool)
 	var prior uint64
-	for _, observation := range facts.EvidenceApplicabilityObservations {
+	for index, observation := range facts.EvidenceApplicabilityObservations {
 		if observation.RecordedAtStateRevision <= prior || observation.RecordedAtStateRevision > stateRevision || observation.Request.EvidenceRevision > facts.EvidenceRevision || seen[observation.Request.RequestID] {
 			return fmt.Errorf("evidence applicability observation ledger has stale/duplicate/reordered fence")
 		}
-		if err := ValidateRuntimeEvidenceApplicabilityObservationSource(observation, facts, receipts); err != nil {
-			return err
+		committed := previous != nil && index < len(previous.Facts.EvidenceApplicabilityObservations) &&
+			reflect.DeepEqual(observation, previous.Facts.EvidenceApplicabilityObservations[index])
+		if !committed {
+			if err := ValidateRuntimeEvidenceApplicabilityObservationSource(observation, facts, receipts); err != nil {
+				return err
+			}
 		}
 		if observation.Request.ReconciliationRequestHash != "" {
 			found := false

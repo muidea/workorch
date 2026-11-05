@@ -1,0 +1,8 @@
+package events
+
+import rc "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+
+type InspectRuntimeValidationInputStructureCommand rc.RuntimeValidationInputStructureRequest
+type InspectRuntimeValidationInputStructureResult struct {
+	Observation rc.RuntimeValidationInputStructureObservation
+}

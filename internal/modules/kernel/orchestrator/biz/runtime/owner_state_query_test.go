@@ -29,6 +29,19 @@ func (r *ownerQueryTestRepository) LoadOwnerStateOriginal(context.Context, commo
 	return r.raw.Clone(), r.aggregate.CloneRaw(), r.err
 }
 
+// This explicit unaccepted-snapshot audit fixture owns its cold admission.
+// Production repositories obtain committed records from Run instead.
+func (r *ownerQueryTestRepository) Load(ctx context.Context, w common.WorkspaceID, id common.RunID) (RuntimeAggregate, error) {
+	record, a, err := r.LoadOwnerStateOriginal(ctx, w, id)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err = independentOwnerStateImage(&record, a); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return a, nil
+}
+
 func TestOwnerQueryReloadMatchesIndependentOrderedGates(t *testing.T) {
 	for _, arm := range []string{"valid", "raw header", "raw scope", "converted header", "seed", "coverage", "budget", "dispatch", "owner before", "owner after", "nil empty", "first error"} {
 		t.Run(arm, func(t *testing.T) {
@@ -51,7 +64,7 @@ func TestOwnerQueryReloadMatchesIndependentOrderedGates(t *testing.T) {
 					case "budget":
 						r.aggregate.ExecutionBudget.Policy.PolicyRevision = "drift"
 					case "dispatch":
-						r.aggregate.CompletedDispatches = append(r.aggregate.CompletedDispatches, SealedDispatch{})
+						r.aggregate.CompletedDispatches = append(r.aggregate.CompletedDispatches, runtimecontract.RuntimeDispatchRecord{})
 					case "owner before":
 						r.aggregate.Decision.AuthoritySnapshot.RunID = "other"
 					case "owner after":
@@ -66,16 +79,13 @@ func TestOwnerQueryReloadMatchesIndependentOrderedGates(t *testing.T) {
 				if call == 2 {
 					r.raw, r.aggregate = runtimeStateRecordForTerminalNonterminalRecoveryTest(t, a), a.CloneRaw()
 				}
-				if call == 3 {
-					c.ReleaseHistoricalCompilation()
-				}
 				beforeR, beforeA := r.raw.Clone(), r.aggregate.CloneRaw()
 				got, err := c.Load(context.Background(), a.Facts.WorkspaceID, a.Facts.RunID)
 				want := independentOwnerStateImage(&r.raw, r.aggregate)
 				if fmt.Sprint(err) != fmt.Sprint(want) {
 					t.Fatalf("call %d: %v != %v", call, err, want)
 				}
-				if err == nil && !reflect.DeepEqual(got, r.aggregate) {
+				if err == nil && !reflect.DeepEqual(ownerStateRecord(got), ownerStateRecord(r.aggregate)) {
 					t.Fatal("query changed complete result")
 				}
 				if err != nil && !reflect.DeepEqual(got, RuntimeAggregate{}) {
@@ -180,7 +190,7 @@ func TestOwnerQueryAndEventShareOnlyPureHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := c.Load(ctx, a.Facts.WorkspaceID, a.Facts.RunID)
-	if err != nil || got.StateRevision != a.StateRevision+1 || r.loads != 3 || r.rereads != 1 || r.saves != 1 {
+	if err != nil || got.StateRevision != a.StateRevision+1 || r.loads != 3 || r.rereads != 0 || r.saves != 1 {
 		t.Fatalf("query/event/CAS: %v", err)
 	}
 	r.previous.Decision.AuthoritySnapshot.RunID = "wrong-current-owner"

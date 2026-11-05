@@ -214,7 +214,7 @@ func findExecutionEvidenceCredit(bindings []runtimecontract.CoverageEvidenceBind
 // terminal proof. All other no-credit findings keep the ordinary mismatch
 // semantics.
 func confirmedRepairCausationOnlyBinding(
-	dispatch SealedDispatch,
+	dispatch runtimecontract.RuntimeDispatchRecord,
 	bindings []runtimecontract.CoverageEvidenceBinding,
 	operation runtimecontract.RuntimeOperation,
 	evidenceKind string,

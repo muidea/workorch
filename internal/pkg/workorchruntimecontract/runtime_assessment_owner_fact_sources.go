@@ -16,6 +16,22 @@ type RuntimeAssessmentOwnerFactSource struct {
 	OwnerRevisionSet  *RuntimeOwnerRevisionSet `json:",omitempty"`
 }
 
+// The selector identifies the original read, independently of its observed
+// value. Consumers can check this identity without observing or judging the
+// historical postcondition again.
+func runtimeAssessmentOwnerFactSelectorHash(workspace string, requirement RuntimeOwnerFactRequirement) (string, error) {
+	selector := struct {
+		WorkspaceID string
+		Requirement RuntimeOwnerFactRequirement
+	}{workspace, requirement}
+	body, err := json.Marshal(selector)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(append([]byte("runtime-assessment-owner-fact-selector/v1\x00"), body...))
+	return hex.EncodeToString(digest[:]), nil
+}
+
 func cloneRuntimeAssessmentOwnerFactSources(values []RuntimeAssessmentOwnerFactSource) []RuntimeAssessmentOwnerFactSource {
 	return cloneRuntimeStateRawSlice(values, func(value RuntimeAssessmentOwnerFactSource) RuntimeAssessmentOwnerFactSource {
 		value.OwnerRevisionSet = CloneRuntimeOwnerRevisionSet(value.OwnerRevisionSet)
@@ -74,18 +90,12 @@ func deriveRuntimeAssessmentOwnerFactSourcesInSession(definition string, workspa
 				continue
 			}
 			// 来源 snapshot 独立保全；依赖 revision 只绑定 postcondition 读取的字段，不使用整 catalog hash。
-			selector := struct {
-				WorkspaceID string
-				Requirement RuntimeOwnerFactRequirement
-			}{workspace, requirement}
-			body, err := json.Marshal(selector)
+			selectorHash, err := runtimeAssessmentOwnerFactSelectorHash(workspace, requirement)
 			if err != nil {
 				return nil, err
 			}
-			digest := sha256.Sum256(append([]byte("runtime-assessment-owner-fact-selector/v1\x00"), body...))
-			selectorHash := hex.EncodeToString(digest[:])
 			observations, _ := observeRuntimeOwnerFactRequirementCatalog(requirement, catalog)
-			body, err = json.Marshal(observations)
+			body, err := json.Marshal(observations)
 			if err != nil {
 				return nil, err
 			}

@@ -13,60 +13,14 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-type DispatchState string
+// Dispatch authority has one representation in the owner, typed contracts and
+// persistence. These aliases do not introduce a second mutable projection.
 
 const (
-	DispatchStateSealed      DispatchState = "sealed"
-	DispatchStateCommitted   DispatchState = "committed"
-	DispatchStateInvalidated DispatchState = "invalidated"
+	DispatchStateSealed      = runtimecontract.RuntimeDispatchStateSealed
+	DispatchStateCommitted   = runtimecontract.RuntimeDispatchStateCommitted
+	DispatchStateInvalidated = runtimecontract.RuntimeDispatchStateInvalidated
 )
-
-type SealedDispatch struct {
-	ID            string
-	WorkspaceID   common.WorkspaceID
-	RunID         common.RunID
-	Transaction   runtimecontract.AuthorityTransaction
-	CandidateHash string
-	Candidate     runtimecontract.RuntimeCandidate
-	// CandidateManifestHash and OperationTargetAuthorizations are the exact
-	// immutable manifest identity/target projection used by final SM-3 seal.
-	CandidateManifestHash         string
-	ImplementationWorkCommitment  *runtimecontract.RuntimeImplementationWorkRound
-	CoverageBindingHash           string
-	CoverageBindings              []runtimecontract.CoverageEvidenceBinding
-	OperationTargetAuthorizations []runtimecontract.RuntimeDispatchOperationTargetAuthorization
-	// FocusTargetRole is copied from the SM-2 decision at seal time. Owner
-	// execution and completed-dispatch causation checks must not consult a later
-	// mutable Focus projection for this value.
-	FocusTargetRole string
-	// ValidationRecipes is the immutable subset selected from the candidate
-	// manifest's validation-owner-confirmed recipes. Execution must never replace it
-	// with activation policy or a later admissibility inventory.
-	ValidationRecipes []runtimecontract.RuntimeValidationRecipe
-	// RepairCommitment is the pre-seal, request-session-bound purpose and
-	// closure lineage for an owner-confirmed validation repair. It is immutable
-	// across partial completion and governance resume hops.
-	RepairCommitmentHash         string
-	RepairCommitment             *runtimecontract.RuntimeDispatchRepairCommitment
-	AssessmentAuthorityInputHash string
-	AssessmentAuthorityInput     *runtimecontract.RuntimeAssessmentAuthorityInput
-	AssessmentAdjudicationHash   string
-	AssessmentAdjudication       *runtimecontract.RuntimeAssessmentAdjudication
-	// OperationAdmissibilities retain the complete owner catalog preimages used
-	// by feasibility and seal. Their matching observations are retained because
-	// capability owners validate the same freshness identity before transport.
-	OperationAdmissibilities           []runtimecontract.RuntimeOperationAdmissibility
-	OperationAdmissibilityObservations []runtimecontract.RuntimePrerequisiteObservation
-	// OperationPolicies are exact activation fallbacks for operations without a
-	// catalog snapshot. They are immutable SM-3 authority, not current policy.
-	OperationPolicies     []runtimecontract.RuntimeOperationPolicyFact
-	State                 DispatchState
-	CompletedOperationIDs []string
-	// OperationExecutions is the per-operation claim/fence ledger (RVC-R9/R10).
-	OperationExecutions    []runtimecontract.RuntimeOperationExecutionRecord
-	OperationAuthorityHash string
-	DispatchAuthorityHash  string
-}
 
 func cloneRuntimeDispatchRepairCommitment(value *runtimecontract.RuntimeDispatchRepairCommitment) *runtimecontract.RuntimeDispatchRepairCommitment {
 	if value == nil {
@@ -117,11 +71,11 @@ type RuntimeDispatchPreSealAuthority struct {
 // grant used to derive continuation execution records before the new dispatch
 // receives its sole authority hash.
 type RuntimeGovernanceResumePreSealAuthority struct {
-	Source  SealedDispatch
+	Source  runtimecontract.RuntimeDispatchRecord
 	Binding runtimecontract.RuntimeOperationGovernanceBinding
 }
 
-func (d SealedDispatch) StepInput() DispatchStepInput {
+func runtimeDispatchStepInput(d runtimecontract.RuntimeDispatchRecord) DispatchStepInput {
 	return DispatchStepInput{DispatchID: d.ID, Transaction: d.Transaction, CandidateHash: d.CandidateHash, Candidate: d.Candidate}
 }
 
@@ -151,64 +105,9 @@ type ExecutionEvidence struct {
 	Receipt             *runtimecontract.RuntimeOperationReceipt
 }
 
-type RuntimeAggregate struct {
-	// ResultFeedbackVersion is immutable SM-4 rendering policy, initialized
-	// once by Orchestrator. Run persists it opaquely; recovery never upgrades it.
-	ResultFeedbackVersion uint32 `json:",omitempty"`
-	StateRevision         uint64
-	EvidenceSequence      uint64
-	Definition            runtimecontract.RuntimeDefinitionContext
-	Facts                 runtimecontract.RuntimeFacts
-	SemanticPlanning      runtimecontract.RuntimeSemanticPlanningLedger
-	// ImplementationWork retains bounded references to the same semantic,
-	// candidate, dispatch and receipt transactions. It never grants terminal credit.
-	ImplementationWork runtimecontract.RuntimeImplementationWorkLedger
-	// Reconciliation is SM-2-owned request/batch lineage. Capability owner
-	// observations enter only through RuntimeInternalEvent and never mutate
-	// Facts directly.
-	Reconciliation runtimecontract.RuntimeCWIReconciliationLedger
-	// CoverageProofLineage is the bounded SM-2 receipt-to-reseal audit ledger.
-	// It records source proof and current-binding resolutions without changing
-	// immutable EvidenceFact binding refs or granting a capability owner credit.
-	CoverageProofLineage []runtimecontract.RuntimeCoverageProofLineage
-	Decision             runtimecontract.RuntimeDecision
-	ActiveDispatch       *SealedDispatch
-	CompletedDispatches  []SealedDispatch
-	ProcessedEventIDs    []string
-	// RepairSurfaceConfirmations is the typed SM-2 replay ledger for resource-owner
-	// repair-surface facts.  It is separate from generic event IDs so owner
-	// confirmation idempotency cannot become a global event index.
-	RepairSurfaceConfirmations []runtimecontract.RuntimeRepairSurfaceConfirmationRecord
-	Diagnostics                []runtimecontract.RuntimeDiagnosticRecord
-	CandidateRequestSessions   []runtimecontract.RuntimeCandidateRequestSession
-	CandidateAttempts          []runtimecontract.RuntimeCandidateAttemptRecord
-	// ExecutionBudget is the sole Orchestrator-owned allocation/consumption
-	// sub-ledger. Owner usage and receipts join it through typed private facts.
-	ExecutionBudget runtimecontract.RuntimeExecutionBudgetLedger
-	// RecoverableWaits are the bounded SM-2/3/4 wait lineage; timers and Run
-	// lifecycle never own or infer these records.
-	RecoverableWaits []runtimecontract.RuntimeRecoverableWaitRecord
-	// OperationRecoveryAuthorizations are the durable SM-4 replay permissions
-	// for exact claimed SM-3 executions. A process-local counter is never replay
-	// authority.
-	OperationRecoveryAuthorizations []runtimecontract.RuntimeOperationRecoveryAuthorization
-	// DefinitionClarification is the dedicated semantic-gap transaction. It is
-	// neither an operation/governance candidate nor a generic dependency.
-	DefinitionClarification     *runtimecontract.RuntimeDefinitionClarificationState
-	GovernanceRequests          []runtimecontract.RuntimeGovernanceRequestRecord
-	GovernanceResolutions       []runtimecontract.RuntimeGovernanceResolutionRecord
-	OperationGovernanceBindings []runtimecontract.RuntimeOperationGovernanceBinding
-	OperationReceipts           []runtimecontract.RuntimeOperationReceipt
-	DeliveryAcknowledgements    []runtimecontract.RuntimeDeliveryAcknowledgement
-	// TerminalMaterialSeal 只在首次交付前由 SM-4 封存，后续 CAS 不得改写。
-	TerminalMaterialSeal      *runtimecontract.RuntimeTerminalMaterialSeal
-	PrerequisiteInvalidations []runtimecontract.RuntimePrerequisiteInvalidationRecord
-	// DriveLease is SM-4 owner-local recovery state. It is persisted with the
-	// aggregate so a process-local timer cannot become a second retry authority.
-	DriveLease *runtimecontract.RuntimeDriveLease
-	// Termination is the SM-1 administrative cancel/supersede record (INV-08).
-	Termination *runtimecontract.RuntimeTerminationRecord
-}
+// RuntimeAggregate is the Orchestrator's behavior over the sole persisted state
+// representation. A conversion is a value view, never admission or authority.
+type RuntimeAggregate runtimecontract.RuntimeStateRecord
 
 // RuntimeStateRepository 读写均传递独立原值副本；不得共享指针或 slice，使 mutation 提前污染持久前像。
 type RuntimeStateRepository interface {
@@ -263,7 +162,7 @@ func newDispatchCoordinator(repository RuntimeStateRepository, transitions *Runt
 // managed-validation recipe selection alongside the candidate.  It is the
 // production SM-3 entry after manifest-bound admission; no execution path may
 // reconstruct this value from current facts.
-func SealDispatchWithManifestAndFeasibilities(decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate, activation runtimecontract.RuntimeActivationContext, manifest runtimecontract.RuntimeCandidateContractManifest, feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord) (SealedDispatch, error) {
+func SealDispatchWithManifestAndFeasibilities(decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate, activation runtimecontract.RuntimeActivationContext, manifest runtimecontract.RuntimeCandidateContractManifest, feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord) (runtimecontract.RuntimeDispatchRecord, error) {
 	return SealDispatchWithManifestAndOwnerAuthority(decision, candidate, activation, manifest, feasibilities, nil, nil)
 }
 
@@ -278,7 +177,7 @@ func SealDispatchWithManifestAndOwnerAuthority(
 	feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord,
 	catalogs []runtimecontract.RuntimeOperationAdmissibility,
 	observations []runtimecontract.RuntimePrerequisiteObservation,
-) (SealedDispatch, error) {
+) (runtimecontract.RuntimeDispatchRecord, error) {
 	return SealDispatchWithManifestAndPreSealAuthority(
 		decision, candidate, activation, manifest, feasibilities, catalogs, observations,
 		RuntimeDispatchPreSealAuthority{},
@@ -298,20 +197,20 @@ func SealDispatchWithManifestAndPreSealAuthority(
 	catalogs []runtimecontract.RuntimeOperationAdmissibility,
 	observations []runtimecontract.RuntimePrerequisiteObservation,
 	authority RuntimeDispatchPreSealAuthority,
-) (SealedDispatch, error) {
+) (runtimecontract.RuntimeDispatchRecord, error) {
 	manifest = manifest.Normalized()
 	if manifest.ImplementationWorkingBinding != nil {
 		work := authority.ImplementationWorkCommitment
 		if work == nil || work.WorkingBinding == nil || work.WorkingBinding.Hash != manifest.ImplementationWorkingBinding.Hash || work.DispatchID != "" || work.CompletedReceiptSetHash != "" || work.Validate() != nil || authority.RepairCommitment != nil || authority.AssessmentAuthorityInput != nil || authority.GovernanceResume != nil {
-			return SealedDispatch{}, fmt.Errorf("implementation dispatch has no exact original pre-seal working commitment")
+			return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("implementation dispatch has no exact original pre-seal working commitment")
 		}
 	} else if authority.ImplementationWorkCommitment != nil {
-		return SealedDispatch{}, fmt.Errorf("unexpected implementation work dispatch authority")
+		return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("unexpected implementation work dispatch authority")
 	}
 	for _, authorization := range manifest.Operations {
 		if v := authorization.InputRevision; v != nil {
 			if candidate.StateChange == nil {
-				return SealedDispatch{}, fmt.Errorf("input revision requires an ordinary state-change candidate")
+				return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("input revision requires an ordinary state-change candidate")
 			}
 			for _, op := range candidate.StateChange.Operations {
 				if op.Operation.Kind != authorization.Kind {
@@ -324,7 +223,7 @@ func SealDispatchWithManifestAndPreSealAuthority(
 					}
 				}
 				if matches != 1 {
-					return SealedDispatch{}, fmt.Errorf("input revision seal lacks original owner before/after proof")
+					return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("input revision seal lacks original owner before/after proof")
 				}
 			}
 		}
@@ -332,7 +231,7 @@ func SealDispatchWithManifestAndPreSealAuthority(
 			continue
 		}
 		if authority.RepairCommitment == nil || !runtimecontract.SameRuntimeValidationInputRepair(authorization.InputRepair, authority.RepairCommitment.InputRepair) {
-			return SealedDispatch{}, fmt.Errorf("runtime input repair seal has no exact source commitment")
+			return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("runtime input repair seal has no exact source commitment")
 		}
 		matches := 0
 		for _, feasibility := range feasibilities {
@@ -341,7 +240,7 @@ func SealDispatchWithManifestAndPreSealAuthority(
 			}
 		}
 		if matches != 1 {
-			return SealedDispatch{}, fmt.Errorf("runtime input repair seal requires one exact owner pre/postimage proof")
+			return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("runtime input repair seal requires one exact owner pre/postimage proof")
 		}
 	}
 	repairRequired := manifest.State == runtimecontract.ConvergenceStateNeedStateChange &&
@@ -353,26 +252,26 @@ func SealDispatchWithManifestAndPreSealAuthority(
 			authority.RepairCommitment.Normalized().OriginDispatchID != runtimecontract.StableRuntimeDispatchID(
 				decision.AuthorityTransaction(), runtimecontract.StableRuntimeCandidateHash(runtimecontract.CanonicalRuntimeCandidate(candidate)),
 			) {
-			return SealedDispatch{}, fmt.Errorf("runtime dispatch manifest-required repair commitment is unavailable")
+			return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("runtime dispatch manifest-required repair commitment is unavailable")
 		}
 	} else if authority.RepairCommitment != nil {
-		return SealedDispatch{}, fmt.Errorf("runtime dispatch cannot carry repair commitment without manifest purpose")
+		return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("runtime dispatch cannot carry repair commitment without manifest purpose")
 	}
 	if candidate.Assessment != nil {
 		if authority.AssessmentAuthorityInput == nil || authority.AssessmentAuthorityInput.Normalized().Purpose != manifest.AssessmentPurpose ||
 			manifest.AssessmentPurposeManifestHash == "" {
-			return SealedDispatch{}, fmt.Errorf("runtime assessment dispatch purpose does not match pre-seal candidate manifest")
+			return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("runtime assessment dispatch purpose does not match pre-seal candidate manifest")
 		}
 	} else if manifest.AssessmentPurpose != "" || manifest.AssessmentPurposeManifestHash != "" {
-		return SealedDispatch{}, fmt.Errorf("non-assessment runtime dispatch cannot use assessment manifest purpose")
+		return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("non-assessment runtime dispatch cannot use assessment manifest purpose")
 	}
 	targetAuthorizations, err := runtimecontract.RuntimeDispatchOperationTargetAuthorizationsFromManifest(manifest, candidate)
 	if err != nil {
-		return SealedDispatch{}, err
+		return runtimecontract.RuntimeDispatchRecord{}, err
 	}
 	recipes, err := runtimecontract.RuntimeCandidateManagedValidationRecipeSnapshot(manifest, candidate)
 	if err != nil {
-		return SealedDispatch{}, err
+		return runtimecontract.RuntimeDispatchRecord{}, err
 	}
 	return sealDispatchWithActivationAndFeasibilities(
 		decision,
@@ -401,36 +300,36 @@ func sealDispatchWithActivationAndFeasibilities(
 	catalogs []runtimecontract.RuntimeOperationAdmissibility,
 	observations []runtimecontract.RuntimePrerequisiteObservation,
 	authority RuntimeDispatchPreSealAuthority,
-) (SealedDispatch, error) {
+) (runtimecontract.RuntimeDispatchRecord, error) {
 	if err := decision.Validate(); err != nil {
-		return SealedDispatch{}, err
+		return runtimecontract.RuntimeDispatchRecord{}, err
 	}
 	if err := runtimecontract.ValidateRuntimeCandidateRawShapeForSeal(candidate); err != nil {
-		return SealedDispatch{}, err
+		return runtimecontract.RuntimeDispatchRecord{}, err
 	}
 	if err := candidate.ValidateWithActivation(decision, activation); err != nil {
-		return SealedDispatch{}, err
+		return runtimecontract.RuntimeDispatchRecord{}, err
 	}
 	candidate = runtimecontract.CanonicalRuntimeCandidate(candidate)
 	if strings.TrimSpace(candidateManifestHash) == "" {
-		return SealedDispatch{}, fmt.Errorf("runtime dispatch requires candidate manifest hash")
+		return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("runtime dispatch requires candidate manifest hash")
 	}
 	coverageBindings = runtimecontract.CloneCoverageEvidenceBindings(coverageBindings)
 	if err := runtimecontract.ValidateCoverageEvidenceBindingProjection(coverageBindings); err != nil {
-		return SealedDispatch{}, err
+		return runtimecontract.RuntimeDispatchRecord{}, err
 	}
 	for _, operation := range candidateRuntimeOperations(candidate) {
 		for _, ref := range operation.BindingRefs {
 			if _, found := runtimecontract.CoverageEvidenceBindingForRef(coverageBindings, ref); !found {
-				return SealedDispatch{}, fmt.Errorf("runtime dispatch operation %q binding %q is absent from candidate manifest", operation.ID, ref)
+				return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("runtime dispatch operation %q binding %q is absent from candidate manifest", operation.ID, ref)
 			}
 		}
 	}
 	if err := runtimecontract.ValidateRuntimeDispatchOperationTargetAuthorizations(candidate, operationTargetAuthorizations); err != nil {
-		return SealedDispatch{}, err
+		return runtimecontract.RuntimeDispatchRecord{}, err
 	}
 	if err := runtimecontract.ValidateRuntimeCandidateManagedValidationRecipeSnapshot(candidate, validationRecipes); err != nil {
-		return SealedDispatch{}, err
+		return runtimecontract.RuntimeDispatchRecord{}, err
 	}
 	transaction := decision.AuthorityTransaction()
 	candidateHash := runtimecontract.StableRuntimeCandidateHash(candidate)
@@ -439,7 +338,7 @@ func sealDispatchWithActivationAndFeasibilities(
 		commitment := *authority.RepairCommitment
 		commitmentHash := runtimecontract.StableRuntimeDispatchRepairCommitmentHash(commitment)
 		if err := runtimecontract.ValidateRuntimeDispatchRepairCommitmentProjection(commitmentHash, &commitment); err != nil {
-			return SealedDispatch{}, fmt.Errorf("runtime dispatch pre-seal repair commitment: %w", err)
+			return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("runtime dispatch pre-seal repair commitment: %w", err)
 		}
 		commitment = commitment.Clone()
 		expectedOrigin := strings.TrimSpace(authority.RepairCommitmentOriginDispatchID)
@@ -447,28 +346,28 @@ func sealDispatchWithActivationAndFeasibilities(
 			expectedOrigin = dispatchID
 		}
 		if commitment.OriginDispatchID != expectedOrigin || commitment.FocusID != transaction.FocusID {
-			return SealedDispatch{}, fmt.Errorf("runtime dispatch pre-seal repair commitment identity mismatch")
+			return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("runtime dispatch pre-seal repair commitment identity mismatch")
 		}
 		authority.RepairCommitment = &commitment
 	} else if strings.TrimSpace(authority.RepairCommitmentOriginDispatchID) != "" {
-		return SealedDispatch{}, fmt.Errorf("runtime dispatch repair origin has no pre-seal commitment")
+		return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("runtime dispatch repair origin has no pre-seal commitment")
 	}
 	if candidate.Assessment != nil {
 		if authority.AssessmentAuthorityInput == nil {
-			return SealedDispatch{}, fmt.Errorf("runtime assessment dispatch requires complete pre-seal authority input")
+			return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("runtime assessment dispatch requires complete pre-seal authority input")
 		}
 		input := *authority.AssessmentAuthorityInput
 		if err := input.Validate(transaction, coverageBindings); err != nil {
-			return SealedDispatch{}, fmt.Errorf("runtime assessment dispatch pre-seal authority: %w", err)
+			return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("runtime assessment dispatch pre-seal authority: %w", err)
 		}
 		input = input.Clone()
 		authority.AssessmentAuthorityInput = &input
 	} else if authority.AssessmentAuthorityInput != nil {
-		return SealedDispatch{}, fmt.Errorf("non-assessment runtime dispatch cannot carry pre-seal assessment authority")
+		return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("non-assessment runtime dispatch cannot carry pre-seal assessment authority")
 	}
 	sealedCatalogs, sealedObservations, sealedPolicies, err := sealRuntimeDispatchOperationAuthority(candidate, activation, feasibilities, catalogs, observations)
 	if err != nil {
-		return SealedDispatch{}, err
+		return runtimecontract.RuntimeDispatchRecord{}, err
 	}
 	sealedActivation := activation.Clone()
 	sealedActivation.OperationPolicies = runtimecontract.RuntimeDispatchSealedOperationPolicies(runtimecontract.RuntimeDispatchRecord{
@@ -491,10 +390,10 @@ func sealDispatchWithActivationAndFeasibilities(
 			*authority.GovernanceResume,
 		)
 		if projectionErr != nil {
-			return SealedDispatch{}, projectionErr
+			return runtimecontract.RuntimeDispatchRecord{}, projectionErr
 		}
 	}
-	dispatch := SealedDispatch{
+	dispatch := runtimecontract.RuntimeDispatchRecord{
 		ID:                                 dispatchID,
 		WorkspaceID:                        decision.AuthoritySnapshot.WorkspaceID,
 		RunID:                              decision.AuthoritySnapshot.RunID,
@@ -524,9 +423,9 @@ func sealDispatchWithActivationAndFeasibilities(
 	if dispatch.AssessmentAuthorityInput != nil {
 		dispatch.AssessmentAuthorityInputHash = runtimecontract.StableRuntimeAssessmentAuthorityInputHash(*dispatch.AssessmentAuthorityInput)
 	}
-	dispatch.DispatchAuthorityHash = runtimecontract.StableRuntimeDispatchAuthorityHash(sealedDispatchToRuntimeRecord(dispatch))
+	dispatch.DispatchAuthorityHash = runtimecontract.StableRuntimeDispatchAuthorityHash((dispatch))
 	if err := dispatch.ValidateWithActivation(decision, activation); err != nil {
-		return SealedDispatch{}, err
+		return runtimecontract.RuntimeDispatchRecord{}, err
 	}
 	return dispatch, nil
 }
@@ -541,7 +440,7 @@ func projectGovernanceResumePreSealExecutions(
 		binding.OperationDispatchID != source.ID || source.CandidateHash != runtimecontract.StableRuntimeCandidateHash(source.Candidate) {
 		return nil, nil, fmt.Errorf("governance resume pre-seal authority does not match one committed source dispatch")
 	}
-	if source.DispatchAuthorityHash != runtimecontract.StableRuntimeDispatchAuthorityHash(sealedDispatchToRuntimeRecord(source)) {
+	if source.DispatchAuthorityHash != runtimecontract.StableRuntimeDispatchAuthorityHash((source)) {
 		return nil, nil, fmt.Errorf("governance resume source dispatch authority hash mismatch")
 	}
 	sourceExecution, found := operationExecutionRecord(source.OperationExecutions, binding.OperationID)
@@ -704,14 +603,6 @@ func sealOperationExecutionRecords(
 		ret = append(ret, execution)
 	}
 	return runtimecontract.NormalizeRuntimeOperationExecutionRecords(ret)
-}
-
-func (d SealedDispatch) Validate(decision runtimecontract.RuntimeDecision) error {
-	return d.ValidateWithActivation(decision, runtimecontract.RuntimeActivationContext{})
-}
-
-func (d SealedDispatch) ValidateWithActivation(decision runtimecontract.RuntimeDecision, activation runtimecontract.RuntimeActivationContext) error {
-	return sealedDispatchToRuntimeRecord(d).ValidateWithActivation(decision, activation)
 }
 
 func isStateChangeNoOpWithoutProvenanceFailure(failure runtimecontract.FailureFact, receipt *runtimecontract.RuntimeOperationReceipt) bool {
@@ -1071,7 +962,7 @@ func candidateOperationCount(candidate runtimecontract.RuntimeCandidate) int {
 	}
 }
 
-func expectedEffectScopeForOperation(dispatch SealedDispatch, operationID string, activation runtimecontract.RuntimeActivationContext) (runtimecontract.RuntimeEffectScope, bool) {
+func expectedEffectScopeForOperation(dispatch runtimecontract.RuntimeDispatchRecord, operationID string, activation runtimecontract.RuntimeActivationContext) (runtimecontract.RuntimeEffectScope, bool) {
 	operationID = strings.TrimSpace(operationID)
 	for _, exec := range dispatch.OperationExecutions {
 		if exec.Normalized().OperationID == operationID {

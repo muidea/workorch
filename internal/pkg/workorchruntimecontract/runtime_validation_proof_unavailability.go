@@ -14,12 +14,14 @@ type RuntimeValidationProofUnavailability struct {
 	Requirement        RuntimeValidationProofRequirement
 	ValidationRecipeID string
 	OriginalDiagnostic *RuntimeOriginalDiagnostic
+	Maintenance        *RuntimeValidationInputMaintenance `json:",omitempty"`
 }
 
 func (v RuntimeValidationProofUnavailability) Normalized() RuntimeValidationProofUnavailability {
 	v.Requirement = v.Requirement.Normalized()
 	v.ValidationRecipeID = strings.TrimSpace(v.ValidationRecipeID)
 	v.OriginalDiagnostic = v.OriginalDiagnostic.CloneOriginal()
+	v.Maintenance = v.Maintenance.Clone()
 	return v
 }
 
@@ -33,7 +35,10 @@ func (v RuntimeValidationProofUnavailability) Validate() error {
 	if v.OriginalDiagnostic == nil {
 		return fmt.Errorf("validation proof unavailability requires the original owner diagnostic")
 	}
-	return v.OriginalDiagnostic.Validate()
+	if err := v.OriginalDiagnostic.Validate(); err != nil {
+		return err
+	}
+	return v.Maintenance.Validate(v.Requirement, v.ValidationRecipeID)
 }
 
 func normalizeRuntimeValidationProofUnavailabilities(values []RuntimeValidationProofUnavailability) []RuntimeValidationProofUnavailability {
@@ -80,5 +85,8 @@ func writeRuntimeValidationProofUnavailabilitiesHash(h interface{ Write([]byte) 
 		writeHashString(h, value.Requirement.Hash)
 		writeHashString(h, value.ValidationRecipeID)
 		writeHashString(h, StableRuntimeFeedbackHash(RuntimeFeedback{OriginalDiagnostic: value.OriginalDiagnostic}))
+		if value.Maintenance != nil {
+			writeHashString(h, value.Maintenance.Hash())
+		}
 	}
 }

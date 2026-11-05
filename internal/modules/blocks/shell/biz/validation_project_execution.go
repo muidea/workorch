@@ -50,7 +50,7 @@ func (a *RuntimeAdapter) executeShellProjectScope(ctx context.Context, request R
 		return result, common.ErrInvalidArgument
 	}
 	timeout, err := shellCommandTimeout(request.TimeoutMillis, a.timeout)
-	if err != nil || timeout > DefaultCommandTimeout {
+	if err != nil || timeout > MaxCommandTimeout {
 		return result, common.ErrInvalidArgument
 	}
 	if err := ctx.Err(); err != nil {

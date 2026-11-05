@@ -391,12 +391,11 @@ func TestCurrentRuntimeCWIOrderFromSemanticLineageScopesSingleCWIGenerations(t *
 		t.Fatalf("implementation-work generation closure = order=%v changed=%v err=%v", order, changed, err)
 	}
 
-	// The same single-CWI manifest shape without a scoped obligation is a
-	// normal Definition generation. It must see concurrently eligible rows as
-	// a real closure change instead of silently narrowing global authority.
+	// Ordinary generations also keep their complete original task scope;
+	// unrelated ready branches do not invalidate an in-progress frontier.
 	normalManifest := runtimecontract.RuntimeSemanticPlanManifest{Hash: "manifest-normal-cwi-001", CoverageItems: []runtimecontract.RuntimeCoverageItem{{ID: "cwi-001"}}}
 	_, changed, err = currentRuntimeCWIOrderFromSemanticLineage(facts, normalManifest, []common.CoverageWorkItemID{"cwi-001"})
-	if err != nil || !sameCoverageIDs(changed, []common.CoverageWorkItemID{"cwi-002", "cwi-003"}) {
+	if err != nil || len(changed) != 0 {
 		t.Fatalf("normal generation closure change = %v err=%v", changed, err)
 	}
 

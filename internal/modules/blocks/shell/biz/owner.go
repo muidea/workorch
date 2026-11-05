@@ -77,9 +77,11 @@ func (m *Biz) Start() error {
 		{shellevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities},
 		{shellevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility},
 		{shellevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility},
+		{shellevents.TopicInspectRuntimeValidationInputStructure, m.handleRuntimeValidationInputStructure},
 		{shellevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility},
 		{shellevents.TopicProbeRuntimeOwnerFactProspectiveSatisfaction, m.handleRuntimeOwnerFactProspectiveSatisfaction},
 		{shellevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery},
+		{shellevents.TopicQueryRuntimeCWIReconciliationBatch, m.handleRuntimeCWIReconciliationBatch},
 		{shellevents.TopicQueryRuntimeValidationRawOutput, m.handleRuntimeValidationRawOutput},
 		{shellevents.TopicQueryRuntimeValidationReadDependencies, m.handleRuntimeValidationReadDependencies},
 		{shellevents.TopicExecuteOperation, m.handleShellOperation},
@@ -148,16 +150,23 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 		setCapabilityError(result, common.ErrInvalidArgument)
 		return
 	}
+	observation, err := m.queryRuntimeCWIReconciliation(event.Context(), command)
+	if err != nil {
+		setCapabilityError(result, err)
+		return
+	}
+	result.Set(shellevents.QueryRuntimeCWIReconciliationResult{Observation: observation}, nil)
+}
+
+func (m *Biz) queryRuntimeCWIReconciliation(ctx context.Context, command shellevents.QueryRuntimeCWIReconciliationCommand) (runtimecontract.RuntimeCWIReconciliationObservation, error) {
 	if !runtimeCWIReconciliationBindingHasShellProof(command.Binding) {
 		observation := shellReconciliationObservation(command, runtimecontract.RuntimeCWIReconciliationObservationUnverifiable, command.WorkspaceBaselineRevision, nil, nil, "binding has no Shell validation recipe", "validation_recipe_unavailable")
-		result.Set(shellevents.QueryRuntimeCWIReconciliationResult{Observation: observation}, nil)
-		return
+		return observation, nil
 	}
 	recipes := runtimeCWIReconciliationRecipes(command)
 	if len(recipes) != len(command.Binding.ValidationRecipeIDs) {
 		observation := shellReconciliationObservation(command, runtimecontract.RuntimeCWIReconciliationObservationUnverifiable, command.WorkspaceBaselineRevision, nil, nil, "sealed Shell validation recipe is unavailable", "validation_recipe_unavailable")
-		result.Set(shellevents.QueryRuntimeCWIReconciliationResult{Observation: observation}, nil)
-		return
+		return observation, nil
 	}
 	var observedRevision = command.WorkspaceBaselineRevision
 	allPassed := true
@@ -197,10 +206,10 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 		if selected, selectErr := shellProjectRequestSelected(request); selectErr != nil {
 			output, executeErr = validationRecipeUnavailableResult(request, selectErr), selectErr
 		} else if selected {
-			produced, err := m.runtimeAdapter.executeShellProjectScope(event.Context(), request, shellProjectReconciliationRawScope(command, recipe.ID))
+			produced, err := m.runtimeAdapter.executeShellProjectScope(ctx, request, shellProjectReconciliationRawScope(command, recipe.ID))
 			output, executeErr = produced.Result, err
 		} else {
-			output, executeErr = m.runtimeAdapter.ExecuteOperation(event.Context(), request)
+			output, executeErr = m.runtimeAdapter.ExecuteOperation(ctx, request)
 		}
 		if executeErr != nil || output.Status != "completed" || output.ExitCode != 0 || output.ZeroWork || output.ValidationObservation == nil || output.Evidence.Quality != common.EvidenceQualityValid {
 			allPassed = false
@@ -262,7 +271,7 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 		targetRefs = append([]string(nil), command.Binding.TargetRefs...)
 	}
 	observation := shellReconciliationObservation(command, status, observedRevision, targetRefs, checkRefs, message, code)
-	result.Set(shellevents.QueryRuntimeCWIReconciliationResult{Observation: observation}, nil)
+	return observation, nil
 }
 
 func runtimeCWIReconciliationBindingHasShellProof(binding runtimecontract.RuntimeCWIReconciliationBindingRef) bool {

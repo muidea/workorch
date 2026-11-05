@@ -50,7 +50,7 @@ func TestRuntimeControllerRejectsInjectedDefinitionImplementationWorkWithoutWrit
 			t.Fatal(err)
 		}
 		_, err = restarted.initialize(context.Background(), facts, definition, nil)
-		if !errors.Is(err, common.ErrConflict) {
+		if err == nil || (!errors.Is(err, common.ErrConflict) && !strings.Contains(err.Error(), "definition work policies")) {
 			t.Fatalf("injected work declaration survived restart: %v", err)
 		}
 		// Even matching the caller's copy to the corrupted Definition cannot

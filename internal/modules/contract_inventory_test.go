@@ -1,6 +1,9 @@
 package modules
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -8,12 +11,13 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"unicode"
+	"unicode/utf8"
 )
 
 var componentContractVerifiedPattern = regexp.MustCompile(`(?m)^Last Verified: \d{4}-\d{2}-\d{2}$`)
 var componentContractHeadingPattern = regexp.MustCompile(`(?m)^## [^\r\n]+$`)
-var componentContractTestNamePattern = regexp.MustCompile(`\bTest[A-Za-z0-9_]+\b`)
-var componentContractTestDefinitionPattern = regexp.MustCompile(`(?m)^func (Test[A-Za-z0-9_]+)\s*\(`)
+var componentContractTestNamePattern = regexp.MustCompile(`(?:^|[^\p{L}\p{Nd}_])(Test[\p{L}\p{Nd}_]+)`)
 var componentContractLinkPattern = regexp.MustCompile(`\[[^\]]+\]\(([^)]+)\)`)
 
 var componentContractHeadings = []string{
@@ -121,7 +125,7 @@ func assertComponentContractShape(t *testing.T, root, readmeRel, contract string
 			t.Errorf("component contract %s retains non-normative progress noise %q", readmeRel, noise)
 		}
 	}
-	testNames := componentContractTestNamePattern.FindAllString(contract, -1)
+	testNames := componentContractTestReferences(contract)
 	if !strings.Contains(contract, "_test.go") && !strings.Contains(contract, "make verify-") && len(testNames) == 0 {
 		t.Errorf("component contract %s does not map acceptance to executable evidence", readmeRel)
 	}
@@ -143,6 +147,29 @@ func assertComponentContractShape(t *testing.T, root, readmeRel, contract string
 			t.Errorf("component contract %s links missing local target %q: %v", readmeRel, target, err)
 		}
 	}
+}
+
+// Match Go's test-name rule: the first rune after Test must not be lowercase.
+// The standalone word Test in prose is not a reference to a named regression.
+func componentContractNativeTestName(name string) bool {
+	if !strings.HasPrefix(name, "Test") {
+		return false
+	}
+	if name == "Test" {
+		return true
+	}
+	r, _ := utf8.DecodeRuneInString(name[len("Test"):])
+	return !unicode.IsLower(r)
+}
+
+func componentContractTestReferences(contract string) []string {
+	var names []string
+	for _, match := range componentContractTestNamePattern.FindAllStringSubmatch(contract, -1) {
+		if componentContractNativeTestName(match[1]) {
+			names = append(names, match[1])
+		}
+	}
+	return names
 }
 
 func componentContractLocalDocsUnavailable(root, resolved string) bool {
@@ -174,6 +201,66 @@ func TestComponentContractLocalDocsAreOptionalOnlyOutsideSource(t *testing.T) {
 	}
 }
 
+func TestComponentContractTestReferencesUseNativeNamesAndDeclarations(t *testing.T) {
+	contract := "native Test and Testhelper/Testδ are examples; TestCurrent, Test_Regression, Test42, TestΔ, TestMissing_Symbol; prefixTestHidden"
+	want := []string{"TestCurrent", "Test_Regression", "Test42", "TestΔ", "TestMissing_Symbol"}
+	if got := componentContractTestReferences(contract); !slices.Equal(got, want) {
+		t.Fatalf("native test references = %q, want %q", got, want)
+	}
+	root := t.TempDir()
+	directory := filepath.Join(root, "internal", "fixture")
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// Comments, string examples, helper names and methods must not manufacture
+	// executable evidence for a component contract. Unknown native references
+	// remain references and must still fail the existing membership gate.
+	const source = `package fixture
+import "testing"
+// func TestCommented(t *testing.T) {}
+const example = "func TestQuoted(t *testing.T) {}"
+func Test(t *testing.T) {}
+func TestCurrent(t *testing.T) {}
+func Test_Regression(t *testing.T) {}
+func Test42(t *testing.T) {}
+func TestΔ(t *testing.T) {}
+func Testhelper(t *testing.T) {}
+func Testδ(t *testing.T) {}
+type receiver struct{}
+func (receiver) TestMethod(t *testing.T) {}
+`
+	if err := os.WriteFile(filepath.Join(directory, "fixture_test.go"), []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"testdata", ".hidden", "_hidden"} {
+		ignored := filepath.Join(directory, name)
+		if err := os.Mkdir(ignored, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(ignored, "example_test.go"), []byte("invalid Go fixture"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{".ignored_test.go", "_ignored_test.go"} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte("invalid Go fixture"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	symbols := repositoryTestSymbols(t, root)
+	var actual []string
+	for name := range symbols {
+		actual = append(actual, name)
+	}
+	sort.Strings(actual)
+	expected := []string{"Test", "Test42", "TestCurrent", "Test_Regression", "TestΔ"}
+	if !slices.Equal(actual, expected) {
+		t.Fatalf("declared native tests = %q, want %q", actual, expected)
+	}
+	if _, found := symbols[want[len(want)-1]]; found {
+		t.Fatal("missing native test reference gained executable evidence")
+	}
+}
+
 func repositoryTestSymbols(t *testing.T, root string) map[string]struct{} {
 	t.Helper()
 	ret := map[string]struct{}{}
@@ -181,15 +268,29 @@ func repositoryTestSymbols(t *testing.T, root string) map[string]struct{} {
 		if walkErr != nil {
 			return walkErr
 		}
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
+		name := entry.Name()
+		if entry.IsDir() {
+			if name == "testdata" || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || !strings.HasSuffix(name, "_test.go") {
 			return nil
 		}
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		for _, match := range componentContractTestDefinitionPattern.FindAllSubmatch(content, -1) {
-			ret[string(match[1])] = struct{}{}
+		file, err := parser.ParseFile(token.NewFileSet(), path, content, 0)
+		if err != nil {
+			return err
+		}
+		for _, declaration := range file.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if ok && function.Recv == nil && componentContractNativeTestName(function.Name.Name) {
+				ret[function.Name.Name] = struct{}{}
+			}
 		}
 		return nil
 	})

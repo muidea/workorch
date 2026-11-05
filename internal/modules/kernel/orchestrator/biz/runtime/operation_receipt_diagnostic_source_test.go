@@ -60,7 +60,7 @@ func TestDiagnosticReceiptCannotDowngradeOriginalBindingAtIngressOrReload(t *tes
 		Feedback: runtimeOperationFeedbackForTest(t, aggregate, operation.ID, runtimecontract.FailureFact{Class: runtimecontract.FailureClassBuildFailure, Code: "owner-failed", Message: "original failure"}),
 		Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{RecipeID: binding.ValidationRecipeID, ObservationProtocolRef: conjunction.ProtocolRef, ExecutionConjunction: &conjunction}},
 	}
-	check := func(a RuntimeAggregate, d SealedDispatch, r runtimecontract.RuntimeOperationReceipt, reload bool) error {
+	check := func(a RuntimeAggregate, d runtimecontract.RuntimeDispatchRecord, r runtimecontract.RuntimeOperationReceipt, reload bool) error {
 		if reload {
 			return validateOperationReceiptFeedbackAgainstDispatch(a, d, common.WorkspaceID("ws-source"), common.RunID("run-source"), r)
 		}
@@ -76,7 +76,7 @@ func TestDiagnosticReceiptCannotDowngradeOriginalBindingAtIngressOrReload(t *tes
 						t.Fatal("dispatch reload failed", err)
 					}
 					a.ActiveDispatch = nil
-					a.CompletedDispatches = []SealedDispatch{d}
+					a.CompletedDispatches = []runtimecontract.RuntimeDispatchRecord{d}
 				}
 				switch scenario {
 				case "source-raw-gap", "source-raw-gap-with-failure":

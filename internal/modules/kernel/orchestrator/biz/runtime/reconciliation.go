@@ -20,7 +20,7 @@ func (c *driveDeliveryComponent) ensureReconciliationRequest(ctx context.Context
 	if err := request.Validate(); err != nil {
 		return RuntimeAggregate{}, false, err
 	}
-	aggregate, err := c.repository.Load(ctx, request.WorkspaceID, request.RunID)
+	aggregate, err := c.load(ctx, request.WorkspaceID, request.RunID)
 	if err != nil {
 		return RuntimeAggregate{}, false, err
 	}
@@ -101,9 +101,7 @@ func (c *driveDeliveryComponent) ensureReconciliationRequest(ctx context.Context
 	ledger.Reopened = nil
 	aggregate.Reconciliation = ledger.Normalized()
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, false, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, false, err
 	}
@@ -118,7 +116,7 @@ func (c *authorityComponent) commitReconciliationBatch(ctx context.Context, work
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, false, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, false, err
 	}
@@ -197,9 +195,7 @@ func (c *authorityComponent) commitReconciliationBatch(ctx context.Context, work
 	aggregate.Facts = nextFacts
 	aggregate.Decision = nextDecision
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, false, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, false, err
 	}

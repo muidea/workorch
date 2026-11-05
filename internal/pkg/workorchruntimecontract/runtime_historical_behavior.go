@@ -174,46 +174,9 @@ func validateRuntimeHistoricalSemanticStartupSource(sources RuntimeLineageAssert
 	return nil
 }
 
-func ValidateRuntimeHistoricalBehaviorCompletions(sources RuntimeLineageAssertionSources) error {
-	return validateRuntimeHistoricalBehaviorCompletionsInSession(sources, &runtimeHistoricalPreimageSession{})
-}
-
-func validateRuntimeHistoricalBehaviorCompletionsInSession(sources RuntimeLineageAssertionSources, session *runtimeHistoricalPreimageSession) error {
-	if session != nil && session.sourceCompiler != nil {
-		return session.sourceCompiler.validate(sources, false, func() error {
-			return validateRuntimeHistoricalBehaviorCompletionsComplete(sources, session)
-		})
-	}
-	return validateRuntimeHistoricalBehaviorCompletionsComplete(sources, session)
-}
-
-func validateRuntimeHistoricalBehaviorCompletionsComplete(sources RuntimeLineageAssertionSources, session *runtimeHistoricalPreimageSession) error {
-	for _, row := range sources.Facts.Coverage {
-		if row.HistoricalBehavior == nil {
-			continue
-		}
-		expected, err := compileRuntimeHistoricalBehaviorInSession(sources, row.ID, row.HistoricalBehavior.DispatchID, false, session)
-		if err != nil {
-			return err
-		}
-		if !reflect.DeepEqual(row.HistoricalBehavior, expected) {
-			return fmt.Errorf("historical behavior differs from original complete effect lineage")
-		}
-		if err := validateRuntimeHistoricalAcceptanceProofsInSession(sources, row, session); err != nil {
-			return err
-		}
-	}
-	for _, row := range sources.Facts.Coverage {
-		if row.HistoricalBehavior == nil && len(row.HistoricalAcceptanceProofs) != 0 {
-			return fmt.Errorf("historical acceptance lacks original behavior completion")
-		}
-	}
-	return nil
-}
-
 // RuntimeCWIPrerequisiteReadyForConsumer preserves ordinary settled admission.
 // The sole exception is original mapped historical progress for its exact
-// acceptance consumer. Full aggregate admission separately replays receipts.
+// acceptance consumer. Full aggregate admission separately verifies source integrity.
 func RuntimeCWIPrerequisiteReadyForConsumer(facts RuntimeFacts, prerequisite RuntimeCoverageItemFact, consumer common.CoverageWorkItemID) bool {
 	if prerequisite.CWIConvergenceState == RuntimeCWIConvergenceStateSettled && prerequisite.State == RuntimeCoverageItemStateSatisfied && prerequisite.CurrentBindingRef != nil {
 		return true

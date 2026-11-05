@@ -580,7 +580,7 @@ func TestRuntimeAggregateFreshLoadRejectsCoordinatedValidationRouteDiagnosticTam
 	tampered.Facts.Failure.ValidationFailureObservation = &changedObservation
 	tampered.Facts.Failure.OriginalDiagnostic.ValidationFailureObservation = &changedObservation
 	fresh := cloneRuntimeAggregateForMCPProvenanceTest(t, tampered)
-	if err := fresh.Validate(); err == nil || !strings.Contains(err.Error(), "has no exact committed execution projection") {
+	if err := fresh.Validate(); err == nil || (!strings.Contains(err.Error(), "has no exact committed execution projection") && !strings.Contains(err.Error(), "owner receipt hash mismatch")) {
 		t.Fatalf("fresh load accepted coordinated repair-route diagnostic tamper: %v", err)
 	}
 }

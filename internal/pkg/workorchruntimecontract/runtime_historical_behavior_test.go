@@ -112,7 +112,7 @@ func TestHistoricalBehaviorUnlocksOnlyExactConsumerWithoutTerminalCredit(t *test
 		t.Fatal("pure completion compiler changed sources or granted terminal credit")
 	}
 	sources.Facts.Coverage[0].HistoricalBehavior = completion
-	if err := ValidateRuntimeHistoricalBehaviorCompletions(sources); err != nil {
+	if err := ValidateRuntimeHistoricalBehaviorCompletions(sources.Facts, sources.Completed); err != nil {
 		t.Fatal(err)
 	}
 	row := sources.Facts.Coverage[0]
@@ -128,7 +128,7 @@ func TestHistoricalBehaviorUnlocksOnlyExactConsumerWithoutTerminalCredit(t *test
 	}
 	body, _ := json.Marshal(sources)
 	var reload RuntimeLineageAssertionSources
-	if json.Unmarshal(body, &reload) != nil || ValidateRuntimeHistoricalBehaviorCompletions(reload) != nil || !reflect.DeepEqual(reload, sources) {
+	if json.Unmarshal(body, &reload) != nil || ValidateRuntimeHistoricalBehaviorCompletions(reload.Facts, reload.Completed) != nil || !reflect.DeepEqual(reload, sources) {
 		t.Fatal("completion source changed on JSON restart")
 	}
 	raw := (RuntimeStateRecord{Facts: sources.Facts}).Clone()
@@ -201,7 +201,7 @@ func TestHistoricalBehaviorRejectsPartialWeakUnconfirmedAndCoordinatedLineage(t 
 	}
 	sources.Facts.Coverage[0].HistoricalBehavior = completion
 	completion.EvidenceRefs = append(completion.EvidenceRefs, completion.EvidenceRefs[0])
-	if ValidateRuntimeHistoricalBehaviorCompletions(sources) == nil || RuntimeCWIPrerequisiteReadyForConsumer(sources.Facts, sources.Facts.Coverage[0], "current") {
+	if ValidateRuntimeHistoricalBehaviorCompletions(sources.Facts, sources.Completed) == nil || RuntimeCWIPrerequisiteReadyForConsumer(sources.Facts, sources.Facts.Coverage[0], "current") {
 		t.Fatal("self-consistent completion label bypassed independently compiled member set")
 	}
 }

@@ -33,9 +33,8 @@ func BuildRuntimeCandidateContractManifestForAggregate(aggregate RuntimeAggregat
 		if _, err := runtimecontract.RuntimeAssessmentSourceProjection(aggregate.Facts, focus.ID, focus.CoverageWorkItemIDs); err != nil {
 			return runtimecontract.RuntimeCandidateContractManifest{}, fmt.Errorf("runtime assessment candidate Definition preimage: %w", err)
 		}
-		preimage, err := runtimecontract.ResolveRuntimeAssessmentPurposePreimage(
-			aggregate.SemanticPlanning,
-			focus.CoverageEvidenceBindings,
+		preimage, err := runtimecontract.RuntimeAssessmentPurposeForCurrentFocus(
+			aggregate.Facts, aggregate.SemanticPlanning, focus,
 		)
 		if err != nil {
 			return runtimecontract.RuntimeCandidateContractManifest{}, fmt.Errorf("runtime assessment candidate purpose preimage: %w", err)

@@ -47,7 +47,7 @@ func adjudicateRuntimeOperationResult(decision runtimecontract.RuntimeDecision, 
 	return nil
 }
 
-func executionEvidenceFromOperationResult(workspaceID common.WorkspaceID, runID common.RunID, dispatch SealedDispatch, operation runtimecontract.RuntimeOperation, result RuntimeOperationExecutionResult) ExecutionEvidence {
+func executionEvidenceFromOperationResult(workspaceID common.WorkspaceID, runID common.RunID, dispatch runtimecontract.RuntimeDispatchRecord, operation runtimecontract.RuntimeOperation, result RuntimeOperationExecutionResult) ExecutionEvidence {
 	return ExecutionEvidence{
 		EventID: result.EventID, WorkspaceID: workspaceID, RunID: runID,
 		DispatchID: dispatch.ID, AuthoritySnapshotID: dispatch.Transaction.AuthoritySnapshotID,

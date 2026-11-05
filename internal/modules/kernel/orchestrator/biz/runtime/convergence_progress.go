@@ -13,7 +13,17 @@ import (
 // candidate retry bookkeeping. A drive transition that changes only those
 // bookkeeping fields is not positive convergence.
 func RuntimeConvergenceProgressSignature(aggregate RuntimeAggregate) string {
-	facts := aggregate.Facts.Normalized()
+	// A progress observation consumes only these fields. Full Facts ownership
+	// does not make unrelated catalogs, evidence bodies or Definition inputs
+	// part of this query. The canonical field rules remain in one normalizer.
+	facts := (runtimecontract.RuntimeFacts{
+		Focus: aggregate.Facts.Focus, RemainingFocuses: aggregate.Facts.RemainingFocuses,
+		CompletedFocuses: aggregate.Facts.CompletedFocuses, EvidenceRevision: aggregate.Facts.EvidenceRevision,
+		Failure: aggregate.Facts.Failure, Prerequisites: aggregate.Facts.Prerequisites,
+		Repair: aggregate.Facts.Repair, RepairDirective: aggregate.Facts.RepairDirective,
+		Resources: runtimecontract.RuntimeResourceFacts{PrerequisiteObservations: aggregate.Facts.Resources.PrerequisiteObservations},
+		Coverage:  aggregate.Facts.Coverage, Feasibility: aggregate.Facts.Feasibility,
+	}).Normalized()
 	decision := aggregate.Decision
 	progress := struct {
 		Focus                     runtimecontract.CoverageFocus
@@ -49,7 +59,7 @@ func RuntimeConvergenceProgressSignature(aggregate RuntimeAggregate) string {
 		Coverage:                  facts.Coverage, Feasibility: facts.Feasibility,
 		State:          decision.State,
 		RequiredOutput: decision.RequiredOutput.Normalized(), Terminal: decision.Terminal,
-		SemanticPlanning:      aggregate.SemanticPlanning.Clone(),
+		SemanticPlanning:      aggregate.SemanticPlanning,
 		ImplementationWork:    aggregate.ImplementationWork.Clone(),
 		GovernanceRequests:    append([]runtimecontract.RuntimeGovernanceRequestRecord(nil), aggregate.GovernanceRequests...),
 		GovernanceResolutions: runtimecontract.CloneRuntimeGovernanceResolutionRecords(aggregate.GovernanceResolutions),
@@ -81,7 +91,7 @@ func RuntimeConvergenceProgressSignature(aggregate RuntimeAggregate) string {
 
 type runtimeConvergenceDispatchProgress struct {
 	CandidateHash         string
-	State                 DispatchState
+	State                 runtimecontract.RuntimeDispatchState
 	CompletedOperationIDs []string
 }
 
@@ -95,7 +105,7 @@ type runtimeConvergenceCandidateAdmission struct {
 	Feasibilities       []runtimecontract.RuntimeCandidateFeasibilityRecord
 }
 
-func runtimeConvergenceDispatchProgressFrom(dispatch SealedDispatch) runtimeConvergenceDispatchProgress {
+func runtimeConvergenceDispatchProgressFrom(dispatch runtimecontract.RuntimeDispatchRecord) runtimeConvergenceDispatchProgress {
 	return runtimeConvergenceDispatchProgress{
 		CandidateHash: dispatch.CandidateHash, State: dispatch.State,
 		CompletedOperationIDs: append([]string(nil), dispatch.CompletedOperationIDs...),

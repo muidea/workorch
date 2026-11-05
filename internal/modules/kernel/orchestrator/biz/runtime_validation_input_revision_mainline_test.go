@@ -1,13 +1,15 @@
 package orchestrator
 
 import (
+	"context"
 	"fmt"
-	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -71,7 +73,7 @@ func runtimeInputRevisionMainlineCandidate(c llmevents.RequestRuntimeCandidateCo
 	before, after := `!="5"`, `!="4"`
 	var reviewedInput string
 	if v := c.CandidateManifest.ImplementationWorkingBinding.InputRevision; v != nil {
-		for _, f := range v.Binding.InputReview.Files {
+		for _, f := range v.InputFiles() {
 			if f.TargetRef == target {
 				reviewedInput = f.Content
 			}
@@ -89,6 +91,9 @@ func runtimeInputRevisionMainlineCandidate(c llmevents.RequestRuntimeCandidateCo
 		if !strings.Contains(reviewedInput, before) {
 			before, after = after, before
 		}
+	}
+	if len(modes) != 0 && modes[0] == "input_revision_structure" {
+		before, after = "func init() {}\n", ""
 	}
 	if len(modes) != 0 && modes[0] == "input_revision_omission" {
 		before, after = `strings.TrimSpace(string(out))==""`, `strings.TrimSpace(string(out))!="4"`
@@ -181,7 +186,11 @@ func assertRuntimeInputRevisionMainline(t *testing.T, a runtime.RuntimeAggregate
 			t.Fatalf("cycle lost exact terminal: %+v", a.Decision.Terminal)
 		}
 	}
-	if reviews != wantRounds+1 || len(a.ImplementationWork.Rounds) != wantRounds || len(a.GovernanceRequests) != 0 {
+	wantReviews := wantRounds + 1
+	if mode == "input_revision_structure" {
+		wantReviews = 1
+	}
+	if reviews != wantReviews || len(a.ImplementationWork.Rounds) != wantRounds || len(a.GovernanceRequests) != 0 {
 		t.Fatalf("revision did not use one bounded real effect and fresh review: reviews=%d rounds=%d", reviews, len(a.ImplementationWork.Rounds))
 	}
 	r := a.ImplementationWork.Rounds[0]
@@ -198,6 +207,15 @@ func assertRuntimeInputRevisionMainline(t *testing.T, a runtime.RuntimeAggregate
 	}
 	for mutationIndex, mutate := range []func(*runtime.RuntimeAggregate){
 		func(b *runtime.RuntimeAggregate) {
+			if v := r.ScopeRequest.InputRevision; v.OwnerObservation != nil {
+				id := v.OwnerObservation.Observation.ObservationID
+				b.PrerequisiteInvalidations = slices.DeleteFunc(b.PrerequisiteInvalidations, func(i runtimecontract.RuntimePrerequisiteInvalidationRecord) bool {
+					return slices.Contains(i.ObservationIDs, id)
+				})
+				b.Facts.Resources.PrerequisiteObservations = slices.DeleteFunc(b.Facts.Resources.PrerequisiteObservations, func(o runtimecontract.RuntimePrerequisiteObservation) bool { return o.ObservationID == id })
+				b.Facts.Resources.RetiredPrerequisiteObservations = slices.DeleteFunc(b.Facts.Resources.RetiredPrerequisiteObservations, func(o runtimecontract.RuntimePrerequisiteObservation) bool { return o.ObservationID == id })
+				return
+			}
 			var sessions []runtimecontract.RuntimeCandidateRequestSession
 			for _, session := range b.CandidateRequestSessions {
 				if session.LogicalRequestID != r.ScopeRequest.InputRevision.SourceLogicalRequestID {
@@ -223,7 +241,12 @@ func assertRuntimeInputRevisionMainline(t *testing.T, a runtime.RuntimeAggregate
 			}
 		},
 		func(b *runtime.RuntimeAggregate) {
-			b.ImplementationWork.Rounds[0].ScopeRequest.InputRevision.Report.Checks[0].Reason = "forged"
+			v := b.ImplementationWork.Rounds[0].ScopeRequest.InputRevision
+			if v.OwnerObservation != nil {
+				v.OwnerObservation.Catalog.ObservedRevision = "forged"
+			} else {
+				v.Report.Checks[0].Reason = "forged"
+			}
 		},
 	} {
 		bad := runtimeAggregateFromRecord(runtimeStateRecordFromAggregate(a))
@@ -234,10 +257,59 @@ func assertRuntimeInputRevisionMainline(t *testing.T, a runtime.RuntimeAggregate
 		if record := runtimeStateRecordFromAggregate(bad); record.Validate() == nil {
 			t.Fatal("persisted DTO trusted forged revision")
 		}
+		// The same corruption must be rejected against the actual committed
+		// preimage, including when its retired request had no operation attempt.
+		previous := runtimeStateRecordFromAggregate(a)
+		postimage := runtimeStateRecordFromAggregate(bad)
+		postimage.StateRevision = previous.StateRevision + 1
+		if err := runtimecontract.CompileRuntimeOwnerStateTransition(previous, runtimecontract.RuntimeOwnerStateSourceImage{
+			Converted: &postimage, AggregateJoins: func(*runtimecontract.RuntimeOwnerInvariantSourceGate) error { return nil },
+		}); err == nil {
+			t.Fatal("formal transition trusted forged revision", mutationIndex)
+		}
+
 	}
 	if !reflect.DeepEqual(r.ScopeRequest.InputRevision.Report, r.WorkingBinding.InputRevision.Report) {
 		t.Fatal("work lost rejected original report")
 	}
+}
+
+// Successful seal deliberately consumes pre-seal feasibility records. Check
+// their fresh-load invariants while they are persisted, before that boundary.
+type inputStructureCheckingRepository struct {
+	runtimeStateRepository
+	t       *testing.T
+	checked bool
+}
+
+func (r *inputStructureCheckingRepository) Save(ctx context.Context, a runtime.RuntimeAggregate, expected uint64) error {
+	return r.save(ctx, a, expected, r.runtimeStateRepository.Save)
+}
+
+func (r *inputStructureCheckingRepository) SaveValidated(ctx context.Context, a runtime.RuntimeAggregate, expected uint64) error {
+	return r.save(ctx, a, expected, r.runtimeStateRepository.SaveValidated)
+}
+
+func (r *inputStructureCheckingRepository) save(ctx context.Context, a runtime.RuntimeAggregate, expected uint64, persist func(context.Context, runtime.RuntimeAggregate, uint64) error) error {
+	if err := persist(ctx, a, expected); err != nil {
+		return err
+	}
+	if !r.checked {
+		for _, attempt := range a.CandidateAttempts {
+			for _, record := range attempt.Feasibilities {
+				if record.InputStructure != nil {
+					loaded, err := r.Load(ctx, a.Facts.WorkspaceID, a.Facts.RunID)
+					if err != nil {
+						r.t.Fatal(err)
+					}
+					assertRuntimeInputStructureFreshLoad(r.t, loaded)
+					r.checked = true
+					return nil
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // Missing behavior assertions, original source conjuncts and future delivery
@@ -280,5 +352,60 @@ func TestDriveRuntimeInputRevisionsConsumeOriginalCapabilityBudget(t *testing.T)
 	baseline := runValidationInputReviewMainline(t, "input_revision_budget", "")
 	if got := runValidationInputReviewMainline(t, "input_revision_budget", "after_input_revision_receipt"); got != baseline {
 		t.Fatalf("restart reset actual budget: %d != %d", got, baseline)
+	}
+}
+
+func TestDriveRuntimeStructuralInputRevisionRealOwnersAndRecovery(t *testing.T) {
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterConjunctiveEntrypoint, ValidationCount: 1}
+	baseline := runValidationInputReviewMainline(t, "input_revision_structure", "", options)
+	for _, cut := range []string{"after_input_revision_retirement", "after_input_revision_receipt"} {
+		t.Run(cut, func(t *testing.T) {
+			if got := runValidationInputReviewMainline(t, "input_revision_structure", cut, options); got != baseline {
+				t.Fatalf("recovery repeated calls %d != %d", got, baseline)
+			}
+		})
+	}
+}
+
+func TestDriveRuntimeInputPostimageRejectsBeforeWriteAndRecoversCorrection(t *testing.T) {
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterConjunctiveEntrypoint, ValidationCount: 1, InvalidRevisionCandidate: true}
+	baseline := runValidationInputReviewMainline(t, "input_revision_structure", "", options)
+	if got := runValidationInputReviewMainline(t, "input_revision_structure", "after_input_structure_rejection", options); got != baseline {
+		t.Fatalf("recovery repeated provider call: %d != %d", got, baseline)
+	}
+}
+
+func assertRuntimeInputStructureFreshLoad(t *testing.T, a runtime.RuntimeAggregate) {
+	t.Helper()
+	found := false
+	for i, attempt := range a.CandidateAttempts {
+		for j, record := range attempt.Feasibilities {
+			if record.InputStructure == nil {
+				continue
+			}
+			found = true
+			for _, scenario := range []string{"missing", "bytes", "request", "source", "owner"} {
+				bad := a.CloneRaw()
+				fact := bad.CandidateAttempts[i].Feasibilities[j].InputStructure
+				switch scenario {
+				case "missing":
+					bad.CandidateAttempts[i].Feasibilities[j].InputStructure = nil
+				case "bytes":
+					fact.Postimage.Content += "altered"
+				case "request":
+					fact.RequestHash = "other-transaction"
+				case "source":
+					fact.Proof.BeforeHash = "stale"
+				case "owner":
+					fact.OwnerModuleID = runtimecontract.RuntimeModuleFile
+				}
+				if err := bad.Validate(); err == nil {
+					t.Fatalf("fresh load accepted input structure tamper: %s", scenario)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("input revision lost structural owner observation")
 	}
 }

@@ -14,7 +14,7 @@ func TestSemanticLocalAliasesPreserveConflictBeforeContentAndIntent(t *testing.T
 	intent := &rc.RuntimeImplementationIntent{DeclarationRef: "original", RemainingWork: "actual missing work", Reason: "original reason"}
 	prev := &rc.RuntimeImplementationRoundReviewSource{Ordinal: 17, DispatchID: "dispatch-17", ReceiptSetHash: "set-17", IntentBinding: &rc.RuntimeImplementationWorkIntentBinding{Intent: intent.Clone()}, Before: []rc.TargetSnapshot{{TargetRef: "input", Content: "different preimage"}}}
 	input := rc.RuntimeValidationInputReviewFile{TargetRef: "input", ContentHash: "exact-hash", Content: text}
-	p := runtimeSemanticAuthorityProjection{Schema: json.RawMessage(`{}`), WorkContext: &runtimeSemanticWorkProjection{Content: &rc.RuntimeImplementationWorkContent{Snapshots: []rc.TargetSnapshot{{TargetRef: input.TargetRef, ContentHash: input.ContentHash, Content: input.Content}}}, PriorRounds: []runtimeSemanticWorkRoundProjection{{Ordinal: 17, DispatchID: "dispatch-17", ReceiptSetHash: "set-17", Intent: intent}}}, Manifest: runtimeSemanticManifestProjection{ImplementationPurpose: &runtimeSemanticImplementationWorkProjection{PreviousRound: prev, InputRevision: &rc.RuntimeValidationInputRevision{Binding: rc.RuntimeValidationProofRequirementBinding{InputReview: &rc.RuntimeValidationInputReviewSubject{Files: []rc.RuntimeValidationInputReviewFile{input, {TargetRef: "input", ContentHash: "old-hash", Content: text + "old"}}}}}}, ValidationGenerationContexts: []runtimeValidationGenerationContextProjection{{Context: &rc.RuntimeValidationGenerationContext{Files: []rc.RuntimeValidationInputReviewFile{input}}}}}}
+	p := runtimeSemanticAuthorityProjection{Schema: json.RawMessage(`{}`), WorkContext: &runtimeSemanticWorkProjection{Content: &rc.RuntimeImplementationWorkContent{Snapshots: []rc.TargetSnapshot{{TargetRef: input.TargetRef, ContentHash: input.ContentHash, Content: input.Content}}}, PriorRounds: []runtimeSemanticWorkRoundProjection{{Ordinal: 17, DispatchID: "dispatch-17", ReceiptSetHash: "set-17", Intent: intent}}}, Manifest: runtimeSemanticManifestProjection{ImplementationPurpose: &runtimeSemanticImplementationWorkProjection{PreviousRound: prev, InputRevision: &runtimeInputRevisionProjection{Binding: rc.RuntimeValidationProofRequirementBinding{InputReview: &rc.RuntimeValidationInputReviewSubject{Files: []rc.RuntimeValidationInputReviewFile{input, {TargetRef: "input", ContentHash: "old-hash", Content: text + "old"}}}}}}, ValidationGenerationContexts: []runtimeValidationGenerationContextProjection{{Context: &rc.RuntimeValidationGenerationContext{Files: []rc.RuntimeValidationInputReviewFile{input}}}}}}
 	before, _ := json.Marshal(runtimeSemanticAuthorityInline(p))
 	raw, err := json.Marshal(p)
 	if err != nil {
@@ -79,6 +79,50 @@ func TestOrdinaryOrderDoesNotRequestImplementationIntent(t *testing.T) {
 	purpose := runtimeSemanticWorkProviderRequestForTest(t, true)
 	if !strings.Contains(runtimeSemanticSharedWorkOutputInstruction(purpose.SemanticContext, purpose.SemanticManifest), "implementationIntent") {
 		t.Fatal("real purpose lost mandatory intent")
+	}
+}
+
+func TestStructuralInputLocalReferenceExpandsExactOriginalBytes(t *testing.T) {
+	content := strings.Repeat("original malformed input\n", 200)
+	f := rc.RuntimeValidationInputReviewFile{TargetRef: "checks/input", Content: content, ContentHash: rc.RuntimeValidationInputContentHash(content)}
+	p := runtimeSemanticAuthorityProjection{Schema: json.RawMessage(`{}`), WorkContext: &runtimeSemanticWorkProjection{Content: &rc.RuntimeImplementationWorkContent{Snapshots: []rc.TargetSnapshot{{TargetRef: f.TargetRef, ContentHash: f.ContentHash, Content: f.Content}}}}, Manifest: runtimeSemanticManifestProjection{ImplementationPurpose: &runtimeSemanticImplementationWorkProjection{InputRevision: &runtimeInputRevisionProjection{Observation: &runtimeInputRevisionObservationProjection{Files: []rc.RuntimeValidationInputReviewFile{f}}}}}}
+	inline, _ := json.Marshal(runtimeSemanticAuthorityInline(p))
+	raw, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var w runtimeSemanticAuthorityWire
+	if err := json.Unmarshal(raw, &w); err != nil || len(w.FileRefs) != 1 || len(raw) >= len(inline) {
+		t.Fatal("structural input did not reuse its exact local snapshot", err)
+	}
+	var expanded runtimeSemanticAuthorityProjection
+	if err := json.Unmarshal(raw, &expanded); err != nil || !reflect.DeepEqual(p, expanded) {
+		t.Fatal("structural source expansion differs from original", err)
+	}
+	t.Logf("fixture C3 inline=%d bytes, physical=%d bytes; expanded source remains exact", len(inline), len(raw))
+	for _, kind := range []string{"missing source", "other target", "other version", "mixed content", "duplicate"} {
+		t.Run(kind, func(t *testing.T) {
+			var bad runtimeSemanticAuthorityWire
+			if err := json.Unmarshal(raw, &bad); err != nil {
+				t.Fatal(err)
+			}
+			switch kind {
+			case "missing source":
+				bad.WorkContext.Content.Snapshots = nil
+			case "other target":
+				bad.WorkContext.Content.Snapshots[0].TargetRef = "another/input"
+			case "other version":
+				bad.WorkContext.Content.Snapshots[0].ContentHash = "new-version"
+			case "mixed content":
+				bad.Manifest.ImplementationPurpose.InputRevision.Observation.Files[0].Content = "another input"
+			case "duplicate":
+				bad.FileRefs = append(bad.FileRefs, bad.FileRefs[0])
+			}
+			bytes, _ := json.Marshal(bad)
+			if err := json.Unmarshal(bytes, &expanded); err == nil {
+				t.Fatal("non-exact structural alias accepted")
+			}
+		})
 	}
 }
 

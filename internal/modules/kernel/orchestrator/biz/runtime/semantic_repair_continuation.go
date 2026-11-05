@@ -82,7 +82,7 @@ func semanticRepairFreshValidationEvidenceRevision(aggregate RuntimeAggregate) (
 		!runtimecontract.EvidenceRevisionAfter(trigger.Revision, closure.BaselineEvidenceRevision) {
 		return invalid("handoff has no unique final repair evidence revision")
 	}
-	var dispatch SealedDispatch
+	var dispatch runtimecontract.RuntimeDispatchRecord
 	dispatches := 0
 	for _, candidate := range aggregate.CompletedDispatches {
 		if candidate.ID == trigger.DispatchID {

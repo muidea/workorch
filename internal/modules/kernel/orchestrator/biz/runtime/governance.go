@@ -20,7 +20,7 @@ func (c *authorityComponent) bindGovernanceRequest(ctx context.Context, workspac
 	if err := runtimecontract.ValidateRuntimeGovernanceRequestRecords([]runtimecontract.RuntimeGovernanceRequestRecord{request}); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -67,9 +67,7 @@ func (c *authorityComponent) bindGovernanceRequest(ctx context.Context, workspac
 	}
 	aggregate.GovernanceRequests = append(aggregate.GovernanceRequests, request)
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -163,13 +161,11 @@ func (c *authorityComponent) commitGovernanceResolutionWithContinuationLease(
 	if err != nil {
 		return EvidenceCommitResult{}, err
 	}
-	aggregate, err := c.repository.Load(ctx, resolution.WorkspaceID, resolution.RunID)
+	aggregate, err := c.load(ctx, resolution.WorkspaceID, resolution.RunID)
 	if err != nil {
 		return EvidenceCommitResult{}, err
 	}
-	if err := c.validateAggregate(aggregate); err != nil {
-		return EvidenceCommitResult{}, err
-	}
+
 	eventID := resolution.EventID()
 	if containsString(aggregate.ProcessedEventIDs, eventID) {
 		switch persistedRuntimeGovernanceResolutionDisposition(aggregate, resolution) {
@@ -390,9 +386,7 @@ func (c *authorityComponent) commitGovernanceResolutionWithContinuationLease(
 		lease.State = runtimecontract.RuntimeDriveLeaseScheduled
 		aggregate.DriveLease = &lease
 	}
-	if err := c.validateAggregate(aggregate); err != nil {
-		return EvidenceCommitResult{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return EvidenceCommitResult{}, err
 	}
@@ -481,12 +475,12 @@ func validateGovernanceContinuationDriveLeaseTemplate(
 	return &lease, nil
 }
 
-func buildGovernanceResumeDispatch(aggregate RuntimeAggregate, binding runtimecontract.RuntimeOperationGovernanceBinding) (SealedDispatch, error) {
+func buildGovernanceResumeDispatch(aggregate RuntimeAggregate, binding runtimecontract.RuntimeOperationGovernanceBinding) (runtimecontract.RuntimeDispatchRecord, error) {
 	binding = binding.Normalized()
 	if binding.State != runtimecontract.RuntimeOperationGovernanceBindingGranted || binding.Grant == nil {
-		return SealedDispatch{}, fmt.Errorf("governance resume requires granted binding")
+		return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("governance resume requires granted binding")
 	}
-	var source *SealedDispatch
+	var source *runtimecontract.RuntimeDispatchRecord
 	for idx := range aggregate.CompletedDispatches {
 		if aggregate.CompletedDispatches[idx].ID == binding.OperationDispatchID {
 			value := aggregate.CompletedDispatches[idx]
@@ -495,20 +489,20 @@ func buildGovernanceResumeDispatch(aggregate RuntimeAggregate, binding runtimeco
 		}
 	}
 	if source == nil || source.State != DispatchStateCommitted {
-		return SealedDispatch{}, fmt.Errorf("governance resume source dispatch %q is missing", binding.OperationDispatchID)
+		return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("governance resume source dispatch %q is missing", binding.OperationDispatchID)
 	}
 	sourceExecution, found := operationExecutionRecord(source.OperationExecutions, binding.OperationID)
 	if !found {
-		return SealedDispatch{}, fmt.Errorf("governance resume source execution does not match granted binding")
+		return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("governance resume source execution does not match granted binding")
 	}
 	if err := sourceExecution.Validate(); err != nil {
-		return SealedDispatch{}, fmt.Errorf("governance resume source execution: %w", err)
+		return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("governance resume source execution: %w", err)
 	}
 	if containsString(source.CompletedOperationIDs, binding.OperationID) {
-		return SealedDispatch{}, fmt.Errorf("governance resume operation %q is already completed", binding.OperationID)
+		return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("governance resume operation %q is already completed", binding.OperationID)
 	}
 	effectiveActivation := runtimecontract.RuntimeActivationForFacts(aggregate.Facts)
-	effectiveActivation.OperationPolicies = runtimecontract.RuntimeDispatchSealedOperationPolicies(sealedDispatchToRuntimeRecord(*source))
+	effectiveActivation.OperationPolicies = runtimecontract.RuntimeDispatchSealedOperationPolicies((*source))
 	preSealAuthority := RuntimeDispatchPreSealAuthority{
 		ImplementationWorkCommitment: cloneImplementationWorkCommitment(source.ImplementationWorkCommitment),
 		RepairCommitment:             cloneRuntimeDispatchRepairCommitment(source.RepairCommitment),
@@ -535,12 +529,12 @@ func buildGovernanceResumeDispatch(aggregate RuntimeAggregate, binding runtimeco
 		preSealAuthority,
 	)
 	if err != nil {
-		return SealedDispatch{}, err
+		return runtimecontract.RuntimeDispatchRecord{}, err
 	}
 	return resume, nil
 }
 
-func governanceResumeAuthorityFeasibilities(source SealedDispatch) []runtimecontract.RuntimeCandidateFeasibilityRecord {
+func governanceResumeAuthorityFeasibilities(source runtimecontract.RuntimeDispatchRecord) []runtimecontract.RuntimeCandidateFeasibilityRecord {
 	ret := make([]runtimecontract.RuntimeCandidateFeasibilityRecord, 0, len(source.OperationExecutions))
 	for _, execution := range source.OperationExecutions {
 		execution = execution.Normalized()

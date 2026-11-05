@@ -82,13 +82,13 @@ func TestRuntimeLineageCandidateSealIndependentPreimageAndResponseLoss(t *testin
 			if after {
 				want, saves = baseline, 1
 			}
-			if !reflect.DeepEqual(persisted, want) || repository.saves != saves {
+			if !reflect.DeepEqual(ownerStateRecord(persisted), ownerStateRecord(want)) || repository.saves != saves {
 				t.Fatal("故障改变原始前像或未保全完整同一 CAS after-image")
 			}
 			// 独立加载产物可变，持久化前像不得受调用方改写影响。
 			persisted.CandidateAttempts[0].State = "caller-mutated-invalid-state"
 			fresh, err := repository.Load(ctx, previous.Facts.WorkspaceID, previous.Facts.RunID)
-			if err != nil || !reflect.DeepEqual(fresh, want) {
+			if err != nil || !reflect.DeepEqual(ownerStateRecord(fresh), ownerStateRecord(want)) {
 				t.Fatalf("Load 共享 attempt 切片污染独立前像: %v", err)
 			}
 			reopened, err := NewRuntimeController(repository)
@@ -102,11 +102,11 @@ func TestRuntimeLineageCandidateSealIndependentPreimageAndResponseLoss(t *testin
 			if err := result.Aggregate.Validate(); err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(result.Aggregate, baseline) || repository.saves != 1 {
+			if !reflect.DeepEqual(ownerStateRecord(result.Aggregate), ownerStateRecord(baseline)) || repository.saves != 1 {
 				t.Fatal("重放改变 normal seal 材料、规则、预算或重复 CAS")
 			}
 			duplicate, err := reopened.ApplyInternalEvent(ctx, event)
-			if err != nil || !reflect.DeepEqual(duplicate.Aggregate, baseline) || repository.saves != 1 {
+			if err != nil || !reflect.DeepEqual(ownerStateRecord(duplicate.Aggregate), ownerStateRecord(baseline)) || repository.saves != 1 {
 				t.Fatalf("duplicate seal 非幂等: %v", err)
 			}
 			conflicting := baseline.CloneRaw()
@@ -115,7 +115,7 @@ func TestRuntimeLineageCandidateSealIndependentPreimageAndResponseLoss(t *testin
 				t.Fatalf("stale CAS 非零写入拒绝: %v", err)
 			}
 			final, err := repository.Load(ctx, previous.Facts.WorkspaceID, previous.Facts.RunID)
-			if err != nil || !reflect.DeepEqual(final, baseline) {
+			if err != nil || !reflect.DeepEqual(ownerStateRecord(final), ownerStateRecord(baseline)) {
 				t.Fatalf("stale CAS 改写 seal 原材料: %v", err)
 			}
 		})

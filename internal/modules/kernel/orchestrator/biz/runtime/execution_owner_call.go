@@ -53,11 +53,11 @@ func (x *activeDispatchExecution) operationExecutionCallHandoff(operation runtim
 
 // Detached value projection of the purpose fields only. The enclosing
 // aggregate/dispatch gate independently validates the complete authority.
-func runtimeHistoricalEffectProofContractForDispatch(dispatch SealedDispatch, operation runtimecontract.RuntimeOperation) string {
+func runtimeHistoricalEffectProofContractForDispatch(dispatch runtimecontract.RuntimeDispatchRecord, operation runtimecontract.RuntimeOperation) string {
 	return runtimecontract.RuntimeHistoricalEffectProofContractForDispatch(runtimeHistoricalEffectPurposeDispatch(dispatch), operation)
 }
 
-func runtimeHistoricalEffectPurposeDispatch(dispatch SealedDispatch) runtimecontract.RuntimeDispatchRecord {
+func runtimeHistoricalEffectPurposeDispatch(dispatch runtimecontract.RuntimeDispatchRecord) runtimecontract.RuntimeDispatchRecord {
 	return runtimecontract.RuntimeDispatchRecord{
 		Transaction: dispatch.Transaction, CoverageBindings: dispatch.CoverageBindings,
 		RepairCommitment: dispatch.RepairCommitment, RepairCommitmentHash: dispatch.RepairCommitmentHash,
@@ -70,7 +70,7 @@ func runtimeHistoricalEffectPurposeDispatch(dispatch SealedDispatch) runtimecont
 // binding and the exact owner-catalog binding must agree byte-for-byte on all
 // owner-neutral identities before the latter may cross EventHub. Native check
 // and protocol values remain opaque here.
-func runtimeValidationProofBindingForOperation(dispatch SealedDispatch, operation runtimecontract.RuntimeOperation, catalog *runtimecontract.RuntimeOperationAdmissibility) (runtimecontract.RuntimeValidationProofRequirementBinding, error) {
+func runtimeValidationProofBindingForOperation(dispatch runtimecontract.RuntimeDispatchRecord, operation runtimecontract.RuntimeOperation, catalog *runtimecontract.RuntimeOperationAdmissibility) (runtimecontract.RuntimeValidationProofRequirementBinding, error) {
 	if runtimecontract.CanonicalRuntimeBlockKind(operation.Kind) != runtimecontract.RuntimeBlockKindManagedValidationSession {
 		return runtimecontract.RuntimeValidationProofRequirementBinding{}, nil
 	}
@@ -144,11 +144,17 @@ func runtimeOwnerCatalogObservationForOperation(values []runtimecontract.Runtime
 	if catalog == nil {
 		return nil
 	}
-	catalogValue := catalog.Normalized()
+	catalogValue := *catalog
+	catalogValue.PrerequisiteID = strings.TrimSpace(catalogValue.PrerequisiteID)
+	catalogValue.OwnerModuleID = strings.TrimSpace(catalogValue.OwnerModuleID)
+	catalogValue.SnapshotID = strings.TrimSpace(catalogValue.SnapshotID)
 	for _, raw := range values {
+		if strings.TrimSpace(raw.PrerequisiteID) != catalogValue.PrerequisiteID || runtimecontract.PrerequisiteKind(strings.TrimSpace(string(raw.Kind))) != runtimecontract.PrerequisiteKindOperationAdmissibility ||
+			strings.TrimSpace(raw.OwnerModuleID) != catalogValue.OwnerModuleID || strings.TrimSpace(raw.ContentHash) != catalogValue.SnapshotID {
+			continue
+		}
 		observation := raw.Normalized()
-		if observation.PrerequisiteID != catalogValue.PrerequisiteID || observation.Kind != runtimecontract.PrerequisiteKindOperationAdmissibility ||
-			observation.OwnerModuleID != catalogValue.OwnerModuleID || observation.ContentHash != catalogValue.SnapshotID || observation.Validate() != nil {
+		if observation.Validate() != nil {
 			continue
 		}
 		observation.Dependencies = append([]runtimecontract.RuntimeFreshnessDependency(nil), observation.Dependencies...)
@@ -169,9 +175,12 @@ func runtimeOwnerCatalogForOperation(values []runtimecontract.RuntimeOperationAd
 		return nil
 	}
 	for _, catalog := range values {
+		if strings.TrimSpace(catalog.OwnerModuleID) != owner || strings.TrimSpace(catalog.SnapshotID) != requiredSnapshotID ||
+			strings.TrimSpace(catalog.AcquisitionBinding) != requiredAcquisitionBinding || !runtimeCatalogContainsOperationKind(catalog, canonicalKind) {
+			continue
+		}
 		catalog = catalog.Normalized()
-		if catalog.OwnerModuleID != owner || catalog.SnapshotID != requiredSnapshotID || catalog.AcquisitionBinding != requiredAcquisitionBinding ||
-			!runtimeCatalogContainsOperationKind(catalog, canonicalKind) || catalog.Validate() != nil {
+		if catalog.Validate() != nil {
 			continue
 		}
 		if runtimeOwnerCatalogObservationForOperation(observations, &catalog) == nil {

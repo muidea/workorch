@@ -31,12 +31,12 @@ func validateRuntimeExecutionPurposeFence(a RuntimeAggregate) error {
 	if err := runtimecontract.ValidateRuntimeCWILedger(a.Facts); err != nil {
 		return err
 	}
-	dispatch := sealedDispatchToRuntimeRecord(*a.ActiveDispatch)
+	dispatch := (*a.ActiveDispatch)
 	if err := runtimecontract.ValidateRuntimeImplementationWorkDispatchCommitment(dispatch); err != nil {
 		return err
 	}
 	if a.Decision.RequiredOutput.ImplementationWorkBindingHash != dispatch.ImplementationWorkCommitment.WorkingBinding.Hash || a.Facts.Failure != nil || a.Facts.RepairDirective != nil {
 		return fmt.Errorf("%w: work execution lost exact ordinary-work authority", common.ErrConflict)
 	}
-	return runtimecontract.ValidateRuntimeImplementationWorkState(a.Definition, a.Facts, a.ImplementationWork, a.SemanticPlanning, &dispatch, sealedDispatchesToRuntimeRecords(a.CompletedDispatches), a.OperationReceipts, a.OperationGovernanceBindings, a.ExecutionBudget)
+	return runtimecontract.ValidateRuntimeImplementationWorkState(a.Definition, a.Facts, a.ImplementationWork, a.SemanticPlanning, &dispatch, (a.CompletedDispatches), a.OperationReceipts, a.OperationGovernanceBindings, a.ExecutionBudget)
 }

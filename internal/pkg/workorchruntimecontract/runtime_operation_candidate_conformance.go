@@ -51,6 +51,7 @@ type RuntimeOperationCandidateActualShape string
 
 const (
 	RuntimeOperationCandidateActualShapeInvalidSyntax                 RuntimeOperationCandidateActualShape = "invalid_syntax"
+	RuntimeOperationCandidateActualShapeInputStructureInvalid         RuntimeOperationCandidateActualShape = "authorized_input_structure_invalid"
 	RuntimeOperationCandidateActualShapeTargetMismatch                RuntimeOperationCandidateActualShape = "target_mismatch"
 	RuntimeOperationCandidateActualShapeTargetModeMismatch            RuntimeOperationCandidateActualShape = "target_mode_mismatch"
 	RuntimeOperationCandidateActualShapeObservedTargetContextMismatch RuntimeOperationCandidateActualShape = "observed_target_context_mismatch"
@@ -87,7 +88,7 @@ func (c RuntimeOperationCandidateConstraint) Validate() error {
 			return nil
 		}
 	case RuntimeOperationCandidateConstraintTargetApplicability:
-		if c.RequiredShape == RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget ||
+		if c.RequiredShape == RuntimeOperationCandidateRequiredShapeInputStructure || c.RequiredShape == RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget ||
 			c.RequiredShape == RuntimeOperationCandidateRequiredShapeTextReplaceApplicableToObservedTarget {
 			return nil
 		}
@@ -260,12 +261,12 @@ func (v RuntimeOperationCandidateConstraintViolation) Validate() error {
 			return fmt.Errorf("runtime operation candidate actual shape %q is not declared for representation conformance", v.ActualShape)
 		}
 		return nil
-	case RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget,
+	case RuntimeOperationCandidateRequiredShapeInputStructure, RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget,
 		RuntimeOperationCandidateRequiredShapeTextReplaceApplicableToObservedTarget:
 		if v.TargetRef == "" || v.ObservedRevision == "" {
 			return fmt.Errorf("runtime operation candidate applicability violation requires target and observed revision")
 		}
-		if v.ActualShape != RuntimeOperationCandidateActualShapeObservedTargetContextMismatch {
+		if v.ActualShape != RuntimeOperationCandidateActualShapeObservedTargetContextMismatch && !(v.RequiredShape == RuntimeOperationCandidateRequiredShapeInputStructure && v.ActualShape == RuntimeOperationCandidateActualShapeInputStructureInvalid) {
 			return fmt.Errorf("runtime operation candidate actual shape %q is not declared for target applicability", v.ActualShape)
 		}
 		return nil

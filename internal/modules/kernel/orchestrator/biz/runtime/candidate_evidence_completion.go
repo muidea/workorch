@@ -103,7 +103,7 @@ func evidenceDispatchInvalidated(aggregate RuntimeAggregate, evidence ExecutionE
 
 func completeEvidenceDispatch(
 	aggregate *RuntimeAggregate,
-	dispatch SealedDispatch,
+	dispatch runtimecontract.RuntimeDispatchRecord,
 	invalidated bool,
 	admission executionEvidenceAdmission,
 	fact runtimecontract.EvidenceFact,

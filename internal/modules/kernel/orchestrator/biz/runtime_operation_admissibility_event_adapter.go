@@ -211,7 +211,11 @@ func ProbeRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub, c
 	}
 	switch response.Outcome {
 	case runtimecontract.RuntimeOwnerFeasibilityFeasible:
-		return normalizeFeasibleRuntimeOperationObservation(command, descriptor, response)
+		feasible, err := normalizeFeasibleRuntimeOperationObservation(command, descriptor, response)
+		if err != nil {
+			return runtimecontract.RuntimeOperationFeasibilityObservation{}, err
+		}
+		return inspectRuntimeInputRevisionPostimage(ctx, hub, command, feasible)
 	case runtimecontract.RuntimeOwnerFeasibilityCandidateConstraintViolated:
 		return normalizeCandidateConstraintRuntimeOperationObservation(command, descriptor, response)
 	default:
@@ -306,6 +310,13 @@ func requestRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub,
 
 func normalizeRuntimeOperationFeasibilityResponse(command runtimecontract.RuntimeOperationFeasibilityRequest, response runtimecontract.RuntimeOperationFeasibilityObservation) (runtimecontract.RuntimeOperationFeasibilityObservation, error) {
 	operation, inventory := command.Operation, command.Admissibility
+	_, structureRequired, structureErr := runtimecontract.RuntimeInputStructureConstraintForOperation(operation, command.OperationAuthorization)
+	if structureErr != nil {
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, structureErr
+	}
+	if response.InputStructure != nil || (response.Postimage != nil && (!structureRequired || response.Outcome != runtimecontract.RuntimeOwnerFeasibilityFeasible || response.ReplayProof == nil)) {
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("owner returned unbound input structure data")
+	}
 	if response.OperationID != operation.ID || response.AdmissibilitySnapshotID != inventory.SnapshotID || response.CapabilityStateBinding != inventory.AcquisitionBinding {
 		return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility probe returned an invalid result")
 	}

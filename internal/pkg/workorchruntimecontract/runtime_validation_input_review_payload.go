@@ -3,6 +3,8 @@ package workorchruntimecontract
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func validateRuntimeValidationInputReviewPayload(path string, raw json.RawMessage) error {
@@ -71,13 +73,18 @@ func validateRuntimeValidationInputReviewPayload(path string, raw json.RawMessag
 	return nil
 }
 
-func addRuntimeSemanticInputReviewSchema(proposal map[string]any, manifest RuntimeSemanticPlanManifest) {
+func addRuntimeSemanticInputReviewSchema(proposal map[string]any, manifest RuntimeSemanticPlanManifest, coverageIDs []common.CoverageWorkItemID) {
+	selected := make(map[common.CoverageWorkItemID]struct{}, len(coverageIDs))
+	for _, id := range normalizeOrderedCoverageWorkItemIDs(coverageIDs) {
+		selected[id] = struct{}{}
+	}
 	var applicable []any
 	var rules []any
 	for _, catalog := range manifest.OwnerCatalogs {
 		for _, surface := range catalog.ValidationSurfaces {
 			for _, binding := range surface.ProofRequirementBindings {
-				if binding.InputReview == nil {
+				_, applicableToRequest := selected[binding.CoverageWorkItemID]
+				if !applicableToRequest || binding.InputReview == nil {
 					continue
 				}
 				condition := map[string]any{

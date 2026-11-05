@@ -237,7 +237,7 @@ func testImplementationWorkProductionDriverTargetsWithCardinality(t *testing.T, 
 	t.Cleanup(func() { provider.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	originalDefinition := aggregate.Definition
 	originalFocus := aggregate.Facts.DefinitionFocuses[0]
-	for transition := 0; transition < runtimeDriveTransitionLimit; transition++ {
+	for transition := 0; transition < runtimeDriveTransitionBatchSize; transition++ {
 		outcome, err := module.driveOneRuntimeTransition(ctx, nil, aggregate, orchestratorevents.DriveRuntimeCommand{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract))
 		if err != nil {
 			t.Fatalf("production transition %d phase=%s state=%s: %v", transition, aggregate.SemanticPlanning.Phase, aggregate.Decision.State, err)

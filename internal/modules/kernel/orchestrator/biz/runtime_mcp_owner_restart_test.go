@@ -391,7 +391,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				// remote call, recreate FailureTarget authority, or consume another
 				// aggregate revision before File grounding starts.
 				sealedDispatchID := sealed.Aggregate.ActiveDispatch.ID
-				var sealedValidation runtime.SealedDispatch
+				var sealedValidation runtimecontract.RuntimeDispatchRecord
 				for _, dispatch := range persisted.CompletedDispatches {
 					if dispatch.ID == sealedDispatchID {
 						sealedValidation = dispatch

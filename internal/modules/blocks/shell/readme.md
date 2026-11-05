@@ -160,8 +160,8 @@ delivery process or passes its own tests cannot authorize replacement of the
 previous verification input. A ready reviewed owner binding carries a mandatory exact
 `InputReview` subject: the complete versioned input namespace (helpers/fixtures
 included) and present Go module/workspace definitions, with content hashes and
-the immutable requirement/native mapping. The current envelope is 16 files and
-64 KiB per subject; unavailable/invalid-UTF-8/symlink/over-capacity inputs produce an
+the immutable requirement/native mapping. The ordinary envelope is 16 files and
+64 KiB per subject (multi-failure uses the explicit larger corpus below); unavailable/invalid-UTF-8/symlink/over-capacity inputs produce an
 explicit `validation_input_review_*` unavailability, never truncated review.
 Unrepresentable multi-check mappings are also explicit unavailability. Missing
 inputs may use the existing exact create-only preparation; creation is not review
@@ -209,8 +209,11 @@ full-suite/build criterion still requires explicit actual execution/assertions b
 historical failures may not be silently omitted to satisfy that criterion.
 
 Every current-package Go source is structurally inspected, including non-test helpers.
-Runner overrides, effectful initializers, other tests/methods, cgo and imports of other
-validation packages are unsupported. Nested Go packages/modules and intermediate
+Runner overrides, effectful initializers, cgo and imports of other validation packages
+are unsupported. The selected adapter determines native-test membership: conjunctive/project
+packages allow helper methods; multi-failure additionally inventories and independently reviews
+ordinary additive native tests, then executes them in the project conjunction. These tests cannot
+replace exact required checks or acquire their CWI credit. Nested Go packages/modules and intermediate
 module/workspace definitions are explicit `validation_input_review_scope_unsupported`;
 invalid helpers, symlinks, unreadable or oversized inputs fail closed. This bounded
 closure does not certify arbitrary dynamic file/process dependencies: a review cannot
@@ -251,8 +254,8 @@ SHA256 固定一个 `workorch_validation/conjunctive/<requirement-digest>/input_
 create-only preparation 返回一个 exact target 与完整 native mapping、
 `shell/go-test-input/conjunctive-entrypoint/v1`；不是逐项补造部分 proof。
 全部 package helpers/fixtures 与根定义合计仍限 16 files / 64 KiB，native checks 仍限 32；
-超界显式 unavailable，不截断或提高限制。结构检查只允许已声明的原／补充 Test，拒绝额外 Test、init、
-TestMain、effectful initializer 和跨 harness 引用；每项仍需真实 testing.T 断言、逐判据一致性评审与实际行为观察。
+超界显式 unavailable，不截断或提高限制。合取 package 允许同包 helper method；普通合取协议只执行已声明的原／补充 Test。
+multi-failure 的额外 Test 采用下述完整独立 inventory/review 合同。仍拒绝 init、TestMain、effectful initializer 和跨 harness 引用；每项仍需真实 testing.T 断言、逐判据一致性评审与实际行为观察。
 各成员的 supplement 使用同 package 中不同 exact 文件，不得别名；单输入 compile-repair 不获得多成员修复权限。
 当前能力不提供任意输入替换或一般多成员 compile-repair，不能用实现修复绕过输入保护。
 
@@ -269,7 +272,7 @@ provider 为脚本替身；它不代替公开 authoring、真实模型、任意�
 #### 根 module 与逐 CWI 验证合取
 
 Shell-private `runShellProjectConjunction` 复用 `validation_project_conjunction.go` 的事实生产器，
-在同一 managed workspace 副本和同一不超过 60000ms 的原 operation deadline 内依次运行
+在同一 managed workspace 副本和同一本次封存的 operation deadline（显式声明范围 1000–600000ms，未声明时使用 owner 默认期限） 内依次运行
 `go build ./...`、`go test -json -count=1 ./...`、`go test -race -json -count=1 ./...`，
 最后独立运行准确映射的当前 requirement 原／补充检查及实现行为观察。
 前三阶段不使用最后阶段的 coverage；完整项目成功不能替代当前 CWI 的准确检查通过或实际行为。
@@ -315,6 +318,10 @@ owner 从准确输入 bytes 编译完整项目测试来源（opaque source ref�
 有界 corpus 包含全部 project `_test.go`、validation namespace helpers、普通非 Go fixture/documentation 和根定义；
 非 test/non-harness Go 文件仍为可修复的交付实现，不成为不可变验证输入。依赖未提供的外部 harness/fixture
 不能猜作 consistent。新 envelope 为 64 files/256 KiB、64 sources、64 KiB report；超界明确不可用，不裁剪。
+允许普通附加 native Test 和同包 helper method；Go 原生 Test 名称发现与独立诊断 inventory 使用同一规则，method 和 Testhelper 不冒充 native Test。
+附加 native Test 必须完整独立评审，并参加全项目合取；失败仍阻止通过，不能替代 required checks。
+preparation/supplement 使用实际选中协议的容量和期限说明：multi-failure 为 64 files/256 KiB、64 sources/64 KiB report，
+单个 operation 的准备、全部执行阶段与 cleanup 共用本次封存的 deadline（显式声明范围 1000–600000ms，默认不变），不能重置期限、减样本或跳过原准则。
 普通 mutation 排除全部原 project test 与 validation namespace；来源评审不开放输入维护授权。
 
 root test/race 完整失败后，只有全部 failed package/case 能唯一匹配封存来源、没有 skip/build/unknown/source drift，
@@ -366,7 +373,7 @@ reconciliation 原文使用绑定 Workspace/Run、request/generation、Definitio
 
 `validation_project_execution.go` 将准备、四阶段、行为转换、原文发布、句柄关闭和实际 scratch cleanup
 纳入从私有封套入口开始的同一最早 deadline。只接受原 execution scope 的 ephemeral managed validation，
-不接受 caller scratch 或超过既有 60000ms 的期限；阶段规格从执行前的 owner 编译产物取得，不从结果反推。
+不接受 caller scratch、超过本次声明或超过 owner 最大 600000ms 的期限；阶段规格从执行前的 owner 编译产物取得，不从结果反推。
 首次执行事实与 raw refs 绑定同一 Workspace／Run／原 ExecutionKey；未保存的流显式保留 omission 原因。
 cleanup、原文发布或总期限失败使合取 incomplete／quality invalid，已知阶段失败的原 exit/code 不因此改成未决。
 启动前失败保留实际空 stdout/stderr 的 bytes/hash，不补造 Started。该封套不提供 replay/读取准入；
@@ -465,7 +472,7 @@ consume the judged result without reinterpreting this owner diagnostic.
 `shell/go-test-json/entrypoint-behavior`。该 adapter 同时观测 in-process 测试与本次 Go 构建的子进程；Resume/recovery 仍使用原封存执行输入。
 
 `shell/go-test-input/conjunctive-entrypoint-test` 允许 exact 补充文件中的同包具名 helper、type、const、无调用/闭包
-初始化的 var，仍拒绝 init、TestMain、method、额外 Test 定义与不可达的 testing.T 断言。旧输入只被重新检查，不被改写；
+初始化的 var，仍拒绝 init、TestMain、method、额外 Test 定义与不可达的 testing.T 断言。此单检查协议的限制不套用于合取/project package。旧输入只被重新检查，不被改写；
 原检查和补充检查仍是 all-of。结构无效或语义证据不足不授权改写判据，也不自动扩大 File repair surface。
 
 新增输入内容合同可以声明可选失败报告语法：实际 testing.T 断言失败时，在独立一行输出
@@ -511,6 +518,10 @@ recovery/delivery 合同。`TestEntrypointBehaviorObservesBuiltGoProcessWithoutR
   `ProofRequirementUnavailability` 保留 exact requirement 与原始原因，不发布另一条 create 路径或 prospective constraint。
   同一 requirement 不能同时为 ready、preparable 与 unavailable；其它 CWI 的合法 binding 不受影响。以上均不是
   target、repair、retry 或 terminal authority。
+- 对已有验证包的可处理语法/断言结构缺陷，unavailability 可附 typed `RuntimeValidationInputMaintenance`：原 requirement/binding、
+  完整原始 bounded files 与当前同包输入目标。读取复用独立 review 的同一 source/bytes reader，但不生成 review subject/hash、
+  一致性结论或 readiness。范围、读取、容量与不支持协议等不可用原因不取得维护许可；Shell 不选择后继、不修改业务。
+  SM-2 只有在原 Profile 已授权 input revision 且 exact 当前 CWI/owner/source 均匹配时才可使用现有维护事务；否则保留原不可用原因。
 - v2 每次执行绑定同一 proof 的完整 native-check 集合（最多 32 项），强制 fresh JSON test observation，并在 managed
   scratch 内生成 owner-controlled workspace coverage。外部模块、测试源、`workorch_validation` harness 与零执行记录
   不提供实现执行证据；无可核对的 workspace 实现执行或输出不完整时，返回
@@ -574,3 +585,52 @@ input rules. Existing input replacement and review-conflict retry remain unautho
 而非仅在 prospective preparation 时提供。选择和 bytes/SHA256 校验沿 Shell adapter 合同执行；unavailable/over_capacity
 保留明确状态且不发布部分正文。该上下文供 LLM 修订测试输入，不赋予 mutation authority 或行为/回执 credit。
 Profile/template 中的正式 owner receipt/Result/ACK 规则由其既定 Runtime 消费点核对，项目 native test 不读取私有 owner 存储。
+
+
+### 冻结输入修订的写前结构观察
+
+`InspectRuntimeValidationInputStructure` 为只读 SM-3 query，仅接受 Orchestrator 强来源调用。
+File 的现有 patch preview 返回精确后像 bytes/hash 和原 replay proof；Shell 对原完整冻结输入 corpus
+仅替换该后像，复用 readiness 同一 parser、声明规则及断言遍历，不写文件、不运行进程、不调用模型。
+观察绑定 Workspace/Run、authority transaction、candidate manifest、原 revision、operation 与 File 前后像。
+缺检查、重复、非法签名、runner interception 等结构问题沿原有一次候选纠正，原文不修补。
+此接点只覆盖已有授权的 input-revision File edit/patch，不宣称普通业务源码或首次创建输入都已做写前语言校验。
+通过仍须执行 File 原 CAS/权限门禁、fresh readiness、新独立 review 和普通 validation；零验收 credit。
+
+project adapter 遵守原 recipe/operation 及更早父 context 的单一总期限；准备、build/test/race、当前 CWI
+行为、原文发布和 cleanup 都不能重置它。去除 adapter 私有 60s 上限不增加任何既有 Run 期限/预算。
+原已封存期限容不下 60s 完整观察与其他阶段时仍不可行，不能缩短样本。当前 software-dev 内置方法对后续合法新事务声明 300000ms 总期限；这不是对旧 Run/已发操作的扩容，也不保证任意项目都能在其中完成。
+
+跨 CWI test/race 证明复用尚未实现。`observeShellValidationCopiedInputs` 仅观察原复制文件，明确不跟踪
+全部子进程读取；source hash 和这些依赖相同不能证明网络、时钟、外部文件或工具链依赖未变。
+现阶段保留全部物理阶段、完整 Goal/DoD 合取和当前 CWI 的独立行为证明，不能将历史 PASS 改成当前执行。
+
+
+新 owner input-review subject 显式声明本次 `Recipe` 方法（含总 TimeoutMillis），并将其纳入原 subject hash；
+与 catalog 的原 recipe 逐值一致，不能通过自重算 hash 更换期限或方法。新 preparation 和项目 supplement 同步说明
+精确已声明总期限；0 仅表示使用 owner 默认，不代表无界或最大值。结构维护保存同一原 recipe，零 review/readiness credit。
+重读已冻结 subject 仅保留它原先声明的方法，不给旧原件追加声明。未声明 executable metadata 的 owner 不受 Shell transport 要求。
+输入修订继续由原权威、权限和预算控制；新的期限信息不改变全部必需阶段、样本和准则。
+结构 query 同时登记在 owner topic 与 concrete typed message 合同，均为 Orchestrator SM-3 的只读 participant。
+
+### 同一 reconciliation 批次的共同执行事实
+
+`QueryRuntimeCWIReconciliationBatchCommand` 是 Shell 接收的有界 typed 查询：2–8 个成员必须逐值来自
+同一个已持久 request/generation/binding-set/baseline，不能扩展消费者。Orchestrator 只提供原 completed
+SM-3 seal 的 exact scope、recipe 和 accepted receipt hash；Shell 独立检查方法和各成员当前输入。
+同一当前项目、相同完整 project recipe、各自不重复的 exact native checks 才适用共同执行；成员的
+原行为 scope 不合并。任何不适用都在执行前回到各自原方法，不授共享证明。
+
+适用时一次完整 scratch 副本执行共同 build/test/race，随后逐 CWI 执行完整 exact 行为。
+每个 `RuntimeValidationExecutionUse` 保留共同阶段同一实际时间、source/argv、原输出身份和受限引用，
+以及自己的独立行为、原 accepted receipt 和原 scope/recipe hash。该用途属于 fresh reconciliation
+事实，不是另一操作 receipt，不新增普通 validation 或 assessment credit。全批原文发布、关闭、source
+完整成员复核和 scratch cleanup 完成，且未超过本次 recipe 与父 context 的最早总期限，才返回满足。
+任一成员失败使整批不可满足，保留实际 failure code；执行后的错误不退回重跑。
+
+scope 包含当前完整副本文件集合，新增/删除/替换相邻输入也使本批失效。只在这次查询内共享实际事实，
+不以 copied-input hash 宣称网络、时钟、外部文件、环境或工具链具有跨时间依赖闭包，不提供历史 PASS cache。
+原文继续保存在受限 Shell store，共同阶段用 reconciliation/group scope，独立阶段另含 binding identity；
+它们不是 operation receipt 的输出，不借原 receipt read topic 获得读取权限。
+持久 batch 后的 duplicate drive 读原 aggregate；在 batch CAS 前中断仍遵守原 fresh-query 语义，
+不承诺查询物理执行 at-most-once，也不另造恢复账本。

@@ -210,7 +210,7 @@ func (c *authorityComponent) reserveImplementationWorkScope(ctx context.Context,
 	if c == nil || c.repository == nil || workspace == "" || run == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	a, err := c.repository.Load(ctx, workspace, run)
+	a, err := c.load(ctx, workspace, run)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -269,7 +269,7 @@ func (c *authorityComponent) observeImplementationWorkScope(ctx context.Context,
 	if c == nil || c.repository == nil || workspace == "" || run == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	a, err := c.repository.Load(ctx, workspace, run)
+	a, err := c.load(ctx, workspace, run)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}

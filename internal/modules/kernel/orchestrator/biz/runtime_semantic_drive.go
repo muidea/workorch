@@ -19,7 +19,7 @@ import (
 // directly: every phase change is submitted through the Orchestrator-private
 // internal-event dispatcher.
 func (m *Biz) driveRuntimeSemanticPlanning(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, error) {
-	ledger := aggregate.SemanticPlanning.Clone()
+	ledger := aggregate.SemanticPlanning
 	switch ledger.Phase {
 	case runtimecontract.RuntimeSemanticPlanningRequired:
 		return m.driveRuntimeSemanticRequired(ctx, aggregate)
@@ -77,49 +77,7 @@ func (m *Biz) driveRuntimeSemanticRequired(ctx context.Context, aggregate runtim
 	if aggregate.Facts.Resources.ProviderCeiling == nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_ceiling_missing", "semantic planning has no sealed provider ceiling prerequisite", nil)
 	}
-	eligibleCoverage := runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts)
-	if len(eligibleCoverage) == 0 {
-		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_no_eligible_cwi", "semantic planning was requested without an eligible canonical CWI", nil)
-	}
-	repairInput, repairRequired, repairErr := runtime.CurrentRuntimeValidationFailureRepairGenerationInput(aggregate)
-	if repairErr != nil {
-		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_validation_failure_repair_invalid", repairErr.Error(), nil)
-	}
-	identity := semanticplan.ManifestIdentity{
-		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
-		Definition: aggregate.Definition, DefinitionSeed: aggregate.Facts.DefinitionSeed,
-		DefinitionFocuses: aggregate.Facts.DefinitionFocuses,
-		Execution:         aggregate.Facts.Activation.ExecutionContract, Admissibilities: aggregate.Facts.Resources.OperationAdmissibilities,
-		EligibleCoverage: eligibleCoverage,
-	}
-	identity.InputReviewInformation, repairErr = runtime.RuntimeInputReviewInformation(aggregate)
-	if repairErr != nil {
-		return runtime.RuntimeAggregate{}, repairErr
-	}
-	if repairRequired {
-		// A repair purpose is CWI-local and cannot replace unrelated eligible
-		// Definition proofs in the same generation.
-		identity.EligibleCoverage = []common.CoverageWorkItemID{repairInput.CoverageWorkItemID}
-		identity.ValidationFailureRepair = &repairInput
-	}
-	if current, workErr := runtime.CurrentRuntimeImplementationWorkReservation(aggregate); workErr != nil {
-		return runtime.RuntimeAggregate{}, workErr
-	} else if current != nil {
-		if repairRequired || current.ScopeObservation == nil {
-			return runtime.RuntimeAggregate{}, fmt.Errorf("%w: semantic work scope is unsettled or exact repair is current", common.ErrConflict)
-		}
-		identity.ImplementationWork = current
-		identity.EligibleCoverage = []common.CoverageWorkItemID{current.CoverageWorkItemID}
-	}
-	if preview := aggregate.ImplementationWork.ScopePreview; preview != nil {
-		if repairRequired || preview.Observation == nil {
-			return runtime.RuntimeAggregate{}, fmt.Errorf("%w: implementation purpose preview is incomplete or conflicts with exact repair", common.ErrConflict)
-		}
-		identity.ImplementationPurposePreview = preview
-		identity.ImplementationWorkRounds = aggregate.ImplementationWork.Rounds
-		identity.EligibleCoverage = []common.CoverageWorkItemID{preview.Request.CoverageWorkItemID}
-	}
-	manifest, err := semanticplan.CompileManifest(identity)
+	manifest, err := runtime.CompileRuntimeSemanticManifest(aggregate)
 	if err != nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_manifest_invalid", err.Error(), nil)
 	}
@@ -153,7 +111,7 @@ func (m *Biz) driveRuntimeSemanticOrderAccepted(ctx context.Context, aggregate r
 		return runtime.RuntimeAggregate{}, err
 	}
 	aggregate = projected.Aggregate
-	ledger = aggregate.SemanticPlanning.Clone()
+	ledger = aggregate.SemanticPlanning
 	// EligibleFocusProjected is an owner-private SM-2 event and may retire the
 	// generation when a normal Definition closure has changed. Hand that new
 	// phase back to the outer SM-4 drive immediately; never continue with the
@@ -189,7 +147,7 @@ func (m *Biz) driveRuntimeSemanticFeasibilityComplete(ctx context.Context, aggre
 		if err != nil {
 			return runtime.RuntimeAggregate{}, err
 		}
-		aggregate, ledger = advanced, advanced.SemanticPlanning.Clone()
+		aggregate, ledger = advanced, advanced.SemanticPlanning
 		if refreshed := activeRuntimeSemanticBatch(ledger); refreshed != nil {
 			activeBatch = refreshed
 		}
@@ -269,7 +227,7 @@ func runtimeSemanticLogicalRequestID(aggregate runtime.RuntimeAggregate, stableP
 }
 
 func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, error) {
-	ledger := aggregate.SemanticPlanning.Clone()
+	ledger := aggregate.SemanticPlanning
 	if ledger.Manifest == nil || ledger.LogicalRequestID == "" || aggregate.Facts.Resources.ProviderCeiling == nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_request_context_invalid", "semantic request is missing manifest, request identity, or provider ceiling", nil)
 	}
@@ -376,7 +334,7 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 		return runtime.RuntimeAggregate{}, fmt.Errorf("%w: semantic request session differs from its sealed intent", common.ErrConflict)
 	}
 	aggregate = ensured
-	ledger = aggregate.SemanticPlanning.Clone()
+	ledger = aggregate.SemanticPlanning
 	if resumed, handled, err := m.resumeRuntimeSemanticRequestSession(ctx, aggregate, session); handled {
 		return resumed, err
 	}
@@ -515,7 +473,7 @@ func (m *Biz) handleRuntimeSemanticDocumentOutcome(ctx context.Context, aggregat
 // batch compiler. It reads only the persisted order document and submits the
 // resulting fact through the private event path; it never mutates the ledger.
 func (m *Biz) compileRuntimeSemanticPlanBatch(ctx context.Context, aggregate runtime.RuntimeAggregate, logicalRequestID string, maxItems int) (runtime.RuntimeAggregate, error) {
-	ledger := aggregate.SemanticPlanning.Clone()
+	ledger := aggregate.SemanticPlanning
 	if ledger.Manifest == nil || ledger.CoverageOrderDocument == nil || ledger.Document == nil || ledger.Document.PlanStep != runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
 		return runtime.RuntimeAggregate{}, fmt.Errorf("%w: semantic batch requires persisted coverage order", common.ErrConflict)
 	}
@@ -542,7 +500,7 @@ func (m *Biz) compileRuntimeSemanticPlanBatch(ctx context.Context, aggregate run
 }
 
 func (m *Biz) mergeRuntimeSemanticPlanFocusBatchDocument(ctx context.Context, aggregate runtime.RuntimeAggregate, batch runtimecontract.RuntimeSemanticPlanBatch) (runtime.RuntimeAggregate, error) {
-	ledger := aggregate.SemanticPlanning.Clone()
+	ledger := aggregate.SemanticPlanning
 	if ledger.Manifest == nil {
 		return runtime.RuntimeAggregate{}, fmt.Errorf("%w: semantic focus batch merge has no manifest", common.ErrConflict)
 	}
@@ -582,7 +540,7 @@ func (m *Biz) observeRuntimeSemanticPlanBatchFeasibility(ctx context.Context, ag
 }
 
 func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, aggregate runtime.RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession) (runtime.RuntimeAggregate, error) {
-	ledger := aggregate.SemanticPlanning.Clone()
+	ledger := aggregate.SemanticPlanning
 	if ledger.Manifest == nil || ledger.LogicalRequestID != session.LogicalRequestID {
 		return runtime.RuntimeAggregate{}, fmt.Errorf("%w: complete semantic document has no matching planning request", common.ErrConflict)
 	}
@@ -734,7 +692,7 @@ func runtimeSemanticCorrectionDiagnostic(diagnostic runtimecontract.RuntimeOrigi
 }
 
 func (m *Biz) driveRuntimeSemanticFeasibility(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, error) {
-	ledger := aggregate.SemanticPlanning.Clone()
+	ledger := aggregate.SemanticPlanning
 	feasibilityDocument, found := runtimeSemanticActiveFeasibilityDocument(ledger)
 	if ledger.Manifest == nil || !found {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_feasibility_context_invalid", "semantic feasibility has no persisted manifest or document", nil)
@@ -833,7 +791,7 @@ func runtimeSemanticActiveFeasibilityDocument(ledger runtimecontract.RuntimeSema
 }
 
 func (m *Biz) probeRuntimeSemanticProposal(ctx context.Context, aggregate runtime.RuntimeAggregate, proposal runtimecontract.RuntimeSemanticProofProposal) (runtime.RuntimeAggregate, error) {
-	ledger := aggregate.SemanticPlanning.Clone()
+	ledger := aggregate.SemanticPlanning
 	if ledger.Manifest == nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_probe_proposal_invalid", "semantic proposal has no sealed manifest", nil)
 	}

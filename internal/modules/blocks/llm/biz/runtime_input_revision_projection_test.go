@@ -12,11 +12,14 @@ import (
 func inputRevisionProviderFixture(t *testing.T) *runtimecontract.RuntimeValidationInputRevision {
 	request := runtimeInputReviewProviderFixture(t)
 	binding := request.SemanticManifest.OwnerCatalogs[0].ValidationSurfaces[0].ProofRequirementBindings[0]
+	method := request.SemanticManifest.OwnerCatalogs[0].ValidationRecipes[0]
+	binding.InputReview.Recipe = &method
+	binding.InputReview.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, binding)
 	report := runtimecontract.RuntimeValidationInputReview{SubjectHash: binding.InputReview.Hash}
 	for _, check := range binding.RequiredCheckRefs {
 		report.Checks = append(report.Checks, runtimecontract.RuntimeValidationInputCheckReview{RequiredCheckRef: check, Conclusion: runtimecontract.RuntimeValidationInputConflict, Reason: "The input omits the original required assertion.", InputTargetRefs: []string{binding.InputReview.Files[0].TargetRef}, Obligations: []runtimecontract.RuntimeValidationInputObligationReview{{CriterionText: request.SemanticManifest.CoverageItems[0].TargetText, Finding: runtimecontract.RuntimeValidationInputMissing, Reason: "The input omits the original required assertion.", InputTargetRefs: []string{binding.InputReview.Files[0].TargetRef}}}})
 	}
-	v := &runtimecontract.RuntimeValidationInputRevision{WorkspaceID: request.SemanticContext.WorkspaceID, RunID: request.SemanticContext.RunID, DefinitionSeedHash: request.SemanticContext.DefinitionSeed.Hash, SourceManifestHash: "original-manifest", SourceLogicalRequestID: "original-request", SourceDocumentHash: "original-rejected-report", OwnerModuleID: runtimecontract.RuntimeModuleFile, Binding: binding, Report: report, InputTargetRefs: []string{binding.InputReview.Files[0].TargetRef}}
+	v := &runtimecontract.RuntimeValidationInputRevision{WorkspaceID: request.SemanticContext.WorkspaceID, RunID: request.SemanticContext.RunID, DefinitionSeedHash: request.SemanticContext.DefinitionSeed.Hash, SourceManifestHash: "original-manifest", SourceLogicalRequestID: "original-request", SourceDocumentHash: "original-rejected-report", OwnerModuleID: runtimecontract.RuntimeModuleFile, Recipe: &method, Binding: binding, Report: report, InputTargetRefs: []string{binding.InputReview.Files[0].TargetRef}}
 	if err := v.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +43,7 @@ func TestRuntimeInputRevisionCompleteC3StablePrefixAndClosedPurpose(t *testing.T
 			if !purpose {
 				projected = authority.Manifest.ProofObligations[0].ImplementationWork
 			}
-			if projected == nil || len(projected.InputCoverageRevisionTasks) != len(v.Report.Checks) || projected.InputRevision == nil || projected.TerminalEvidenceCredit || !reflect.DeepEqual(projected.InputRevision, request.SemanticManifest.ProofObligations[0].ImplementationWork.Scope.Request.InputRevision) {
+			if projected == nil || len(projected.InputCoverageRevisionTasks) != len(v.Report.Checks) || projected.InputRevision == nil || projected.TerminalEvidenceCredit || !reflect.DeepEqual(projected.InputRevision, inputRevisionForProvider(request.SemanticManifest.ProofObligations[0].ImplementationWork.Scope.Request.InputRevision)) {
 				t.Fatal("C3 lost exact original input/review or claimed credit")
 			}
 			if purpose {
@@ -133,8 +136,33 @@ func TestInputRevisionProviderMethodOmitsAllowanceButRetainsOriginalSources(t *t
 		if err != nil {
 			t.Fatal(err)
 		}
-		if source.Scope.Request.Policy.MaxInputRevisionsPerCWI != 4 || projected.Policy.MaxInputRevisionsPerCWI != 0 || projected.PolicyHash != source.PolicyHash || !reflect.DeepEqual(projected.InputRevision, source.Scope.Request.InputRevision) {
+		if source.Scope.Request.Policy.MaxInputRevisionsPerCWI != 4 || projected.Policy.MaxInputRevisionsPerCWI != 0 || projected.PolicyHash != source.PolicyHash || !reflect.DeepEqual(projected.InputRevision, inputRevisionForProvider(source.Scope.Request.InputRevision)) {
 			t.Fatal("source authority or full original review changed")
 		}
+	}
+}
+
+func TestStructuralInputProjectionExcludesUnrelatedAuthorityAndReusesExactContent(t *testing.T) {
+	original := inputRevisionProviderFixture(t)
+	files := append([]runtimecontract.RuntimeValidationInputReviewFile(nil), original.Binding.InputReview.Files...)
+	binding := original.Binding.Clone()
+	binding.InputReview = nil
+	diagnostic := &runtimecontract.RuntimeOriginalDiagnostic{OriginalCode: "owner_structure_invalid", OriginalMessage: "  exact owner diagnostic\n"}
+	source := &runtimecontract.RuntimeValidationInputRevision{Recipe: original.Recipe, Binding: binding, InputTargetRefs: original.InputTargetRefs, OwnerModuleID: original.OwnerModuleID, OwnerObservation: &runtimecontract.RuntimeValidationInputRevisionObservation{Observation: runtimecontract.RuntimePrerequisiteObservation{ObservationID: "original-observation"}, Catalog: runtimecontract.RuntimeOperationAdmissibility{SnapshotID: "original-catalog", ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{ProofRequirementUnavailabilities: []runtimecontract.RuntimeValidationProofUnavailability{{Requirement: runtimecontract.RuntimeValidationProofRequirement{Hash: binding.RequirementHash}, OriginalDiagnostic: diagnostic, Maintenance: &runtimecontract.RuntimeValidationInputMaintenance{Recipe: original.Recipe, Binding: binding, Files: files}}}}, {ID: "unrelated-CWI-authority-must-stay-owner-only"}}}}}
+	before, _ := json.Marshal(source)
+	p := inputRevisionForProvider(source)
+	raw, _ := json.Marshal(p)
+	if strings.Contains(string(raw), "unrelated-CWI-authority") || p.Report != nil || p.Observation == nil || !reflect.DeepEqual(p.Observation.Files, files) || !reflect.DeepEqual(p.Observation.OriginalDiagnostic, diagnostic) {
+		t.Fatal("structural projection lost original input/diagnostic or leaked unrelated catalog")
+	}
+	after, _ := json.Marshal(source)
+	if string(before) != string(after) {
+		t.Fatal("projection rewrote original owner source")
+	}
+	p.Observation.Files[0].Content = "mutated"
+	p.Observation.OriginalDiagnostic.OriginalMessage = "mutated"
+	after, _ = json.Marshal(source)
+	if string(before) != string(after) {
+		t.Fatal("projection aliases owner authority")
 	}
 }

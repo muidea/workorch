@@ -2,6 +2,7 @@ package workorchruntimecontract
 
 import (
 	"fmt"
+	"reflect"
 	"sync"
 )
 
@@ -10,13 +11,11 @@ import (
 // after-image. The owner supplies the actual ordered aggregate invariant bodies.
 // This value is lexical compiler input, not an EventHub or persistence contract.
 type RuntimeOwnerStateSourceImage struct {
-	Original        *RuntimeStateRecord
-	Sources         RuntimeLineageAssertionSources
-	Output          RequiredOutputContract
-	Revision        uint64
-	FeedbackVersion uint32
-	BeforeSemantic  func() error
-	AfterSemantic   func(*RuntimeOwnerInvariantSourceGate) error
+	Original *RuntimeStateRecord
+	// Converted is an exact representation of Original, not another business
+	// input to admit. AggregateJoins owns only aggregate-specific joins.
+	Converted      *RuntimeStateRecord
+	AggregateJoins func(*RuntimeOwnerInvariantSourceGate) error
 }
 
 // CompileRuntimeOwnerStateTransaction bounds pure subresult reuse to one
@@ -26,13 +25,16 @@ type RuntimeOwnerStateSourceImage struct {
 // or recursive use, and poisons the compilation on the first validation error.
 // The owner, not this pure compiler, performs every read, reducer and CAS.
 func CompileRuntimeOwnerStateTransaction(run func(func(RuntimeOwnerStateSourceImage) error) error) error {
-	return compileRuntimeOwnerStateTransaction(run, newRuntimeSemanticValidationSession(), nil)
+	return compileRuntimeOwnerStateTransaction(run, newRuntimeSemanticValidationSession())
 }
 
-func compileRuntimeOwnerStateTransaction(run func(func(RuntimeOwnerStateSourceImage) error) error, semantic *runtimeSemanticValidationSession, scope *runtimeOwnerHistoricalScope) error {
+func compileRuntimeOwnerStateTransaction(run func(func(RuntimeOwnerStateSourceImage) error) error, semantic *runtimeSemanticValidationSession) error {
 	if run == nil {
 		return fmt.Errorf("runtime owner-state transaction requires an owner body")
 	}
+	// Complete candidate consumers are lexical products only, not entries in
+	// the retained semantic whitelist or ordinary public cold validators.
+	semantic.candidateSources = &runtimeCandidateSourceCompiler{}
 	historical := &runtimeHistoricalPreimageSession{semantic: semantic, sourceCompiler: &runtimeHistoricalSourceCompiler{}}
 	var mu sync.Mutex
 	active := true
@@ -41,6 +43,7 @@ func compileRuntimeOwnerStateTransaction(run func(func(RuntimeOwnerStateSourceIm
 		mu.Lock()
 		active = false
 		// Do not retain raw subtrees through a captured, revoked gate function.
+		semantic.candidateSources = nil
 		semantic, historical = nil, nil
 		mu.Unlock()
 	}()
@@ -55,13 +58,7 @@ func compileRuntimeOwnerStateTransaction(run func(func(RuntimeOwnerStateSourceIm
 		if firstError != nil {
 			return firstError
 		}
-		if scope != nil && !scope.matches(image) {
-			// Keep the same lifecycle, poison and error order on a cold image.
-			cold := newRuntimeSemanticValidationSession()
-			firstError = validateRuntimeOwnerStateSourceImage(image, cold, &runtimeHistoricalPreimageSession{semantic: cold, sourceCompiler: &runtimeHistoricalSourceCompiler{}})
-		} else {
-			firstError = validateRuntimeOwnerStateSourceImage(image, semantic, historical)
-		}
+		firstError = validateRuntimeOwnerStateSourceImage(image, semantic, historical)
 		return firstError
 	}
 	err := run(validate)
@@ -78,22 +75,37 @@ func compileRuntimeOwnerStateTransaction(run func(func(RuntimeOwnerStateSourceIm
 	return err
 }
 
+// CompileRuntimeOwnerStateTransition is the one post-image check for a CAS.
+// It borrows the exact formal preimage synchronously, retains no result, and
+// never re-admits unchanged typed inputs. It is not a read/recovery entry.
+func CompileRuntimeOwnerStateTransition(previous RuntimeStateRecord, image RuntimeOwnerStateSourceImage) error {
+	if image.Converted == nil || image.Original != nil {
+		return fmt.Errorf("runtime transition requires complete postimage")
+	}
+	if err := ValidateRuntimeCommittedHistoryTransition(previous, *image.Converted); err != nil {
+		return err
+	}
+	session := newRuntimeSemanticValidationSession()
+	session.committedPreimage = &previous
+	return validateRuntimeOwnerStateSourceImage(image, session, &runtimeHistoricalPreimageSession{semantic: session})
+}
+
 func validateRuntimeOwnerStateSourceImage(image RuntimeOwnerStateSourceImage, semantic *runtimeSemanticValidationSession, historical *runtimeHistoricalPreimageSession) error {
+	if image.Converted == nil || image.AggregateJoins == nil {
+		return fmt.Errorf("runtime owner image requires complete record and aggregate joins")
+	}
+	canonical := image.Converted
 	if image.Original != nil {
-		if err := image.Original.validateInSourceSession(semantic, historical); err != nil {
+		canonical = image.Original
+	}
+	if err := runtimeProcessingRegion("record_admission", func() error { return canonical.validateInSourceSession(semantic, historical) }); err != nil {
+		if image.Original != nil {
 			return fmt.Errorf("load Runtime state: %w", err)
 		}
-	}
-	if err := ValidateRuntimeDefinitionLineageAssertions(image.Sources.Facts.DefinitionFocuses, image.Sources.Facts.Activation.ExecutionContract.ProfileContracts); err != nil {
 		return err
 	}
-	if err := ValidateRuntimeResultFeedbackVersion(image.FeedbackVersion); err != nil {
-		return err
+	if image.Original != nil && !reflect.DeepEqual(*image.Original, *image.Converted) {
+		return fmt.Errorf("runtime owner record conversion changed original data")
 	}
-	var after func() error
-	if image.AfterSemantic != nil {
-		after = func() error { return withRuntimeOwnerInvariantSourceGate(semantic, image.AfterSemantic) }
-	}
-	return validateRuntimeConvergenceSourcesAndSemanticLedgerInSession(image.Sources, image.Output, image.Revision,
-		image.BeforeSemantic, after, semantic, historical)
+	return runtimeProcessingRegion("aggregate_joins", func() error { return withRuntimeOwnerInvariantSourceGate(semantic, image.AggregateJoins) })
 }

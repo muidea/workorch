@@ -5,7 +5,7 @@ import "fmt"
 // Frozen original aggregate source gate: consumers independently validate
 // complete sources and preserve every interstitial gate and first-error order.
 func referenceConvergenceSourceLedgers(s RuntimeLineageAssertionSources, output RequiredOutputContract, revision uint64) error {
-	if err := ValidateRuntimeHistoricalBehaviorCompletions(s); err != nil {
+	if err := ValidateRuntimeHistoricalBehaviorCompletions(s.Facts, s.Completed); err != nil {
 		return fmt.Errorf("runtime aggregate historical behavior: %w", err)
 	}
 	if err := ValidateRuntimeImplementationWorkState(s.Definition, s.Facts, s.Work, s.Semantic, s.Active, s.Completed, s.Receipts, s.Governance, s.Budget); err != nil {
@@ -43,7 +43,7 @@ func referenceConvergenceSourceLedgers(s RuntimeLineageAssertionSources, output 
 	if err := ValidateRuntimeAssessmentApplicabilityGenerations(s.Reconciliation, s.Active, s.Completed); err != nil {
 		return fmt.Errorf("runtime aggregate assessment applicability generation: %w", err)
 	}
-	if err := ValidateRuntimeAssessmentAdjudications(s.Facts, s.Completed, s.ProofLineage, s); err != nil {
+	if err := ValidateRuntimeAssessmentAdjudications(s.Facts, s.Completed); err != nil {
 		return fmt.Errorf("runtime aggregate assessment adjudication: %w", err)
 	}
 	return nil

@@ -187,7 +187,7 @@ func (m *Biz) buildWorkspaceRuntimeQuiescenceToken(ctx context.Context, intent d
 				}
 				return deletioncontract.WorkspaceRuntimeQuiescenceToken{}, common.ErrConflict
 			}
-			record := runtimeStateRecordFromAggregate(aggregate)
+			record := runtimecontract.RuntimeStateRecord(aggregate)
 			fact.RuntimeStatePresent = true
 			fact.RuntimeStateRevision = aggregate.StateRevision
 			fact.RuntimeStateRef = runevents.RuntimeStateRef(intent.WorkspaceID, item.ID, aggregate.StateRevision)

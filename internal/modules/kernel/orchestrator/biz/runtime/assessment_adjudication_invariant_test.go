@@ -2,13 +2,15 @@ package runtime
 
 import (
 	"context"
+	"errors"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"testing"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestRuntimeAssessmentAdjudicationRejectsCoordinatedDispositionAndProofRewrite(t *testing.T) {
-	controller, _, _ := prepareOwnerFactAssessment(t, true)
+	controller, repository, _ := prepareOwnerFactAssessment(t, true)
 	completed, err := controller.commitAssessment(context.Background(), "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
@@ -26,7 +28,7 @@ func TestRuntimeAssessmentAdjudicationRejectsCoordinatedDispositionAndProofRewri
 	if runtimecontract.StableRuntimeDispatchAuthorityHash(postSealMutation) != sealedAuthorityHash {
 		t.Fatal("post-seal assessment adjudication entered immutable dispatch authority hash")
 	}
-	repairableController, _, _ := prepareOwnerFactAssessment(t, false)
+	repairableController, repairableRepository, _ := prepareOwnerFactAssessment(t, false)
 	repairable, err := repairableController.commitAssessment(context.Background(), "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
@@ -45,9 +47,7 @@ func TestRuntimeAssessmentAdjudicationRejectsCoordinatedDispositionAndProofRewri
 		dispatch.AssessmentAdjudicationHash = runtimecontract.StableRuntimeAssessmentAdjudicationHash(*dispatch.AssessmentAdjudication)
 		drifted.Facts.Assessments[factIndex].Disposition = runtimecontract.AssessmentDispositionRepairableGap
 		drifted.Facts.Assessments[factIndex].AdjudicationHash = dispatch.AssessmentAdjudicationHash
-		if err := drifted.Validate(); err == nil {
-			t.Fatal("coordinated satisfied-to-repairable disposition flip was accepted")
-		}
+		assertCommittedAssessmentRewriteRejected(t, repository, completed, drifted)
 	})
 
 	t.Run("repairable to satisfied coordinated flip", func(t *testing.T) {
@@ -57,9 +57,7 @@ func TestRuntimeAssessmentAdjudicationRejectsCoordinatedDispositionAndProofRewri
 		dispatch.AssessmentAdjudicationHash = runtimecontract.StableRuntimeAssessmentAdjudicationHash(*dispatch.AssessmentAdjudication)
 		drifted.Facts.Assessments[repairableFactIndex].Disposition = runtimecontract.AssessmentDispositionSatisfied
 		drifted.Facts.Assessments[repairableFactIndex].AdjudicationHash = dispatch.AssessmentAdjudicationHash
-		if err := drifted.Validate(); err == nil {
-			t.Fatal("coordinated repairable-to-satisfied disposition flip was accepted")
-		}
+		assertCommittedAssessmentRewriteRejected(t, repairableRepository, repairable, drifted)
 	})
 
 	t.Run("proof and hash coordinated rewrite", func(t *testing.T) {
@@ -137,4 +135,27 @@ func runtimeAssessmentAdjudicationIndexes(t *testing.T, aggregate RuntimeAggrega
 		t.Fatal("completed assessment dispatch has no fact")
 	}
 	return dispatchIndex, factIndex
+}
+
+// Rehashing a different business result is detected against the formal CAS
+// preimage, not by reclassifying it on every read.
+func assertCommittedAssessmentRewriteRejected(t *testing.T, repository *controllerRepository, original, changed RuntimeAggregate) {
+	t.Helper()
+	saves := repository.saves
+	coordinator, err := NewRuntimeTransitionCoordinator(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed.StateRevision = original.StateRevision + 1
+	readErr := changed.Validate()
+	err = coordinator.Commit(context.Background(), changed, original.StateRevision)
+	if err == nil {
+		t.Fatal("CAS accepted a rewrite of a committed assessment result")
+	}
+	if readErr == nil && !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("coherent historical rewrite did not reach the CAS immutability fence: %v", err)
+	}
+	if repository.saves != saves {
+		t.Fatal("rejected rewrite reached persistence")
+	}
 }

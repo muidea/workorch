@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"context"
 	"fmt"
 	"reflect"
 	"testing"
@@ -10,42 +9,15 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestOwnerHistoricalCompilerReleaseOnlyDiscardsPureInputs(t *testing.T) {
-	a := stateChangeAggregate(t)
-	r := &ownerStateTransactionTestRepository{previous: a, raw: runtimeStateRecordForTerminalNonterminalRecoveryTest(t, a)}
-	c, err := NewRuntimeController(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	before := r.previous.CloneRaw()
-	for range 2 {
-		c.ReleaseHistoricalCompilation()
-	}
-	if r.loads != 0 || r.rereads != 0 || r.saves != 0 || !reflect.DeepEqual(before, r.previous) {
-		t.Fatal("pure release performed owner I/O or changed Runtime authority")
-	}
-	failure := runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_drive_failed", Signature: "release-test", Message: "preserved input"}
-	event := RuntimeInternalEvent{Kind: RuntimeInternalEventFailureObserved, Scope: RuntimeInternalEventScope{WorkspaceID: a.Facts.WorkspaceID, RunID: a.Facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{FailureFact: &failure}}
-	if _, err := c.ApplyInternalEvent(context.Background(), event); err != nil || r.loads != 1 || r.rereads != 1 || r.saves != 1 {
-		t.Fatalf("closed optimization changed full event/CAS: %v", err)
-	}
-	r.raw.ResultFeedbackVersion = 0
-	if _, err := c.ApplyInternalEvent(context.Background(), event); err == nil || r.saves != 1 {
-		t.Fatal("closed optimization bypassed raw validation")
-	}
-}
-
-func TestOwnerHistoricalCompilerCompleteEventImagesMatchIndependentGates(t *testing.T) {
+func TestOfflineOwnerAuditCompleteEventImagesMatchIndependentGates(t *testing.T) {
 	for _, arm := range []string{"valid", "raw scope", "raw header", "converted header", "seed", "evidence", "budget", "dispatch", "owner before", "owner after", "nil empty", "revision"} {
 		t.Run(arm, func(t *testing.T) {
 			a := stateChangeAggregate(t)
 			r := runtimeStateRecordForTerminalNonterminalRecoveryTest(t, a)
 			originalR, originalA := r.Clone(), a.CloneRaw()
-			var compiler runtimecontract.RuntimeOwnerHistoricalCompiler
 			for event := range 3 {
-				err := compiler.Compile(a.Facts.WorkspaceID, a.Facts.RunID, func(gate func(runtimecontract.RuntimeOwnerStateSourceImage) error) error {
+				err := runtimecontract.CompileRuntimeOwnerStateTransaction(func(gate func(runtimecontract.RuntimeOwnerStateSourceImage) error) error {
 					// The owner invariant compiler is always new for each event.
-					local := &ownerStateInvariantCompiler{}
 					for phase := range 3 {
 						raw, image := r.Clone(), a.CloneRaw()
 						var record *runtimecontract.RuntimeStateRecord
@@ -69,7 +41,7 @@ func TestOwnerHistoricalCompilerCompleteEventImagesMatchIndependentGates(t *test
 							case "budget":
 								image.ExecutionBudget.Policy.PolicyRevision = "drift"
 							case "dispatch":
-								image.CompletedDispatches = append(image.CompletedDispatches, SealedDispatch{})
+								image.CompletedDispatches = append(image.CompletedDispatches, runtimecontract.RuntimeDispatchRecord{})
 							case "owner before":
 								image.Decision.AuthoritySnapshot.RunID = "other"
 							case "owner after":
@@ -80,7 +52,7 @@ func TestOwnerHistoricalCompilerCompleteEventImagesMatchIndependentGates(t *test
 								image.StateRevision = 0
 							}
 						}
-						got := gate(ownerStateSourceImageInCompiler(record, image, local))
+						got := gate(ownerStateSourceImageInCompiler(record, image))
 						want := independentOwnerStateImage(record, image)
 						if fmt.Sprint(got) != fmt.Sprint(want) {
 							t.Fatalf("event %d phase %d first error differs: %v != %v", event, phase, got, want)
@@ -102,7 +74,7 @@ func TestOwnerHistoricalCompilerCompleteEventImagesMatchIndependentGates(t *test
 	}
 }
 
-func FuzzOwnerHistoricalCompilerCompleteEventImages(f *testing.F) {
+func FuzzOfflineOwnerAuditCompleteEventImages(f *testing.F) {
 	for arm := uint8(0); arm < 8; arm++ {
 		f.Add(arm, "原文\x00")
 	}
@@ -112,9 +84,8 @@ func FuzzOwnerHistoricalCompilerCompleteEventImages(f *testing.F) {
 		}
 		a := stateChangeAggregate(t)
 		r := runtimeStateRecordForTerminalNonterminalRecoveryTest(t, a)
-		var c runtimecontract.RuntimeOwnerHistoricalCompiler
 		for event := range 2 {
-			_ = c.Compile(a.Facts.WorkspaceID, a.Facts.RunID, func(gate func(runtimecontract.RuntimeOwnerStateSourceImage) error) error {
+			_ = runtimecontract.CompileRuntimeOwnerStateTransaction(func(gate func(runtimecontract.RuntimeOwnerStateSourceImage) error) error {
 				image, record := a.CloneRaw(), r.Clone()
 				if event == 1 {
 					switch arm % 8 {

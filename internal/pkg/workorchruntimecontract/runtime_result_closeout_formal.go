@@ -309,7 +309,15 @@ func ownerRevisionRefLess(left, right RuntimeOwnerRevisionRef) bool {
 }
 
 func stableFormalValueHash(kind string, value any) string {
-	payload, _ := json.Marshal(value)
-	digest := sha256.Sum256(append([]byte(kind+"\x00"), payload...))
-	return kind + "-sha256:" + hex.EncodeToString(digest[:])
+	// Encoder retains Marshal's exact representation without its full output
+	// copy and the second domain+payload copy. The call-local writer withholds
+	// only Encoder's trailing newline; original field bytes are never changed.
+	w := runtimeJSONHashWriter{digest: sha256.New()}
+	_, _ = w.digest.Write([]byte(kind + "\x00"))
+	if json.NewEncoder(&w).Encode(value) != nil {
+		// Preserve the original Marshal-error hash (nil payload), too.
+		w.digest.Reset()
+		_, _ = w.digest.Write([]byte(kind + "\x00"))
+	}
+	return kind + "-sha256:" + hex.EncodeToString(w.digest.Sum(nil))
 }

@@ -337,7 +337,7 @@ func TestProjectExecutionEnvelopeRejectsInvalidScopeAndBudgetBeforeScratch(t *te
 			case "scratch":
 				changed.ValidationScratchDirectory = t.TempDir()
 			case "timeout":
-				changed.TimeoutMillis = 120000
+				changed.TimeoutMillis = MaxCommandTimeout.Milliseconds() + 1
 			case "cancelled":
 				cancelled, cancel := context.WithCancel(ctx)
 				cancel()

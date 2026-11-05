@@ -26,16 +26,15 @@ type runtimePreimageOwnerInterleavedRepository struct {
 	concurrent runtime.RuntimeAggregate
 }
 
-func (r runtimePreimageOwnerInterleavedRepository) LoadTransitionPreimage(ctx context.Context, request runtime.RuntimeTransitionPreimageRequest) (runtime.RuntimeTransitionPreimage, error) {
-	product, err := r.runtimeStateRepository.LoadTransitionPreimage(ctx, request)
+func (r runtimePreimageOwnerInterleavedRepository) Load(ctx context.Context, workspace common.WorkspaceID, run common.RunID) (runtime.RuntimeAggregate, error) {
+	original, err := r.runtimeStateRepository.Load(ctx, workspace, run)
 	if err != nil {
-		return runtime.RuntimeTransitionPreimage{}, err
+		return runtime.RuntimeAggregate{}, err
 	}
-	// A separate successful owner CAS lands after the original complete read.
 	if err := r.runtimeStateRepository.Save(ctx, r.concurrent, r.concurrent.StateRevision-1); err != nil {
-		return runtime.RuntimeTransitionPreimage{}, err
+		return runtime.RuntimeAggregate{}, err
 	}
-	return product, nil
+	return original, nil
 }
 
 func (r runtimePreimageOwnerFaultRepository) SaveValidated(ctx context.Context, aggregate runtime.RuntimeAggregate, expected uint64) error {

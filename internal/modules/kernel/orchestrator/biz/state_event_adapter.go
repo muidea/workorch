@@ -47,6 +47,38 @@ func (r runSnapshotReader) Read(ctx context.Context, workspaceID common.Workspac
 	return response.Run, nil
 }
 
+// ReadLifecycle carries only the SM-1 identities needed between transitions.
+func (r runSnapshotReader) ReadLifecycle(ctx context.Context, w common.WorkspaceID, id common.RunID) (runmodel.RuntimeLifecycleState, error) {
+	command := runevents.QueryRuntimeLifecycleCommand{WorkspaceID: w, RunID: id}
+	if r.hub == nil || command.Validate() != nil {
+		return runmodel.RuntimeLifecycleState{}, common.ErrInvalidArgument
+	}
+	ev := magicevent.NewEventWithContext(runevents.TopicRunCommandRuntimeLifecycle, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	bindOwnerCommandLane(ev, runevents.Contracts(), runevents.TopicRunCommandRuntimeLifecycle, "run", string(id), w, id)
+	response, err := runCommandResponse[runevents.QueryRuntimeLifecycleResult](r.hub.Send(ev), runevents.TopicRunCommandRuntimeLifecycle)
+	if err != nil {
+		return runmodel.RuntimeLifecycleState{}, err
+	}
+	if response.Validate() != nil || response.Lifecycle.WorkspaceID != w || response.Lifecycle.RunID != id {
+		return runmodel.RuntimeLifecycleState{}, common.ErrConflict
+	}
+	return response.Lifecycle, nil
+}
+
+func runtimeLifecycleView(run *runmodel.Run) runmodel.RuntimeLifecycleState {
+	if run == nil {
+		return runmodel.RuntimeLifecycleState{}
+	}
+	v := runmodel.RuntimeLifecycleState{WorkspaceID: run.WorkspaceID, RunID: run.ID, State: run.State, BlockingTicketID: run.BlockingTicketID, BlockingApprovalID: run.BlockingApprovalID, ReconciliationScope: run.ReconciliationScope, ActivationRequestID: run.ActivationRequestID, LifecycleFence: run.RuntimeLifecycleFence}
+	if run.RuntimeState != nil {
+		v.RuntimeStateRevision = run.RuntimeState.StateRevision
+	}
+	if run.RuntimeBootstrap != nil {
+		v.BootstrapHash = runtimecontract.StableRuntimeBootstrapHash(*run.RuntimeBootstrap)
+	}
+	return v
+}
+
 // workspaceSnapshotReader is deliberately read-only. Workspace lifecycle and
 // default-selection mutation stay entirely inside the Workspace owner.
 type workspaceSnapshotReader struct {
@@ -74,7 +106,11 @@ func runtimeLifecycleFenceFromModel(item *runmodel.Run) (*runtimecontract.Runtim
 	if item == nil || item.RuntimeState == nil || item.RuntimeBootstrap == nil {
 		return nil, nil
 	}
-	state := item.RuntimeState
+	return runtimeLifecycleFenceForState(item.WorkspaceID, item.ID, *item.RuntimeState, runtimecontract.StableRuntimeBootstrapHash(*item.RuntimeBootstrap))
+}
+
+func runtimeLifecycleFenceForState(workspaceID common.WorkspaceID, runID common.RunID, record runtimecontract.RuntimeStateRecord, bootstrapHash string) (*runtimecontract.RuntimeOpaqueLifecycleFence, error) {
+	state := &record
 	outcome, terminal, err := runtime.DeriveTerminalOutcome(state.Decision, state.Termination)
 	if err != nil {
 		return nil, err
@@ -91,13 +127,13 @@ func runtimeLifecycleFenceFromModel(item *runmodel.Run) (*runtimecontract.Runtim
 		return nil, nil
 	}
 	fence := runtimecontract.RuntimeOpaqueLifecycleFence{
-		WorkspaceID: item.WorkspaceID, RunID: item.ID, RuntimeStateRevision: state.StateRevision,
-		RuntimeStateRef:  runevents.RuntimeStateRef(item.WorkspaceID, item.ID, state.StateRevision),
+		WorkspaceID: workspaceID, RunID: runID, RuntimeStateRevision: state.StateRevision,
+		RuntimeStateRef:  runevents.RuntimeStateRef(workspaceID, runID, state.StateRevision),
 		RuntimeStateHash: runtimecontract.StableRuntimeStateRecordHash(*state),
-		BootstrapHash:    runtimecontract.StableRuntimeBootstrapHash(*item.RuntimeBootstrap),
+		BootstrapHash:    bootstrapHash,
 	}
 	if terminal {
-		fence.TerminalFenceID = runtimecontract.StableTerminalDeliveryID(item.WorkspaceID, item.ID, state.Decision.AuthoritySnapshot.ID, outcome)
+		fence.TerminalFenceID = runtimecontract.StableTerminalDeliveryID(workspaceID, runID, state.Decision.AuthoritySnapshot.ID, outcome)
 	} else {
 		fence.GovernanceFenceID = governanceHandoff.FenceID()
 		fence.GovernanceResolutionID = governanceHandoff.ResolutionID

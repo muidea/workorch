@@ -82,16 +82,20 @@ func testSemanticRepairReceiptConsumption(t *testing.T, original RuntimeAggregat
 				}
 			})
 		}
-		for name, mutate := range map[string]func(*SealedDispatch, *runtimecontract.EvidenceFact){
-			"foreign dispatch": func(_ *SealedDispatch, f *runtimecontract.EvidenceFact) { f.DispatchID = "foreign" },
-			"before barrier": func(_ *SealedDispatch, f *runtimecontract.EvidenceFact) {
+		for name, mutate := range map[string]func(*runtimecontract.RuntimeDispatchRecord, *runtimecontract.EvidenceFact){
+			"foreign dispatch": func(_ *runtimecontract.RuntimeDispatchRecord, f *runtimecontract.EvidenceFact) {
+				f.DispatchID = "foreign"
+			},
+			"before barrier": func(_ *runtimecontract.RuntimeDispatchRecord, f *runtimecontract.EvidenceFact) {
 				f.Revision = before.Facts.RepairDirective.SupersedesEvidenceRevision
 			},
-			"foreign binding": func(_ *SealedDispatch, f *runtimecontract.EvidenceFact) { f.BindingRefs = []string{"foreign"} },
-			"effect instead of validation": func(_ *SealedDispatch, f *runtimecontract.EvidenceFact) {
+			"foreign binding": func(_ *runtimecontract.RuntimeDispatchRecord, f *runtimecontract.EvidenceFact) {
+				f.BindingRefs = []string{"foreign"}
+			},
+			"effect instead of validation": func(_ *runtimecontract.RuntimeDispatchRecord, f *runtimecontract.EvidenceFact) {
 				f.Kind = runtimecontract.EvidenceKindStateChange
 			},
-			"work commitment": func(d *SealedDispatch, _ *runtimecontract.EvidenceFact) {
+			"work commitment": func(d *runtimecontract.RuntimeDispatchRecord, _ *runtimecontract.EvidenceFact) {
 				d.ImplementationWorkCommitment = &runtimecontract.RuntimeImplementationWorkRound{}
 			},
 		} {

@@ -580,7 +580,7 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	if readErr != nil || string(content) != "package fixture\n// repaired\n" {
 		t.Fatalf("File owner did not apply sealed target-bound patch: content=%q err=%v", content, readErr)
 	}
-	var dispatch SealedDispatch
+	var dispatch runtimecontract.RuntimeDispatchRecord
 	var replayOperation runtimecontract.RuntimeOperation
 	for _, completed := range persisted.CompletedDispatches {
 		for _, candidateOperation := range candidateRuntimeOperations(completed.Candidate) {

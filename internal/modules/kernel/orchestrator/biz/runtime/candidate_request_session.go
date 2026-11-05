@@ -22,7 +22,7 @@ func (c *planningTransactionComponent) ensureCandidateRequestSessionWithExpected
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(stablePrefixHash) == "" || strings.TrimSpace(manifestHash) == "" || expected == nil {
 		return candidateRequestSessionEnsureResult{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return candidateRequestSessionEnsureResult{}, err
 	}
@@ -89,9 +89,7 @@ func (c *planningTransactionComponent) ensureCandidateRequestSessionWithExpected
 	expectedRevision := aggregate.StateRevision
 	aggregate.CandidateRequestSessions = append(aggregate.CandidateRequestSessions, session)
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return candidateRequestSessionEnsureResult{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return candidateRequestSessionEnsureResult{}, err
 	}
@@ -142,7 +140,7 @@ func (c *planningTransactionComponent) markCandidateRequestSubmitted(ctx context
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" || sequence <= 0 || strings.TrimSpace(physicalCallID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -173,9 +171,7 @@ func (c *planningTransactionComponent) markCandidateRequestSubmitted(ctx context
 	aggregate.CandidateRequestSessions[idx].ProviderSubmitted = true
 	aggregate.CandidateRequestSessions[idx].LastPhysicalCallID = physicalCallID
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -189,7 +185,7 @@ func (c *planningTransactionComponent) completeCandidateRequestDocument(ctx cont
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" || strings.TrimSpace(physicalCallID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -225,9 +221,7 @@ func (c *planningTransactionComponent) completeCandidateRequestDocument(ctx cont
 	updated.LastDocumentFraming = nil
 	updated.ProviderSubmitted = true
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}

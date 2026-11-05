@@ -1,5 +1,7 @@
 package runtime
 
+import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+
 import (
 	"fmt"
 	"reflect"
@@ -18,7 +20,7 @@ func validateAssessmentApplicabilitySealTransition(previous, next RuntimeAggrega
 	if previous.ActiveDispatch != nil {
 		known[previous.ActiveDispatch.ID] = true
 	}
-	dispatches := append([]SealedDispatch(nil), next.CompletedDispatches...)
+	dispatches := append([]runtimecontract.RuntimeDispatchRecord(nil), next.CompletedDispatches...)
 	if next.ActiveDispatch != nil {
 		dispatches = append(dispatches, *next.ActiveDispatch)
 	}
@@ -31,7 +33,7 @@ func validateAssessmentApplicabilitySealTransition(previous, next RuntimeAggrega
 			!reflect.DeepEqual(authority.ApplicabilityObservations, previous.Facts.EvidenceApplicabilityObservations) {
 			return fmt.Errorf("%w: assessment applicability seal differs from independent current-generation preimage", common.ErrConflict)
 		}
-		if _, required, err := NextRuntimeEvidenceApplicabilityRequest(previous); err != nil || required {
+		if _, required, err := nextRuntimeEvidenceApplicabilityRequest(previous); err != nil || required {
 			return fmt.Errorf("%w: assessment seal precedes fresh owner applicability observation: %v", common.ErrConflict, err)
 		}
 	}

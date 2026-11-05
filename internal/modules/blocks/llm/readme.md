@@ -410,3 +410,24 @@ Responses adapter 在完整/流式请求构造后记录 `wireSchemaHash`、`wire
 model、reasoning、text.format、cache key/options 及最后一个请求断点以前的角色/正文/断点。
 无断点时 prefix 指纹不可用；这些是本地出站证据，不是远端转发、路由、命中或执行权威。
 `effectiveHints` 仍为 unknown，native cache-read 的 known/unknown 独立保留；没有增加探测调用或改变远端协议。
+
+### 实施意图与验证输入维护的最小投影
+
+provider implementationIntent 只输出 remainingWork/reason、适用的义务审阅/选择和前轮 outcome/reason。
+declarationRef、当前 contentHash、前轮 dispatchId/receiptSetHash 从一个已冻结 manifest 唯一编译，provider 不回填；
+内部文档及 admission 仍完整校验这些身份。schema/parser/编码使用同一当前 wire，旧 echo 不作为兼容输入。
+
+input revision 按来源二选一投影：完整原语义报告/被审输入，或原 owner 结构观察/完整文件/诊断；结构来源不伪装 review。
+原完整 catalog、其它 CWI authority 与不适用的 request/report 字段不发给模型；owner 仍保留并反查完整来源。
+与本请求当前内容完全相等的文件复用已有 C3 局部引用，逐值展开后通过同一完整性门禁；不跨请求借用 PASS、正文或缓存权威。
+
+
+输入审查及 input-revision 的 C3 投影保留原 owner 显式声明的 `Recipe`（含总 TimeoutMillis）；结构来源随原观察保留。
+该方法只描述被维护的证明，不能选择执行、改变已封存期限、缩短必需观测或授验收 credit。0 是未显式声明的 owner 默认，
+不是无限或最大期限。不向未声明 transport metadata 的 owner 追加 Shell 字段；旧冻结 subject/schema/messages 不重渲染。
+原 recipe/subject/corpus/report/来源反查、完整性门禁、深 clone 和 JSON 恢复保持同一合同；这些动态方法事实留在 C3。
+
+`GenerateCandidate` 先保留冻结 Runtime budget/cache-plan commitment，adapter 返回后仅合入实际 wire 指纹四字段，
+随后分别消费物理 submitted、native usage 和 response-mode。不能用 adapter 的本地重编译 cache plan 覆盖原 stable prefix。
+成功、output-limit、empty completed 和 HTTP 失败均保留已观察指纹；配置漂移等调用前拒绝不伪造 wire/submission。
+真实未携带 `text.format` 时 wireSchemaHash 保持空，这与指纹回传丢失不同；本地出站指纹不证明远端命中。

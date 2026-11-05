@@ -31,19 +31,19 @@ func TestRuntimeValidationExecutionBindingComesOnlyFromSealedCWIAndOwnerCatalog(
 
 	tests := []struct {
 		name   string
-		mutate func(*SealedDispatch, *runtimecontract.RuntimeOperation, *runtimecontract.RuntimeOperationAdmissibility)
+		mutate func(*runtimecontract.RuntimeDispatchRecord, *runtimecontract.RuntimeOperation, *runtimecontract.RuntimeOperationAdmissibility)
 		want   string
 	}{
 		{
 			name: "missing persisted binding",
-			mutate: func(_ *SealedDispatch, operation *runtimecontract.RuntimeOperation, _ *runtimecontract.RuntimeOperationAdmissibility) {
+			mutate: func(_ *runtimecontract.RuntimeDispatchRecord, operation *runtimecontract.RuntimeOperation, _ *runtimecontract.RuntimeOperationAdmissibility) {
 				operation.BindingRefs = nil
 			},
 			want: "exactly one persisted CWI binding",
 		},
 		{
 			name: "owner attestation drift",
-			mutate: func(_ *SealedDispatch, _ *runtimecontract.RuntimeOperation, catalog *runtimecontract.RuntimeOperationAdmissibility) {
+			mutate: func(_ *runtimecontract.RuntimeDispatchRecord, _ *runtimecontract.RuntimeOperation, catalog *runtimecontract.RuntimeOperationAdmissibility) {
 				binding := &catalog.ValidationSurfaces[0].ProofRequirementBindings[0]
 				binding.CheckAttestations[0].NativeCheckRef = "owner/native/drifted"
 				catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
@@ -52,7 +52,7 @@ func TestRuntimeValidationExecutionBindingComesOnlyFromSealedCWIAndOwnerCatalog(
 		},
 		{
 			name: "other CWI owner binding",
-			mutate: func(_ *SealedDispatch, _ *runtimecontract.RuntimeOperation, catalog *runtimecontract.RuntimeOperationAdmissibility) {
+			mutate: func(_ *runtimecontract.RuntimeDispatchRecord, _ *runtimecontract.RuntimeOperation, catalog *runtimecontract.RuntimeOperationAdmissibility) {
 				binding := &catalog.ValidationSurfaces[0].ProofRequirementBindings[0]
 				binding.CoverageWorkItemID = "cwi-other"
 				catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
@@ -75,7 +75,7 @@ func TestRuntimeValidationExecutionBindingComesOnlyFromSealedCWIAndOwnerCatalog(
 	}
 }
 
-func runtimeValidationExecutionBindingFixture(t *testing.T) (SealedDispatch, runtimecontract.RuntimeOperation, runtimecontract.RuntimeOperationAdmissibility, runtimecontract.RuntimeValidationProofRequirementBinding) {
+func runtimeValidationExecutionBindingFixture(t *testing.T) (runtimecontract.RuntimeDispatchRecord, runtimecontract.RuntimeOperation, runtimecontract.RuntimeOperationAdmissibility, runtimecontract.RuntimeValidationProofRequirementBinding) {
 	t.Helper()
 	item := runtimecontract.RuntimeCoverageItem{
 		ID: "cwi-execution-proof", SliceID: "slice-execution-proof", SourceScope: "dodItem", SourceID: "dod-execution-proof", TargetText: "the exact CWI passes its native validation",
@@ -132,6 +132,6 @@ func runtimeValidationExecutionBindingFixture(t *testing.T) (SealedDispatch, run
 		ID: "validate-execution-proof", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 		BindingRefs: []string{coverageBinding.ID}, TargetRefs: []string{"validation_target.go"},
 	}
-	dispatch := SealedDispatch{ID: "dispatch-execution-proof", CoverageBindings: []runtimecontract.CoverageEvidenceBinding{coverageBinding}}
+	dispatch := runtimecontract.RuntimeDispatchRecord{ID: "dispatch-execution-proof", CoverageBindings: []runtimecontract.CoverageEvidenceBinding{coverageBinding}}
 	return dispatch, operation, catalog, ownerBinding
 }

@@ -5,15 +5,42 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func StableRuntimeStateRecordHash(state RuntimeStateRecord) string {
-	payload, _ := json.Marshal(state.Clone())
-	digest := sha256.Sum256(payload)
-	return "runtime-state-" + hex.EncodeToString(digest[:])
+	// Keep exactly the raw JSON value bytes, without Marshal's second full
+	// payload allocation. Encoder adds one framing newline, excluded below.
+	writer := runtimeJSONValueHashWriter{digest: sha256.New()}
+	if err := json.NewEncoder(&writer).Encode(state); err != nil || !writer.hasPending || writer.pending != '\n' {
+		return ""
+	}
+	return "runtime-state-" + hex.EncodeToString(writer.digest.Sum(nil))
+}
+
+// Delay only the last byte, independently of Encoder's write chunking. The
+// caller verifies that it is the protocol framing newline before taking Sum.
+// All value bytes, including any escaped original newlines, enter the digest.
+type runtimeJSONValueHashWriter struct {
+	digest     hash.Hash
+	pending    byte
+	hasPending bool
+}
+
+func (w *runtimeJSONValueHashWriter) Write(body []byte) (int, error) {
+	n := len(body)
+	if n == 0 {
+		return 0, nil
+	}
+	if w.hasPending {
+		_, _ = w.digest.Write([]byte{w.pending})
+	}
+	_, _ = w.digest.Write(body[:n-1])
+	w.pending, w.hasPending = body[n-1], true
+	return n, nil
 }
 
 func StableRuntimeBootstrapHash(bootstrap RuntimeBootstrap) string {

@@ -217,7 +217,7 @@ func TestManagedValidationReceiptRejectsForeignOrMismatchedValidationFailureObse
 				OriginalClass: string(runtimecontract.FailureClassBuildFailure), OriginalCode: "failed", OriginalMessage: "operation failed", Signature: observation.FailureSignature,
 				OperationID: observation.OperationID, ValidationFailureObservation: &observation,
 			}
-			if err := validateOperationReceiptDiagnosticOwner(RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: "ws-1", RunID: "run-1"}}, SealedDispatch{}, runtimecontract.RuntimeOperation{ID: observation.OperationID, Kind: kind}, diagnostic); err == nil ||
+			if err := validateOperationReceiptDiagnosticOwner(RuntimeAggregate{Facts: runtimecontract.RuntimeFacts{WorkspaceID: "ws-1", RunID: "run-1"}}, runtimecontract.RuntimeDispatchRecord{}, runtimecontract.RuntimeOperation{ID: observation.OperationID, Kind: kind}, diagnostic); err == nil ||
 				!strings.Contains(err.Error(), "does not admit validation failure candidates") {
 				t.Fatalf("kind %q foreign observation error = %v", kind, err)
 			}
@@ -314,7 +314,7 @@ func TestDirectTargetObservationReceiptIngressIsDescriptorAuthorizedAndEvidenceB
 				Signature: "failure-1", OperationID: "operation-1", TargetRefs: observation.TargetRefs, TargetObservation: &observation,
 			}
 			err := validateOperationReceiptDiagnosticOwner(
-				RuntimeAggregate{}, SealedDispatch{}, runtimecontract.RuntimeOperation{ID: "operation-1", Kind: kind}, diagnostic,
+				RuntimeAggregate{}, runtimecontract.RuntimeDispatchRecord{}, runtimecontract.RuntimeOperation{ID: "operation-1", Kind: kind}, diagnostic,
 			)
 			if err == nil || !strings.Contains(err.Error(), "does not admit direct target observations") {
 				t.Fatalf("owner %q direct observation error = %v", descriptor.OwnerModuleID, err)
@@ -340,7 +340,7 @@ func TestDirectTargetObservationReceiptIngressIsDescriptorAuthorizedAndEvidenceB
 		OriginalClass: string(runtimecontract.FailureClassExecutionFailure), OriginalCode: "failed", OriginalMessage: "failed",
 		Signature: "failure-1", OperationID: "operation-1", TargetRefs: observation.TargetRefs, TargetObservation: &observation,
 	}
-	if err := validateOperationReceiptDiagnosticOwner(RuntimeAggregate{}, SealedDispatch{}, runtimecontract.RuntimeOperation{ID: "operation-1", Kind: runtimecontract.StepKindMCPToolCall}, diagnostic); err != nil {
+	if err := validateOperationReceiptDiagnosticOwner(RuntimeAggregate{}, runtimecontract.RuntimeDispatchRecord{}, runtimecontract.RuntimeOperation{ID: "operation-1", Kind: runtimecontract.StepKindMCPToolCall}, diagnostic); err != nil {
 		t.Fatalf("valid MCP owner observation rejected: %v", err)
 	}
 	descriptor, _ := runtimecontract.RuntimeOperationDescriptorForKind(runtimecontract.StepKindMCPToolCall)

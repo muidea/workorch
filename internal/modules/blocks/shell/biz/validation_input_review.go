@@ -16,6 +16,12 @@ import (
 // exceeding the bounded review envelope is explicit unavailability, not a
 // truncated or inferred review. Delivery code is still proved by execution.
 func shellInputReview(directory string, targets []string, binding runtimecontract.RuntimeValidationProofRequirementBinding) (*runtimecontract.RuntimeValidationInputReviewSubject, string) {
+	return shellReadValidationInputSubject(directory, targets, binding, true)
+}
+
+// Shared source selection and byte reader for review and structural maintenance.
+// The latter is explicitly not a semantic subject and cannot publish readiness.
+func shellReadValidationInputSubject(directory string, targets []string, binding runtimecontract.RuntimeValidationProofRequirementBinding, review bool) (*runtimecontract.RuntimeValidationInputReviewSubject, string) {
 	root, err := os.OpenRoot(directory)
 	if err != nil {
 		return nil, "validation_input_review_source_unavailable"
@@ -51,6 +57,11 @@ func shellInputReview(directory string, targets []string, binding runtimecontrac
 	}
 	slices.Sort(refs)
 	subject := &runtimecontract.RuntimeValidationInputReviewSubject{ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol}
+	if binding.InputReview != nil && binding.InputReview.Recipe != nil {
+		method := *binding.InputReview.Recipe
+		method.Args = slices.Clone(method.Args)
+		subject.Recipe = &method
+	}
 	if pkg != "" {
 		subject.ScopeContractRef, subject.ScopeRequirements = shellIsolatedReviewScopeContractRef, shellIsolatedReviewScopeRequirements
 		if shellProjectObservationProtocol(binding.CheckAttestations[0].ObservationProtocolRef) {
@@ -91,6 +102,9 @@ func shellInputReview(directory string, targets []string, binding runtimecontrac
 		if pkg != "" && check.SupplementalNativeCheckRef != "" && !slices.Contains(refs, shellSupplementTargetRef(check.NativeCheckRef)) {
 			return nil, "validation_input_review_source_unavailable"
 		}
+	}
+	if !review {
+		return subject, ""
 	}
 	if binding.CheckAttestations[0].ObservationProtocolRef == shellProjectMultiFailureDiagnosticProtocolRef {
 		subject.ProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol

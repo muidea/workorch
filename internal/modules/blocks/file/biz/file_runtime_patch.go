@@ -50,6 +50,7 @@ type patchExecutionRequest struct {
 }
 
 type patchExecutionResult struct {
+	postimage        string
 	Status           string
 	Stage            string
 	Operation        string
@@ -349,7 +350,7 @@ func patchSuccessResult(req patchExecutionRequest, before []byte, after []byte, 
 		riskReasons = append(riskReasons, "approval_required")
 	}
 	return patchExecutionResult{
-		Status: "completed", Stage: patchStage(req.Operation), Operation: req.Operation,
+		postimage: string(after), Status: "completed", Stage: patchStage(req.Operation), Operation: req.Operation,
 		PatchType: req.PatchType, TargetRef: req.TargetRef, AffectedFiles: []string{req.TargetRef},
 		BeforeHash: beforeHash, AfterHash: afterHash, ContentHash: contentHash, DiffHash: diffHash,
 		AddedLines: int64(addedLines), DeletedLines: int64(deletedLines), ApprovalRequired: approvalRequired,

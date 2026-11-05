@@ -171,6 +171,9 @@ func (m *Biz) prepareRuntimeRecoveryInventory() error {
 	if err := m.subscribeOwnerTopic(runevents.TopicRunCommandRuntimeStateRecordReadiness, m.handleRuntimeStateRecordReadiness); err != nil {
 		return err
 	}
+	if err := m.subscribeOwnerTopic(runevents.TopicRunCommandRuntimeLifecycle, m.handleRuntimeLifecycleRead); err != nil {
+		return err
+	}
 	if err := m.subscribeOwnerTopic(runevents.TopicRunCommandRuntimeStateRecord, m.handleRuntimeStateRecord); err != nil {
 		return err
 	}

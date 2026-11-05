@@ -27,6 +27,10 @@ The Orchestrator does not own Run, Workspace or Result lifecycle. Capability blo
 Projection and Eventstream are audit/display surfaces, never recovery authorities. Cross-owner I/O uses EventHub and
 concrete typed command/result/data only; owner service/repository facades and map-based authority rebuild are forbidden.
 
+The production EventHub catalog contains 332 typed topics. Shell's frozen-input structure inspection (SM-3) and
+sealed CWI reconciliation batch (SM-2) are read-only participant queries; they confer no execution, transition or
+acceptance authority. Their owner contracts are in the [Shell README](internal/modules/blocks/shell/readme.md).
+
 The design source of truth is [Runtime Stage Contract](docs/00-core/runtime-stage-contract.md). The implementation source
 of truth is [Orchestrator README](internal/modules/kernel/orchestrator/readme.md) together with
 `internal/pkg/workorchruntimecontract`.

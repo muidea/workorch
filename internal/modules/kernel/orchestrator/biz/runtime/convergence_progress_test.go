@@ -42,7 +42,7 @@ func TestRuntimeConvergenceProgressSignatureTracksEvidenceAndDispatch(t *testing
 		t.Fatal("evidence progress did not change convergence signature")
 	}
 	withDispatch := base
-	withDispatch.ActiveDispatch = &SealedDispatch{CandidateHash: "candidate-1", State: DispatchStateSealed}
+	withDispatch.ActiveDispatch = &runtimecontract.RuntimeDispatchRecord{CandidateHash: "candidate-1", State: DispatchStateSealed}
 	if RuntimeConvergenceProgressSignature(base) == RuntimeConvergenceProgressSignature(withDispatch) {
 		t.Fatal("sealed dispatch did not change convergence signature")
 	}

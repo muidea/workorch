@@ -10,7 +10,7 @@ import (
 
 func TestContractsDeclareShellAsExecutionReceiver(t *testing.T) {
 	contracts := Contracts()
-	if len(contracts) != 9 {
+	if len(contracts) != 11 {
 		t.Fatalf("contracts = %+v", contracts)
 	}
 	for _, contract := range contracts {
@@ -18,8 +18,29 @@ func TestContractsDeclareShellAsExecutionReceiver(t *testing.T) {
 			t.Fatalf("contract = %+v", contract)
 		}
 	}
-	if len(MessageContracts()) != 9 {
-		t.Fatalf("message contract count = %d, want 9", len(MessageContracts()))
+	if len(MessageContracts()) != 11 {
+		t.Fatalf("message contract count = %d, want 11", len(MessageContracts()))
+	}
+	structure, batch := 0, 0
+	for _, contract := range contracts {
+		if contract.Topic == TopicQueryRuntimeCWIReconciliationBatch {
+			batch++
+			if contract.Metadata.StateMachine != "sm_2" || contract.Metadata.ReducerOwner != "orchestrator" || contract.Metadata.EffectClass != "read_only" {
+				t.Fatal("batch observation changed authority ownership", contract)
+			}
+		}
+		if contract.Topic == TopicInspectRuntimeValidationInputStructure {
+			structure++
+			if contract.Metadata.StateMachine != "sm_3" || contract.Metadata.ReducerOwner != "orchestrator" || contract.Metadata.EffectClass != "read_only" {
+				t.Fatal("structure inspection changed receiver/reducer/effect ownership", contract)
+			}
+		}
+	}
+	if structure != 1 {
+		t.Fatal("structure query lacks one unique owner contract")
+	}
+	if batch != 1 {
+		t.Fatal("batch query lacks one unique owner contract")
 	}
 }
 

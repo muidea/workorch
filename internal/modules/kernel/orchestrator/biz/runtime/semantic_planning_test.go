@@ -1399,7 +1399,7 @@ func TestSemanticOperationAuthorityKeepsLockedCurrentCWIAheadOfLaterPlanning(t *
 func TestRuntimeSemanticCatalogReacquisitionWithUnchangedIdentityKeepsGeneration(t *testing.T) {
 	ctx := context.Background()
 	controller, repository, aggregate, catalog, prerequisite, observation := sealedSemanticPlanningAggregate(t)
-	beforeLedger := aggregate.SemanticPlanning.Clone()
+	beforeLedger := aggregate.SemanticPlanning.CloneRaw()
 	changed, err := applyReceiptResourceChangeInvalidation(&aggregate, "dispatch-same-catalog", "operation-same-catalog", runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: "execution/semantic-same-catalog", Fence: 1, OperationID: "operation-same-catalog",
 		ResourceChanges: []runtimecontract.RuntimeResourceChange{{
@@ -1705,7 +1705,7 @@ func TestRuntimeSemanticCatalogInvalidationNeverRetiresActiveDispatch(t *testing
 	changedCatalog.ObservedRevision = "file-revision-2"
 	changedCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(changedCatalog)
 	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{changedCatalog}
-	aggregate.ActiveDispatch = &SealedDispatch{ID: "dispatch-active", State: DispatchStateSealed}
+	aggregate.ActiveDispatch = &runtimecontract.RuntimeDispatchRecord{ID: "dispatch-active", State: DispatchStateSealed}
 	before := aggregate.SemanticPlanning.Clone()
 	retired, err := resetSemanticPlanningForInvalidatedCatalog(&aggregate, runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated)
 	if err != nil || retired || aggregate.SemanticPlanning.Phase != before.Phase || len(aggregate.SemanticPlanning.History) != len(before.History) {
@@ -1786,7 +1786,7 @@ func TestRuntimeSemanticRetirementRejectsUnsettledSubmittedRequestWithoutMutatio
 	if err := reserveCandidateRequestExecutionBudget(&aggregate, session, 1, physicalCallID); err != nil {
 		t.Fatal(err)
 	}
-	beforeLedger := aggregate.SemanticPlanning.Clone()
+	beforeLedger := aggregate.SemanticPlanning.CloneRaw()
 	beforeSession := aggregate.CandidateRequestSessions[0].Clone()
 	beforeBudget := aggregate.ExecutionBudget.Clone()
 	beforeRevision := aggregate.StateRevision
@@ -2393,7 +2393,7 @@ func sealFirstTwoItemSemanticBatch(
 	return aggregate
 }
 
-func newTwoItemSemanticBatchFixture(t *testing.T) (*RuntimeController, *controllerRepository, RuntimeAggregate, runtimecontract.RuntimeSemanticPlanManifest, runtimecontract.RuntimeSemanticPlanDocument, []runtimecontract.RuntimeSemanticProofProposal, []runtimecontract.RuntimeSemanticProofFeasibility) {
+func newTwoItemSemanticBatchFixture(t *testing.T, separateSlices ...bool) (*RuntimeController, *controllerRepository, RuntimeAggregate, runtimecontract.RuntimeSemanticPlanManifest, runtimecontract.RuntimeSemanticPlanDocument, []runtimecontract.RuntimeSemanticProofProposal, []runtimecontract.RuntimeSemanticProofFeasibility) {
 	t.Helper()
 	repository := &controllerRepository{}
 	controller, err := NewRuntimeController(repository)
@@ -2402,8 +2402,16 @@ func newTwoItemSemanticBatchFixture(t *testing.T) (*RuntimeController, *controll
 	}
 	facts := controllerFacts()
 	second := runtimecontract.RuntimeCoverageItemFact{ID: "cwi-v2-second", SliceID: facts.Slices[0].ID, SourceScope: "dodItem", SourceID: "dod-v2-second", TargetText: "deliver second", State: runtimecontract.RuntimeCoverageItemStateOpen}
+	if len(separateSlices) != 0 && separateSlices[0] {
+		slice := facts.Slices[0]
+		slice.ID = "slice-second"
+		slice.CoverageWorkItemIDs = []common.CoverageWorkItemID{second.ID}
+		facts.Slices = append(facts.Slices, slice)
+		second.SliceID = slice.ID
+	} else {
+		facts.Slices[0].CoverageWorkItemIDs = append(facts.Slices[0].CoverageWorkItemIDs, second.ID)
+	}
 	facts.Coverage = append(facts.Coverage, second)
-	facts.Slices[0].CoverageWorkItemIDs = append(facts.Slices[0].CoverageWorkItemIDs, second.ID)
 	facts.RemainingFocuses = []runtimecontract.CoverageFocus{{
 		ID: "focus-v2-second", SliceID: second.SliceID,
 		CoverageWorkItemIDs:   []common.CoverageWorkItemID{second.ID},
@@ -2423,16 +2431,7 @@ func newTwoItemSemanticBatchFixture(t *testing.T) (*RuntimeController, *controll
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverage(
-		aggregate.Facts.WorkspaceID,
-		aggregate.Facts.RunID,
-		aggregate.Definition,
-		aggregate.Facts.DefinitionSeed,
-		aggregate.Facts.DefinitionFocuses,
-		aggregate.Facts.Activation.ExecutionContract,
-		aggregate.Facts.Resources.OperationAdmissibilities,
-		runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts),
-	)
+	manifest, err := CompileRuntimeSemanticManifest(aggregate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2440,12 +2439,12 @@ func newTwoItemSemanticBatchFixture(t *testing.T) (*RuntimeController, *controll
 	baseFeasibility := runtimecontract.RuntimeSemanticProofFeasibility{SchemaVersion: runtimecontract.RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: baseProposal.CoverageWorkItemID, ProposalHash: runtimecontract.StableRuntimeSemanticProofProposalHash(baseProposal), OwnerModuleID: baseProposal.OwnerModuleID, CatalogSnapshotID: catalog.SnapshotID, Status: runtimecontract.RuntimeSemanticFeasibilityFeasible, ObservedRevision: catalog.ObservedRevision, TargetRefs: baseProposal.Target.ExactTargetRefs}
 	secondProposal := baseProposal.Clone()
 	secondProposal.CoverageWorkItemID = second.ID
-	secondProposal.DeclarationRef = runtimeTestSemanticDeclarationRef(manifest, second.ID)
+	secondProposal.DeclarationRef = runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef(second.SourceScope, second.SourceID)
 	proposals := []runtimecontract.RuntimeSemanticProofProposal{baseProposal, secondProposal}
 	secondFeasibility := baseFeasibility.Clone()
 	secondFeasibility.CoverageWorkItemID = second.ID
 	secondFeasibility.ProposalHash = runtimecontract.StableRuntimeSemanticProofProposalHash(secondProposal)
-	order := runtimecontract.RuntimeSemanticPlanDocument{SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: runtimecontract.RuntimeSemanticPlanStepCoverageOrder, CoverageOrder: []common.CoverageWorkItemID{manifest.CoverageItems[0].ID, second.ID}}
+	order := runtimecontract.RuntimeSemanticPlanDocument{SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: runtimecontract.RuntimeSemanticPlanStepCoverageOrder, CoverageOrder: runtimeSemanticPlanningFrontier(aggregate.Facts)}
 	return controller, repository, aggregate, manifest, order, proposals, []runtimecontract.RuntimeSemanticProofFeasibility{baseFeasibility, secondFeasibility}
 }
 
@@ -2569,16 +2568,7 @@ func newSemanticPlanningController(t *testing.T, limits ...*runtimecontract.Runt
 
 func semanticPlanningFixture(t *testing.T, aggregate RuntimeAggregate) (runtimecontract.RuntimeSemanticPlanManifest, runtimecontract.RuntimeSemanticPlanDocument, runtimecontract.RuntimeSemanticProofFeasibility) {
 	t.Helper()
-	manifest, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverage(
-		aggregate.Facts.WorkspaceID,
-		aggregate.Facts.RunID,
-		aggregate.Definition,
-		aggregate.Facts.DefinitionSeed,
-		aggregate.Facts.DefinitionFocuses,
-		aggregate.Facts.Activation.ExecutionContract,
-		aggregate.Facts.Resources.OperationAdmissibilities,
-		runtimecontract.RuntimeCWIsEligibleForPlanning(aggregate.Facts),
-	)
+	manifest, err := CompileRuntimeSemanticManifest(aggregate)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -48,7 +48,7 @@ func TestCWISuspensionTransitionRejectsPauseWriteSetSmuggling(t *testing.T) {
 			case "pre_resumed":
 				s.ResumeBinding = &runtimecontract.RuntimeCWIBindingRef{BindingID: "invented"}
 			case "dispatch":
-				before.ActiveDispatch = &SealedDispatch{ID: "in-flight"}
+				before.ActiveDispatch = &runtimecontract.RuntimeDispatchRecord{ID: "in-flight"}
 			case "submitted":
 				before.CandidateRequestSessions = append(before.CandidateRequestSessions, runtimecontract.RuntimeCandidateRequestSession{State: runtimecontract.RuntimeCandidateRequestSessionPrepared, ProviderSubmitted: true})
 			case "terminal":
@@ -104,7 +104,7 @@ func TestCWISuspensionTransitionRejectsResumeRewriteAndUnsafePreimage(t *testing
 			case "failure":
 				after.Facts.Failure = &runtimecontract.FailureFact{Code: "invented"}
 			case "dispatch":
-				before.ActiveDispatch = &SealedDispatch{ID: "in-flight"}
+				before.ActiveDispatch = &runtimecontract.RuntimeDispatchRecord{ID: "in-flight"}
 			case "submitted":
 				before.CandidateRequestSessions = append(before.CandidateRequestSessions, runtimecontract.RuntimeCandidateRequestSession{State: runtimecontract.RuntimeCandidateRequestSessionPrepared, ProviderSubmitted: true})
 			case "terminal":

@@ -82,7 +82,13 @@ func prepareRetiredReadFixture(t *testing.T, owner repository.RunOwnerRepositori
 		TerminalFenceID: terminalDeliveryID,
 	}
 	current.TerminalDelivery = &runtimecontract.RuntimeTerminalDeliveryIdentity{TerminalDeliveryID: terminalDeliveryID}
+	savedState, savedFence := current.RuntimeState, current.RuntimeLifecycleFence
+	current.RuntimeState, current.RuntimeLifecycleFence = nil, nil
 	if err := owner.Runs().CompareAndSwap(ctx, current, current.Revision); err != nil {
+		t.Fatal(err)
+	}
+	current.RuntimeState, current.RuntimeLifecycleFence = savedState, savedFence
+	if err := owner.Runs().CompareAndSwapRuntimeState(ctx, current, current.Revision, 0); err != nil {
 		t.Fatal(err)
 	}
 	stepID := common.StepID(string(item.ID) + "/step-1")

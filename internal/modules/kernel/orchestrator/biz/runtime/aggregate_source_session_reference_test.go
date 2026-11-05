@@ -22,7 +22,7 @@ func validateRuntimeAggregateSM2Authority(a RuntimeAggregate, active *runtimecon
 // Frozen original aggregate source gate: consumers independently validate
 // complete sources and preserve every interstitial gate and first-error order.
 func referenceAggregateConvergenceSources(s runtimecontract.RuntimeLineageAssertionSources, output runtimecontract.RequiredOutputContract, revision uint64) error {
-	if err := runtimecontract.ValidateRuntimeHistoricalBehaviorCompletions(s); err != nil {
+	if err := runtimecontract.ValidateRuntimeHistoricalBehaviorCompletions(s.Facts, s.Completed); err != nil {
 		return fmt.Errorf("runtime aggregate historical behavior: %w", err)
 	}
 	if err := runtimecontract.ValidateRuntimeImplementationWorkState(s.Definition, s.Facts, s.Work, s.Semantic, s.Active, s.Completed, s.Receipts, s.Governance, s.Budget); err != nil {
@@ -60,7 +60,7 @@ func referenceAggregateConvergenceSources(s runtimecontract.RuntimeLineageAssert
 	if err := runtimecontract.ValidateRuntimeAssessmentApplicabilityGenerations(s.Reconciliation, s.Active, s.Completed); err != nil {
 		return fmt.Errorf("runtime aggregate assessment applicability generation: %w", err)
 	}
-	if err := runtimecontract.ValidateRuntimeAssessmentAdjudications(s.Facts, s.Completed, s.ProofLineage, s); err != nil {
+	if err := runtimecontract.ValidateRuntimeAssessmentAdjudications(s.Facts, s.Completed); err != nil {
 		return fmt.Errorf("runtime aggregate assessment adjudication: %w", err)
 	}
 	return nil

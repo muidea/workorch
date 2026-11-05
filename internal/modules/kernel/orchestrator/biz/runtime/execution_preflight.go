@@ -26,7 +26,7 @@ type activeDispatchExecution struct {
 	recoveryCallToken     string
 	recoveryNow           string
 	aggregate             RuntimeAggregate
-	dispatch              SealedDispatch
+	dispatch              runtimecontract.RuntimeDispatchRecord
 	operations            []runtimecontract.RuntimeOperation
 	completed             map[string]struct{}
 }

@@ -36,6 +36,7 @@ const (
 	// module reaches Run. They are deliberately narrower than the normal Get
 	// command, which remains a Run-phase API.
 	TopicRunCommandRuntimeStateRecordReadiness = "/run/command/runtime-state-record-readiness"
+	TopicRunCommandRuntimeLifecycle            = "/run/command/runtime-lifecycle"
 	TopicRunCommandRuntimeStateRecord          = "/run/command/runtime-state-record"
 	TopicRunCommandGetStep                     = "/run/command/get-step"
 	TopicRunCommandListStepsByRun              = "/run/command/list-steps-by-run"

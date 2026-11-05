@@ -654,7 +654,7 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionAndExcludesRetiredGenera
 		if command.SemanticContext.PlanStep == runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
 			document.CoverageOrder = []common.CoverageWorkItemID{item.ID}
 		} else if command.SemanticContext.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
-			if len(repository.aggregate.CandidateRequestSessions) < 2 {
+			if len(repository.aggregate.CandidateRequestSessions) < 1 {
 				t.Errorf("proof-batch provider call preceded persisted expected-document session: %+v", repository.aggregate.CandidateRequestSessions)
 				return
 			}
@@ -748,28 +748,28 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionAndExcludesRetiredGenera
 	if err != nil {
 		t.Fatal(err)
 	}
-	if evaluated.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningOrderAccepted || evaluated.SemanticPlanning.Document == nil || requestCount != 1 || len(evaluated.CandidateAttempts) != 0 || evaluated.ActiveDispatch != nil {
+	if evaluated.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningOrderAccepted || evaluated.SemanticPlanning.Document == nil || requestCount != 0 || evaluated.SemanticPlanning.CompiledOrder == nil || len(evaluated.CandidateAttempts) != 0 || evaluated.ActiveDispatch != nil {
 		t.Fatalf("semantic document crossed into operation authority: ledger=%+v requests=%d", evaluated.SemanticPlanning, requestCount)
 	}
 	batched, err := module.driveRuntimeSemanticPlanning(ctx, evaluated)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if batched.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen || len(batched.CandidateRequestSessions) != 1 || batched.SemanticPlanning.LogicalRequestID == started.SemanticPlanning.LogicalRequestID || requestCount != 1 {
+	if batched.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen || len(batched.CandidateRequestSessions) != 0 || batched.SemanticPlanning.LogicalRequestID == started.SemanticPlanning.LogicalRequestID || requestCount != 0 {
 		t.Fatalf("semantic proof batch was not persisted before request-session creation: ledger=%+v sessions=%+v requests=%d", batched.SemanticPlanning, batched.CandidateRequestSessions, requestCount)
 	}
 	proofObserved, err := module.driveRuntimeSemanticPlanning(ctx, batched)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if proofObserved.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningCorrectionRequired || proofObserved.SemanticPlanning.Attempt != 1 || len(proofObserved.SemanticPlanning.Rejections) != 1 || len(proofObserved.CandidateRequestSessions) != 2 || requestCount != 2 {
+	if proofObserved.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningCorrectionRequired || proofObserved.SemanticPlanning.Attempt != 1 || len(proofObserved.SemanticPlanning.Rejections) != 1 || len(proofObserved.CandidateRequestSessions) != 1 || requestCount != 1 {
 		t.Fatalf("contradictory proof did not open one bounded correction: ledger=%+v sessions=%+v requests=%d", proofObserved.SemanticPlanning, proofObserved.CandidateRequestSessions, requestCount)
 	}
 	corrected, err := module.driveRuntimeSemanticPlanning(ctx, proofObserved)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if corrected.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted || corrected.SemanticPlanning.Attempt != 1 || len(corrected.SemanticPlanning.Rejections) != 1 || requestCount != 3 || len(corrected.CandidateAttempts) != 0 || corrected.ActiveDispatch != nil {
+	if corrected.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted || corrected.SemanticPlanning.Attempt != 1 || len(corrected.SemanticPlanning.Rejections) != 1 || requestCount != 2 || len(corrected.CandidateAttempts) != 0 || corrected.ActiveDispatch != nil {
 		t.Fatalf("corrected proof lost bounded lineage or crossed into operation authority: ledger=%+v requests=%d", corrected.SemanticPlanning, requestCount)
 	}
 	acceptedBatchRequestID := corrected.SemanticPlanning.Batches[0].RequestLogicalID
@@ -803,7 +803,7 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionAndExcludesRetiredGenera
 		t.Fatal(err)
 	}
 	if sealed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed || len(sealed.Facts.Focus.CoverageEvidenceBindings) != 1 ||
-		requestCount != 3 || ownerProbeCalls != 1 || len(sealed.CandidateAttempts) != 0 || sealed.ActiveDispatch != nil {
+		requestCount != 2 || ownerProbeCalls != 1 || len(sealed.CandidateAttempts) != 0 || sealed.ActiveDispatch != nil {
 		t.Fatalf("corrected semantic drive did not seal without operation authority: ledger=%+v requests=%d probes=%d", sealed.SemanticPlanning, requestCount, ownerProbeCalls)
 	}
 	acceptedBatch := sealed.SemanticPlanning.Batches[0]
@@ -827,7 +827,7 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionAndExcludesRetiredGenera
 	if err != nil {
 		t.Fatalf("fresh-load corrected semantic preimage failed: %v", err)
 	}
-	if replayed.StateRevision != sealed.StateRevision || requestCount != 3 || ownerProbeCalls != 1 ||
+	if replayed.StateRevision != sealed.StateRevision || requestCount != 2 || ownerProbeCalls != 1 ||
 		!runtimecontract.RuntimeCoverageEvidenceBindingProjectionsEqual(replayed.Facts.Focus.CoverageEvidenceBindings, wantFocuses[0].CoverageEvidenceBindings) {
 		t.Fatalf("fresh-load replay repeated semantic work or changed binding: revision=%d/%d requests=%d probes=%d", replayed.StateRevision, sealed.StateRevision, requestCount, ownerProbeCalls)
 	}
@@ -837,7 +837,7 @@ func TestRuntimeSemanticDriveClosesProviderSessionBeforeSemanticTerminal(t *test
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	bootstrap := runtimeBootstrap()
+	bootstrap := runtimeSemanticProviderOrderBootstrap()
 	facts, err := bootstrap.InitialFacts("ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
@@ -931,7 +931,7 @@ func TestRuntimeSemanticDriveNoDocumentUsesBoundedRequestRecovery(t *testing.T) 
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	bootstrap := runtimeBootstrap()
+	bootstrap := runtimeSemanticProviderOrderBootstrap()
 	facts, err := bootstrap.InitialFacts("ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
@@ -1045,7 +1045,7 @@ func TestRuntimeSemanticFalseUndeclaredPrerequisiteUsesCorrectionAcrossRestart(t
 		FactKind:      runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
 		OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 	}
-	bootstrap := runtimeBootstrap()
+	bootstrap := runtimeSemanticProviderOrderBootstrap()
 	bootstrap.Definition.CapabilityContract = append(bootstrap.Definition.CapabilityContract, runtimecontract.RuntimeBlockKindManagedValidationSession)
 	bootstrap.DefinitionFocuses[0].RequiredEvidenceKinds = runtimeTestNormalizeStrings(append(
 		bootstrap.DefinitionFocuses[0].RequiredEvidenceKinds,
@@ -1212,7 +1212,7 @@ func TestRuntimeSemanticDriveBodyIdleExhaustionReloadsWithoutProviderReplay(t *t
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
-	bootstrap := runtimeBootstrap()
+	bootstrap := runtimeSemanticProviderOrderBootstrap()
 	facts, err := bootstrap.InitialFacts("ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
@@ -1527,4 +1527,18 @@ func TestRuntimeSemanticDriveFailsOnlyAfterPersistedCatalogRefreshBudgetIsExhaus
 		len(failed.PrerequisiteInvalidations) != 0 {
 		t.Fatalf("semantic catalog refresh exhaustion lost diagnostic or created side effects: %+v", failed)
 	}
+}
+
+// Use a real multi-item ordering choice to exercise provider session failure,
+// correction and recovery. A singleton ordinary order belongs to the owner
+// compiler and must neither consume a provider call nor create a fake session.
+func runtimeSemanticProviderOrderBootstrap() runtimecontract.RuntimeBootstrap {
+	b := runtimeBootstrap()
+	b.CoverageItems = append(b.CoverageItems, runtimecontract.RuntimeCoverageItem{ID: "cwi-v3", SliceID: b.Slices[0].ID, SourceScope: "test", SourceID: "cwi-v3", TargetText: "independent second criterion", Order: 1})
+	b.Slices[0].CoverageWorkItemIDs = append(b.Slices[0].CoverageWorkItemIDs, "cwi-v3")
+	focus := b.DefinitionFocuses[0].Normalized()
+	focus.ID = "focus-v3"
+	focus.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-v3"}
+	b.DefinitionFocuses = append(b.DefinitionFocuses, focus)
+	return runtimeTestBootstrapWithReboundBindings(b)
 }

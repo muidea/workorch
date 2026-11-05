@@ -27,9 +27,8 @@ const (
 // binding's purpose lineage. It is never returned as candidate, dispatch, or
 // operation authority.
 func currentRuntimeSemanticOwnerFactAcquisition(aggregate RuntimeAggregate) (runtimecontract.RuntimeSemanticOwnerFactAcquisition, bool, error) {
-	preimage, err := runtimecontract.ResolveRuntimeAssessmentPurposePreimage(
-		aggregate.SemanticPlanning,
-		aggregate.Facts.Focus.CoverageEvidenceBindings,
+	preimage, err := runtimecontract.RuntimeAssessmentPurposeForCurrentFocus(
+		aggregate.Facts, aggregate.SemanticPlanning, aggregate.Facts.Focus,
 	)
 	if err != nil {
 		return runtimecontract.RuntimeSemanticOwnerFactAcquisition{}, false, fmt.Errorf("%w: current assessment purpose preimage: %v", common.ErrConflict, err)
@@ -83,7 +82,7 @@ func retainRuntimeOwnerFactAcquisitionCoverageOpen(coverage []runtimecontract.Ru
 // by the owner-private AssessmentObserved route. It records the one bounded
 // acquisition attempt, retires that semantic generation, and reopens the same
 // CWI for its still-immutable terminal Definition proof.
-func settleRuntimeOwnerFactAcquisition(aggregate *RuntimeAggregate, assessmentID string, acquisition runtimecontract.RuntimeSemanticOwnerFactAcquisition, preimage RuntimeAggregate) (bool, error) {
+func settleRuntimeOwnerFactAcquisition(aggregate *RuntimeAggregate, assessmentID string, acquisition runtimecontract.RuntimeSemanticOwnerFactAcquisition, preimage RuntimeAggregate, evaluation runtimecontract.RuntimeAssessmentEvaluation) (bool, error) {
 	if aggregate == nil || strings.TrimSpace(assessmentID) == "" {
 		return false, common.ErrInvalidArgument
 	}
@@ -97,8 +96,8 @@ func settleRuntimeOwnerFactAcquisition(aggregate *RuntimeAggregate, assessmentID
 	if err := validateRuntimeOwnerFactAssessmentPreimage(*aggregate, assessmentID, preimage); err != nil {
 		return false, err
 	}
-	if !canonicalAssessmentProofCompleteWithoutOwnerFactsForPurpose(preimage, runtimecontract.RuntimeAssessmentPurposeOwnerFactAcquisition) ||
-		len(runtimecontract.RuntimeMissingOwnerFactRequirements(aggregate.Facts.Focus.RequiredOwnerFacts, aggregate.Facts.Resources.OperationAdmissibilities)) != 0 {
+	if !evaluation.ProofCompleteWithoutOwnerFacts() || evaluation.Adjudication.DispatchID != assessmentID ||
+		len(evaluation.MissingOwnerFacts) != 0 {
 		return false, fmt.Errorf("%w: owner-fact acquisition settlement requires proof and the re-observed owner fact", common.ErrConflict)
 	}
 	if runtimeOwnerFactAcquisitionAttemptRecorded(aggregate.Facts, acquisition.Requirement, acquisition.AcquisitionOperationKind) {
@@ -142,7 +141,7 @@ func recordAcceptedOwnerFactAcquisitionShapes(aggregate RuntimeAggregate, ledger
 // proof did not establish the profile-declared postcondition and reopens the
 // same CWI for a new semantic generation. No capability or Run state is
 // mutated here.
-func replanRuntimeCWIForUnmetOwnerFacts(aggregate *RuntimeAggregate, assessmentID string, purpose runtimecontract.RuntimeAssessmentPurpose, preimage RuntimeAggregate) (bool, error) {
+func replanRuntimeCWIForUnmetOwnerFacts(aggregate *RuntimeAggregate, assessmentID string, preimage RuntimeAggregate, evaluation runtimecontract.RuntimeAssessmentEvaluation) (bool, error) {
 	if aggregate == nil || strings.TrimSpace(assessmentID) == "" {
 		return false, common.ErrInvalidArgument
 	}
@@ -156,10 +155,10 @@ func replanRuntimeCWIForUnmetOwnerFacts(aggregate *RuntimeAggregate, assessmentI
 	if err := requireCurrentRuntimeCWILedger(facts); err != nil {
 		return false, err
 	}
-	if !canonicalAssessmentProofCompleteWithoutOwnerFactsForPurpose(preimage, purpose) {
+	if !evaluation.ProofCompleteWithoutOwnerFacts() || evaluation.Adjudication.DispatchID != assessmentID {
 		return false, nil
 	}
-	if len(runtimecontract.RuntimeMissingOwnerFactRequirements(facts.Focus.RequiredOwnerFacts, facts.Resources.OperationAdmissibilities)) == 0 {
+	if len(evaluation.MissingOwnerFacts) == 0 {
 		return false, nil
 	}
 	acquisition, acquisitionReady := runtimecontract.ResolveRuntimeOwnerFactAcquisition(facts.Focus.RequiredOwnerFacts, facts.Focus.OwnerFactConvergences, facts.Resources.OperationAdmissibilities)
@@ -211,20 +210,19 @@ func validateRuntimeOwnerFactAssessmentPreimage(aggregate RuntimeAggregate, asse
 			if !reflect.DeepEqual(original, *preimage.ActiveDispatch) {
 				return fmt.Errorf("%w: owner-fact assessment changed its sealed dispatch preimage", common.ErrConflict)
 			}
-			expected, err := runtimecontract.DeriveRuntimeAssessmentAdjudication(
-				sealedDispatchToRuntimeRecord(dispatch), preimage.Facts,
-				sealedDispatchesToRuntimeRecords(preimage.CompletedDispatches), preimage.CoverageProofLineage,
-				runtimeLineageAssertionSources(preimage),
-			)
-			if err != nil || !reflect.DeepEqual(expected, *dispatch.AssessmentAdjudication) {
-				return fmt.Errorf("%w: owner-fact assessment adjudication differs from original proof preimage", common.ErrConflict)
-			}
 			adjudicationHash = dispatch.AssessmentAdjudicationHash
 			dispatches++
 		}
 	}
 	for _, fact := range aggregate.Facts.Assessments {
 		if fact.ID == assessmentID && fact.Revision == aggregate.Facts.EvidenceRevision && fact.AdjudicationHash == adjudicationHash {
+			for _, dispatch := range aggregate.CompletedDispatches {
+				if dispatch.ID == assessmentID {
+					if err := runtimecontract.ValidateRuntimeAssessmentAdjudication((dispatch), fact, preimage.Facts); err != nil {
+						return fmt.Errorf("%w: owner-fact assessment result integrity: %v", common.ErrConflict, err)
+					}
+				}
+			}
 			assessments++
 		}
 	}

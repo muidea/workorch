@@ -76,6 +76,7 @@ type FileReadResult struct {
 }
 
 type PatchPreviewResult struct {
+	postimage        string
 	Status           string
 	Stage            string
 	Operation        string
@@ -371,7 +372,8 @@ func (a *RuntimeAdapter) PreviewPatch(request PatchApplyRequest) (PatchPreviewRe
 
 func patchPreviewResultFromExecution(result patchExecutionResult, fallbackTarget string, executeErr error) PatchPreviewResult {
 	ret := PatchPreviewResult{
-		Status: result.Status, Stage: result.Stage, Operation: result.Operation, PatchType: result.PatchType,
+		postimage: result.postimage,
+		Status:    result.Status, Stage: result.Stage, Operation: result.Operation, PatchType: result.PatchType,
 		TargetRef: result.TargetRef, AffectedFiles: append([]string(nil), result.AffectedFiles...),
 		BeforeHash: result.BeforeHash, AfterHash: result.AfterHash, ContentHash: result.ContentHash, DiffHash: result.DiffHash,
 		AddedLines: result.AddedLines, DeletedLines: result.DeletedLines, ApprovalRequired: result.ApprovalRequired,

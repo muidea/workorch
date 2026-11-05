@@ -110,6 +110,7 @@ func (m *Biz) queryRuntimeReconciliationBatch(ctx context.Context, request runti
 		validationRecipes = append(validationRecipes, recipe)
 	}
 	validationRecipes = runtimecontract.NormalizeRuntimeValidationRecipes(validationRecipes)
+	var shellMembers []runtimecontract.RuntimeCWIOwnerReconciliationRequest
 	for _, binding := range request.Bindings {
 		validationScope, sealedRecipes := runtime.ReconciliationValidationContext(aggregate, binding)
 		for _, owner := range binding.OwnerModuleIDs {
@@ -125,6 +126,14 @@ func (m *Biz) queryRuntimeReconciliationBatch(ctx context.Context, request runti
 				command.ValidationScopeTargetRefs = append([]string(nil), validationScope...)
 				command.ValidationRecipes = sealedRecipes
 			}
+			if owner == runtimecontract.RuntimeModuleShell && workspaceErr == nil {
+				scope, recipes, receiptHash := runtime.ReconciliationValidationExecutionSource(aggregate, binding)
+				if receiptHash != "" && len(scope) != 0 && len(recipes) != 0 {
+					command.ValidationScopeTargetRefs, command.ValidationRecipes, command.ValidationSourceReceiptHash = scope, recipes, receiptHash
+					shellMembers = append(shellMembers, command)
+					continue
+				}
+			}
 			observation, err := queryRuntimeCWIReconciliationOwner(ctx, m.EventHub(), owner, command, request)
 			if workspaceErr != nil {
 				observation = unavailableRuntimeCWIReconciliationObservation(command, "workspace owner snapshot is unavailable", "workspace_snapshot_unavailable")
@@ -134,8 +143,57 @@ func (m *Biz) queryRuntimeReconciliationBatch(ctx context.Context, request runti
 			batch.Observations = append(batch.Observations, observation)
 		}
 	}
+	for len(shellMembers) > 0 {
+		n := min(len(shellMembers), runtimecontract.RuntimeValidationExecutionMaxConsumers)
+		members := shellMembers[:n]
+		shellMembers = shellMembers[n:]
+		if n == 1 {
+			o, err := queryRuntimeCWIReconciliationOwner(ctx, m.EventHub(), runtimecontract.RuntimeModuleShell, members[0], request)
+			if err != nil {
+				o = unavailableRuntimeCWIReconciliationObservation(members[0], "capability owner did not return a valid reconciliation observation", "owner_observation_unavailable")
+			}
+			batch.Observations = append(batch.Observations, o)
+			continue
+		}
+		c := shellevents.QueryRuntimeCWIReconciliationBatchCommand{Request: request.Clone(), Members: members}
+		values, err := queryShellReconciliationBatch(ctx, m.EventHub(), c)
+		if err != nil {
+			// An error may follow physical I/O. Never turn it into an automatic
+			// second test invocation in search of PASS.
+			for _, member := range members {
+				values = append(values, unavailableRuntimeCWIReconciliationObservation(member, err.Error(), "owner_observation_unavailable"))
+			}
+		}
+		batch.Observations = append(batch.Observations, values...)
+	}
 	batch.Hash = runtimecontract.StableRuntimeCWIReconciliationBatchHash(batch)
 	return batch
+}
+
+func queryShellReconciliationBatch(ctx context.Context, hub magicevent.Hub, c shellevents.QueryRuntimeCWIReconciliationBatchCommand) ([]runtimecontract.RuntimeCWIReconciliationObservation, error) {
+	if hub == nil || c.ValidateForOwner(runtimecontract.RuntimeModuleShell) != nil {
+		return nil, common.ErrInvalidArgument
+	}
+	r := hub.Send(magicevent.NewEventWithContext(shellevents.TopicQueryRuntimeCWIReconciliationBatch, ModuleID, runtimecontract.RuntimeModuleShell, magicevent.NewHeader(), ctx, c))
+	if r == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	data, err := r.Get()
+	if err != nil {
+		return nil, err
+	}
+	value, ok := data.(shellevents.QueryRuntimeCWIReconciliationBatchResult)
+	if !ok {
+		return nil, fmt.Errorf("invalid Shell reconciliation batch result")
+	}
+	if err := c.ValidateResult(value); err != nil {
+		return nil, err
+	}
+	values := make([]runtimecontract.RuntimeCWIReconciliationObservation, 0, len(value.Observations))
+	for _, o := range value.Observations {
+		values = append(values, o.Clone())
+	}
+	return values, nil
 }
 
 func queryRuntimeCWIReconciliationOwner(ctx context.Context, hub magicevent.Hub, owner string, command runtimecontract.RuntimeCWIOwnerReconciliationRequest, request runtimecontract.RuntimeCWIReconciliationRequest) (runtimecontract.RuntimeCWIReconciliationObservation, error) {

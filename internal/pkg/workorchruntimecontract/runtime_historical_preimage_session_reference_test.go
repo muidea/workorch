@@ -196,7 +196,7 @@ func referenceHistoricalAcceptanceBeforePreimageSession(sources RuntimeLineageAs
 			return RuntimeHistoricalAcceptanceProof{}, fmt.Errorf("historical acceptance original observation receipt: %w", err)
 		}
 	}
-	if err := ValidateRuntimeAssessmentAdjudication(dispatch, assessment, sources.Facts, sources.Completed, sources.ProofLineage, sources); err != nil {
+	if err := ValidateRuntimeAssessmentAdjudication(dispatch, assessment, sources.Facts); err != nil {
 		return RuntimeHistoricalAcceptanceProof{}, fmt.Errorf("historical acceptance original ordinary adjudication: %w", err)
 	}
 	binding, found := assessmentBindingForCoverage(dispatch.CoverageBindings, endpoints.Acceptance.ID)

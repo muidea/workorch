@@ -373,7 +373,7 @@ func (m *Biz) acknowledgePersistedRuntimeGovernanceContinuationDuplicate(
 		return runtimeLifecycleOwnerDeliveryFailureForHandoff(handoff, readErr)
 	}
 
-	record := runtimeStateRecordFromAggregate(aggregate)
+	record := runtimecontract.RuntimeStateRecord(aggregate)
 	current, governed, handoffErr := runtimeGovernanceLifecycleHandoffFromState(&record)
 	if handoffErr != nil {
 		return runtimeLifecycleOwnerDeliveryFailureForHandoff(handoff, handoffErr)
@@ -450,7 +450,7 @@ func runtimeRunOwnsExactAggregateSnapshot(run *runmodel.Run, aggregate runtime.R
 		run.RuntimeState.StateRevision != aggregate.StateRevision {
 		return false, nil
 	}
-	wantState := runtimeStateRecordFromAggregate(aggregate)
+	wantState := runtimecontract.RuntimeStateRecord(aggregate)
 	if runtimecontract.StableRuntimeStateRecordHash(*run.RuntimeState) != runtimecontract.StableRuntimeStateRecordHash(wantState) {
 		return false, nil
 	}

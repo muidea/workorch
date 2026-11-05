@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -995,9 +996,20 @@ type rejectGovernanceContinuationCASRepository struct {
 
 type failFirstRuntimeDriveReadAfterContinuationRepository struct {
 	repository.RunRepository
-	resolutionID common.ResolutionID
-	armed        bool
-	fired        bool
+	resolutionID         common.ResolutionID
+	armed                bool
+	fired                bool
+	responseResolutionID common.ResolutionID
+}
+
+func (r *failFirstRuntimeDriveReadAfterContinuationRepository) GetRuntimeLifecycle(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runmodel.RuntimeLifecycleState, error) {
+	value, err := r.RunRepository.GetRuntimeLifecycle(ctx, workspaceID, runID)
+	if err == nil && r.responseResolutionID != "" && value.LifecycleFence != nil {
+		// A stale owner response is a detached boundary input, not permission to
+		// modify the opaque Runtime fence through an ordinary metadata write.
+		value.LifecycleFence.GovernanceResolutionID = r.responseResolutionID
+	}
+	return value, err
 }
 
 func (r *failFirstRuntimeDriveReadAfterContinuationRepository) GetByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (*runmodel.Run, error) {
@@ -3612,11 +3624,17 @@ func TestRuntimeStartupRecoveryDeliversPersistedGovernanceContinuationToBlockedR
 	}
 	staleActive := runmodel.CloneRun(cutContinued)
 	staleActive.RuntimeLifecycleFence.GovernanceResolutionID = "resolution-stale-response-loss"
-	if err := cutRuns.Update(ctx, staleActive); err != nil {
-		t.Fatal(err)
+	if err := cutRuns.Update(ctx, staleActive); !errors.Is(err, common.ErrConflict) {
+		t.Fatal("ordinary metadata update rewrote opaque lifecycle fence", err)
 	}
+	cutDriveGuard.responseResolutionID = staleActive.RuntimeLifecycleFence.GovernanceResolutionID
 	if delivered, err := cutModule.deliverPersistedRuntimeGovernanceContinuation(ctx, facts.WorkspaceID, facts.RunID); delivered || err == nil {
 		t.Fatalf("stale active response-loss acknowledgement delivered=%v err=%v", delivered, err)
+	}
+	cutDriveGuard.responseResolutionID = ""
+	unchanged, err := cutRuns.GetByWorkspaceID(ctx, facts.WorkspaceID, facts.RunID)
+	if err != nil || !reflect.DeepEqual(unchanged, cutContinued) {
+		t.Fatal("stale acknowledgement changed authoritative Run", err)
 	}
 	if err := cutRunOwner.Stop(ctx); err != nil {
 		t.Fatal(err)

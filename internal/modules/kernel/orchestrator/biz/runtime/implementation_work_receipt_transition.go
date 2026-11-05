@@ -9,7 +9,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func implementationWorkReceiptDisposition(a RuntimeAggregate, dispatch SealedDispatch, receipt runtimecontract.RuntimeOperationReceipt) (runtimecontract.RuntimeImplementationWorkReceiptDisposition, error) {
+func implementationWorkReceiptDisposition(a RuntimeAggregate, dispatch runtimecontract.RuntimeDispatchRecord, receipt runtimecontract.RuntimeOperationReceipt) (runtimecontract.RuntimeImplementationWorkReceiptDisposition, error) {
 	var round *runtimecontract.RuntimeImplementationWorkRound
 	for i := range a.ImplementationWork.Rounds {
 		if a.ImplementationWork.Rounds[i].DispatchID == dispatch.ID {
@@ -22,7 +22,7 @@ func implementationWorkReceiptDisposition(a RuntimeAggregate, dispatch SealedDis
 	if round == nil {
 		return "", fmt.Errorf("implementation receipt has no original round")
 	}
-	return runtimecontract.RuntimeImplementationWorkDispositionForDispatchReceipt(*round, sealedDispatchToRuntimeRecord(dispatch), a.OperationReceipts, a.Facts, a.OperationGovernanceBindings, receipt)
+	return runtimecontract.RuntimeImplementationWorkDispositionForDispatchReceipt(*round, (dispatch), a.OperationReceipts, a.Facts, a.OperationGovernanceBindings, receipt)
 }
 
 // settleImplementationWorkReceipt 仅在 OperationReceiptObserved 中、精确 owner receipt
@@ -89,7 +89,7 @@ func settleImplementationWorkReceipt(a *RuntimeAggregate, operation runtimecontr
 		return fmt.Errorf("implementation receipt has no original private round")
 	}
 	round := a.ImplementationWork.Rounds[index].Clone()
-	members, err := runtimecontract.RuntimeImplementationWorkReceiptMembers(sealedDispatchToRuntimeRecord(dispatch), a.OperationReceipts, a.Facts, a.OperationGovernanceBindings)
+	members, err := runtimecontract.RuntimeImplementationWorkReceiptMembers((dispatch), a.OperationReceipts, a.Facts, a.OperationGovernanceBindings)
 	if err != nil {
 		return err
 	}
@@ -124,7 +124,7 @@ func settleImplementationWorkReceipt(a *RuntimeAggregate, operation runtimecontr
 
 // 非成功 receipt 原文入账并关闭本轮，不能换轮或借 exact repair 续权。
 // 原 owner Failure/Diagnostic 保真；单独的有界无进展 failure 负责 SM-2 交付。
-func settleImplementationWorkRejectedReceipt(a *RuntimeAggregate, dispatch SealedDispatch, admission executionEvidenceAdmission, receipt runtimecontract.RuntimeOperationReceipt) error {
+func settleImplementationWorkRejectedReceipt(a *RuntimeAggregate, dispatch runtimecontract.RuntimeDispatchRecord, admission executionEvidenceAdmission, receipt runtimecontract.RuntimeOperationReceipt) error {
 	disposition, err := implementationWorkReceiptDisposition(*a, dispatch, receipt)
 	if err != nil {
 		return err
@@ -161,7 +161,7 @@ func settleImplementationWorkRejectedReceipt(a *RuntimeAggregate, dispatch Seale
 
 // closeImplementationWorkReceiptDisposition 保留已知 owner outcome，独立关闭工作权限。
 // 不把治理/stale/unknown 改写为 ordinary rejection，不生成继任 effect 权限。
-func closeImplementationWorkReceiptDisposition(a *RuntimeAggregate, dispatch SealedDispatch, operationID string, receipt runtimecontract.RuntimeOperationReceipt, disposition runtimecontract.RuntimeImplementationWorkReceiptDisposition) error {
+func closeImplementationWorkReceiptDisposition(a *RuntimeAggregate, dispatch runtimecontract.RuntimeDispatchRecord, operationID string, receipt runtimecontract.RuntimeOperationReceipt, disposition runtimecontract.RuntimeImplementationWorkReceiptDisposition) error {
 	want, err := implementationWorkReceiptDisposition(*a, dispatch, receipt)
 	if err != nil {
 		return err

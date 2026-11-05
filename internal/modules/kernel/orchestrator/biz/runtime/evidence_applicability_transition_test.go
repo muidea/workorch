@@ -104,6 +104,111 @@ func applicabilityInternalEvent(observation runtimecontract.RuntimeEvidenceAppli
 	return RuntimeInternalEvent{Kind: RuntimeInternalEventEvidenceApplicabilityObserved, Scope: RuntimeInternalEventScope{WorkspaceID: "ws-v2", RunID: "run-v2"}, Authority: &RuntimeInternalAuthorityPayload{EvidenceApplicability: &observation}}
 }
 
+func TestCommittedApplicabilitySourceConsumptionKeepsCurrentAndOriginalGuards(t *testing.T) {
+	base, observation := applicabilityTransitionFixture(t)
+	repository := &implementationWorkDetachedRepository{controllerRepository: controllerRepository{aggregate: &base}}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := controller.ApplyInternalEvent(context.Background(), applicabilityInternalEvent(observation))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, reload := range []bool{false, true} {
+		previous := result.Aggregate.CloneRaw()
+		if reload {
+			previous = runtimeTestEvidenceAggregateRoundTrip(t, previous)
+		}
+		for _, arm := range []string{"unchanged", "duplicate", "future", "changed_fact", "changed_receipt", "changed_observation", "new_bad_source", "missing_reconciliation"} {
+			t.Run(fmt.Sprintf("reload_%v/%s", reload, arm), func(t *testing.T) {
+				next := previous.CloneRaw()
+				next.StateRevision++
+				switch arm {
+				case "duplicate":
+					next.Facts.EvidenceApplicabilityObservations = append(next.Facts.EvidenceApplicabilityObservations, observation.CloneRaw())
+				case "future":
+					next.StateRevision = observation.RecordedAtStateRevision - 1
+				case "changed_fact":
+					next.Facts.Evidence.Accepted[0].SourceRef = "different original"
+				case "changed_receipt":
+					next.OperationReceipts[0].ExecutionKey = "different original"
+				case "changed_observation":
+					next.Facts.EvidenceApplicabilityObservations[0].Request.SourceReceiptHash = "different receipt"
+					next.Facts.EvidenceApplicabilityObservations[0].Request = next.Facts.EvidenceApplicabilityObservations[0].Request.WithID()
+				case "new_bad_source":
+					added := observation.CloneRaw()
+					added.Request.IssuedAtStateRevision = previous.StateRevision
+					added.RecordedAtStateRevision = next.StateRevision
+					added.Request.SourceEvidenceHash = "invented source"
+					added.Request = added.Request.WithID()
+					next.Facts.EvidenceApplicabilityObservations = append(next.Facts.EvidenceApplicabilityObservations, added)
+				case "missing_reconciliation":
+					// A matching committed observation still needs its original
+					// read-generation reference; no preimage may supply that anew.
+					withFence := observation.CloneRaw()
+					withFence.Request.ReconciliationRequestHash = "absent generation"
+					withFence.Request = withFence.Request.WithID()
+					next.Facts.EvidenceApplicabilityObservations[0] = withFence
+				}
+				before := previous.CloneRaw()
+				image := ownerStateSourceImage(nil, next)
+				image.AggregateJoins = func(gate *runtimecontract.RuntimeOwnerInvariantSourceGate) error {
+					return next.validateOwnerAggregateTransition(&previous, gate)
+				}
+				err := runtimecontract.CompileRuntimeOwnerStateTransition(ownerStateRecord(previous), image)
+				if (err == nil) != (arm == "unchanged") {
+					t.Fatalf("source consumption %s: %v", arm, err)
+				}
+				if !reflect.DeepEqual(before, previous) {
+					t.Fatal("source consumption changed its formal preimage")
+				}
+			})
+		}
+	}
+}
+
+func TestApplicabilityRequestAndObservationKeepCompleteIndependentSourceGates(t *testing.T) {
+	base, observation := applicabilityTransitionFixture(t)
+	for _, arm := range []string{"exact", "reload", "unrelated_invalid_event", "receipt_drift"} {
+		t.Run(arm, func(t *testing.T) {
+			before := base.CloneRaw()
+			switch arm {
+			case "reload":
+				before = runtimeTestEvidenceAggregateRoundTrip(t, before)
+			case "unrelated_invalid_event":
+				// Request source joins alone cannot find this corruption. Both
+				// public compilation and the private writer need the full gate.
+				before.ProcessedEventIDs = []string{"same", "same"}
+			case "receipt_drift":
+				before.OperationReceipts[0].ExecutionKey = "changed-original-receipt"
+			}
+			original := before.CloneRaw()
+			request, compileErr := CompileRuntimeEvidenceApplicabilityRequest(before, observation.Request.SourceEvidenceID)
+			gateErr := before.Validate()
+			if gateErr != nil && fmt.Sprint(compileErr) != fmt.Sprint(gateErr) {
+				t.Fatalf("public entry skipped the first full-source error: %v != %v", compileErr, gateErr)
+			}
+			repository := &implementationWorkDetachedRepository{controllerRepository: controllerRepository{aggregate: &before}}
+			controller, err := NewRuntimeController(repository)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, applyErr := controller.ApplyInternalEvent(context.Background(), applicabilityInternalEvent(observation))
+			if arm == "exact" || arm == "reload" {
+				if compileErr != nil || !reflect.DeepEqual(request, observation.Request) || applyErr != nil || repository.saves != 1 {
+					t.Fatalf("unchanged full source failed: compile=%v apply=%v", compileErr, applyErr)
+				}
+				if !reflect.DeepEqual(original.OperationReceipts, result.Aggregate.OperationReceipts) || !reflect.DeepEqual(original.ExecutionBudget, result.Aggregate.ExecutionBudget) || !reflect.DeepEqual(original.Facts.Coverage, result.Aggregate.Facts.Coverage) {
+					t.Fatal("read observation created effect, budget consumption or credit")
+				}
+			} else if gateErr == nil || applyErr == nil || repository.saves != 0 || !reflect.DeepEqual(original, *repository.aggregate) {
+				t.Fatalf("invalid source crossed the owner gate: full=%v apply=%v", gateErr, applyErr)
+			}
+		})
+	}
+}
+
 func TestApplicabilityRevisionFenceIncludesCompletedFocusBeforeCurrentClosure(t *testing.T) {
 	aggregate, observation := applicabilityTransitionFixture(t)
 	facts := aggregate.CloneRaw().Facts

@@ -17,10 +17,17 @@ func runtimeSemanticInputReviewsForRequirement(catalogs []runtimecontract.Runtim
 				var consumers []string
 
 				consumers = runtimecontract.RuntimeValidationProofConsumerRefs(*binding.InputReview)
+				var method *runtimecontract.RuntimeValidationRecipe
+				if binding.InputReview.Recipe != nil {
+					copy := *binding.InputReview.Recipe
+					copy.Args = slices.Clone(copy.Args)
+					method = &copy
+				}
 
 				ret = append(ret, runtimeSemanticInputReviewProjection{
 					OwnerModuleID: catalog.OwnerModuleID, ValidationRecipeID: binding.ValidationRecipeID,
 					SubjectHash: binding.InputReview.Hash, ProtocolRef: binding.InputReview.ProtocolRef,
+					Recipe:                    method,
 					RequiredProofConsumerRefs: consumers,
 					ProofResponsibilities:     runtimeInputProofResponsibilities(binding.InputReview.LineageAssertions),
 					ScopeContractRef:          binding.InputReview.ScopeContractRef, ScopeRequirements: binding.InputReview.ScopeRequirements,
@@ -56,6 +63,12 @@ func runtimeSemanticOutputInstruction(context runtimecontract.RuntimeSemanticPla
 	for _, review := range reviews {
 		if review.ScopeContractRef != "" {
 			base += " Evaluate inputs under the supplied owner scopeContractRef/scopeRequirements; do not infer broader execution or proof from a recipe name. Report missing external input context as inconclusive and any known omission of an original criterion as conflict."
+			break
+		}
+	}
+	for _, review := range reviews {
+		if review.Recipe != nil {
+			base += " When inputReviews includes recipe, review against that exact owner-declared method and its total TimeoutMillis, shared by preparation, all mandatory execution stages and cleanup. Zero means an unspecified owner default, not unlimited or the maximum allowed duration; an earlier parent deadline can still constrain execution. Known infeasibility cannot become consistent by shortening required observations or omitting stages. This declaration is not readiness or execution credit."
 			break
 		}
 	}

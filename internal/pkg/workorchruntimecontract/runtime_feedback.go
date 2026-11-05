@@ -1,7 +1,6 @@
 package workorchruntimecontract
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -302,8 +301,9 @@ func RuntimeFeedbackFromValidationDiagnostic(scope RuntimeFeedbackScope, domain 
 // comparison normalization, it intentionally includes whitespace, ordering,
 // and duplicates so an audit record cannot silently overwrite original detail.
 func StableRuntimeFeedbackHash(feedback RuntimeFeedback) string {
-	feedback = feedback.CloneOriginal()
-	h := sha256.New()
+	// Hashing only reads raw values; detaching this entire diagnostic graph
+	// cannot add isolation to a synchronous read-only encoding.
+	h := newRuntimeHashWriter()
 	writeHashString(h, string(feedback.Domain))
 	writeHashString(h, string(feedback.StableCategory))
 	writeHashString(h, string(feedback.WorkspaceID))

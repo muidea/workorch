@@ -59,6 +59,40 @@ func inspectShellNativeValidationChecks(directory string, targetRefs []string, a
 			return shellNativeCheckInspection{Code: code}
 		}
 	}
+	return inspectShellNativeValidationSources(targetRefs, attestations, func(ref string) ([]byte, error) {
+		path := filepath.Join(root, filepath.FromSlash(ref))
+		rel, err := filepath.Rel(root, path)
+		if err != nil || filepath.IsAbs(ref) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, os.ErrInvalid
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			return nil, err
+		}
+		if !info.Mode().IsRegular() {
+			return nil, os.ErrInvalid
+		}
+		source, err := sourceRoot.Open(filepath.FromSlash(ref))
+		if err != nil {
+			return nil, err
+		}
+		defer source.Close()
+		return io.ReadAll(io.LimitReader(source, maxNativeCheckSourceBytes+1))
+	})
+}
+
+// The same parser/walk consumes either guarded owner reads or the complete
+// frozen revision corpus with File's exact postimage. No scratch or process.
+func inspectShellNativeValidationSources(targetRefs []string, attestations []runtimecontract.RuntimeValidationCheckAttestationBinding, readSource func(string) ([]byte, error)) (inspection shellNativeCheckInspection) {
+	isolatedPackage, err := shellIsolatedValidationPackage(attestations)
+	if err != nil || len(attestations) == 0 {
+		return shellNativeCheckInspection{Code: "validation_input_review_mapping_unsupported"}
+	}
+	if isolatedPackage != "" {
+		if code := shellIsolatedInputScopeCode(targetRefs, isolatedPackage); code != "" {
+			return shellNativeCheckInspection{Code: code}
+		}
+	}
 	functions := make(map[string][]shellNativeCheckFunction)
 	entries := make(map[string][]shellNativeCheckFunction)
 	// Preserve every observed native input, including ambiguous/rejected
@@ -81,25 +115,15 @@ func inspectShellNativeValidationChecks(directory string, targetRefs []string, a
 		if !strings.HasSuffix(ref, ".go") || managedValidationSandboxPathExcluded(ref) {
 			continue
 		}
-		path := filepath.Join(root, filepath.FromSlash(ref))
-		rel, relErr := filepath.Rel(root, path)
-		if relErr != nil || filepath.IsAbs(ref) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		relative := filepath.Clean(filepath.FromSlash(ref))
+		if filepath.IsAbs(ref) || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 			return shellNativeCheckInspection{Code: "native_check_source_out_of_scope"}
 		}
-		info, statErr := os.Lstat(path)
-		if statErr != nil || !info.Mode().IsRegular() {
-			return shellNativeCheckInspection{Code: "native_check_source_unavailable", TargetRefs: []string{ref}}
-		}
 		fileCount++
-		if fileCount > maxNativeCheckSourceFiles || info.Size() > maxNativeCheckSourceBytes-sourceBytes {
+		if fileCount > maxNativeCheckSourceFiles {
 			return shellNativeCheckInspection{Code: "native_check_analysis_limit"}
 		}
-		source, openErr := sourceRoot.Open(filepath.FromSlash(ref))
-		if openErr != nil {
-			return shellNativeCheckInspection{Code: "native_check_source_unavailable", TargetRefs: []string{ref}}
-		}
-		content, readErr := io.ReadAll(io.LimitReader(source, maxNativeCheckSourceBytes-sourceBytes+1))
-		source.Close()
+		content, readErr := readSource(ref)
 		sourceBytes += int64(len(content))
 		if sourceBytes > maxNativeCheckSourceBytes {
 			return shellNativeCheckInspection{Code: "native_check_analysis_limit"}
@@ -107,7 +131,7 @@ func inspectShellNativeValidationChecks(directory string, targetRefs []string, a
 		if readErr != nil {
 			return shellNativeCheckInspection{Code: "native_check_source_unavailable", TargetRefs: []string{ref}}
 		}
-		file, parseErr := parser.ParseFile(token.NewFileSet(), path, content, 0)
+		file, parseErr := parser.ParseFile(token.NewFileSet(), ref, content, 0)
 		if parseErr != nil {
 			// Compilation has its own owner diagnostic. Do not infer a native
 			// declaration from a partial AST or export raw parser text.

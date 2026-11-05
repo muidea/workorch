@@ -529,6 +529,9 @@ func cloneRuntimeCWIReconciliationLedgerRaw(in RuntimeCWIReconciliationLedger) R
 
 func cloneRuntimeCWIReconciliationObservationRaw(in RuntimeCWIReconciliationObservation) RuntimeCWIReconciliationObservation {
 	out := in
+	out.ValidationExecution = cloneRuntimeStateRawPointer(in.ValidationExecution, func(item RuntimeValidationExecutionUse) RuntimeValidationExecutionUse {
+		return item.Clone()
+	})
 	out.TargetRefs = cloneRuntimeStateRawSlice(in.TargetRefs, func(item string) string { return item })
 	out.CheckRefs = cloneRuntimeStateRawSlice(in.CheckRefs, func(item string) string { return item })
 	out.MetricRefs = cloneRuntimeStateRawSlice(in.MetricRefs, func(item string) string { return item })
@@ -772,6 +775,7 @@ func cloneRuntimeCandidateFailureDiagnosticRaw(in RuntimeCandidateFailureDiagnos
 
 func cloneRuntimeCandidateFeasibilityRecordRaw(in RuntimeCandidateFeasibilityRecord) RuntimeCandidateFeasibilityRecord {
 	out := in
+	out.InputStructure = in.InputStructure.Clone()
 	out.Observation = cloneRuntimeStateRawPointer(in.Observation, func(item RuntimeOwnerFeasibilityObservation) RuntimeOwnerFeasibilityObservation {
 		return cloneRuntimeOwnerFeasibilityObservationRaw(item)
 	})
@@ -1876,6 +1880,7 @@ func cloneRuntimeSemanticPlanManifestRaw(in RuntimeSemanticPlanManifest) Runtime
 
 func cloneRuntimeSemanticPlanningGenerationRaw(in RuntimeSemanticPlanningGeneration) RuntimeSemanticPlanningGeneration {
 	out := in
+	out.OwnerInputRevision = in.OwnerInputRevision.Clone()
 	out.InvalidationSignatures = cloneRuntimeStateRawSlice(in.InvalidationSignatures, func(item string) string { return item })
 	out.PrerequisiteIDs = cloneRuntimeStateRawSlice(in.PrerequisiteIDs, func(item string) string { return item })
 	out.ReopenedCoverageIDs = cloneRuntimeStateRawSlice(in.ReopenedCoverageIDs, func(item common.CoverageWorkItemID) common.CoverageWorkItemID { return item })
@@ -2231,6 +2236,7 @@ func cloneRuntimeValidationSurfaceRaw(in RuntimeValidationSurface) RuntimeValida
 		item.Requirement.RequiredCheckRefs = cloneRuntimeStateRawSlice(item.Requirement.RequiredCheckRefs, func(value string) string { return value })
 		item.Requirement.SourceObligationChecks = CloneRuntimeSourceObligationChecks(item.Requirement.SourceObligationChecks)
 		item.OriginalDiagnostic = item.OriginalDiagnostic.CloneOriginal()
+		item.Maintenance = item.Maintenance.Clone()
 		return item
 	})
 	out.ProspectiveTargetSatisfactionConstraint = cloneRuntimeStateRawPointer(in.ProspectiveTargetSatisfactionConstraint, func(item RuntimeProspectiveTargetSatisfactionConstraint) RuntimeProspectiveTargetSatisfactionConstraint {

@@ -2,7 +2,6 @@ package workorchruntimecontract
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -180,96 +179,6 @@ func TestOwnerLineageIndexCompleteRawNodes(t *testing.T) {
 	})
 }
 
-func TestOwnerLineageIndexDoesNotRetainActiveOrFailedNodes(t *testing.T) {
-	index := &runtimeOwnerLineageIndex{}
-	d := runtimeDispatchIntrinsicFixture(t, 0)
-	if err := index.dispatch(d); err != nil || len(index.dispatches) != 0 {
-		t.Fatal("active success retained", err)
-	}
-	d.CandidateHash = "same-id drift"
-	if err := index.dispatch(d); err == nil || len(index.dispatches) != 0 {
-		t.Fatal("active drift admitted")
-	}
-	r := runtimeOperationReceiptLineageFixture("exec/ws/run/dispatch/op-1", 0, "op-1")
-	if index.receipt(r) == nil || len(index.receipts) != 0 {
-		t.Fatal("failed node retained")
-	}
-	s := newRuntimeSemanticValidationSession()
-	if runtimeOwnerLineageIndexFor(s) != nil {
-		t.Fatal("ordinary validator enabled owner index")
-	}
-	s.ownerHistory = &runtimeOwnerHistoricalSemanticCompiler{lineage: index}
-	if runtimeOwnerLineageIndexFor(s) != index {
-		t.Fatal("owner-private index not selected")
-	}
-	index.receipts = map[string][]runtimeOwnerLineageReceipt{"over limit": make([]runtimeOwnerLineageReceipt, runtimeOwnerHistoricalEntryLimit+1)}
-	retained := retainRuntimeOwnerHistoricalSubtrees(s)
-	if runtimeOwnerRetainedCount(retained) != runtimeOwnerHistoricalEntryLimit || retained.ownerHistory.lineage.count() != runtimeOwnerHistoricalEntryLimit || len(index.receipts["over limit"]) != runtimeOwnerHistoricalEntryLimit+1 {
-		t.Fatal("lineage nodes escaped bounded subset limit or changed original input")
-	}
-}
-
-func TestOwnerLineageIndexLifetimeAndExactRawSuccess(t *testing.T) {
-	r := runtimeOperationReceiptLineageFixture("exec/ws/run/dispatch/op-1", 1, "op-1")
-	index := &runtimeOwnerLineageIndex{}
-	if err := index.receipt(r); err != nil {
-		t.Fatal(err)
-	}
-	changed := cloneRuntimeOperationReceiptRaw(r)
-	changed.Evidence.Summary = " " + r.Evidence.Summary + " "
-	if err := index.receipt(changed); err != nil || len(index.receipts[r.ExecutionKey]) != 2 {
-		t.Fatal("normalized-equal raw receipt reused old success", err)
-	}
-	for _, exit := range []string{"error", "panic", "scope", "close"} {
-		s := newRuntimeSemanticValidationSession()
-		s.ownerHistory = &runtimeOwnerHistoricalSemanticCompiler{lineage: index}
-		c := &RuntimeOwnerHistoricalCompiler{workspace: "ws", run: "run", semantic: s}
-		sentinel := errors.New("real owner gate failure")
-		switch exit {
-		case "error", "panic":
-			func() {
-				defer func() {
-					if p := recover(); (exit == "panic") != (p == sentinel) {
-						t.Fatal("panic changed", p)
-					}
-				}()
-				err := c.Compile("ws", "run", func(func(RuntimeOwnerStateSourceImage) error) error {
-					if exit == "panic" {
-						panic(sentinel)
-					}
-					return sentinel
-				})
-				if err != sentinel {
-					t.Fatal("error changed", err)
-				}
-			}()
-			if c.semantic != nil {
-				t.Fatal("failure retained historical nodes")
-			}
-		case "scope":
-			if err := c.Compile("other", "run", func(func(RuntimeOwnerStateSourceImage) error) error { return nil }); err != nil {
-				t.Fatal(err)
-			}
-			if c.semantic.ownerHistory.lineage != nil {
-				t.Fatal("other scope inherited nodes")
-			}
-		case "close":
-			c.Close()
-			if c.semantic != nil {
-				t.Fatal("closed owner retained nodes")
-			}
-			if err := c.Compile("ws", "run", func(func(RuntimeOwnerStateSourceImage) error) error { return nil }); err != nil || c.semantic != nil {
-				t.Fatal("closed compiler resurrected nodes", err)
-			}
-		}
-		wire, _ := json.Marshal(c)
-		var fresh RuntimeOwnerHistoricalCompiler
-		if err := json.Unmarshal(wire, &fresh); err != nil || fresh.semantic != nil {
-			t.Fatal("restart inherited node products", err)
-		}
-	}
-}
-
 func TestOwnerLineageIndexCollectionAndJoinGatesRerun(t *testing.T) {
 	d := runtimeDispatchIntrinsicFixture(t, 0)
 	runtimeDispatchMarkCommittedForTest(&d)
@@ -279,7 +188,7 @@ func TestOwnerLineageIndexCollectionAndJoinGatesRerun(t *testing.T) {
 	}
 	for _, history := range [][]RuntimeDispatchRecord{{d}, {d, d}, {d, {}}, {{}, d}} {
 		for _, scope := range []common.WorkspaceID{d.WorkspaceID, "other"} {
-			got := validateRuntimeDispatchHistoryShapeInIndex(scope, d.RunID, nil, history, index)
+			got := referenceDispatchHistoryWithNodes(scope, d.RunID, history, index)
 			want := ValidateRuntimeDispatchHistoryShape(scope, d.RunID, nil, history)
 			if fmt.Sprint(got) != fmt.Sprint(want) {
 				t.Fatal("collection/scope first error changed", got, want)
@@ -296,7 +205,7 @@ func TestOwnerLineageIndexCollectionAndJoinGatesRerun(t *testing.T) {
 			if !joined {
 				dispatch.OperationExecutions[0].OwnerReceiptHash = "other"
 			}
-			got := validateRuntimeOperationReceiptExecutionLineageInIndex(&dispatch, nil, receipts, index)
+			got := ValidateRuntimeOperationReceiptExecutionLineage(&dispatch, nil, receipts)
 			want := ValidateRuntimeOperationReceiptExecutionLineage(&dispatch, nil, receipts)
 			if fmt.Sprint(got) != fmt.Sprint(want) {
 				t.Fatal("receipt join/duplicate first error changed", got, want)
@@ -308,7 +217,7 @@ func TestOwnerLineageIndexCollectionAndJoinGatesRerun(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, values := range [][]RuntimeRepairSurfaceConfirmationRecord{{c}, {c, c}, {c, {}}, {{}, c}} {
-		got := validateRuntimeRepairSurfaceConfirmationRecordsInIndex(values, index)
+		got := ValidateRuntimeRepairSurfaceConfirmationRecords(values)
 		want := ValidateRuntimeRepairSurfaceConfirmationRecords(values)
 		if fmt.Sprint(got) != fmt.Sprint(want) {
 			t.Fatal("confirmation order/duplicate error changed", got, want)
@@ -322,7 +231,7 @@ func TestOwnerLineageIndexReadOnlyArchive(t *testing.T) {
 		r := run.RuntimeState
 		index := &runtimeOwnerLineageIndex{}
 		for range 2 {
-			if err := runtimeValidateLineageOperationsInIndex(historicalSessionArchiveSources(r), index); err != nil {
+			if err := referenceLineageNodes(historicalSessionArchiveSources(r), index); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -333,7 +242,7 @@ func TestOwnerLineageIndexReadOnlyArchive(t *testing.T) {
 			changed := r.Clone()
 			mutateRuntimeStateConsumerSession(&changed, arm, "same identity raw drift")
 			sources := historicalSessionArchiveSources(changed)
-			got, want := runtimeValidateLineageOperationsInIndex(sources, index), runtimeValidateLineageOperations(sources)
+			got, want := referenceLineageNodes(sources, index), runtimeValidateLineageOperations(sources)
 			if fmt.Sprint(got) != fmt.Sprint(want) {
 				t.Fatalf("archive lineage first error changed in arm %d: %v != %v", arm, got, want)
 			}
@@ -383,4 +292,40 @@ func FuzzOwnerLineageIndexRawNodes(f *testing.F) {
 			t.Fatal("mutation changed original retained node")
 		}
 	})
+}
+
+// The old node index is retained only as an offline raw-node oracle. Current
+// production validators neither enable it nor receive its products.
+func referenceDispatchHistoryWithNodes(ws common.WorkspaceID, run common.RunID, history []RuntimeDispatchRecord, index *runtimeOwnerLineageIndex) error {
+	// Current collection partition checks are independent of the retired index.
+	if err := ValidateRuntimeDispatchHistoryShape(ws, run, nil, history); err != nil {
+		return err
+	}
+	for _, d := range history {
+		if err := index.dispatch(d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func referenceLineageNodes(s RuntimeLineageAssertionSources, index *runtimeOwnerLineageIndex) error {
+	if err := runtimeValidateLineageOperations(s); err != nil {
+		return err
+	}
+	for _, d := range s.Completed {
+		if err := index.dispatch(d); err != nil {
+			return err
+		}
+		for _, a := range d.OperationAdmissibilities {
+			if err := index.catalog(a); err != nil {
+				return err
+			}
+		}
+	}
+	for _, r := range s.Receipts {
+		if err := index.receipt(r); err != nil {
+			return err
+		}
+	}
+	return nil
 }

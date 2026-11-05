@@ -10,7 +10,6 @@ import (
 
 func sourceLedgerSemanticSession() *runtimeSemanticValidationSession {
 	s := newRuntimeSemanticValidationSession()
-	s.ownerHistory = &runtimeOwnerHistoricalSemanticCompiler{}
 	return s
 }
 
@@ -138,7 +137,7 @@ func compareSourceLedgerCompiler(t *testing.T, original, changed RuntimeStateRec
 				}
 			}
 		}
-		got = validateRuntimeAssessmentAdjudicationsInSession(s.Facts, s.Completed, s.ProofLineage, s, session)
+		got = auditCommittedAssessmentAdjudicationsInSession(s.Facts, s.Completed, s.ProofLineage, s, session)
 		want = referenceLineagePreimageValidateRuntimeAssessmentAdjudications(s.Facts, s.Completed, s.ProofLineage, s)
 		if fmt.Sprint(got) != fmt.Sprint(want) {
 			t.Fatal("assessment complete cold first error differs", got, want)
@@ -147,13 +146,7 @@ func compareSourceLedgerCompiler(t *testing.T, original, changed RuntimeStateRec
 		if !bytes.Equal(before, after) {
 			t.Fatal("nested source-ledger consumer changed raw input")
 		}
-		semantic = retainRuntimeOwnerHistoricalSubtrees(semantic)
-		if semantic == nil {
-			semantic = sourceLedgerSemanticSession()
-		}
-		if len(semantic.workStates) != 0 {
-			t.Fatal("complete current-state success escaped transaction")
-		}
+		semantic = sourceLedgerSemanticSession()
 	}
 }
 

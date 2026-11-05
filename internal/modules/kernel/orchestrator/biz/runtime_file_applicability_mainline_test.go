@@ -113,7 +113,7 @@ func TestRuntimeFileMutationApplicabilityPairsActualReceiptAndSM2(t *testing.T) 
 		t.Fatal("File lost original input or actual postcondition bytes")
 	}
 	original := aggregate.CloneRaw()
-	request, required, err := runtime.NextRuntimeEvidenceApplicabilityRequest(aggregate)
+	request, required, err := runtimeNextEvidenceApplicabilityRequestForTest(aggregate)
 	if err != nil || !required || request.SourceEvidenceID != fact.ID {
 		t.Fatalf("exact current query obligation: required=%v err=%v", required, err)
 	}
@@ -124,7 +124,7 @@ func TestRuntimeFileMutationApplicabilityPairsActualReceiptAndSM2(t *testing.T) 
 	if len(updated.Facts.EvidenceApplicabilityObservations) != 1 || !reflect.DeepEqual(updated.Facts.EvidenceApplicabilityObservations[0].CurrentDependencies, &fact.ApplicabilityDependencies.OwnerRevisionSet) || !reflect.DeepEqual(updated.OperationReceipts, original.OperationReceipts) || !reflect.DeepEqual(updated.Facts.Evidence, original.Facts.Evidence) || !reflect.DeepEqual(updated.ExecutionBudget, original.ExecutionBudget) {
 		t.Fatal("observation changed original receipt/effect/budget or invented postcondition")
 	}
-	if _, required, err := runtime.NextRuntimeEvidenceApplicabilityRequest(updated); err != nil || required {
+	if _, required, err := runtimeNextEvidenceApplicabilityRequestForTest(updated); err != nil || required {
 		t.Fatalf("same revision repeated owner query: %v", err)
 	}
 	for _, scenario := range []string{"matching", "changed", "missing"} {
@@ -179,6 +179,12 @@ func TestRuntimeFileMutationApplicabilityPairsActualReceiptAndSM2(t *testing.T) 
 					t.Fatal(err)
 				}
 				owner.runtimeController = controller
+				// A raw JSON reload is persistence data; recovery enters the owner
+				// Load boundary to obtain this revision's ordinary query product.
+				reload, err = owner.runtimeController.Load(ctx, reload.Facts.WorkspaceID, reload.Facts.RunID)
+				if err != nil {
+					t.Fatal(err)
+				}
 				result, changed, err := owner.driveRuntimeEvidenceApplicability(ctx, reload)
 				if err != nil || changed == afterCAS || repository.saves != saves+1 || len(result.Facts.EvidenceApplicabilityObservations) != 1 {
 					t.Fatalf("recovery repeated or lost query observation CAS: changed=%v err=%v", changed, err)
@@ -220,9 +226,15 @@ func TestRuntimeFileMutationApplicabilityPairsActualReceiptAndSM2(t *testing.T) 
 					}
 				}
 			}
+			// A raw JSON reload is persistence data; recovery enters the owner
+			// Load boundary to obtain this revision's ordinary query product.
+			reload, err = owner.runtimeController.Load(ctx, reload.Facts.WorkspaceID, reload.Facts.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
 			result, changed, err := owner.driveRuntimeEvidenceApplicability(ctx, reload)
 			if scenario == "read_error" {
-				if err == nil || changed || repository.saves != saves || !reflect.DeepEqual(repository.aggregate, reload) {
+				if err == nil || changed || repository.saves != saves || !reflect.DeepEqual(runtimeStateRecordFromAggregate(repository.aggregate), runtimeStateRecordFromAggregate(reload)) {
 					t.Fatal("read error became missing fact or CAS")
 				}
 				return

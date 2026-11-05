@@ -91,7 +91,7 @@ func TestActiveRejectedOperationShapesUsesCompletedDispatchFocusForNonCreditingR
 	}
 
 	otherFocus := aggregate
-	otherFocus.CompletedDispatches = append([]SealedDispatch(nil), aggregate.CompletedDispatches...)
+	otherFocus.CompletedDispatches = append([]runtimecontract.RuntimeDispatchRecord(nil), aggregate.CompletedDispatches...)
 	otherFocus.CompletedDispatches[0].Transaction.FocusID = "focus-next"
 	if shapes := ActiveRejectedOperationShapes(otherFocus); len(shapes) != 0 {
 		t.Fatalf("other-focus dispatch leaked rejected shape into current focus: %+v", shapes)
@@ -455,7 +455,7 @@ func TestRepairableAssessmentSameGapRecordsAcceptedOperationShapeForAdmission(t 
 	aggregate := stateChangeAggregate(t)
 	candidate := stateChangeCandidate()
 	operation := candidate.StateChange.Operations[0].Operation
-	aggregate.CompletedDispatches = []SealedDispatch{{
+	aggregate.CompletedDispatches = []runtimecontract.RuntimeDispatchRecord{{
 		ID: "dispatch-accepted-state", Candidate: candidate,
 	}}
 	aggregate.Facts.Evidence.Accepted = []runtimecontract.EvidenceFact{{

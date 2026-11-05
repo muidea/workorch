@@ -224,15 +224,15 @@ func shellProjectFixedStages(exactArgs []string, pkg string) []shellProjectStage
 	}
 }
 
-// caller 只能供应同一 operation 的 deadline，禁止无 deadline 或超过旧 60s
-// 总预算。每次启动一个 owner process group；正常退出也清理后代。
+// caller 只能供应同一 operation 的 deadline，禁止无 deadline 或超过 owner 最大期限。
+// 原封套仍校验精确 request 期限，每次启动一个 owner process group；正常退出也清理后代。
 func runShellProjectStage(ctx context.Context, directory string, env []string, spec shellProjectStageSpec) (shellProjectStageFact, error) {
 	fact := shellProjectStageFact{ID: spec.ID, Scope: spec.Scope, Argv: append([]string{"go"}, spec.Args...), ExitCode: -1,
 		Stdout: newShellProjectRawBuffer().fact(), Stderr: newShellProjectRawBuffer().fact()}
 	deadline, ok := ctx.Deadline()
-	if !ok || time.Until(deadline) > DefaultCommandTimeout {
+	if !ok || time.Until(deadline) > MaxCommandTimeout {
 		fact.FailureCode = "validation_project_deadline_invalid"
-		return fact, fmt.Errorf("复合验证要求不超过原 60000ms 的单一 deadline")
+		return fact, fmt.Errorf("复合验证要求不超过 owner 最大期限的单一 deadline")
 	}
 	if err := ctx.Err(); err != nil {
 		fact.TimedOut = err == context.DeadlineExceeded

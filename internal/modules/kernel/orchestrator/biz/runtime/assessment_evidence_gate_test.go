@@ -240,7 +240,7 @@ func assessmentGateFixture(t *testing.T, claim, passedCheck string) (RuntimeAggr
 				Quality: common.EvidenceQualityValid, Summary: "validation completed", Validation: observation,
 			}}},
 		},
-		CompletedDispatches: []SealedDispatch{{
+		CompletedDispatches: []runtimecontract.RuntimeDispatchRecord{{
 			ID:        "dispatch-validation",
 			Candidate: runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: operation}}}},
 		}},

@@ -174,7 +174,7 @@ func TestSemanticProofBudgetRetiredGenerationExhaustsBeforeNewSession(t *testing
 		if !errors.As(err, &exhausted) || exhausted.Dimension != runtimecontract.RuntimeBudgetDimensionSemanticGeneration {
 			t.Fatalf("expected proof exhaustion: %v", err)
 		}
-		if store.saves != 0 || !reflect.DeepEqual(before, store.aggregate) {
+		if store.saves != 0 || !reflect.DeepEqual(ownerStateRecord(before), ownerStateRecord(store.aggregate)) {
 			t.Fatal("exhaustion wrote batch/session/allocation or authority")
 		}
 	}

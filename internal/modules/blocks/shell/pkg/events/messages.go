@@ -45,9 +45,11 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[ProbeRuntimeOperationFeasibilityCommand, ProbeRuntimeOperationFeasibilityResult]("shell", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicProbeRuntimeOperationFeasibility),
 		eventcontract.CommandTopic[ProbeRuntimeSemanticProofFeasibilityCommand, ProbeRuntimeSemanticProofFeasibilityResult]("shell", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicProbeRuntimeSemanticProofFeasibility),
 		eventcontract.CommandTopic[ProbeRuntimeOwnerFactProspectiveSatisfactionCommand, ProbeRuntimeOwnerFactProspectiveSatisfactionResult]("shell", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicProbeRuntimeOwnerFactProspectiveSatisfaction),
+		eventcontract.CommandTopic[QueryRuntimeCWIReconciliationBatchCommand, QueryRuntimeCWIReconciliationBatchResult]("shell", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicQueryRuntimeCWIReconciliationBatch),
 		eventcontract.CommandTopic[QueryRuntimeCWIReconciliationCommand, QueryRuntimeCWIReconciliationResult]("shell", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicQueryRuntimeCWIReconciliation),
 		eventcontract.CommandTopic[QueryRuntimeValidationRawOutputCommand, QueryRuntimeValidationRawOutputResult]("shell", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicQueryRuntimeValidationRawOutput),
 		eventcontract.CommandTopic[QueryRuntimeValidationReadDependenciesCommand, QueryRuntimeValidationReadDependenciesResult]("shell", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicQueryRuntimeValidationReadDependencies),
+		eventcontract.CommandTopic[InspectRuntimeValidationInputStructureCommand, InspectRuntimeValidationInputStructureResult]("shell", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicInspectRuntimeValidationInputStructure),
 		eventcontract.CommandTopic[ExecuteOperationCommand, ExecuteOperationResult]("shell", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicExecuteOperation),
 	)
 }

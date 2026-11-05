@@ -762,6 +762,10 @@ func compileRuntimeSemanticProofObligations(definitionRevision string, sourceFoc
 }
 
 func compileRuntimeSemanticProofObligationsWithValidatedCatalogs(definitionRevision string, sourceByCoverage map[common.CoverageWorkItemID]RuntimeDefinitionFocus, coverageItems []RuntimeCoverageItem, validated runtimeSemanticProofCatalogs) ([]RuntimeSemanticProofObligation, error) {
+	return compileRuntimeSemanticProofObligationsWithCatalogsInSession(definitionRevision, sourceByCoverage, coverageItems, validated, nil)
+}
+
+func compileRuntimeSemanticProofObligationsWithCatalogsInSession(definitionRevision string, sourceByCoverage map[common.CoverageWorkItemID]RuntimeDefinitionFocus, coverageItems []RuntimeCoverageItem, validated runtimeSemanticProofCatalogs, session *runtimeSemanticValidationSession) ([]RuntimeSemanticProofObligation, error) {
 	catalogs, catalogByOwner := validated.values, validated.byOwner
 	ret := make([]RuntimeSemanticProofObligation, 0, len(coverageItems))
 	for _, item := range NormalizeRuntimeCoverageItems(coverageItems) {
@@ -770,7 +774,7 @@ func compileRuntimeSemanticProofObligationsWithValidatedCatalogs(definitionRevis
 			return nil, fmt.Errorf("runtime semantic proof obligation has no Definition focus for coverage %q", item.ID)
 		}
 		source = source.Normalized()
-		obligation, err := compileRuntimeSemanticDefinitionProofObligation(definitionRevision, item, source)
+		obligation, err := compileRuntimeDefinitionProofInSession(definitionRevision, item, source, session)
 		if err != nil {
 			return nil, err
 		}

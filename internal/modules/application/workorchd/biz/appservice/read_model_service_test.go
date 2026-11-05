@@ -225,6 +225,14 @@ func (r *blockingRunListRepository) GetByWorkspaceID(ctx context.Context, worksp
 	return r.base.GetByWorkspaceID(ctx, workspaceID, id)
 }
 
+func (r *blockingRunListRepository) GetRuntimeLifecycle(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (runmodel.RuntimeLifecycleState, error) {
+	return r.base.GetRuntimeLifecycle(ctx, workspaceID, id)
+}
+
+func (r *blockingRunListRepository) GetRuntimeStateWriteBase(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (runmodel.RuntimeStateWriteBase, error) {
+	return r.base.GetRuntimeStateWriteBase(ctx, workspaceID, id)
+}
+
 func (r *blockingRunListRepository) List(ctx context.Context) ([]*runmodel.Run, error) {
 	return r.base.List(ctx)
 }

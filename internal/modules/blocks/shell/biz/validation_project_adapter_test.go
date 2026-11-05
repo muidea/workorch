@@ -64,7 +64,7 @@ func TestProjectAdapterBindsExactStagesReviewAndOriginalRequirements(t *testing.
 		case "args":
 			changed.Args = []string{"test", "./delivery"}
 		case "timeout":
-			changed.TimeoutMillis = 60001
+			changed.TimeoutMillis = MaxCommandTimeout.Milliseconds() + 1
 		}
 		if values := resolveRuntimeValidationRecipeDeclarations([]runtimecontract.RuntimeValidationRecipe{changed}, manifest.Manifest); len(values) != 0 {
 			t.Fatalf("unsupported project declaration resolved: %s", scenario)
@@ -379,7 +379,7 @@ func TestProjectReconciliationRawScopeBindsFullIdentityAndRejectsUnsafeRequests(
 		case "no-mapping":
 			changed.ValidationCheckAttestations = nil
 		case "timeout":
-			changed.TimeoutMillis = 60001
+			changed.TimeoutMillis = MaxCommandTimeout.Milliseconds() + 1
 		}
 		produced, err := NewRuntimeAdapter().executeShellProjectScope(context.Background(), changed, scope)
 		if err == nil || produced.Conjunction != nil || len(produced.Result.ValidationResources) != 0 || len(produced.Raw) != 0 {

@@ -48,6 +48,29 @@ func TestRunStoreAndQueryPreserveOpaqueRuntimeStateRawShape(t *testing.T) {
 	raw := runOpaqueRuntimeStateRawFixture()
 	expected := runOpaqueRuntimeStateRawFixture()
 	expectedRevision := initial.StateRevision
+	// A mismatched fence must be a semantic rejection at the physical write
+	// boundary, with no revision advance before the valid original command.
+	badFence := runtimecontract.RuntimeOpaqueLifecycleFence{
+		WorkspaceID: item.WorkspaceID, RunID: item.ID, RuntimeStateRevision: raw.StateRevision,
+		RuntimeStateRef:  runevents.RuntimeStateRef(item.WorkspaceID, item.ID, raw.StateRevision),
+		RuntimeStateHash: "wrong-state-identity", BootstrapHash: runtimecontract.StableRuntimeBootstrapHash(bootstrap), TerminalFenceID: "terminal-fence-test",
+	}
+	rejected := hub.Send(magicevent.NewEventWithContext(runevents.TopicRunCommandStoreRuntimeStateRecord, "kernel/orchestrator", runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.StoreRuntimeStateRecordCommand{WorkspaceID: item.WorkspaceID, RunID: item.ID, RuntimeState: &raw, ExpectedRuntimeStateRevision: &expectedRevision, LifecycleFence: &badFence}))
+	if rejected == nil {
+		t.Fatal("missing rejected result")
+	}
+	rejectedData, rejectedErr := rejected.Get()
+	if rejectedErr != nil {
+		t.Fatal(rejectedErr)
+	}
+	rejectedResult, ok := rejectedData.(runevents.StoreRuntimeStateRecordResult)
+	if !ok || rejectedResult.RuntimeStateUpdate == nil || rejectedResult.RuntimeStateUpdate.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategorySemanticRejection {
+		t.Fatalf("wrong hash changed rejection class: %#v", rejectedData)
+	}
+	stillOriginal, err := runs.GetByWorkspaceID(ctx, item.WorkspaceID, item.ID)
+	if err != nil || stillOriginal.Revision != item.Revision || stillOriginal.RuntimeState.StateRevision != initial.StateRevision {
+		t.Fatalf("rejected write changed owner: %v", err)
+	}
 	store := hub.Send(magicevent.NewEventWithContext(
 		runevents.TopicRunCommandStoreRuntimeStateRecord,
 		"kernel/orchestrator",
@@ -64,9 +87,9 @@ func TestRunStoreAndQueryPreserveOpaqueRuntimeStateRawShape(t *testing.T) {
 	if store == nil {
 		t.Fatal("Run store returned nil result")
 	}
-	storeData, err := store.Get()
-	if err != nil {
-		t.Fatalf("Run store: %v", err)
+	storeData, storeErr := store.Get()
+	if storeErr != nil {
+		t.Fatalf("Run store: %v", storeErr)
 	}
 	storeResult, ok := storeData.(runevents.StoreRuntimeStateRecordResult)
 	if !ok || storeResult.RuntimeStateUpdate == nil || storeResult.RuntimeStateUpdate.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryAccepted {

@@ -78,7 +78,7 @@ func TestVerificationPolicySealedOwnerModalityAndScope(t *testing.T) {
 			copy := aggregate
 			copy.OperationReceipts = append([]runtimecontract.RuntimeOperationReceipt(nil), aggregate.OperationReceipts...)
 			copy.Facts.Evidence.Accepted = append([]runtimecontract.EvidenceFact(nil), aggregate.Facts.Evidence.Accepted...)
-			copy.CompletedDispatches = append([]SealedDispatch(nil), aggregate.CompletedDispatches...)
+			copy.CompletedDispatches = append([]runtimecontract.RuntimeDispatchRecord(nil), aggregate.CompletedDispatches...)
 			copy.CompletedDispatches[0].ValidationRecipes = append([]runtimecontract.RuntimeValidationRecipe(nil), aggregate.CompletedDispatches[0].ValidationRecipes...)
 			copy.CompletedDispatches[0].OperationExecutions = append([]runtimecontract.RuntimeOperationExecutionRecord(nil), aggregate.CompletedDispatches[0].OperationExecutions...)
 			copy.Facts.Evidence.Accepted[0].OwnerRevisionSet = runtimecontract.CloneRuntimeOwnerRevisionSet(aggregate.Facts.Evidence.Accepted[0].OwnerRevisionSet)
@@ -154,7 +154,7 @@ func TestVerificationPolicyClosureUsesOwnerReceiptNotEvidenceCount(t *testing.T)
 			copy.OperationReceipts = append([]runtimecontract.RuntimeOperationReceipt(nil), aggregate.OperationReceipts...)
 			mutation.apply(&copy)
 			if mutation.name == "fabricated source" {
-				copy.CompletedDispatches = append([]SealedDispatch(nil), aggregate.CompletedDispatches...)
+				copy.CompletedDispatches = append([]runtimecontract.RuntimeDispatchRecord(nil), aggregate.CompletedDispatches...)
 				copy.CompletedDispatches[0].OperationExecutions = append([]runtimecontract.RuntimeOperationExecutionRecord(nil), aggregate.CompletedDispatches[0].OperationExecutions...)
 				copy.CompletedDispatches[0].OperationExecutions[0].EvidenceFactHash = runtimecontract.StableRuntimeEvidenceFactHash(copy.Facts.Evidence.Accepted[0])
 				if !runtimeVerificationPolicySatisfied(copy, binding, "cwi-claim", []string{string(fact.ID)}) {

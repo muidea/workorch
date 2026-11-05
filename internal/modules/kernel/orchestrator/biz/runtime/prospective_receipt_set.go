@@ -71,9 +71,9 @@ func runtimeAcceptedEvidenceForProspectiveReceiptMember(
 	return runtimecontract.EvidenceFact{}, false
 }
 
-func runtimeDispatchForCollectiveReceiptSet(aggregate RuntimeAggregate, dispatchID string) (SealedDispatch, bool) {
+func runtimeDispatchForCollectiveReceiptSet(aggregate RuntimeAggregate, dispatchID string) (runtimecontract.RuntimeDispatchRecord, bool) {
 	if dispatchID == "" {
-		return SealedDispatch{}, false
+		return runtimecontract.RuntimeDispatchRecord{}, false
 	}
 	if aggregate.ActiveDispatch != nil && aggregate.ActiveDispatch.ID == dispatchID {
 		return *aggregate.ActiveDispatch, true
@@ -83,7 +83,7 @@ func runtimeDispatchForCollectiveReceiptSet(aggregate RuntimeAggregate, dispatch
 			return dispatch, true
 		}
 	}
-	return SealedDispatch{}, false
+	return runtimecontract.RuntimeDispatchRecord{}, false
 }
 
 // runtimeProspectiveCoverageKindComplete requires one and the same sealed

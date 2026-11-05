@@ -31,13 +31,13 @@ type confirmedRepairReceiptLink struct {
 
 type completedConfirmedRepairTransaction struct {
 	transaction            confirmedRepairTransaction
-	dispatch               SealedDispatch
+	dispatch               runtimecontract.RuntimeDispatchRecord
 	finalEvidenceRevision  string
 	finalWorkspaceRevision string
 }
 
 type confirmedRepairDispatchLineage struct {
-	dispatches []SealedDispatch
+	dispatches []runtimecontract.RuntimeDispatchRecord
 	bindings   []runtimecontract.RuntimeOperationGovernanceBinding
 }
 
@@ -90,7 +90,7 @@ func deriveConfirmedRepairAdmissionCommitment(
 	if err != nil {
 		return nil, fmt.Errorf("%w: confirmed owner repair candidate target projection: %v", common.ErrConflict, err)
 	}
-	probe := SealedDispatch{Candidate: candidate, OperationTargetAuthorizations: targetAuthorizations}
+	probe := runtimecontract.RuntimeDispatchRecord{Candidate: candidate, OperationTargetAuthorizations: targetAuthorizations}
 	coverageIDs := append([]common.CoverageWorkItemID(nil), aggregate.Decision.RequiredOutput.CoverageWorkItemIDs...)
 	// Decision targets are the complete owner-confirmed authorization surface,
 	// not an implicit operation sequence. Admission may choose a non-empty
@@ -203,8 +203,8 @@ func deriveConfirmedRepairAdmissionCommitment(
 // side fails closed; current mutable repair projections are never consulted.
 func confirmedRepairTransactionFromCommitment(
 	aggregate RuntimeAggregate,
-	dispatch SealedDispatch,
-	origin SealedDispatch,
+	dispatch runtimecontract.RuntimeDispatchRecord,
+	origin runtimecontract.RuntimeDispatchRecord,
 ) (*confirmedRepairTransaction, error) {
 	if dispatch.RepairCommitment == nil {
 		return nil, fmt.Errorf("%w: confirmed owner repair dispatch has no repair commitment", common.ErrConflict)
@@ -288,8 +288,8 @@ func confirmedRepairTransactionFromCommitment(
 	}, nil
 }
 
-func confirmedRepairAdmissionLineage(aggregate RuntimeAggregate, leaf SealedDispatch) (confirmedRepairDispatchLineage, error) {
-	byID := make(map[string]SealedDispatch, len(aggregate.CompletedDispatches)+1)
+func confirmedRepairAdmissionLineage(aggregate RuntimeAggregate, leaf runtimecontract.RuntimeDispatchRecord) (confirmedRepairDispatchLineage, error) {
+	byID := make(map[string]runtimecontract.RuntimeDispatchRecord, len(aggregate.CompletedDispatches)+1)
 	for _, dispatch := range aggregate.CompletedDispatches {
 		if _, duplicate := byID[dispatch.ID]; duplicate {
 			return confirmedRepairDispatchLineage{}, fmt.Errorf("%w: confirmed owner repair dispatch lineage duplicates dispatch %q", common.ErrConflict, dispatch.ID)
@@ -304,7 +304,7 @@ func confirmedRepairAdmissionLineage(aggregate RuntimeAggregate, leaf SealedDisp
 	}
 	byID[leaf.ID] = leaf
 
-	reversedDispatches := make([]SealedDispatch, 0, 2)
+	reversedDispatches := make([]runtimecontract.RuntimeDispatchRecord, 0, 2)
 	reversedBindings := make([]runtimecontract.RuntimeOperationGovernanceBinding, 0, 1)
 	visited := map[string]struct{}{}
 	current := leaf
@@ -317,7 +317,7 @@ func confirmedRepairAdmissionLineage(aggregate RuntimeAggregate, leaf SealedDisp
 
 		acceptedMatches := 0
 		for _, attempt := range aggregate.CandidateAttempts {
-			if runtimecontract.RuntimeAcceptedCandidateAttemptMatchesDispatch(attempt, sealedDispatchToRuntimeRecord(current)) {
+			if runtimecontract.RuntimeAcceptedCandidateAttemptMatchesDispatch(attempt, (current)) {
 				acceptedMatches++
 			}
 		}
@@ -363,7 +363,7 @@ func confirmedRepairAdmissionLineage(aggregate RuntimeAggregate, leaf SealedDisp
 		}
 	}
 	lineage := confirmedRepairDispatchLineage{
-		dispatches: make([]SealedDispatch, len(reversedDispatches)),
+		dispatches: make([]runtimecontract.RuntimeDispatchRecord, len(reversedDispatches)),
 		bindings:   make([]runtimecontract.RuntimeOperationGovernanceBinding, len(reversedBindings)),
 	}
 	for index := range reversedDispatches {
@@ -375,9 +375,9 @@ func confirmedRepairAdmissionLineage(aggregate RuntimeAggregate, leaf SealedDisp
 	return lineage, nil
 }
 
-func (l confirmedRepairDispatchLineage) origin() (SealedDispatch, bool) {
+func (l confirmedRepairDispatchLineage) origin() (runtimecontract.RuntimeDispatchRecord, bool) {
 	if len(l.dispatches) == 0 {
-		return SealedDispatch{}, false
+		return runtimecontract.RuntimeDispatchRecord{}, false
 	}
 	return l.dispatches[0], true
 }
@@ -399,56 +399,56 @@ func (l confirmedRepairDispatchLineage) dispatchIndex(dispatchID string) int {
 func confirmedRepairGovernanceSourceTransaction(
 	aggregate RuntimeAggregate,
 	binding runtimecontract.RuntimeOperationGovernanceBinding,
-) (SealedDispatch, *confirmedRepairTransaction, bool, error) {
+) (runtimecontract.RuntimeDispatchRecord, *confirmedRepairTransaction, bool, error) {
 	binding = binding.Normalized()
 	if binding.OperationDispatchID == "" || binding.OperationID == "" || binding.ExecutionKey == "" {
-		return SealedDispatch{}, nil, false, nil
+		return runtimecontract.RuntimeDispatchRecord{}, nil, false, nil
 	}
-	var source *SealedDispatch
+	var source *runtimecontract.RuntimeDispatchRecord
 	for index := range aggregate.CompletedDispatches {
 		candidate := &aggregate.CompletedDispatches[index]
 		if candidate.ID != binding.OperationDispatchID {
 			continue
 		}
 		if source != nil {
-			return SealedDispatch{}, nil, false, fmt.Errorf("%w: confirmed owner repair governance source dispatch is duplicated", common.ErrConflict)
+			return runtimecontract.RuntimeDispatchRecord{}, nil, false, fmt.Errorf("%w: confirmed owner repair governance source dispatch is duplicated", common.ErrConflict)
 		}
 		source = candidate
 	}
 	if source == nil || source.State != DispatchStateCommitted || source.Transaction.State != runtimecontract.ConvergenceStateNeedStateChange {
-		return SealedDispatch{}, nil, false, nil
+		return runtimecontract.RuntimeDispatchRecord{}, nil, false, nil
 	}
 	operation, found := candidateOperationByID(source.Candidate, binding.OperationID)
 	if !found {
-		return SealedDispatch{}, nil, false, nil
+		return runtimecontract.RuntimeDispatchRecord{}, nil, false, nil
 	}
 	execution, found := operationExecutionRecord(source.OperationExecutions, binding.OperationID)
 	if !found || execution.ExecutionKey != binding.ExecutionKey || execution.Fence != binding.Fence {
-		return SealedDispatch{}, nil, false, fmt.Errorf("%w: confirmed owner repair governance binding does not match its source execution", common.ErrConflict)
+		return runtimecontract.RuntimeDispatchRecord{}, nil, false, fmt.Errorf("%w: confirmed owner repair governance binding does not match its source execution", common.ErrConflict)
 	}
 	if source.RepairCommitment == nil {
-		return SealedDispatch{}, nil, false, nil
+		return runtimecontract.RuntimeDispatchRecord{}, nil, false, nil
 	}
 	lineage, err := confirmedRepairAdmissionLineage(aggregate, *source)
 	if err != nil {
-		return SealedDispatch{}, nil, false, err
+		return runtimecontract.RuntimeDispatchRecord{}, nil, false, err
 	}
 	origin, found := lineage.origin()
 	if !found {
-		return SealedDispatch{}, nil, false, fmt.Errorf("%w: confirmed owner repair governance source has no origin admission", common.ErrConflict)
+		return runtimecontract.RuntimeDispatchRecord{}, nil, false, fmt.Errorf("%w: confirmed owner repair governance source has no origin admission", common.ErrConflict)
 	}
 	transaction, err := confirmedRepairTransactionFromCommitment(aggregate, *source, origin)
 	if err != nil {
-		return SealedDispatch{}, nil, false, err
+		return runtimecontract.RuntimeDispatchRecord{}, nil, false, err
 	}
 	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
 	if !found || descriptor.OwnerModuleID != transaction.confirmation.OwnerModuleID {
-		return SealedDispatch{}, nil, false, fmt.Errorf("%w: confirmed repair governance operation owner does not match its confirmation", common.ErrConflict)
+		return runtimecontract.RuntimeDispatchRecord{}, nil, false, fmt.Errorf("%w: confirmed repair governance operation owner does not match its confirmation", common.ErrConflict)
 	}
 	coverageIDs := append([]common.CoverageWorkItemID(nil), transaction.closure.CoverageWorkItemIDs...)
 	if len(coverageIDs) == 0 || !sameCoverageIDs(coverageIDs, aggregate.Facts.Focus.CoverageWorkItemIDs) ||
 		!confirmedRepairSourceBindingsCoverCurrentScope(aggregate, transaction.sourceOp.BindingRefs, coverageIDs) {
-		return SealedDispatch{}, nil, false, fmt.Errorf("%w: confirmed owner repair governance source has no current coverage", common.ErrConflict)
+		return runtimecontract.RuntimeDispatchRecord{}, nil, false, fmt.Errorf("%w: confirmed owner repair governance source has no current coverage", common.ErrConflict)
 	}
 	return *source, transaction, true, nil
 }
@@ -543,7 +543,7 @@ func currentConfirmedRepairTransaction(
 // intentionally absent from this derivation: both are owner-revision-bound
 // authority and are retired as soon as the first durable repair-owner receipt changes
 // that revision.
-func resolveConfirmedRepairTransaction(aggregate RuntimeAggregate, dispatch SealedDispatch) (*confirmedRepairTransaction, bool, error) {
+func resolveConfirmedRepairTransaction(aggregate RuntimeAggregate, dispatch runtimecontract.RuntimeDispatchRecord) (*confirmedRepairTransaction, bool, error) {
 	if dispatch.State != DispatchStateSealed || dispatch.Candidate.StateChange == nil ||
 		aggregate.Decision.State != runtimecontract.ConvergenceStateNeedStateChange ||
 		strings.TrimSpace(aggregate.Decision.RequiredOutput.RepairClosureID) == "" {
@@ -592,7 +592,7 @@ func resolveConfirmedRepairTransaction(aggregate RuntimeAggregate, dispatch Seal
 	return matched, true, nil
 }
 
-func confirmedRepairDispatchTargets(dispatch SealedDispatch) ([]string, string, error) {
+func confirmedRepairDispatchTargets(dispatch runtimecontract.RuntimeDispatchRecord) ([]string, string, error) {
 	operations := candidateRuntimeOperations(dispatch.Candidate)
 	if dispatch.Candidate.StateChange == nil || len(operations) == 0 {
 		return nil, "", nil
@@ -624,7 +624,7 @@ func confirmedRepairSourceRejection(
 ) (runtimecontract.EvidenceFact, runtimecontract.RuntimeOperationReceipt, runtimecontract.RuntimeOperation, error) {
 	confirmation = confirmation.Normalized()
 	observation := confirmation.Observation.Normalized()
-	var dispatch *SealedDispatch
+	var dispatch *runtimecontract.RuntimeDispatchRecord
 	for idx := range aggregate.CompletedDispatches {
 		candidate := &aggregate.CompletedDispatches[idx]
 		if candidate.ID == observation.DispatchID && candidate.State == DispatchStateCommitted &&
@@ -659,7 +659,7 @@ func confirmedRepairSourceRejection(
 	}
 	var fact runtimecontract.EvidenceFact
 	matches := 0
-	for _, candidate := range aggregate.Facts.Normalized().Evidence.Rejected {
+	for _, candidate := range (runtimecontract.RuntimeFacts{Evidence: runtimecontract.EvidenceLedger{Rejected: aggregate.Facts.Evidence.Rejected}}).Normalized().Evidence.Rejected {
 		if candidate.DispatchID != dispatch.ID || candidate.OperationID != operation.ID {
 			continue
 		}
@@ -802,7 +802,7 @@ func validateConfirmedRepairResourceChanges(
 	return *workspaceTree, nil
 }
 
-func validateConfirmedRepairDispatchOperations(dispatch SealedDispatch, confirmation runtimecontract.RuntimeRepairSurfaceConfirmation) error {
+func validateConfirmedRepairDispatchOperations(dispatch runtimecontract.RuntimeDispatchRecord, confirmation runtimecontract.RuntimeRepairSurfaceConfirmation) error {
 	if dispatch.Candidate.StateChange == nil || len(candidateRuntimeOperations(dispatch.Candidate)) == 0 {
 		return fmt.Errorf("%w: confirmed owner repair transaction requires a state-change dispatch", common.ErrConflict)
 	}
@@ -834,7 +834,7 @@ func validateConfirmedRepairDispatchOperations(dispatch SealedDispatch, confirma
 // the owner confirmation is the sole ordering authority.
 func confirmedRepairCompletedReceiptChain(
 	aggregate RuntimeAggregate,
-	dispatch SealedDispatch,
+	dispatch runtimecontract.RuntimeDispatchRecord,
 	confirmation runtimecontract.RuntimeRepairSurfaceConfirmation,
 ) (string, map[string]runtimecontract.RuntimeOperationReceipt, error) {
 	confirmation = confirmation.Normalized()
@@ -940,7 +940,7 @@ func confirmedRepairGovernanceEvidenceRevision(aggregate RuntimeAggregate, bindi
 	wantSource := "governance-resolution/" + string(grant.ResolutionID)
 	var matched runtimecontract.EvidenceFact
 	matches := 0
-	for _, fact := range aggregate.Facts.Normalized().Evidence.Accepted {
+	for _, fact := range (runtimecontract.RuntimeFacts{Evidence: runtimecontract.EvidenceLedger{Accepted: aggregate.Facts.Evidence.Accepted}}).Normalized().Evidence.Accepted {
 		if fact.ID != wantID || fact.Kind != runtimecontract.EvidenceKindGovernance || fact.SourceRef != wantSource ||
 			fact.DispatchID != binding.GovernanceDispatchID || fact.AuthoritySnapshotID != binding.GovernanceSnapshotID ||
 			fact.ContentHash != grant.ResolutionHash || !sameRuntimeTargetRefs(fact.EvidenceRefs, grant.EvidenceRefs) {
@@ -1013,7 +1013,7 @@ func completedConfirmedRepairTransactions(aggregate RuntimeAggregate) ([]complet
 	return ret, nil
 }
 
-func confirmedRepairCompletedDispatchAllAccepted(aggregate RuntimeAggregate, dispatch SealedDispatch) (bool, error) {
+func confirmedRepairCompletedDispatchAllAccepted(aggregate RuntimeAggregate, dispatch runtimecontract.RuntimeDispatchRecord) (bool, error) {
 	for _, operationID := range dispatch.CompletedOperationIDs {
 		execution, found := operationExecutionRecord(dispatch.OperationExecutions, operationID)
 		if !found || execution.State != runtimecontract.OperationExecutionEvidenceCommitted || execution.Fence == 0 {
@@ -1033,7 +1033,7 @@ func confirmedRepairCompletedDispatchAllAccepted(aggregate RuntimeAggregate, dis
 
 func confirmedRepairFinalEvidenceRevision(
 	aggregate RuntimeAggregate,
-	dispatch SealedDispatch,
+	dispatch runtimecontract.RuntimeDispatchRecord,
 	receipts map[string]runtimecontract.RuntimeOperationReceipt,
 	finalWorkspaceRevision string,
 ) (string, error) {
@@ -1070,7 +1070,7 @@ func confirmedRepairFinalEvidenceRevision(
 
 func validateConfirmedRepairAcceptedEvidenceLineage(
 	aggregate RuntimeAggregate,
-	dispatch SealedDispatch,
+	dispatch runtimecontract.RuntimeDispatchRecord,
 	operation runtimecontract.RuntimeOperation,
 	receipt runtimecontract.RuntimeOperationReceipt,
 ) (runtimecontract.EvidenceFact, error) {
@@ -1164,13 +1164,14 @@ func runtimeTargetRefsWithin(values, allowed []string) bool {
 // prove only that a commitment is mandatory; the commitment remains the sole
 // reverse key for confirmation, closure and fresh-validation settlement.
 func validateConfirmedRepairMandatoryCommitments(aggregate RuntimeAggregate) error {
-	dispatches := make([]SealedDispatch, 0, len(aggregate.CompletedDispatches)+1)
+	dispatches := make([]runtimecontract.RuntimeDispatchRecord, 0, len(aggregate.CompletedDispatches)+1)
 	dispatches = append(dispatches, aggregate.CompletedDispatches...)
 	if aggregate.ActiveDispatch != nil {
 		dispatches = append(dispatches, *aggregate.ActiveDispatch)
 	}
+	rejected := (runtimecontract.RuntimeFacts{Evidence: runtimecontract.EvidenceLedger{Rejected: aggregate.Facts.Evidence.Rejected}}).Normalized().Evidence.Rejected
 	for _, dispatch := range dispatches {
-		required, err := confirmedRepairCommitmentRequiredByRejectedObservation(aggregate, dispatch)
+		required, err := confirmedRepairCommitmentRequiredFromRejectedEvidence(aggregate, dispatch, rejected)
 		if err != nil {
 			return err
 		}
@@ -1181,7 +1182,14 @@ func validateConfirmedRepairMandatoryCommitments(aggregate RuntimeAggregate) err
 	return nil
 }
 
-func confirmedRepairCommitmentRequiredByRejectedObservation(aggregate RuntimeAggregate, dispatch SealedDispatch) (bool, error) {
+func confirmedRepairCommitmentRequiredByRejectedObservation(aggregate RuntimeAggregate, dispatch runtimecontract.RuntimeDispatchRecord) (bool, error) {
+	rejected := (runtimecontract.RuntimeFacts{Evidence: runtimecontract.EvidenceLedger{Rejected: aggregate.Facts.Evidence.Rejected}}).Normalized().Evidence.Rejected
+	return confirmedRepairCommitmentRequiredFromRejectedEvidence(aggregate, dispatch, rejected)
+}
+
+// rejected is the same-call complete canonical collection. It is not an
+// admission result: source, receipt/fence and binding checks remain below.
+func confirmedRepairCommitmentRequiredFromRejectedEvidence(aggregate RuntimeAggregate, dispatch runtimecontract.RuntimeDispatchRecord, rejected []runtimecontract.EvidenceFact) (bool, error) {
 	if dispatch.Candidate.StateChange == nil || dispatch.Transaction.State != runtimecontract.ConvergenceStateNeedStateChange {
 		return false, nil
 	}
@@ -1191,13 +1199,12 @@ func confirmedRepairCommitmentRequiredByRejectedObservation(aggregate RuntimeAgg
 	}
 	operations := candidateRuntimeOperations(dispatch.Candidate)
 	matches := 0
-	facts := aggregate.Facts.Normalized()
-	for _, fact := range facts.Evidence.Rejected {
+	for _, fact := range rejected {
 		if fact.Kind != runtimecontract.EvidenceKindValidation || fact.FocusID != dispatch.Transaction.FocusID ||
 			fact.Revision != dispatch.Transaction.EvidenceRevision || fact.DispatchID == "" || fact.OperationID == "" {
 			continue
 		}
-		var sourceDispatch *SealedDispatch
+		var sourceDispatch *runtimecontract.RuntimeDispatchRecord
 		for index := range aggregate.CompletedDispatches {
 			candidate := &aggregate.CompletedDispatches[index]
 			if candidate.ID != fact.DispatchID || candidate.State != DispatchStateCommitted ||
@@ -1335,7 +1342,7 @@ func pendingConfirmedRepairTransactionCovers(aggregate RuntimeAggregate, coverag
 
 func validateConfirmedRepairPartialFreshness(
 	aggregate RuntimeAggregate,
-	dispatch SealedDispatch,
+	dispatch runtimecontract.RuntimeDispatchRecord,
 	confirmation runtimecontract.RuntimeRepairSurfaceConfirmation,
 	receipts map[string]runtimecontract.RuntimeOperationReceipt,
 ) error {

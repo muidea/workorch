@@ -72,9 +72,18 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 	providerRequest.ContextBudget.ProfileMode = "runtime_sealed_ceiling"
 
 	// Sealed path: never re-resolve catalog/current profile.
-	// Capture a pre-submit audit snapshot; completeProviderWithSealedCeiling mutates a local copy.
 	budgetSnapshot := cloneProviderContextBudget(providerRequest.ContextBudget)
 	completion, execution, err := m.completeProviderWithSealedCeiling(ctx, *ceiling, providerRequest)
+	// Preserve the frozen Runtime rendering commitment. The adapter can also
+	// prepare a local cache plan; it must not replace that authority snapshot.
+	// Only actual wire observations are copied back, on success and error paths.
+	// Neither a wire fingerprint nor a hint proves submission or a native hit.
+	if actual := providerRequest.ContextBudget; actual != nil && budgetSnapshot != nil {
+		budgetSnapshot.WireSchemaHash = actual.WireSchemaHash
+		budgetSnapshot.WireCachePrefixHash = actual.WireCachePrefixHash
+		budgetSnapshot.WireCacheMode = actual.WireCacheMode
+		budgetSnapshot.WireCacheBreakpoints = actual.WireCacheBreakpoints
+	}
 	completedAt := time.Now().UTC()
 	if err != nil {
 		var limitErr *ProviderOutputLimitError

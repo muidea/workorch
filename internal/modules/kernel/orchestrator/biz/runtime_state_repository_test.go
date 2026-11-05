@@ -608,7 +608,7 @@ func runtimeStringPointer(value string) *string {
 func recordAcceptedRuntimeDispatchAdmissionForTest(
 	t *testing.T,
 	aggregate *runtime.RuntimeAggregate,
-	dispatch runtime.SealedDispatch,
+	dispatch runtimecontract.RuntimeDispatchRecord,
 	manifest runtimecontract.RuntimeCandidateContractManifest,
 ) {
 	t.Helper()
@@ -1024,49 +1024,14 @@ func TestRuntimeStateRepositoryRoundTripsSealedValidationRecipeSnapshot(t *testi
 	}
 }
 
+// Unaccepted structs enter through Orchestrator admission; a Run query only
+// transports an already committed, integrity-checked result. Keep these real
+// missing/ambiguous-input negatives at admission and CAS, never restore a
+// second historical business validator on ordinary Load.
 func TestRuntimeStateRepositoryRejectsInvalidDuplicateCWILedgerWithoutRewriting(t *testing.T) {
-	ctx := context.Background()
-	runs := filerepository.NewRunRepository(filepath.Join(t.TempDir(), "runs.json"))
-	run := runtimeRunForTest(common.RunStateActive, runtimeDefinition())
-	record := runtimeStateRecordFromAggregate(runtimeAggregate(t, 9))
-	// The same canonical CWI is projected in both active and completed focus
-	// queues. Loading rejects the current data shape without repairing or
-	// classifying it into another lifecycle.
-	record.Facts.CompletedFocuses = []runtimecontract.CoverageFocus{record.Facts.Focus.Normalized()}
-	run.RuntimeState = &record
-	if err := runs.Create(ctx, run); err != nil {
-		t.Fatal(err)
-	}
-
-	hub := magicevent.NewHub(16)
-	t.Cleanup(func() { hub.Terminate(ctx) })
-	module := runmodule.New()
-	if err := module.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
-		t.Fatal(err)
-	}
-	if err := module.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = module.Stop(ctx) })
-
-	_, err := (runtimeStateRepository{hub: hub}).Load(ctx, run.WorkspaceID, run.ID)
-	if err == nil {
-		t.Fatal("duplicate CWI record was accepted")
-	}
-	coordinator, err := runtime.NewRuntimeTransitionCoordinator(runtimeStateRepository{hub: hub})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := coordinator.Commit(ctx, runtimeAggregate(t, 10), 9); err == nil {
-		t.Fatal("single-commit load accepted duplicate raw CWI record")
-	}
-	stored, err := runs.GetByWorkspaceID(ctx, run.WorkspaceID, run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stored.RuntimeState == nil || stored.RuntimeState.StateRevision != record.StateRevision || len(stored.RuntimeState.Facts.CompletedFocuses) != 1 {
-		t.Fatalf("load rewrote opaque invalid record: %+v", stored.RuntimeState)
-	}
+	assertRuntimeUnacceptedRecordRejected(t, func(record *runtimecontract.RuntimeStateRecord) {
+		record.Facts.CompletedFocuses = []runtimecontract.CoverageFocus{record.Facts.Focus.Normalized()}
+	})
 }
 
 func TestRuntimeStateRepositoryRejectsAmbiguousRawActivationEvidencePoliciesWithoutRewriting(t *testing.T) {
@@ -1092,47 +1057,63 @@ func TestRuntimeStateRepositoryRejectsAmbiguousRawActivationEvidencePoliciesWith
 			record.Facts.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{base}
 		},
 	} {
-		t.Run(name, func(t *testing.T) {
-			ctx := context.Background()
-			runs := filerepository.NewRunRepository(filepath.Join(t.TempDir(), "runs.json"))
-			run := runtimeRunForTest(common.RunStateActive, runtimeDefinition())
-			record := runtimeStateRecordFromAggregate(runtimeAggregate(t, 9))
-			mutate(&record)
-			run.RuntimeState = &record
-			if err := runs.Create(ctx, run); err != nil {
-				t.Fatal(err)
-			}
+		t.Run(name, func(t *testing.T) { assertRuntimeUnacceptedRecordRejected(t, mutate) })
+	}
+}
 
-			hub := magicevent.NewHub(16)
-			t.Cleanup(func() { hub.Terminate(ctx) })
-			module := runmodule.New()
-			if err := module.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
-				t.Fatal(err)
-			}
-			if err := module.Start(); err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = module.Stop(ctx) })
-
-			_, err := (runtimeStateRepository{hub: hub}).Load(ctx, run.WorkspaceID, run.ID)
-			if err == nil || !strings.Contains(err.Error(), "evidence polic") {
-				t.Fatalf("ambiguous raw evidence policies were accepted: %v", err)
-			}
-			coordinator, err := runtime.NewRuntimeTransitionCoordinator(runtimeStateRepository{hub: hub})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := coordinator.Commit(ctx, runtimeAggregate(t, 10), 9); err == nil || !strings.Contains(err.Error(), "evidence polic") {
-				t.Fatalf("single-commit load accepted ambiguous raw policy: %v", err)
-			}
-			stored, err := runs.GetByWorkspaceID(ctx, run.WorkspaceID, run.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if stored.RuntimeState == nil || !reflect.DeepEqual(stored.RuntimeState.Facts.Activation.EvidencePolicies, record.Facts.Activation.EvidencePolicies) {
-				t.Fatalf("load rewrote ambiguous raw evidence policies: got=%+v want=%+v", stored.RuntimeState, record.Facts.Activation.EvidencePolicies)
-			}
-		})
+func assertRuntimeUnacceptedRecordRejected(t *testing.T, mutate func(*runtimecontract.RuntimeStateRecord)) {
+	t.Helper()
+	ctx := context.Background()
+	runs := filerepository.NewRunRepository(filepath.Join(t.TempDir(), "runs.json"))
+	run := runtimeRunForTest(common.RunStateActive, runtimeDefinition())
+	original := runtimeAggregate(t, 9)
+	record := runtimeStateRecordFromAggregate(original)
+	run.RuntimeState = &record
+	if err := runs.Create(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	before, err := runs.GetByWorkspaceID(ctx, run.WorkspaceID, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	module := runmodule.New()
+	if err := module.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+	repo := runtimeStateRepository{hub: hub}
+	malformed := runtimeStateRecordFromAggregate(runtimeAggregate(t, 10))
+	mutate(&malformed)
+	raw := malformed.Clone()
+	if _, err := runtime.AdmitRuntimeOwnerStateRecord(malformed); err == nil {
+		t.Fatal("ambiguous external record passed owner admission")
+	}
+	if !reflect.DeepEqual(raw, malformed) {
+		t.Fatal("admission rewrote rejected input")
+	}
+	proposed := runtimeAggregateFromRecord(malformed)
+	if err := repo.Save(ctx, proposed, 9); err == nil {
+		t.Fatal("unaccepted record passed direct save")
+	}
+	coordinator, err := runtime.NewRuntimeTransitionCoordinator(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.Commit(ctx, proposed, 9); err == nil {
+		t.Fatal("unaccepted record passed CAS admission")
+	}
+	loaded, err := repo.Load(ctx, run.WorkspaceID, run.ID)
+	if err != nil || !reflect.DeepEqual(loaded, original) {
+		t.Fatal("rejected proposal changed committed authority", err)
+	}
+	after, err := runs.GetByWorkspaceID(ctx, run.WorkspaceID, run.ID)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatal("rejected input changed physical owner state", err)
 	}
 }
 

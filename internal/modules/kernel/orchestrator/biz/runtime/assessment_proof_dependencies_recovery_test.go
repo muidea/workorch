@@ -53,7 +53,7 @@ func TestRuntimeAssessmentSelectedProofDependenciesSurviveCASFailureAndReplyLoss
 			dispatchIndex, _ := runtimeAssessmentAdjudicationIndexes(t, persisted)
 			adjudication := persisted.CompletedDispatches[dispatchIndex].AssessmentAdjudication
 			proofs := adjudication.Proofs
-			expectedSource, err := runtimecontract.DeriveRuntimeAssessmentAdjudication(sealedDispatchToRuntimeRecord(*before.ActiveDispatch), before.Facts, sealedDispatchesToRuntimeRecords(before.CompletedDispatches), before.CoverageProofLineage, runtimeLineageAssertionSources(before))
+			expectedSource, err := runtimeTestDeriveAssessmentAdjudication(sealedDispatchToRuntimeRecord(*before.ActiveDispatch), before.Facts, sealedDispatchesToRuntimeRecords(before.CompletedDispatches), before.CoverageProofLineage, runtimeLineageAssertionSources(before))
 			if err != nil || len(expectedSource.OwnerFactSources) != 1 || !reflect.DeepEqual(adjudication.OwnerFactSources, expectedSource.OwnerFactSources) {
 				t.Fatalf("assessment recovery changed sealed owner postcondition source: %v", err)
 			}

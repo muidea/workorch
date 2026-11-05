@@ -63,7 +63,7 @@ type RuntimeOperationExecutor interface {
 	ExecuteRuntimeOperation(context.Context, RuntimeOperationExecutionRequest) (RuntimeOperationExecutionResult, error)
 }
 
-func completedRequiredOperationReceiptBindings(dispatch SealedDispatch, receipts []runtimecontract.RuntimeOperationReceipt, completed map[string]struct{}) []runtimecontract.RuntimeRequiredOperationReceiptBinding {
+func completedRequiredOperationReceiptBindings(dispatch runtimecontract.RuntimeDispatchRecord, receipts []runtimecontract.RuntimeOperationReceipt, completed map[string]struct{}) []runtimecontract.RuntimeRequiredOperationReceiptBinding {
 	operations, err := orderedCandidateOperations(dispatch.Candidate)
 	if err != nil {
 		return nil
@@ -148,7 +148,7 @@ func (c *candidateDispatchComponent) recordOperationGovernanceRequired(ctx conte
 		return RuntimeAggregate{}, err
 	}
 	// Mark operation outcome without committing ordinary rejected evidence.
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -192,9 +192,7 @@ func (c *candidateDispatchComponent) recordOperationGovernanceRequired(ctx conte
 	aggregate.Facts = facts
 	aggregate.Decision = decision
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -202,7 +200,7 @@ func (c *candidateDispatchComponent) recordOperationGovernanceRequired(ctx conte
 }
 
 // 两条私有事务共享同一 exact persisted receipt / execution 校验，仍由调用方在原 CAS 提交写集。
-func runtimeOperationSuspensionFinding(aggregate RuntimeAggregate, dispatch SealedDispatch, operationID string, response runtimecontract.RuntimeOperationReceipt, requirement runtimecontract.RuntimeGovernanceRequirement) (governancecheck.OperationSuspensionFinding, error) {
+func runtimeOperationSuspensionFinding(aggregate RuntimeAggregate, dispatch runtimecontract.RuntimeDispatchRecord, operationID string, response runtimecontract.RuntimeOperationReceipt, requirement runtimecontract.RuntimeGovernanceRequirement) (governancecheck.OperationSuspensionFinding, error) {
 	execution, found := operationExecutionRecord(dispatch.OperationExecutions, operationID)
 	if !found {
 		return governancecheck.OperationSuspensionFinding{}, fmt.Errorf("%w: operation governance requires sealed execution", common.ErrConflict)
@@ -235,7 +233,7 @@ func operationExecutionRecord(values []runtimecontract.RuntimeOperationExecution
 	return runtimecontract.RuntimeOperationExecutionRecord{}, false
 }
 
-func operationEvidenceFromPersistedReceipt(aggregate RuntimeAggregate, dispatch SealedDispatch, operation runtimecontract.RuntimeOperation, receipt runtimecontract.RuntimeOperationReceipt) (ExecutionEvidence, error) {
+func operationEvidenceFromPersistedReceipt(aggregate RuntimeAggregate, dispatch runtimecontract.RuntimeDispatchRecord, operation runtimecontract.RuntimeOperation, receipt runtimecontract.RuntimeOperationReceipt) (ExecutionEvidence, error) {
 	execution, found := operationExecutionRecord(dispatch.OperationExecutions, operation.ID)
 	if !found {
 		return ExecutionEvidence{}, fmt.Errorf("operation %q has no sealed execution record", operation.ID)
@@ -318,7 +316,7 @@ func runtimeOperationEvidenceQualityFailure(operation runtimecontract.RuntimeOpe
 }
 
 func (c *candidateDispatchComponent) claimOperationExecution(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, operationID string) (RuntimeAggregate, error) {
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -369,9 +367,7 @@ func (c *candidateDispatchComponent) claimOperationExecution(ctx context.Context
 		return RuntimeAggregate{}, fmt.Errorf("%w: operation %q execution ledger is missing", common.ErrConflict, operationID)
 	}
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -383,7 +379,7 @@ func (c *candidateDispatchComponent) claimOperationExecution(ctx context.Context
 // proves that the one unbudgeted owner call for that grant has begun. Any later
 // re-drive therefore enters the ordinary SM-4 recovery-budget path.
 func (c *candidateDispatchComponent) markGovernanceResumeExecutionStarted(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, operationID string) (RuntimeAggregate, *runtimecontract.RuntimeOperationGovernanceGrant, error) {
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, nil, err
 	}
@@ -410,9 +406,7 @@ func (c *candidateDispatchComponent) markGovernanceResumeExecutionStarted(ctx co
 		return RuntimeAggregate{}, nil, fmt.Errorf("%w: governance resume operation %q is missing", common.ErrConflict, operationID)
 	}
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, nil, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, nil, err
 	}
@@ -420,7 +414,7 @@ func (c *candidateDispatchComponent) markGovernanceResumeExecutionStarted(ctx co
 }
 
 func (c *candidateDispatchComponent) markOperationExecutionOutcomeUnknown(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, operationID string, diagnostic ...*runtimecontract.RuntimeOriginalDiagnostic) (RuntimeAggregate, error) {
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -492,9 +486,7 @@ func (c *candidateDispatchComponent) markOperationExecutionOutcomeUnknown(ctx co
 		}
 	}
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}

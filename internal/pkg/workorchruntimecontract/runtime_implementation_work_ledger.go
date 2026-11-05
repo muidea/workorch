@@ -189,6 +189,9 @@ func (r RuntimeImplementationWorkRound) Validate() error {
 }
 
 func (r RuntimeImplementationWorkRound) validateInSemanticSession(session *runtimeSemanticValidationSession) error {
+	if session.committedWorkRound(r) {
+		return nil
+	}
 	if session != nil {
 		for _, prior := range session.workRounds {
 			if reflect.DeepEqual(prior, r) {
@@ -424,42 +427,45 @@ func (l RuntimeImplementationWorkLedger) validateForSourcesInSemanticSession(s R
 	previous := map[common.CoverageWorkItemID]RuntimeImplementationWorkRound{}
 	requests, bindings, dispatches := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for index, r := range l.Rounds {
-		if err := r.validateInSemanticSession(session); err != nil {
-			return fmt.Errorf("implementation work round %d: %w", index, err)
-		}
-		if r.WorkspaceID != s.WorkspaceID || r.RunID != s.RunID || r.StartupInputHash != s.StartupInputHash || r.DefinitionSeedHash != s.Seed.Hash {
-			return fmt.Errorf("implementation work ledger round escapes sealed startup")
-		}
-		scopeSources := RuntimeImplementationWorkScopeSources{WorkspaceID: s.WorkspaceID, RunID: s.RunID, AuthoritySnapshotID: r.ScopeRequest.AuthoritySnapshotID,
-			Seed: s.Seed, Focuses: s.Focuses, Profiles: s.Profiles, CoverageWorkItemID: r.CoverageWorkItemID, ManifestBinding: r.ScopeRequest.ManifestBinding, InputRevision: r.ScopeRequest.InputRevision}
-		if err := validateRuntimeWorkScopeInSession(r.ScopeRequest, scopeSources, session); err != nil {
-			return err
-		}
-		if r.WorkingBinding != nil {
-			for _, proposal := range r.WorkingBinding.Proposals {
-				matched := false
-				for _, focus := range s.Focuses {
-					if len(focus.CoverageWorkItemIDs) == 1 && focus.CoverageWorkItemIDs[0] == r.CoverageWorkItemID && proposal.DeclarationRef == focus.EvidenceDeclarationRef {
-						matched = true
-					}
-				}
-				if !matched {
-					return fmt.Errorf("implementation work proposal does not preserve original exact CWI declaration")
-				}
+		committed := session.committedWorkRound(r)
+		if !committed {
+			if err := r.validateInSemanticSession(session); err != nil {
+				return fmt.Errorf("implementation work round %d: %w", index, err)
 			}
-		}
-		if r.CompletedReceiptSetHash != "" {
-			matches := 0
-			for _, set := range s.ReceiptSets {
-				if set.DispatchID == r.DispatchID {
-					matches++
-					if _, err := validateRuntimeImplementationWorkReceiptSetInSession(r, set.Members, session); err != nil {
-						return err
+			if r.WorkspaceID != s.WorkspaceID || r.RunID != s.RunID || r.StartupInputHash != s.StartupInputHash || r.DefinitionSeedHash != s.Seed.Hash {
+				return fmt.Errorf("implementation work ledger round escapes sealed startup")
+			}
+			scopeSources := RuntimeImplementationWorkScopeSources{WorkspaceID: s.WorkspaceID, RunID: s.RunID, AuthoritySnapshotID: r.ScopeRequest.AuthoritySnapshotID,
+				Seed: s.Seed, Focuses: s.Focuses, Profiles: s.Profiles, CoverageWorkItemID: r.CoverageWorkItemID, ManifestBinding: r.ScopeRequest.ManifestBinding, InputRevision: r.ScopeRequest.InputRevision}
+			if err := validateRuntimeWorkScopeInSession(r.ScopeRequest, scopeSources, session); err != nil {
+				return err
+			}
+			if r.WorkingBinding != nil {
+				for _, proposal := range r.WorkingBinding.Proposals {
+					matched := false
+					for _, focus := range s.Focuses {
+						if len(focus.CoverageWorkItemIDs) == 1 && focus.CoverageWorkItemIDs[0] == r.CoverageWorkItemID && proposal.DeclarationRef == focus.EvidenceDeclarationRef {
+							matched = true
+						}
+					}
+					if !matched {
+						return fmt.Errorf("implementation work proposal does not preserve original exact CWI declaration")
 					}
 				}
 			}
-			if matches != 1 {
-				return fmt.Errorf("implementation work completion has no unique independent dispatch receipt source")
+			if r.CompletedReceiptSetHash != "" {
+				matches := 0
+				for _, set := range s.ReceiptSets {
+					if set.DispatchID == r.DispatchID {
+						matches++
+						if _, err := validateRuntimeImplementationWorkReceiptSetInSession(r, set.Members, session); err != nil {
+							return err
+						}
+					}
+				}
+				if matches != 1 {
+					return fmt.Errorf("implementation work completion has no unique independent dispatch receipt source")
+				}
 			}
 		}
 		prior, found := previous[r.CoverageWorkItemID]

@@ -24,7 +24,7 @@ func (c *RuntimeController) queryOperationReceiptWithReadSource(ctx context.Cont
 	if c == nil || c.repository == nil || !exactOperationReceiptOwnerSource(owner) {
 		return runtimecontract.RuntimeOperationReceipt{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, source.WorkspaceID, source.RunID)
+	aggregate, err := c.load(ctx, source.WorkspaceID, source.RunID)
 	if err != nil {
 		return runtimecontract.RuntimeOperationReceipt{}, err
 	}

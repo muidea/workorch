@@ -33,7 +33,7 @@ func implementationWorkUnknownLateKnown(t *testing.T, sealed RuntimeAggregate) {
 		t.Fatalf("unstarted operation fabricated unknown physical claim: %v", err)
 	}
 	unchanged, err := controller.Load(ctx, scope.WorkspaceID, scope.RunID)
-	if err != nil || !reflect.DeepEqual(unchanged, initial) {
+	if err != nil || !reflect.DeepEqual(ownerStateRecord(unchanged), ownerStateRecord(initial)) {
 		t.Fatalf("unstarted unknown event changed aggregate: %v", err)
 	}
 	call, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{Kind: RuntimeInternalEventDispatchExecutionRequested, Scope: scope, Transaction: &RuntimeInternalTransactionPayload{}})
@@ -47,7 +47,7 @@ func implementationWorkUnknownLateKnown(t *testing.T, sealed RuntimeAggregate) {
 	if deliveryErr != nil || !found || deliveryRequest.Execution.ExecutionKey != execution.ExecutionKey || deliveryRequest.Execution.Fence != execution.Fence {
 		t.Fatalf("original-result-only projection: %v", deliveryErr)
 	}
-	if !reflect.DeepEqual(call.Aggregate, *repository.aggregate) {
+	if !reflect.DeepEqual(ownerStateRecord(call.Aggregate), ownerStateRecord(*repository.aggregate)) {
 		t.Fatal("result delivery projection changed authority")
 	}
 	diagnostic := &runtimecontract.RuntimeOriginalDiagnostic{SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: runtimecontract.RuntimeModuleFile, OriginalClass: "result_delivery", OriginalCode: "file_result_dependencies", OriginalMessage: "File operation result unavailable at dependencies", Signature: "original-file-result", OperationID: execution.OperationID, DetailsRef: "workorch://file-operation-results/original/diagnostic", DetailsHash: "original-error-hash", DetailsBytes: 28}

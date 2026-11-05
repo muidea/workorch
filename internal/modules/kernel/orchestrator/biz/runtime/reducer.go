@@ -11,6 +11,10 @@ import (
 )
 
 func ReduceRuntimeState(facts runtimecontract.RuntimeFacts, previous *runtimecontract.AuthoritySnapshot, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, error) {
+	facts = facts.Normalized()
+	if err := facts.Validate(); err != nil {
+		return runtimecontract.RuntimeDecision{}, err
+	}
 	decision, _, err := reduceAndSealRuntimeState(facts, previous, nil, nil, runtimeCoverageProofLineageArgument(proofLineages))
 	return decision, err
 }
@@ -23,7 +27,7 @@ func ReduceRuntimeState(facts runtimecontract.RuntimeFacts, previous *runtimecon
 type runtimeOwnerInternalReductionEvent struct {
 	Kind                 RuntimeInternalEventKind
 	GovernanceResolution runtimecontract.RuntimeGovernanceResolution
-	SourceDispatch       SealedDispatch
+	SourceDispatch       runtimecontract.RuntimeDispatchRecord
 	OperationBinding     runtimecontract.RuntimeOperationGovernanceBinding
 }
 
@@ -34,10 +38,6 @@ func reduceAndSealRuntimeState(
 	lineage *RuntimeAggregate,
 	proofLineage []runtimecontract.RuntimeCoverageProofLineage,
 ) (runtimecontract.RuntimeDecision, bool, error) {
-	facts = facts.Normalized()
-	if err := facts.Validate(); err != nil {
-		return runtimecontract.RuntimeDecision{}, false, err
-	}
 	decision, eventHandled, err := reduceOwnerInternalEvent(facts, ownerEvent)
 	if err != nil {
 		return runtimecontract.RuntimeDecision{}, false, err
@@ -78,7 +78,7 @@ func reduceAndSealRuntimeState(
 		previous.RequiredOutputHash == runtimecontract.StableRequiredOutputHash(decision.RequiredOutput) {
 		attempt = previous.Attempt + 1
 	}
-	sealed, err := runtimecontract.SealRuntimeDecision(facts, decision, attempt)
+	sealed, err := runtimecontract.CompileRuntimeDecisionSeal(facts, decision, attempt)
 	return sealed, eventHandled, err
 }
 
@@ -157,6 +157,13 @@ func reduceRuntimeStateWithLineage(
 	if len(facts.Prerequisites.Pending) == 0 {
 		facts = preflightRuntimeFactsPreservingPending(facts, runtimeTargetGroundingRequirements(facts, proofLineages...))
 	}
+	// Standalone raw-input reductions have their own admission. Aggregate-backed
+	// owner events instead validate their complete changed postimage once at CAS.
+	if lineage == nil {
+		if err := facts.Validate(); err != nil {
+			return facts, runtimecontract.RuntimeDecision{}, err
+		}
+	}
 	decision, eventHandled, err := reduceAndSealRuntimeState(facts, previous, ownerEvent, lineage, runtimeCoverageProofLineageArgument(proofLineages))
 	if err != nil {
 		return facts, runtimecontract.RuntimeDecision{}, err
@@ -177,7 +184,7 @@ func reduceRuntimeStateWithLineage(
 		(facts.RepairDirective.RequiredState == runtimecontract.ConvergenceStateNeedStateChange || facts.RepairDirective.RequiredState == runtimecontract.ConvergenceStateNeedValidation) &&
 		(decision.State != facts.RepairDirective.RequiredState || decision.RequiredOutput.RepairClosureID != facts.RepairDirective.Closure.ID ||
 			decision.RequiredOutput.RepairPurpose != facts.RepairDirective.Purpose) {
-		decision, err = ReduceRuntimeState(facts, previous, proofLineages...)
+		decision, _, err = reduceAndSealRuntimeState(facts, previous, nil, lineage, runtimeCoverageProofLineageArgument(proofLineages))
 		if err != nil {
 			return facts, runtimecontract.RuntimeDecision{}, err
 		}
@@ -231,7 +238,7 @@ func reduceOwnerInternalEvent(
 		source.Transaction.FocusID != facts.Focus.ID || source.Transaction.State != runtimecontract.ConvergenceStateNeedStateChange {
 		return runtimecontract.RuntimeDecision{}, false, fmt.Errorf("%w: governance continuation source dispatch does not match current authority", common.ErrConflict)
 	}
-	if err := sealedDispatchToRuntimeRecord(source).ValidateIntrinsic(); err != nil {
+	if err := (source).ValidateIntrinsic(); err != nil {
 		return runtimecontract.RuntimeDecision{}, false, fmt.Errorf("%w: governance continuation source dispatch: %v", common.ErrConflict, err)
 	}
 	operation, found := candidateOperationByID(source.Candidate, binding.OperationID)
@@ -281,7 +288,7 @@ func reduceOwnerInternalEvent(
 	}
 	if source.ImplementationWorkCommitment != nil {
 		commitment := source.ImplementationWorkCommitment
-		if source.RepairCommitment != nil || commitment.WorkingBinding == nil || len(source.CoverageBindings) != 0 || runtimecontract.ValidateRuntimeImplementationWorkDispatchCommitment(sealedDispatchToRuntimeRecord(source)) != nil {
+		if source.RepairCommitment != nil || commitment.WorkingBinding == nil || len(source.CoverageBindings) != 0 || runtimecontract.ValidateRuntimeImplementationWorkDispatchCommitment((source)) != nil {
 			return runtimecontract.RuntimeDecision{}, false, fmt.Errorf("implementation governance continuation lost exact no-credit working seal")
 		}
 		return runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedStateChange, Focus: facts.Focus, RequiredOutput: runtimecontract.RequiredOutputContract{ImplementationWorkBindingHash: commitment.WorkingBinding.Hash, AcceptedKinds: operationKinds, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedEffectScopes: effectScopes, RequiredEffectScopes: effectScopes, TargetRefs: targetRefs, RequiredOperationSequence: requiredSequence}}, true, nil
@@ -304,7 +311,7 @@ func reduceOwnerInternalEvent(
 	}, true, nil
 }
 
-func sealedDispatchRequiredOperationSequence(dispatch SealedDispatch) ([]runtimecontract.RuntimeRequiredOperationVariant, error) {
+func sealedDispatchRequiredOperationSequence(dispatch runtimecontract.RuntimeDispatchRecord) ([]runtimecontract.RuntimeRequiredOperationVariant, error) {
 	operations, err := orderedCandidateOperations(dispatch.Candidate)
 	if err != nil {
 		return nil, err
@@ -447,6 +454,9 @@ func reduce(facts runtimecontract.RuntimeFacts, proofLineage []runtimecontract.R
 	// unavailability close this SM-2 obligation. It cannot become another
 	// acquisition or be hidden by a target-free fresh-validation directive.
 	if missingOwnerFactIsUnavailable(facts) {
+		if pendingRuntimeOwnerInputRevision(lineage, facts) {
+			return stateChangeDecision(base, facts)
+		}
 		return ownerFactExhaustedDecision(base, facts), nil
 	}
 	// A validation failure remains a validation gap unless a capability owner

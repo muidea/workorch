@@ -16,11 +16,11 @@ func (m *Biz) executeRuntimeStateStoreCommand(ctx context.Context, ev magicevent
 	if !ok || cmd.RunID == "" || cmd.WorkspaceID == "" || ev.Source() != "kernel/orchestrator" {
 		return runevents.StoreRuntimeStateRecordResult{}, common.ErrInvalidArgument
 	}
-	current, err := m.runs.GetByWorkspaceID(ctx, cmd.WorkspaceID, cmd.RunID)
+	base, err := m.runs.GetRuntimeStateWriteBase(ctx, cmd.WorkspaceID, cmd.RunID)
 	if err != nil {
 		return runevents.StoreRuntimeStateRecordResult{}, err
 	}
-	return m.updateRuntimeState(ctx, current, cmd)
+	return m.updateRuntimeState(ctx, base, cmd)
 }
 
 // updateRuntimeState persists an Orchestrator-owned aggregate through the
@@ -29,23 +29,17 @@ func (m *Biz) executeRuntimeStateStoreCommand(ctx context.Context, ev magicevent
 // case rebase the opaque RuntimeState write on the latest Run record; only an
 // aggregate revision mismatch is a semantic conflict that returns to the
 // Orchestrator SM-4 recovery owner.
-func (m *Biz) updateRuntimeState(ctx context.Context, current *runmodel.Run, cmd runevents.StoreRuntimeStateRecordCommand) (runevents.StoreRuntimeStateRecordResult, error) {
+func (m *Biz) updateRuntimeState(ctx context.Context, base runmodel.RuntimeStateWriteBase, cmd runevents.StoreRuntimeStateRecordCommand) (runevents.StoreRuntimeStateRecordResult, error) {
 	const maxPhysicalCASRebases = 4
 	for attempt := 0; attempt < maxPhysicalCASRebases; attempt++ {
+		current := base.Run
 		if current == nil {
 			return runtimeStateUpdateOutcome(nil, cmd, runtimemodel.RuntimeFeedbackCategoryOwnerTransient, 0, common.ErrNotFound), nil
 		}
 		if err := validateRunUpdate(current, cmd); err != nil {
-			observedRevision := uint64(0)
-			if current.RuntimeState != nil {
-				observedRevision = current.RuntimeState.StateRevision
-			}
-			return runtimeStateUpdateOutcome(current, cmd, runtimemodel.RuntimeFeedbackCategorySemanticRejection, observedRevision, err), nil
+			return runtimeStateUpdateOutcome(current, cmd, runtimemodel.RuntimeFeedbackCategorySemanticRejection, base.RuntimeStateRevision, err), nil
 		}
-		currentRevision := uint64(0)
-		if current.RuntimeState != nil {
-			currentRevision = current.RuntimeState.StateRevision
-		}
+		currentRevision := base.RuntimeStateRevision
 		if currentRevision != *cmd.ExpectedRuntimeStateRevision {
 			return runtimeStateUpdateOutcome(current, cmd, runtimemodel.RuntimeFeedbackCategoryAggregateRevisionMismatch, currentRevision, nil), nil
 		}
@@ -54,21 +48,20 @@ func (m *Biz) updateRuntimeState(ctx context.Context, current *runmodel.Run, cmd
 		if err == nil {
 			return runtimeStateUpdateOutcome(item, cmd, runtimemodel.RuntimeFeedbackCategoryAccepted, item.RuntimeState.StateRevision, nil), nil
 		}
+		if errors.Is(err, runmodel.ErrRuntimeStateIntegrity) {
+			return runtimeStateUpdateOutcome(current, cmd, runtimemodel.RuntimeFeedbackCategorySemanticRejection, currentRevision, err), nil
+		}
 		if !errors.Is(err, common.ErrConflict) {
 			return runtimeStateUpdateOutcome(current, cmd, runtimemodel.RuntimeFeedbackCategoryOwnerTransient, currentRevision, err), nil
 		}
 		// A physical CAS conflict may be a concurrent SM-1/model write. Reload
 		// and retry only while the semantic aggregate fence is still current.
-		current, err = m.runs.GetByWorkspaceID(ctx, cmd.WorkspaceID, cmd.RunID)
+		base, err = m.runs.GetRuntimeStateWriteBase(ctx, cmd.WorkspaceID, cmd.RunID)
 		if err != nil {
 			return runtimeStateUpdateOutcome(nil, cmd, runtimemodel.RuntimeFeedbackCategoryOwnerTransient, currentRevision, err), nil
 		}
 	}
-	observedRevision := uint64(0)
-	if current != nil && current.RuntimeState != nil {
-		observedRevision = current.RuntimeState.StateRevision
-	}
-	return runtimeStateUpdateOutcome(current, cmd, runtimemodel.RuntimeFeedbackCategoryOwnerTransient, observedRevision, common.ErrConflict), nil
+	return runtimeStateUpdateOutcome(base.Run, cmd, runtimemodel.RuntimeFeedbackCategoryOwnerTransient, base.RuntimeStateRevision, common.ErrConflict), nil
 }
 
 func runFromUpdateCommand(current *runmodel.Run, cmd runevents.StoreRuntimeStateRecordCommand) *runmodel.Run {
@@ -76,7 +69,10 @@ func runFromUpdateCommand(current *runmodel.Run, cmd runevents.StoreRuntimeState
 		return nil
 	}
 	item := *current
-	item.RuntimeState = cloneRuntimeStateRecord(cmd.RuntimeState)
+	// The command owns its detached input until this synchronous call returns.
+	// This local wrapper never mutates it. The physical repository alone clones
+	// the new graph before publication; another intermediate copy has no owner.
+	item.RuntimeState = cmd.RuntimeState
 	if cmd.LifecycleFence != nil {
 		fence := cmd.LifecycleFence.Normalized()
 		item.RuntimeLifecycleFence = &fence
@@ -97,7 +93,7 @@ func validateRunUpdate(current *runmodel.Run, cmd runevents.StoreRuntimeStateRec
 		fence := cmd.LifecycleFence.Normalized()
 		if err := fence.Validate(); err != nil || fence.WorkspaceID != cmd.WorkspaceID || fence.RunID != cmd.RunID ||
 			fence.RuntimeStateRevision != cmd.RuntimeState.StateRevision || fence.RuntimeStateRef != runevents.RuntimeStateRef(cmd.WorkspaceID, cmd.RunID, cmd.RuntimeState.StateRevision) ||
-			fence.RuntimeStateHash != runtimemodel.StableRuntimeStateRecordHash(*cmd.RuntimeState) || fence.BootstrapHash != runtimemodel.StableRuntimeBootstrapHash(*current.RuntimeBootstrap) {
+			fence.BootstrapHash != runtimemodel.StableRuntimeBootstrapHash(*current.RuntimeBootstrap) {
 			return common.ErrConflict
 		}
 	}
@@ -108,12 +104,4 @@ func validateRunUpdate(current *runmodel.Run, cmd runevents.StoreRuntimeStateRec
 // focused contract tests; it does not alter owner state.
 func ValidateRunUpdate(current *runmodel.Run, cmd runevents.StoreRuntimeStateRecordCommand) error {
 	return validateRunUpdate(current, cmd)
-}
-
-func cloneRuntimeStateRecord(value *runtimemodel.RuntimeStateRecord) *runtimemodel.RuntimeStateRecord {
-	if value == nil {
-		return nil
-	}
-	cloned := value.Clone()
-	return &cloned
 }

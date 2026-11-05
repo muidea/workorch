@@ -385,7 +385,8 @@ type RuntimeCWIOwnerReconciliationRequest struct {
 	// ValidationScopeTargetRefs is projected from the exact completed dispatch
 	// for this binding, never from a later workspace inventory. Empty means no
 	// replayable validation scope; owners must not infer one from TargetRefs.
-	ValidationScopeTargetRefs []string
+	ValidationScopeTargetRefs   []string
+	ValidationSourceReceiptHash string `json:",omitempty"`
 }
 
 func ValidateRuntimeCWIOwnerReconciliationRequest(c RuntimeCWIOwnerReconciliationRequest, ownerModuleID string) error {
@@ -465,21 +466,22 @@ func (r RuntimeCWIReconciliationRequest) ValidateAgainstContract(contract Runtim
 // from one declared owner.  Its structured refs are opaque capability facts;
 // callers must not fill them from Goal/DoD prose, summaries or LLM output.
 type RuntimeCWIReconciliationObservation struct {
-	RequestID          string
-	WorkspaceID        common.WorkspaceID
-	RunID              common.RunID
-	Generation         uint64
-	CoverageWorkItemID common.CoverageWorkItemID
-	BindingID          string
-	BindingHash        string
-	OwnerModuleID      string
-	ObservedRevision   string
-	Status             RuntimeCWIReconciliationObservationStatus
-	TargetRefs         []string
-	CheckRefs          []string
-	MetricRefs         []string
-	ArtifactRefs       []string
-	OriginalDiagnostic *RuntimeOriginalDiagnostic
+	RequestID           string
+	WorkspaceID         common.WorkspaceID
+	RunID               common.RunID
+	Generation          uint64
+	CoverageWorkItemID  common.CoverageWorkItemID
+	BindingID           string
+	BindingHash         string
+	OwnerModuleID       string
+	ObservedRevision    string
+	Status              RuntimeCWIReconciliationObservationStatus
+	TargetRefs          []string
+	CheckRefs           []string
+	MetricRefs          []string
+	ArtifactRefs        []string
+	OriginalDiagnostic  *RuntimeOriginalDiagnostic
+	ValidationExecution *RuntimeValidationExecutionUse `json:",omitempty"`
 }
 
 // StableRuntimeCWIReconciliationObservationRef identifies one owner fact in
@@ -498,6 +500,9 @@ func StableRuntimeCWIReconciliationObservationRef(observation RuntimeCWIReconcil
 	writeHashString(h, observation.OwnerModuleID)
 	writeHashString(h, observation.ObservedRevision)
 	writeHashString(h, string(observation.Status))
+	if observation.ValidationExecution != nil {
+		writeHashString(h, stableFormalValueHash("runtime-validation-execution-use", *observation.ValidationExecution))
+	}
 	return "runtime-cwi-observation-" + hex.EncodeToString(h.Sum(nil))
 }
 
@@ -527,6 +532,10 @@ func (o RuntimeCWIReconciliationObservation) Normalized() RuntimeCWIReconciliati
 	o.MetricRefs = normalizeStrings(o.MetricRefs)
 	o.ArtifactRefs = normalizeStrings(o.ArtifactRefs)
 	o.OriginalDiagnostic = o.OriginalDiagnostic.CloneOriginal()
+	if o.ValidationExecution != nil {
+		value := o.ValidationExecution.Clone()
+		o.ValidationExecution = &value
+	}
 	return o
 }
 
@@ -572,6 +581,25 @@ func (o RuntimeCWIReconciliationObservation) ValidateForRequest(request RuntimeC
 		}
 		if !containsString(binding.OwnerModuleIDs, o.OwnerModuleID) {
 			return fmt.Errorf("reconciliation observation owner %q is outside binding %q", o.OwnerModuleID, o.BindingID)
+		}
+		if o.ValidationExecution != nil {
+			if err := o.ValidationExecution.ValidateForRequest(request, binding); err != nil {
+				return err
+			}
+			if o.Status == RuntimeCWIReconciliationObservationSatisfied {
+				v := o.ValidationExecution.Validation
+				if v.ExecutionConjunction == nil || !v.ExecutionConjunction.Complete || v.ProofClass != RuntimeValidationProofBehavioral || len(RuntimeValidationConflictingChecks(v)) != 0 {
+					return fmt.Errorf("satisfied shared execution lacks complete behavioral proof")
+				}
+				for _, attestation := range binding.ValidationCheckAttestations {
+					if !RuntimeValidationAttestationPassed(v, attestation) {
+						return fmt.Errorf("shared execution lacks consumer native proof")
+					}
+				}
+				if !sameRuntimeStringSet(o.CheckRefs, binding.RequiredCheckRefs) {
+					return fmt.Errorf("shared execution consumer checks mismatch")
+				}
+			}
 		}
 		return nil
 	}
@@ -635,6 +663,9 @@ func (b RuntimeCWIReconciliationBatch) ValidateForRequest(request RuntimeCWIReco
 			}
 		}
 	}
+	if err := ValidateRuntimeValidationExecutionUses(request, b.Observations); err != nil {
+		return err
+	}
 	if b.Hash != StableRuntimeCWIReconciliationBatchHash(b) {
 		return fmt.Errorf("reconciliation batch hash does not match contents")
 	}
@@ -669,6 +700,9 @@ func StableRuntimeCWIReconciliationBatchHash(batch RuntimeCWIReconciliationBatch
 		writeHashStrings(h, observation.CheckRefs)
 		writeHashStrings(h, observation.MetricRefs)
 		writeHashStrings(h, observation.ArtifactRefs)
+		if observation.ValidationExecution != nil {
+			writeHashString(h, stableFormalValueHash("runtime-validation-execution-use", *observation.ValidationExecution))
+		}
 	}
 	return "runtime-cwi-reconciliation-batch-" + hex.EncodeToString(h.Sum(nil))
 }

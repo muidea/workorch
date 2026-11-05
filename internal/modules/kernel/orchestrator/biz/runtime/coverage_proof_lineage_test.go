@@ -436,7 +436,7 @@ func coverageProofLineageTestAggregate(binding runtimecontract.CoverageEvidenceB
 			Manifest:         &runtimecontract.RuntimeSemanticPlanManifest{Hash: "semantic-manifest-lineage"},
 			LogicalRequestID: "semantic-request-lineage",
 		},
-		ActiveDispatch: &SealedDispatch{
+		ActiveDispatch: &runtimecontract.RuntimeDispatchRecord{
 			ID: "dispatch-lineage",
 			OperationExecutions: []runtimecontract.RuntimeOperationExecutionRecord{{
 				OperationID: "operation-lineage", ExecutionKey: receipt.ExecutionKey, Fence: receipt.Fence,

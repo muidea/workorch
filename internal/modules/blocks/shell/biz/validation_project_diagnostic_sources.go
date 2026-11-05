@@ -63,10 +63,13 @@ func shellProjectDiagnosticSourceInventory(files []runtimecontract.RuntimeValida
 				continue
 			}
 			name := fn.Name.Name
+			if fn.Recv != nil {
+				continue
+			}
 			if name == "TestMain" || strings.HasPrefix(name, "Fuzz") || strings.HasPrefix(name, "Example") {
 				return nil, "validation_project_diagnostic_native_unsupported"
 			}
-			if !strings.HasPrefix(name, "Test") {
+			if !shellGoTestName(name) {
 				continue
 			}
 			params := nativeCheckTestingParameters(fn.Type, alias)

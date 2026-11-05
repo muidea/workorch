@@ -3,6 +3,7 @@ package shell
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -12,6 +13,17 @@ import (
 // 仅由 owner 内部的执行封套调用。前三阶段不使用当前 CWI 的
 // coverage；最后阶段单独解析原生检查和行为，不能借全项目测试的 coverage 授予 credit。
 func runShellProjectConjunction(ctx context.Context, directory string, env []string, request RuntimeCommandRequest) (RuntimeCommandResult, shellProjectConjunctionFact, error) {
+	return runShellProjectConjunctionShared(ctx, directory, env, request, nil)
+}
+
+// Only the fresh multi-consumer owner transaction creates this value. It never
+// survives the query, crosses an owner boundary or imports an earlier PASS.
+type shellProjectSharedStages struct {
+	Stages []shellProjectStageFact
+	Specs  []shellProjectStageSpec
+}
+
+func runShellProjectConjunctionShared(ctx context.Context, directory string, env []string, request RuntimeCommandRequest, shared *shellProjectSharedStages) (RuntimeCommandResult, shellProjectConjunctionFact, error) {
 	output := shellBaseOutput(request, request.Command, request.Args, directory, "", "go")
 	output.Status = "completed"
 	protocol := shellProjectConjunctionProtocolRef
@@ -31,9 +43,9 @@ func runShellProjectConjunction(ctx context.Context, directory string, env []str
 	}
 	timeout, timeoutErr := shellCommandTimeout(request.TimeoutMillis, DefaultCommandTimeout)
 	deadline, bounded := ctx.Deadline()
-	if timeoutErr != nil || timeout > DefaultCommandTimeout || !bounded || time.Until(deadline) > timeout || ctx.Err() != nil {
+	if timeoutErr != nil || timeout > MaxCommandTimeout || !bounded || time.Until(deadline) > timeout || ctx.Err() != nil {
 		output.Status, output.FailureCode = "failed", "validation_project_deadline_invalid"
-		result, err := finalizeShellResult(output, fmt.Errorf("复合验证要求有效且不超过原 60000ms 的单一 deadline"))
+		result, err := finalizeShellResult(output, fmt.Errorf("复合验证要求有效且不超过本次声明期限的单一 deadline"))
 		return result, sealShellProjectConjunction(nil, nil, nil), err
 	}
 	output.TimeoutMillis = timeout.Milliseconds()
@@ -68,7 +80,21 @@ func runShellProjectConjunction(ctx context.Context, directory string, env []str
 		if index == len(specs)-1 {
 			stageEnv = shellProcessBehaviorEnvironment(stageEnv, processPath, behaviorArgs)
 		}
-		stage, stageErr := runShellProjectStage(ctx, directory, stageEnv, spec)
+		var stage shellProjectStageFact
+		var stageErr error
+		if shared != nil && index < 3 && index < len(shared.Stages) {
+			stage = shared.Stages[index]
+			current, err := shellProjectSourceSetHash(directory)
+			if err != nil || current != stage.SourceAfter || !reflect.DeepEqual(shared.Specs[index], spec) || ctx.Err() != nil {
+				stageErr = fmt.Errorf("shared project execution is no longer applicable to the original snapshot")
+			}
+		} else {
+			stage, stageErr = runShellProjectStage(ctx, directory, stageEnv, spec)
+			if shared != nil && index < 3 && stageErr == nil {
+				shared.Stages = append(shared.Stages, stage)
+				shared.Specs = append(shared.Specs, spec)
+			}
+		}
 		stages = append(stages, stage)
 		output.Stdout, output.Stderr = string(stage.Stdout.Raw), string(stage.Stderr.Raw)
 		output.ExitCode = int64(stage.ExitCode)

@@ -17,8 +17,8 @@ func TestImplementationWorkFullflowAssessmentConsumesPublishedFocusReference(t *
 		inline    bool
 		wantError bool
 	}{
-		{name: "v4 reference", ref: "context.focus"},
-		{name: "inline renderer", inline: true},
+		{name: "current reference", ref: "context.focus"},
+		{name: "retired inline renderer", inline: true, wantError: true},
 		{name: "missing focus", wantError: true},
 		{name: "unknown reference", ref: "other.focus", wantError: true},
 		{name: "duplicate focus", ref: "context.focus", inline: true, wantError: true},

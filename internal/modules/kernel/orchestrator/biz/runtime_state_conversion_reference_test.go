@@ -106,7 +106,7 @@ func referenceRuntimeAggregateFromRecord(record runtimecontract.RuntimeStateReco
 		value := referenceRuntimeDispatchFromRecord(*record.ActiveDispatch)
 		ret.ActiveDispatch = &value
 	}
-	ret.CompletedDispatches = make([]runtime.SealedDispatch, len(record.CompletedDispatches))
+	ret.CompletedDispatches = make([]runtimecontract.RuntimeDispatchRecord, len(record.CompletedDispatches))
 	for idx := range record.CompletedDispatches {
 		ret.CompletedDispatches[idx] = referenceRuntimeDispatchFromRecord(record.CompletedDispatches[idx])
 	}
@@ -114,7 +114,7 @@ func referenceRuntimeAggregateFromRecord(record runtimecontract.RuntimeStateReco
 	return ret
 }
 
-func referenceRuntimeDispatchRecordFromAggregate(dispatch runtime.SealedDispatch) runtimecontract.RuntimeDispatchRecord {
+func referenceRuntimeDispatchRecordFromAggregate(dispatch runtimecontract.RuntimeDispatchRecord) runtimecontract.RuntimeDispatchRecord {
 	return runtimecontract.RuntimeDispatchRecord{
 		ID: dispatch.ID, WorkspaceID: dispatch.WorkspaceID, RunID: dispatch.RunID,
 		Transaction: dispatch.Transaction, CandidateHash: dispatch.CandidateHash, Candidate: dispatch.Candidate,
@@ -140,8 +140,8 @@ func referenceRuntimeDispatchRecordFromAggregate(dispatch runtime.SealedDispatch
 	}
 }
 
-func referenceRuntimeDispatchFromRecord(dispatch runtimecontract.RuntimeDispatchRecord) runtime.SealedDispatch {
-	return runtime.SealedDispatch{
+func referenceRuntimeDispatchFromRecord(dispatch runtimecontract.RuntimeDispatchRecord) runtimecontract.RuntimeDispatchRecord {
+	return runtimecontract.RuntimeDispatchRecord{
 		ID: dispatch.ID, WorkspaceID: dispatch.WorkspaceID, RunID: dispatch.RunID,
 		Transaction: dispatch.Transaction, CandidateHash: dispatch.CandidateHash, Candidate: dispatch.Candidate,
 		CandidateManifestHash:              dispatch.CandidateManifestHash,
@@ -160,7 +160,7 @@ func referenceRuntimeDispatchFromRecord(dispatch runtimecontract.RuntimeDispatch
 		OperationAdmissibilities:           runtimecontract.CloneRuntimeOperationAdmissibilities(dispatch.OperationAdmissibilities),
 		OperationAdmissibilityObservations: runtimecontract.CloneRuntimePrerequisiteObservations(dispatch.OperationAdmissibilityObservations),
 		OperationPolicies:                  runtimecontract.NormalizeRuntimeOperationPolicyFacts(dispatch.OperationPolicies),
-		State:                              runtime.DispatchState(dispatch.State), CompletedOperationIDs: append([]string(nil), dispatch.CompletedOperationIDs...),
+		State:                              runtimecontract.RuntimeDispatchState(dispatch.State), CompletedOperationIDs: append([]string(nil), dispatch.CompletedOperationIDs...),
 		OperationExecutions: runtimecontract.CloneRuntimeOperationExecutionRecords(dispatch.OperationExecutions), OperationAuthorityHash: dispatch.OperationAuthorityHash,
 		DispatchAuthorityHash: dispatch.DispatchAuthorityHash,
 	}

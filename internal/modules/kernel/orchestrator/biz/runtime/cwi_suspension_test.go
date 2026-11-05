@@ -32,7 +32,7 @@ func runtimeSuspensionProjectionFixture(t *testing.T) RuntimeAggregate {
 	ref := a.Facts.Focus.CoverageEvidenceBindings[0].ID
 	fact := runtimecontract.EvidenceFact{ID: "real-effect", Kind: runtimecontract.EvidenceKindStateChange, BindingRefs: []string{ref}, CoverageWorkItemIDs: []common.CoverageWorkItemID{id}, DispatchID: "completed-effect", OperationID: "effect"}
 	a.Facts.Evidence.Accepted = append(a.Facts.Evidence.Accepted, fact)
-	a.CompletedDispatches = append(a.CompletedDispatches, SealedDispatch{ID: fact.DispatchID, OperationExecutions: []runtimecontract.RuntimeOperationExecutionRecord{{OperationID: fact.OperationID, State: runtimecontract.OperationExecutionEvidenceCommitted, EvidenceFactID: fact.ID, EvidenceFactHash: runtimecontract.StableRuntimeEvidenceFactHash(fact), ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable}}})
+	a.CompletedDispatches = append(a.CompletedDispatches, runtimecontract.RuntimeDispatchRecord{ID: fact.DispatchID, OperationExecutions: []runtimecontract.RuntimeOperationExecutionRecord{{OperationID: fact.OperationID, State: runtimecontract.OperationExecutionEvidenceCommitted, EvidenceFactID: fact.ID, EvidenceFactHash: runtimecontract.StableRuntimeEvidenceFactHash(fact), ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable}}})
 	a.Facts.Repair = runtimecontract.RuntimeRepairLedger{FocusID: a.Facts.Focus.ID, SliceID: a.Facts.Focus.SliceID, RepairAttempts: 2, ValidationOnlyRetries: 1, NoProgressCount: 1, SignatureCounts: []runtimecontract.RuntimeFailureSignatureCount{{Signature: "original", Count: 1}}}
 	return a
 }
@@ -115,7 +115,7 @@ func TestCWISuspensionSafeWindowGuardsDoNotDropInFlightResponsibility(t *testing
 			a := runtimeSuspensionProjectionFixture(t)
 			switch scenario {
 			case "dispatch":
-				a.ActiveDispatch = &SealedDispatch{ID: "in-flight"}
+				a.ActiveDispatch = &runtimecontract.RuntimeDispatchRecord{ID: "in-flight"}
 			case "submitted":
 				a.CandidateRequestSessions = append(a.CandidateRequestSessions, runtimecontract.RuntimeCandidateRequestSession{ProviderSubmitted: true, State: runtimecontract.RuntimeCandidateRequestSessionPrepared})
 			case "terminal":

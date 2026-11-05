@@ -802,6 +802,25 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		failure = fileOperationInfeasible(operation, "validation_input_revision_preimage_mismatch", "candidate does not change the exact reviewed input", operation.TargetRefs)
 		replayProof = nil
 	}
+	var postimage *runtimecontract.RuntimeValidationInputReviewFile
+	_, structureRequired, structureErr := runtimecontract.RuntimeInputStructureConstraintForOperation(operation, command.OperationAuthorization)
+	if structureErr != nil {
+		setPrerequisiteError(result, structureErr)
+		return
+	}
+	if structureRequired && failure == nil && stale == nil && replayProof != nil {
+		request, valid := patchApplyRequestFromRuntimeOperation(command.WorkspaceDeliverableDirectory, operation)
+		if !valid {
+			setPrerequisiteError(result, common.ErrInvalidArgument)
+			return
+		}
+		preview, previewErr := m.runtimeAdapter.PreviewPatch(request)
+		if previewErr != nil || preview.BeforeHash != replayProof.BeforeHash || preview.AfterHash != replayProof.AfterHash {
+			setPrerequisiteError(result, common.ErrConflict)
+			return
+		}
+		postimage = &runtimecontract.RuntimeValidationInputReviewFile{TargetRef: preview.TargetRef, ContentHash: preview.AfterHash, Content: preview.postimage}
+	}
 	prerequisiteRequest := fileOperationSnapshotPrerequisiteRequest(operation, failure, command.CurrentTargetSnapshot)
 	constraintImpact := ownerFeasibilityConstraintImpact(operationAuthorizationTargetPolicy(command.OperationAuthorization), failure)
 	var violation *runtimecontract.RuntimeOperationCandidateConstraintViolation
@@ -824,6 +843,7 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		return
 	}
 	value := runtimecontract.RuntimeOperationFeasibilityObservation(observation)
+	value.Postimage = postimage
 	value.OwnerPolicy = runtimecontract.RuntimeOwnerPolicyIdentity{OwnerModuleID: ModuleID, PolicyRevision: fileOwnerFeasibilityPolicyRevision, CatalogSnapshotID: command.Admissibility.SnapshotID}
 	value.ConstraintImpact = constraintImpact
 	if value.ConstraintImpact != "" && value.Feedback != nil && value.Feedback.OriginalDiagnostic != nil {

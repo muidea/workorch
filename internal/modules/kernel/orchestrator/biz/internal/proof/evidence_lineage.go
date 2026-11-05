@@ -7,6 +7,22 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+// This pure predicate reads only these fields. Project before normalization so
+// testing one evidence/CWI pair does not copy unrelated provider diagnostics,
+// catalogs, work/Definition declarations or the entire evidence ledger. The
+// actual owner admission still validates its complete raw record separately.
+// Keep the original normalizers and all current-binding/applicability checks;
+// this projection is neither a validated aggregate nor a retained result.
+func normalizedEvidenceLineageFacts(facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
+	return (runtimecontract.RuntimeFacts{
+		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID,
+		EvidenceRevision:       facts.EvidenceRevision,
+		CWILedgerSchemaVersion: facts.CWILedgerSchemaVersion,
+		Coverage:               facts.Coverage, Focus: facts.Focus,
+		EvidenceApplicabilityObservations: facts.EvidenceApplicabilityObservations,
+	}).Normalized()
+}
+
 // CoverageBindingForCoverage returns the one activation-sealed proof binding
 // for a CWI in the supplied focus. It does not derive or repair a binding.
 func CoverageBindingForCoverage(focus runtimecontract.CoverageFocus, coverageID common.CoverageWorkItemID) (runtimecontract.CoverageEvidenceBinding, bool) {
@@ -26,7 +42,7 @@ func coverageBindingForNormalizedFocus(focus runtimecontract.CoverageFocus, cove
 // admission and evidence attribution. It accepts only a current-schema ledger
 // row whose persisted binding identity exactly matches the focus binding.
 func CurrentCWIBindingForFocus(facts runtimecontract.RuntimeFacts, coverageID common.CoverageWorkItemID) (runtimecontract.RuntimeCoverageItemFact, bool) {
-	facts = facts.Normalized()
+	facts = normalizedEvidenceLineageFacts(facts)
 	return currentCWIBindingForNormalizedFacts(facts, coverageID)
 }
 
@@ -71,7 +87,7 @@ func EvidenceAppliesToCoverageWorkItemWithLineage(
 	coverageID common.CoverageWorkItemID,
 	lineage []runtimecontract.RuntimeCoverageProofLineage,
 ) bool {
-	facts = facts.Normalized()
+	facts = normalizedEvidenceLineageFacts(facts)
 	return evidenceAppliesToCoverageWorkItemWithNormalizedFacts(facts, evidence, coverageID, lineage)
 }
 
@@ -81,9 +97,22 @@ func evidenceAppliesToCoverageWorkItemWithNormalizedFacts(
 	coverageID common.CoverageWorkItemID,
 	lineage []runtimecontract.RuntimeCoverageProofLineage,
 ) bool {
-	if !runtimecontract.RuntimeEvidenceIsHistoricalEffect(evidence) && runtimecontract.RuntimeEvidenceHasStaleApplicability(evidence, facts.EvidenceApplicabilityObservations, facts.EvidenceRevision) {
+	if !evidenceHasCurrentProofApplicability(facts, evidence) {
 		return false
 	}
+	return evidenceMatchesCurrentCoverageBinding(facts, evidence, coverageID, lineage)
+}
+
+func evidenceHasCurrentProofApplicability(facts runtimecontract.RuntimeFacts, evidence runtimecontract.EvidenceFact) bool {
+	return runtimecontract.RuntimeEvidenceIsHistoricalEffect(evidence) || !runtimecontract.RuntimeEvidenceHasStaleApplicability(evidence, facts.EvidenceApplicabilityObservations, facts.EvidenceRevision)
+}
+
+func evidenceMatchesCurrentCoverageBinding(
+	facts runtimecontract.RuntimeFacts,
+	evidence runtimecontract.EvidenceFact,
+	coverageID common.CoverageWorkItemID,
+	lineage []runtimecontract.RuntimeCoverageProofLineage,
+) bool {
 	item, bound := currentCWIBindingForNormalizedFacts(facts, coverageID)
 	if !bound || (item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateBound &&
 		item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateSettled) {
@@ -105,6 +134,53 @@ func evidenceAppliesToCoverageWorkItemWithNormalizedFacts(
 	return evidenceHasEquivalentCoverageProofLineage(facts, evidence, coverageID, lineage)
 }
 
+// EvidenceAppliesToAnyFocusWithLineage checks the same attribution predicate
+// across the original current/remaining/completed focus order. The common
+// ledger and observations are normalized once for this call; each focus is
+// normalized once, without changing its original member iteration. This is a
+// pure finding, not owner admission, credit or a result retained across calls.
+func EvidenceAppliesToAnyFocusWithLineage(facts runtimecontract.RuntimeFacts, evidence runtimecontract.EvidenceFact, lineage []runtimecontract.RuntimeCoverageProofLineage) bool {
+	commonFacts := facts
+	commonFacts.Focus = runtimecontract.CoverageFocus{}
+	var normalized *runtimecontract.RuntimeFacts
+	applicable := false
+	check := func(focus runtimecontract.CoverageFocus) bool {
+		if len(focus.CoverageWorkItemIDs) == 0 {
+			return false
+		}
+		if normalized == nil {
+			value := normalizedEvidenceLineageFacts(commonFacts)
+			normalized = &value
+			// Focus-independent, including the original historical-purpose
+			// exception. Compare the same normalized revision/observations as
+			// the single-member predicate, without reviving any stale source.
+			applicable = evidenceHasCurrentProofApplicability(value, evidence)
+		}
+		if !applicable {
+			return false
+		}
+		probe := *normalized
+		probe.Focus = focus.Normalized()
+		for _, coverageID := range focus.CoverageWorkItemIDs {
+			if evidenceMatchesCurrentCoverageBinding(probe, evidence, coverageID, lineage) {
+				return true
+			}
+		}
+		return false
+	}
+	if check(facts.Focus) {
+		return true
+	}
+	for _, focuses := range [][]runtimecontract.CoverageFocus{facts.RemainingFocuses, facts.CompletedFocuses} {
+		for _, focus := range focuses {
+			if check(focus) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // EvidenceAppliesToCoverageIDsWithLineage narrows attribution to a sealed
 // action's explicit current-focus CWI set.
 func EvidenceAppliesToCoverageIDsWithLineage(
@@ -113,7 +189,7 @@ func EvidenceAppliesToCoverageIDsWithLineage(
 	coverageIDs []common.CoverageWorkItemID,
 	lineage []runtimecontract.RuntimeCoverageProofLineage,
 ) bool {
-	facts = facts.Normalized()
+	facts = normalizedEvidenceLineageFacts(facts)
 	if len(coverageIDs) == 0 || facts.CWILedgerSchemaVersion != runtimecontract.RuntimeCWILedgerSchemaCurrent {
 		return false
 	}
@@ -153,7 +229,7 @@ func EvidenceHasEquivalentCoverageProofLineage(
 	coverageID common.CoverageWorkItemID,
 	lineage []runtimecontract.RuntimeCoverageProofLineage,
 ) bool {
-	facts = facts.Normalized()
+	facts = normalizedEvidenceLineageFacts(facts)
 	return evidenceHasEquivalentCoverageProofLineage(facts, evidence, coverageID, lineage)
 }
 

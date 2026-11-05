@@ -56,7 +56,7 @@ func TestRuntimeValidationExecutionConjunctionReceiptSourceSurvivesReload(t *tes
 	}
 	saves := repository.saves
 	duplicate := lineageReceiptObserve(t, reopened, reloaded, receipt)
-	if saves != repository.saves || !reflect.DeepEqual(duplicate, reloaded) {
+	if saves != repository.saves || !reflect.DeepEqual(ownerStateRecord(duplicate), ownerStateRecord(reloaded)) {
 		t.Fatal("重载后 duplicate 改写原 receipt 或重复 CAS")
 	}
 	conflicting := receipt.Clone()
@@ -109,7 +109,7 @@ func TestRuntimeValidationExecutionConjunctionReceiptCASFailureAndReplyLoss(t *t
 			if err != nil || persisted.Validate() != nil {
 				t.Fatalf("故障后原 aggregate 无法完整重载：%v", err)
 			}
-			if !afterCommit && !reflect.DeepEqual(persisted, claimed) {
+			if !afterCommit && !reflect.DeepEqual(ownerStateRecord(persisted), ownerStateRecord(claimed)) {
 				t.Fatal("CAS 前失败污染持久前像")
 			}
 			if afterCommit && (len(persisted.OperationReceipts) != 1 || !reflect.DeepEqual(persisted.OperationReceipts[0].Evidence.Validation, &observation)) {

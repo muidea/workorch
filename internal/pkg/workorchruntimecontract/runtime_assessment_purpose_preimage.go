@@ -67,11 +67,11 @@ func runtimeAssessmentPurposePreimagesFromSemanticLedgerInSession(ledger Runtime
 	ret = append(ret, activeEntries...)
 	for index, generation := range ledger.AllHistory() {
 		if !semanticLedgerAlreadyValidated {
-			if err := validateRuntimeSemanticPlanningGenerationNormalized(generation, generation.Normalized(), session); err != nil {
+			if err := validateRuntimeSemanticPlanningGenerationNormalized(generation, normalizeRuntimeSemanticGenerationForValidation(generation, session), session); err != nil {
 				return nil, fmt.Errorf("runtime assessment purpose semantic history %d: %w", index, err)
 			}
 		}
-		entries, err := runtimeHistoricalPurposeInOwnerCompiler(generation.Snapshot, session)
+		entries, err := runtimeAssessmentPurposePreimagesFromSemanticGenerationInSession(generation.Snapshot, session)
 		if err != nil {
 			return nil, fmt.Errorf("runtime assessment purpose semantic history %d: %w", index, err)
 		}

@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,6 +13,25 @@ import (
 	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+// This workflow audits an independently decoded original once between rounds,
+// then exercises the current formal-read/CAS contract. The detached audit
+// repository remains available to tests of unaccepted/corrupt snapshots; it is
+// not the production recovery contract and must not run every historical proof
+// twice on every workflow query.
+type implementationWorkCommittedTestRepository struct {
+	store *implementationWorkDetachedRepository
+}
+
+func (r implementationWorkCommittedTestRepository) Load(_ context.Context, w common.WorkspaceID, id common.RunID) (RuntimeAggregate, error) {
+	if r.store.aggregate == nil || r.store.aggregate.Facts.WorkspaceID != w || r.store.aggregate.Facts.RunID != id {
+		return RuntimeAggregate{}, common.ErrNotFound
+	}
+	return ReadCommittedRuntimeOwnerStateRecord(RuntimeStateRecordFromAggregate(*r.store.aggregate))
+}
+func (r implementationWorkCommittedTestRepository) Save(ctx context.Context, a RuntimeAggregate, revision uint64) error {
+	return r.store.Save(ctx, a, revision)
+}
 
 func refreshImplementationHistoryTestOwners(t *testing.T, owner *implementationWorkRealFileFixture, a RuntimeAggregate) RuntimeAggregate {
 	t.Helper()
@@ -86,7 +106,7 @@ func TestImplementationWorkThirtyThreeRoundsHistoryRolloverAndTerminalPurpose(t 
 			t.Fatal(err)
 		}
 		owner.repository.aggregate = &reopened
-		owner.controller, err = NewRuntimeController(owner.repository)
+		owner.controller, err = NewRuntimeController(implementationWorkCommittedTestRepository{owner.repository})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -96,7 +116,7 @@ func TestImplementationWorkThirtyThreeRoundsHistoryRolloverAndTerminalPurpose(t 
 	for _, purpose := range []runtimecontract.RuntimeImplementationWorkPurpose{runtimecontract.RuntimeImplementationWorkPurposeInconclusive} {
 		restored := before.CloneRaw()
 		owner.aggregate, owner.repository.aggregate = &restored, &restored
-		owner.controller, err = NewRuntimeController(owner.repository)
+		owner.controller, err = NewRuntimeController(implementationWorkCommittedTestRepository{owner.repository})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -125,7 +145,7 @@ func TestImplementationWorkThirtyThreeRoundsHistoryRolloverAndTerminalPurpose(t 
 	}
 	restored := before.CloneRaw()
 	owner.aggregate, owner.repository.aggregate = &restored, &restored
-	owner.controller, err = NewRuntimeController(owner.repository)
+	owner.controller, err = NewRuntimeController(implementationWorkCommittedTestRepository{owner.repository})
 	if err != nil {
 		t.Fatal(err)
 	}

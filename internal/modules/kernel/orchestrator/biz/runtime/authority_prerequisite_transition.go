@@ -13,7 +13,7 @@ func (c *authorityComponent) invalidateSemanticCatalogForFocusScope(ctx context.
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -69,9 +69,7 @@ func (c *authorityComponent) invalidateSemanticCatalogForFocusScope(ctx context.
 	aggregate.Facts = facts
 	aggregate.Decision = decision
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -92,7 +90,7 @@ func (c *authorityComponent) invalidatePrerequisitesForReadOnlyStale(ctx context
 	if err := stale.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -134,9 +132,7 @@ func (c *authorityComponent) invalidatePrerequisitesForReadOnlyStale(ctx context
 	aggregate.Facts = facts
 	aggregate.Decision = decision
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}

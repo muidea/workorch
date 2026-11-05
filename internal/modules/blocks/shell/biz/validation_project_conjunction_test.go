@@ -178,7 +178,7 @@ func TestProjectConjunctionRealGoRejectsProjectFailuresSkipsAndEmpty(t *testing.
 }
 
 func TestProjectConjunctionDeadlineCannotBeExtendedOrRenewed(t *testing.T) {
-	for _, duration := range []time.Duration{0, 2 * DefaultCommandTimeout, -time.Second} {
+	for _, duration := range []time.Duration{0, 2 * MaxCommandTimeout, -time.Second} {
 		ctx := context.Background()
 		cancel := func() {}
 		if duration != 0 {

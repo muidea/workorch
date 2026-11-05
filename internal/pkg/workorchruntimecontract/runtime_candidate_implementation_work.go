@@ -28,6 +28,26 @@ func implementationWorkingOperationManifest(operation RuntimeCandidateOperationM
 	}
 	target.ExcludedTargetRefs = slices.Clone(binding.ExcludedTargetRefs)
 	operation.InputRevision = binding.InputRevision.Clone()
+	if operation.InputRevision != nil {
+		if operation.Kind == StepKindFileEdit {
+			operation.CandidateConstraints = append(operation.CandidateConstraints, RuntimeInputStructureConstraint("newText"))
+		} else if operation.Kind == RuntimeBlockKindPatchApply {
+			for i := range operation.Variants {
+				parameter := ""
+				switch operation.Variants[i].ID {
+				case "file_write":
+					parameter = "content"
+				case "text_replace":
+					parameter = "newText"
+				case "unified_diff":
+					parameter = "diff"
+				}
+				if parameter != "" {
+					operation.Variants[i].CandidateConstraints = append(operation.Variants[i].CandidateConstraints, RuntimeInputStructureConstraint(parameter))
+				}
+			}
+		}
+	}
 	operation.Target = target.Normalized()
 	operation.TargetParameterBindings = runtimeCandidateTargetParameterBindings(operation.Kind, operation.Target, []RuntimeOperationAdmissibility{binding.OwnerCatalog}, binding.OwnerCatalog.OwnerModuleID)
 	operation.PrerequisiteSnapshotRefs = []string{binding.CatalogObservation.ObservationID}

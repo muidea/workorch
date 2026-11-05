@@ -231,6 +231,14 @@ func (p RuntimeValidationProofPreparation) Clone() RuntimeValidationProofPrepara
 }
 
 func (p RuntimeValidationProofPreparation) Validate() error {
+	_, err := validateAndNormalizeRuntimeValidationProofPreparation(p)
+	return err
+}
+
+// Only lexical consumers use this canonical projection. OriginalDiagnostic is
+// borrowed read-only here; the enclosing surface detaches it at its output
+// boundary. No successful validation result escapes through the public API.
+func validateAndNormalizeRuntimeValidationProofPreparation(p RuntimeValidationProofPreparation) (RuntimeValidationProofPreparation, error) {
 	rawAttestations := p.CheckAttestations
 	// 纯校验只读原诊断；其 Validate 自行构造比较副本，不先 raw-clone 随后丢弃。
 	originalDiagnostic := p.OriginalDiagnostic
@@ -239,43 +247,43 @@ func (p RuntimeValidationProofPreparation) Validate() error {
 	p.OriginalDiagnostic = originalDiagnostic
 	if p.RequirementHash == "" || p.DefinitionRevision == "" || p.CoverageWorkItemID == "" || p.DeclarationRef == "" ||
 		p.ValidationRecipeID == "" || (p.TargetRef != "" && !runtimeProspectiveTargetRefValid(p.TargetRef)) || len(p.CheckAttestations) == 0 {
-		return fmt.Errorf("runtime validation proof preparation requires exact requirement, CWI, recipe and native attestations")
+		return RuntimeValidationProofPreparation{}, fmt.Errorf("runtime validation proof preparation requires exact requirement, CWI, recipe and native attestations")
 	}
 	if strings.Contains(p.DeclarationRef, "*") {
-		return fmt.Errorf("runtime validation proof preparation declaration %q is not CWI-specific", p.DeclarationRef)
+		return RuntimeValidationProofPreparation{}, fmt.Errorf("runtime validation proof preparation declaration %q is not CWI-specific", p.DeclarationRef)
 	}
 	if (p.ContentContractRef == "") != (p.ContentRequirements == "") || len(p.ContentContractRef) > 512 || len(p.ContentRequirements) > 4096 || !utf8.ValidString(p.ContentContractRef+p.ContentRequirements) ||
 		strings.IndexFunc(p.ContentContractRef+p.ContentRequirements, func(r rune) bool { return r < 32 || r == 127 }) >= 0 {
-		return fmt.Errorf("runtime validation proof preparation requires bounded owner content contract and requirements together")
+		return RuntimeValidationProofPreparation{}, fmt.Errorf("runtime validation proof preparation requires bounded owner content contract and requirements together")
 	}
 	required := make([]string, 0, len(p.CheckAttestations))
 	for _, attestation := range p.CheckAttestations {
 		required = append(required, attestation.RequiredCheckRef)
 	}
 	if err := ValidateRuntimeValidationCheckAttestationBindings(rawAttestations, required); err != nil {
-		return err
+		return RuntimeValidationProofPreparation{}, err
 	}
 	if err := ValidateRuntimeSourceObligationChecks(p.DefinitionRevision, p.CoverageWorkItemID, p.SourceObligationChecks); err != nil {
-		return err
+		return RuntimeValidationProofPreparation{}, err
 	}
 	for _, source := range p.SourceObligationChecks {
 		if !slices.Contains(required, source.CheckRef) {
-			return fmt.Errorf("preparation source obligation has no exact native check")
+			return RuntimeValidationProofPreparation{}, fmt.Errorf("preparation source obligation has no exact native check")
 		}
 	}
 	constraint := p.ProspectiveTargetSatisfactionConstraint
 	if err := constraint.Validate(); err != nil {
-		return fmt.Errorf("runtime validation proof preparation target constraint: %w", err)
+		return RuntimeValidationProofPreparation{}, fmt.Errorf("runtime validation proof preparation target constraint: %w", err)
 	}
 	if constraint.ValidationRecipeID != p.ValidationRecipeID {
-		return fmt.Errorf("runtime validation proof preparation recipe does not match target constraint")
+		return RuntimeValidationProofPreparation{}, fmt.Errorf("runtime validation proof preparation recipe does not match target constraint")
 	}
 	if p.OriginalDiagnostic != nil {
 		if err := p.OriginalDiagnostic.Validate(); err != nil {
-			return fmt.Errorf("runtime validation proof preparation diagnostic: %w", err)
+			return RuntimeValidationProofPreparation{}, fmt.Errorf("runtime validation proof preparation diagnostic: %w", err)
 		}
 		if p.OriginalDiagnostic.OwnerModuleID != constraint.OwnerModuleID || p.OriginalDiagnostic.ObservedRevision != constraint.CatalogObservedRevision {
-			return fmt.Errorf("runtime validation proof preparation diagnostic must match its owner and catalog revision")
+			return RuntimeValidationProofPreparation{}, fmt.Errorf("runtime validation proof preparation diagnostic must match its owner and catalog revision")
 		}
 	}
 	if p.TargetRef != "" {
@@ -288,10 +296,10 @@ func (p RuntimeValidationProofPreparation) Validate() error {
 			}
 		}
 		if !exactTargetDeclared {
-			return fmt.Errorf("runtime validation proof preparation target %q is absent from exact target constraint", p.TargetRef)
+			return RuntimeValidationProofPreparation{}, fmt.Errorf("runtime validation proof preparation target %q is absent from exact target constraint", p.TargetRef)
 		}
 	}
-	return nil
+	return p, nil
 }
 
 func normalizeRuntimeValidationProofPreparations(values []RuntimeValidationProofPreparation) []RuntimeValidationProofPreparation {
@@ -299,6 +307,10 @@ func normalizeRuntimeValidationProofPreparations(values []RuntimeValidationProof
 	for _, value := range values {
 		ret = append(ret, value.Clone())
 	}
+	return sortRuntimeValidationProofPreparations(ret)
+}
+
+func sortRuntimeValidationProofPreparations(ret []RuntimeValidationProofPreparation) []RuntimeValidationProofPreparation {
 	sort.SliceStable(ret, func(i, j int) bool {
 		if ret[i].RequirementHash != ret[j].RequirementHash {
 			return ret[i].RequirementHash < ret[j].RequirementHash

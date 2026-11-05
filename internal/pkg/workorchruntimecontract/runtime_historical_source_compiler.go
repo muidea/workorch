@@ -2,43 +2,60 @@ package workorchruntimecontract
 
 // Complete pure consumer results live only in one owner-private transaction.
 // A detached full source superset, not a digest or normalized projection, is
-// compared at every gate. The two consumers cannot certify each other.
+// compared at every gate. This execution guard does not certify historical
+// behavior or acceptance results.
 type runtimeHistoricalSourcePreimage struct {
-	raw                     RuntimeLineageAssertionSources
-	behavior, adjudications bool
+	raw       RuntimeLineageAssertionSources
+	execution []runtimeExecutionLineagePreimage
+}
+
+type runtimeExecutionLineagePreimage struct {
+	binding  CoverageEvidenceBinding
+	revision string
 }
 
 type runtimeHistoricalSourceCompiler struct {
 	images []runtimeHistoricalSourcePreimage
 }
 
-func (c *runtimeHistoricalSourceCompiler) validate(s RuntimeLineageAssertionSources, adjudications bool, body func() error) error {
+func (c *runtimeHistoricalSourceCompiler) index(s RuntimeLineageAssertionSources) int {
+	for i := range c.images {
+		if runtimeRawEqual(c.images[i].raw, s) {
+			return i
+		}
+	}
+	return -1
+}
+
+// Only successful complete guard computations on identical full inputs may
+// share work inside one lexical owner transaction. No false result, receipt,
+// assessment credit or result survives that transaction.
+func (c *runtimeHistoricalSourceCompiler) executionSatisfied(binding CoverageEvidenceBinding, s RuntimeLineageAssertionSources, revision string, body func() bool) bool {
 	if c == nil {
 		return body()
 	}
-	index := -1
-	for i := range c.images {
-		if runtimeRawEqual(c.images[i].raw, s) {
-			index = i
-			if adjudications && c.images[i].adjudications || !adjudications && c.images[i].behavior {
-				return nil
+	index := c.index(s)
+	if index >= 0 {
+		for _, entry := range c.images[index].execution {
+			if entry.revision == revision && runtimeRawEqual(entry.binding, binding) {
+				return true
 			}
-			break
 		}
 	}
-	if err := body(); err != nil {
-		return err
+	if !body() {
+		return false
+	}
+	// A nested consumer may have registered the same complete source while
+	// computing the guard. Reuse that detached graph rather than cloning twice.
+	if index < 0 {
+		index = c.index(s)
 	}
 	if index < 0 {
 		c.images = append(c.images, runtimeHistoricalSourcePreimage{raw: cloneRuntimeLineageSourcesRaw(s)})
 		index = len(c.images) - 1
 	}
-	if adjudications {
-		c.images[index].adjudications = true
-	} else {
-		c.images[index].behavior = true
-	}
-	return nil
+	c.images[index].execution = append(c.images[index].execution, runtimeExecutionLineagePreimage{binding: cloneCoverageEvidenceBindingRaw(binding), revision: revision})
+	return true
 }
 
 func cloneRuntimeLineageSourcesRaw(s RuntimeLineageAssertionSources) RuntimeLineageAssertionSources {

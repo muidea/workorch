@@ -77,7 +77,6 @@ func TestRuntimeOwnerQueryRealReadRevisionAndRestart(t *testing.T) {
 	if err := m.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
-	c.ReleaseHistoricalCompilation()
 	start()
 	fresh, _ := runtime.NewRuntimeController(runtimeStateRepository{hub: hub})
 	got, err = fresh.Load(ctx, before.Facts.WorkspaceID, before.Facts.RunID)
@@ -208,11 +207,10 @@ func BenchmarkRuntimePublicArchiveOwnerQuery(b *testing.B) {
 				base := &runtimeArchivePreimageRepository{record: run.RuntimeState.Clone()}
 				var repo runtime.RuntimeStateRepository = base
 				if name != "independent" {
-					repo = runtimeArchiveTransactionRepository{runtimeArchiveCompletePreimageRepository{runtimeArchivePreimageRepository: base}}
+					repo = runtimeArchiveTransactionRepository{base}
 				}
 				c, _ := runtime.NewRuntimeController(repo)
 				if name == "cold_joint" {
-					c.ReleaseHistoricalCompilation()
 				}
 				b.ReportAllocs()
 				for b.Loop() {

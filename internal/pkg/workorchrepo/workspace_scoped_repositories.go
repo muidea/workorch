@@ -2404,23 +2404,22 @@ func (r *workspaceScopedRunRepository) CompareAndSwapRuntimeState(ctx context.Co
 		return err
 	}
 	repo := r.store.runRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.ID), workspaceScopedRunFile))
-	current, err := repo.GetByWorkspaceID(ctx, item.WorkspaceID, item.ID)
+	base, err := repo.GetRuntimeStateWriteBase(ctx, item.WorkspaceID, item.ID)
 	if err != nil {
 		return err
 	}
-	if current.Revision != expectedRevision {
+	if base.Run.Revision != expectedRevision {
 		return common.ErrConflict
 	}
 	if head.Retirement != nil {
 		fence := head.Retirement.Normalized()
-		if fence.Validate() != nil || fence.IsRetired() || !workspaceScopedRunStateIsTerminal(current.State) {
+		if fence.Validate() != nil || fence.IsRetired() || !workspaceScopedRunStateIsTerminal(base.Run.State) {
 			return common.ErrConflict
 		}
 	}
-	if err := runmodel.ValidateOpaqueRuntimeStateCAS(current, item, expectedRuntimeStateRevision); err != nil {
-		return err
-	}
-	return repo.CompareAndSwap(ctx, item, expectedRevision)
+	// The workspace head owns retirement; the physical repository below owns
+	// the one opaque write/fence/CAS gate under its own record lock.
+	return repo.CompareAndSwapRuntimeState(ctx, item, expectedRevision, expectedRuntimeStateRevision)
 }
 
 func (r *workspaceScopedRunRepository) Delete(ctx context.Context, id common.RunID) error {

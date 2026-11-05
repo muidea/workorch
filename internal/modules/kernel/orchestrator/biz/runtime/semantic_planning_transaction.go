@@ -22,7 +22,7 @@ func (c *planningTransactionComponent) beginSemanticPlanningMutation(ctx context
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return semanticPlanningMutationTransaction{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return semanticPlanningMutationTransaction{}, err
 	}
@@ -33,7 +33,7 @@ func (c *planningTransactionComponent) beginSemanticPlanningMutation(ctx context
 		return semanticPlanningMutationTransaction{}, fmt.Errorf("%w: runtime semantic planning scope mismatch", common.ErrConflict)
 	}
 	return semanticPlanningMutationTransaction{
-		aggregate: aggregate, ledger: aggregate.SemanticPlanning.Clone(), expectedRevision: aggregate.StateRevision,
+		aggregate: aggregate, ledger: aggregate.SemanticPlanning.CloneRaw(), expectedRevision: aggregate.StateRevision,
 	}, nil
 }
 
@@ -43,9 +43,6 @@ func (c *planningTransactionComponent) commitSemanticPlanningMutation(ctx contex
 	}
 	if !changed {
 		return transaction.aggregate, nil
-	}
-	if err := transaction.ledger.Validate(); err != nil {
-		return RuntimeAggregate{}, err
 	}
 	transaction.aggregate.SemanticPlanning = transaction.ledger
 	transaction.aggregate.StateRevision++

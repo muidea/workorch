@@ -1,7 +1,6 @@
 package workorchruntimecontract
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 )
@@ -16,7 +15,7 @@ func StableRuntimeEvidenceFactHash(fact EvidenceFact) string {
 		return ""
 	}
 	fact = values[0]
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-evidence-fact/v2")
 	writeHashString(h, string(fact.ID))
 	writeHashString(h, fact.Kind)

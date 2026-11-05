@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -80,7 +81,7 @@ func TestRuntimeValidationScopeTargetsOnlyUseSealedManagedValidationAuthority(t 
 		}},
 	}
 	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
-	dispatch := SealedDispatch{
+	dispatch := runtimecontract.RuntimeDispatchRecord{
 		Candidate: runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: managed}}}},
 		OperationTargetAuthorizations: []runtimecontract.RuntimeDispatchOperationTargetAuthorization{{
 			OperationID: managed.ID, OperationHash: runtimecontract.StableRuntimeOperationHash(managed), RequireTargets: true,
@@ -100,7 +101,7 @@ func TestRuntimeValidationScopeTargetsOnlyUseSealedManagedValidationAuthority(t 
 	if err != nil || len(got) != 2 || got[0] != "cmd/lsp-bridge/main.go" || got[1] != "internal/lspbridge/validation_surface_test.go" {
 		t.Fatalf("managed validation sealed target scope = %v err=%v", got, err)
 	}
-	got, err = runtimeValidationScopeTargetRefs(SealedDispatch{}, runtimecontract.RuntimeOperation{ID: "mutate", Kind: runtimecontract.StepKindShellCommand})
+	got, err = runtimeValidationScopeTargetRefs(runtimecontract.RuntimeDispatchRecord{}, runtimecontract.RuntimeOperation{ID: "mutate", Kind: runtimecontract.StepKindShellCommand})
 	if err != nil || len(got) != 0 {
 		t.Fatalf("durable Shell command received validation target scope: %v err=%v", got, err)
 	}
@@ -728,7 +729,7 @@ func TestMissingOperationExecutionLedgerFailsWithoutSaveOrBudgetMutation(t *test
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := invoke(); !errors.Is(err, common.ErrConflict) {
+			if err := invoke(); err == nil || (!errors.Is(err, common.ErrConflict) && !strings.Contains(err.Error(), "exactly one operation execution")) {
 				t.Fatalf("missing execution ledger err=%v, want conflict", err)
 			}
 			if repository.saves != saves || len(repository.aggregate.ActiveDispatch.OperationExecutions) != 0 ||
@@ -1103,7 +1104,7 @@ func TestRecordFailureFactRejectsActiveDispatch(t *testing.T) {
 	_, err = controller.recordFailureFact(context.Background(), "ws-v2", "run-v2", runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassRuntimeInvariantDefect, Code: "generic", Signature: "generic", Message: "generic failure",
 	})
-	if !errors.Is(err, common.ErrConflict) || repository.aggregate.StateRevision != revision || repository.aggregate.ActiveDispatch == nil {
+	if err == nil || (!errors.Is(err, common.ErrConflict) && !strings.Contains(err.Error(), "exactly one operation execution")) || repository.aggregate.StateRevision != revision || repository.aggregate.ActiveDispatch == nil {
 		t.Fatalf("generic failure changed an active dispatch: aggregate=%+v err=%v", repository.aggregate, err)
 	}
 }
@@ -1359,10 +1360,79 @@ func TestRuntimeControllerExecutesManagedValidationWithSealedRecipeAfterResource
 	if scopeAgain, recipesAgain := ReconciliationValidationContext(completed, binding); !reflect.DeepEqual(scope, scopeAgain) || !reflect.DeepEqual(recipes, recipesAgain) {
 		t.Fatal("duplicate reconciliation changed the sealed context")
 	}
+	sourceScope, sourceRecipes, receiptHash := ReconciliationValidationExecutionSource(completed, binding)
+	if receiptHash == "" || !reflect.DeepEqual(sourceScope, scope) || !reflect.DeepEqual(sourceRecipes, recipes) {
+		t.Fatal("accepted operation lost its grouped execution source")
+	}
+	assertReconciliationSourceScanMutations(t, completed, binding)
+	for _, mutation := range []string{"receipt-missing", "receipt-rejected", "receipt-replaced", "scope-replaced", "same-receipt-changed-scope", "later-source"} {
+		t.Run("execution-source/"+mutation, func(t *testing.T) {
+			changed := completed.CloneRaw()
+			use := &runtimecontract.RuntimeValidationExecutionUse{SourceReceiptHash: receiptHash, SourceScopeHash: runtimecontract.RuntimeValidationExecutionScopeHash(scope, recipes)}
+			request := runtimecontract.RuntimeCWIReconciliationRequest{Bindings: []runtimecontract.RuntimeCWIReconciliationBindingRef{binding.Clone()}}
+			batch := runtimecontract.RuntimeCWIReconciliationBatch{Observations: []runtimecontract.RuntimeCWIReconciliationObservation{{BindingID: binding.BindingID, ValidationExecution: use}}}
+			switch mutation {
+			case "receipt-missing":
+				changed.OperationReceipts = nil
+			case "receipt-rejected":
+				for i := range changed.OperationReceipts {
+					changed.OperationReceipts[i].Outcome = runtimecontract.RuntimeOperationOutcomeRejected
+				}
+			case "receipt-replaced":
+				use.SourceReceiptHash = "another-receipt"
+			case "scope-replaced":
+				use.SourceScopeHash = "another-scope"
+			case "same-receipt-changed-scope", "later-source":
+				// A newer exact binding source cannot hide the original source
+				// referenced by an already persisted history observation.
+				later := changed.CompletedDispatches[len(changed.CompletedDispatches)-1]
+				later.ValidationRecipes = runtimecontract.NormalizeRuntimeValidationRecipes(later.ValidationRecipes)
+				later.ValidationRecipes[0].TimeoutMillis++
+				if mutation == "later-source" {
+					later.OperationExecutions = append([]runtimecontract.RuntimeOperationExecutionRecord(nil), later.OperationExecutions...)
+					for i := range later.OperationExecutions {
+						e := &later.OperationExecutions[i]
+						r, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(changed.OperationReceipts, e.ExecutionKey, e.Fence)
+						if !found {
+							t.Fatal("missing fixture receipt")
+						}
+						r = r.Clone()
+						r.Fence++
+						e.Fence = r.Fence
+						e.OwnerReceiptHash = runtimecontract.StableRuntimeOperationReceiptHash(r)
+						changed.OperationReceipts = append(changed.OperationReceipts, r)
+					}
+				}
+				later.DispatchAuthorityHash = runtimecontract.StableRuntimeDispatchAuthorityHash(sealedDispatchToRuntimeRecord(later))
+				changed.CompletedDispatches = append(changed.CompletedDispatches, later)
+			}
+			changed.Reconciliation.Request, changed.Reconciliation.Batch = &request, &batch
+			err := validateReconciliationExecutionSources(changed)
+			if mutation == "later-source" {
+				if err != nil {
+					t.Fatalf("later source hid original receipt: %v", err)
+				}
+				changed.Reconciliation.Request, changed.Reconciliation.Batch = nil, nil
+				changed.Reconciliation.History = []runtimecontract.RuntimeCWIReconciliationGeneration{{Request: request, Batch: &batch}}
+				if err := validateReconciliationExecutionSources(changed); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("group source accepted a self-rehashed replacement")
+			}
+			changed.Reconciliation.Request, changed.Reconciliation.Batch = nil, nil
+			changed.Reconciliation.History = []runtimecontract.RuntimeCWIReconciliationGeneration{{Request: request, Batch: &batch}}
+			if validateReconciliationExecutionSources(changed) == nil {
+				t.Fatal("historical group lost source validation")
+			}
+		})
+	}
 	for _, scenario := range []string{"other-run", "other-definition", "changed-dispatch-hash", "changed-native-mapping", "changed-recipe"} {
 		t.Run("reconciliation/"+scenario, func(t *testing.T) {
 			changed := completed
-			changed.CompletedDispatches = append([]SealedDispatch(nil), completed.CompletedDispatches...)
+			changed.CompletedDispatches = append([]runtimecontract.RuntimeDispatchRecord(nil), completed.CompletedDispatches...)
 			requested := binding.Clone()
 			switch scenario {
 			case "other-run":

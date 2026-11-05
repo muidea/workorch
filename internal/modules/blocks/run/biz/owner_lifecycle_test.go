@@ -67,7 +67,7 @@ func TestRunLifecycleCanceledQueuedRecoveryIsNotCompletedUntilCallbackReturns(t 
 	}
 	key := replacementRecoveryTaskKey(predecessor.WorkspaceID, predecessor.ID)
 	acquiredTopics := append([]string(nil), owner.topics...)
-	if len(acquiredTopics) != 24 { // Complete history and exact original-receipt queries.
+	if len(acquiredTopics) != 25 { // Complete history and exact original-receipt queries.
 		t.Fatalf("unexpected acquired topic inventory: %v", acquiredTopics)
 	}
 	owner.BeginShutdown()

@@ -161,13 +161,7 @@ func EvaluateRuntimeCompleteAdmission(raw RuntimeCompleteAdmissionInput) Runtime
 	if err := ValidateRuntimeCWILedger(input.Facts); err != nil {
 		return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "cwi_ledger_invalid", err)
 	}
-	if err := ValidateRuntimeHistoricalBehaviorCompletions(RuntimeLineageAssertionSources{
-		Definition: input.Definition, Facts: input.Facts, Semantic: input.SemanticPlanning, Completed: input.CompletedDispatches,
-		Receipts: input.OperationReceipts, ProcessedEventIDs: input.ProcessedEventIDs, Reconciliation: input.Reconciliation,
-		ProofLineage: input.ProofLineage, Work: input.ImplementationWork, Active: input.ActiveDispatch,
-		Governance: input.Governance, Budget: input.Budget, EvidenceSequence: input.EvidenceSequence,
-		Resolutions: input.Resolutions, Attempts: input.Attempts, Sessions: input.Sessions, Confirmations: input.Confirmations,
-	}); err != nil {
+	if err := ValidateRuntimeHistoricalBehaviorCompletions(input.Facts, input.CompletedDispatches); err != nil {
 		return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "historical_behavior_lineage_invalid", err)
 	}
 	if err := ValidateRuntimeCWIFocusBindings(input.Facts); err != nil {
@@ -203,7 +197,7 @@ func EvaluateRuntimeCompleteAdmission(raw RuntimeCompleteAdmissionInput) Runtime
 		if _, err := RuntimeAssessmentSourceProjection(input.Facts, focus.ID, focus.CoverageWorkItemIDs); err != nil {
 			return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "assessment_definition_preimage_invalid", err)
 		}
-		preimage, err := ResolveRuntimeAssessmentPurposePreimage(input.SemanticPlanning, focus.CoverageEvidenceBindings)
+		preimage, err := RuntimeAssessmentPurposeForCurrentFocus(input.Facts, input.SemanticPlanning, focus)
 		if err != nil {
 			return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "assessment_purpose_preimage_invalid", err)
 		}
@@ -237,7 +231,7 @@ func EvaluateRuntimeCompleteAdmission(raw RuntimeCompleteAdmissionInput) Runtime
 		}
 		return completeAdmissionFailure(RuntimeCompleteAdmissionStaleConflict, "active_dispatch_conflict", fmt.Errorf("runtime authority already has a different active dispatch"))
 	}
-	if feasibility := evaluateRuntimeCompleteAdmissionFeasibility(input.Facts, input.Manifest, input.Candidate, input.Attempt.Feasibilities); !feasibility.Admitted() {
+	if feasibility := evaluateRuntimeCompleteAdmissionFeasibility(input.Facts, input.Manifest, input.Candidate, input.Attempt.Feasibilities, input.Decision.AuthorityTransaction()); !feasibility.Admitted() {
 		return feasibility
 	}
 	if err := ValidateRuntimeCWIBindingRetirementsAgainstExecution(input.Facts, input.ActiveDispatch, input.CompletedDispatches, input.OperationReceipts); err != nil {
@@ -298,7 +292,7 @@ func runtimeCurrentFocusBlockedPrerequisites(facts RuntimeFacts) []string {
 	return normalizeStrings(blocked)
 }
 
-func evaluateRuntimeCompleteAdmissionFeasibility(facts RuntimeFacts, manifest RuntimeCandidateContractManifest, candidate RuntimeCandidate, values []RuntimeCandidateFeasibilityRecord) RuntimeCompleteAdmissionDecision {
+func evaluateRuntimeCompleteAdmissionFeasibility(facts RuntimeFacts, manifest RuntimeCandidateContractManifest, candidate RuntimeCandidate, values []RuntimeCandidateFeasibilityRecord, transaction AuthorityTransaction) RuntimeCompleteAdmissionDecision {
 	if err := ValidateRuntimeCandidateFeasibilityRecords(values); err != nil {
 		return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "owner_feasibility_invalid", err)
 	}
@@ -343,6 +337,9 @@ func evaluateRuntimeCompleteAdmissionFeasibility(facts RuntimeFacts, manifest Ru
 		}
 		if observation.AcquisitionBinding != inventory.AcquisitionBinding {
 			return completeAdmissionFailure(RuntimeCompleteAdmissionOwnerStale, "owner_feasibility_catalog_stale", fmt.Errorf("candidate operation %q feasibility acquisition binding is stale", operation.ID))
+		}
+		if err := ValidateRuntimeInputStructureRecord(manifest, operation, observation, transaction); err != nil {
+			return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "input_structure_invalid", err)
 		}
 		if observation.ReplayProof != nil {
 			proof := observation.ReplayProof.Normalized()

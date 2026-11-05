@@ -28,7 +28,7 @@ type runtimeSemanticAuthorityWire struct {
 	ReferenceRule  string                             `json:"referenceRule,omitempty"`
 }
 
-const semanticLocalReferenceRule = "fileRefs replace only empty inputRevision.Binding.InputReview.Files[file].content with exact workContext.content.Snapshots[snapshot].Content (matching target and hash). intentRefs replace only null previousRound.intentBinding.intent with exact workContext.priorRounds[round].intent (matching ordinal, dispatch and receipt set). work=-1 names manifest.implementationPurpose; other work indexes name manifest.proofObligations[work].implementationWork. generationRefs replace only empty validationGenerationContexts[generation].context.Files[file].content from exactly one local snapshot, sourceReview=[proof,review,file], or earlier sourceGeneration/sourceFile with matching target/hash. Expand these same-C3 aliases before review; all original conflict reports, before-content, criteria and lineage remain mandatory."
+const semanticLocalReferenceRule = "fileRefs replace only empty inputRevision input content (Binding.InputReview.Files or ownerObservation.Files)[file].content with exact workContext.content.Snapshots[snapshot].Content (matching target and hash). intentRefs replace only null previousRound.intentBinding.intent with exact workContext.priorRounds[round].intent (matching ordinal, dispatch and receipt set). work=-1 names manifest.implementationPurpose; other work indexes name manifest.proofObligations[work].implementationWork. generationRefs replace only empty validationGenerationContexts[generation].context.Files[file].content from exactly one local snapshot, sourceReview=[proof,review,file], or earlier sourceGeneration/sourceFile with matching target/hash. Expand these same-C3 aliases before review; all original conflict reports, before-content, criteria and lineage remain mandatory."
 
 func semanticLocalWork(p *runtimeSemanticAuthorityProjection, index int) *runtimeSemanticImplementationWorkProjection {
 	if index == -1 {
@@ -64,9 +64,10 @@ func (p runtimeSemanticAuthorityProjection) MarshalJSON() ([]byte, error) {
 		if w == nil || p.WorkContext == nil {
 			continue
 		}
-		if v := w.InputRevision; v != nil && v.Binding.InputReview != nil && p.WorkContext.Content != nil {
-			for fi := range v.Binding.InputReview.Files {
-				f := &v.Binding.InputReview.Files[fi]
+		if v := w.InputRevision; v != nil && len(v.inputFiles()) != 0 && p.WorkContext.Content != nil {
+			files := v.inputFiles()
+			for fi := range files {
+				f := &files[fi]
 				if len(f.Content) < 256 {
 					continue
 				}
@@ -107,10 +108,10 @@ func (p *runtimeSemanticAuthorityProjection) UnmarshalJSON(raw []byte) error {
 	}
 	for _, ref := range wire.FileRefs {
 		w := semanticLocalWork(&value, ref.Work)
-		if w == nil || w.InputRevision == nil || w.InputRevision.Binding.InputReview == nil || value.WorkContext.Content == nil {
+		if w == nil || w.InputRevision == nil || len(w.InputRevision.inputFiles()) == 0 || value.WorkContext.Content == nil {
 			return fmt.Errorf("semantic file reference has no original input")
 		}
-		files := w.InputRevision.Binding.InputReview.Files
+		files := w.InputRevision.inputFiles()
 		snapshots := value.WorkContext.Content.Snapshots
 		if ref.File < 0 || ref.File >= len(files) || ref.Snapshot < 0 || ref.Snapshot >= len(snapshots) {
 			return fmt.Errorf("semantic file reference is outside local scope")

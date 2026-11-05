@@ -40,7 +40,7 @@ func validateRuntimeConvergenceSourcesAndSemanticLedgerInSession(s RuntimeLineag
 }
 
 func validateRuntimeConvergenceSourceLedgersInSession(s RuntimeLineageAssertionSources, output RequiredOutputContract, revision uint64, semantic *runtimeSemanticValidationSession, historical *runtimeHistoricalPreimageSession) error {
-	if err := validateRuntimeHistoricalBehaviorCompletionsInSession(s, historical); err != nil {
+	if err := ValidateRuntimeHistoricalBehaviorCompletions(s.Facts, s.Completed); err != nil {
 		return fmt.Errorf("runtime aggregate historical behavior: %w", err)
 	}
 	if err := validateRuntimeImplementationWorkStateInSession(s.Definition, s.Facts, s.Work, s.Semantic, s.Active, s.Completed, s.Receipts, s.Governance, s.Budget, semantic); err != nil {
@@ -57,7 +57,7 @@ func validateRuntimeConvergenceSourceLedgersInSession(s RuntimeLineageAssertionS
 			return fmt.Errorf("runtime aggregate working output has no unique original live semantic work commitment")
 		}
 	}
-	if err := validateRuntimeDispatchHistoryShapeInIndex(s.Facts.WorkspaceID, s.Facts.RunID, s.Active, s.Completed, runtimeOwnerLineageIndexFor(semantic)); err != nil {
+	if err := ValidateRuntimeDispatchHistoryShape(s.Facts.WorkspaceID, s.Facts.RunID, s.Active, s.Completed); err != nil {
 		return fmt.Errorf("runtime aggregate dispatch history: %w", err)
 	}
 	if err := ValidateRuntimeEvidenceLedgerSequence(s.EvidenceSequence, s.Facts, s.Active, s.Completed, s.Resolutions); err != nil {
@@ -78,7 +78,7 @@ func validateRuntimeConvergenceSourceLedgersInSession(s RuntimeLineageAssertionS
 	if err := ValidateRuntimeAssessmentApplicabilityGenerations(s.Reconciliation, s.Active, s.Completed); err != nil {
 		return fmt.Errorf("runtime aggregate assessment applicability generation: %w", err)
 	}
-	if err := validateRuntimeAssessmentAdjudicationsInSession(s.Facts, s.Completed, s.ProofLineage, s, historical); err != nil {
+	if err := ValidateRuntimeAssessmentAdjudications(s.Facts, s.Completed); err != nil {
 		return fmt.Errorf("runtime aggregate assessment adjudication: %w", err)
 	}
 	return nil

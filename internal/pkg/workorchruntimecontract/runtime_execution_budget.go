@@ -591,6 +591,7 @@ func (l RuntimeExecutionBudgetLedger) Validate() error {
 		allocations[allocation.AllocationID] = allocation
 	}
 	consumptionsByAllocation := map[string]int{}
+	consumptionByAllocation := map[string]RuntimeBudgetConsumptionFact{}
 	physicalOwners := map[string]string{}
 	seenConsumptions := map[string]struct{}{}
 	for _, consumption := range l.Consumptions {
@@ -606,6 +607,7 @@ func (l RuntimeExecutionBudgetLedger) Validate() error {
 		}
 		seenConsumptions[consumption.ConsumptionID] = struct{}{}
 		consumptionsByAllocation[consumption.AllocationID]++
+		consumptionByAllocation[consumption.AllocationID] = consumption
 		physicalKey := consumption.Owner + "\x00" + consumption.PhysicalConsumptionID + "\x00" + string(allocation.Dimension)
 		if other, duplicate := physicalOwners[physicalKey]; duplicate && other != consumption.AllocationID {
 			return fmt.Errorf("runtime physical consumption belongs to multiple allocations")
@@ -623,7 +625,7 @@ func (l RuntimeExecutionBudgetLedger) Validate() error {
 			if count != 1 {
 				return fmt.Errorf("confirmed runtime budget allocation requires one consumption")
 			}
-			fact := runtimeBudgetConsumptionForAllocation(l.Consumptions, allocation.AllocationID)
+			fact := consumptionByAllocation[allocation.AllocationID]
 			if fact.UnknownAmount != 0 || allocation.OwnerFactRef != fact.OwnerResultRef {
 				return fmt.Errorf("confirmed runtime budget allocation carries unknown consumption")
 			}
@@ -631,7 +633,7 @@ func (l RuntimeExecutionBudgetLedger) Validate() error {
 			if count != 1 {
 				return fmt.Errorf("unknown or exhausted runtime budget allocation requires one consumption")
 			}
-			fact := runtimeBudgetConsumptionForAllocation(l.Consumptions, allocation.AllocationID)
+			fact := consumptionByAllocation[allocation.AllocationID]
 			if fact.UnknownAmount <= 0 || fact.ConfirmedAmount != 0 || allocation.OwnerFactRef != fact.OwnerResultRef {
 				return fmt.Errorf("unknown or exhausted runtime budget allocation has invalid consumption")
 			}
@@ -669,6 +671,19 @@ func runtimeBudgetConsumptionForAllocation(values []RuntimeBudgetConsumptionFact
 		}
 	}
 	return RuntimeBudgetConsumptionFact{}
+}
+
+// A call-local lookup, not a ledger or validation cache. Preserve raw-order
+// first-match semantics for public projections that accept unvalidated inputs.
+func runtimeBudgetConsumptionsByAllocation(values []RuntimeBudgetConsumptionFact) map[string]RuntimeBudgetConsumptionFact {
+	result := make(map[string]RuntimeBudgetConsumptionFact, len(values))
+	for _, raw := range values {
+		fact := raw.Normalized()
+		if _, found := result[fact.AllocationID]; !found {
+			result[fact.AllocationID] = fact
+		}
+	}
+	return result
 }
 
 type RuntimeBudgetAllocationSpec struct {
@@ -1148,6 +1163,7 @@ func RuntimeBudgetRemaining(ledger RuntimeExecutionBudgetLedger, dimension Runti
 	if !found {
 		return 0, common.ErrInvalidArgument
 	}
+	consumptions := runtimeBudgetConsumptionsByAllocation(ledger.Consumptions)
 	var unavailable int64
 	for _, allocation := range ledger.Allocations {
 		allocation = allocation.Normalized()
@@ -1158,7 +1174,7 @@ func RuntimeBudgetRemaining(ledger RuntimeExecutionBudgetLedger, dimension Runti
 		case RuntimeBudgetAllocationReserved:
 			unavailable += allocation.ReservedAmount
 		case RuntimeBudgetAllocationConfirmed, RuntimeBudgetAllocationUnknown, RuntimeBudgetAllocationExhausted:
-			fact := runtimeBudgetConsumptionForAllocation(ledger.Consumptions, allocation.AllocationID)
+			fact := consumptions[allocation.AllocationID]
 			unavailable += fact.ConfirmedAmount + fact.UnknownAmount
 		}
 		if unavailable > dimensionPolicy.Limit {
@@ -1297,6 +1313,10 @@ func BuildRuntimeExecutionBudgetView(workspaceID common.WorkspaceID, runID commo
 			return RuntimeExecutionBudgetView{}, err
 		}
 	}
+	// The view is also callable on unvalidated input. Preserve the former
+	// first-match result in canonical consumption order, including duplicates
+	// and missing rows; this lookup is not consumption admission or credit.
+	consumptions := runtimeBudgetConsumptionsByAllocation(ledger.Consumptions)
 	view := RuntimeExecutionBudgetView{WorkspaceID: workspaceID, RunID: runID, PolicyRevision: ledger.Policy.PolicyRevision, StateRevision: stateRevision, ActiveWaitID: strings.TrimSpace(activeWaitID), TerminalReasonCode: strings.TrimSpace(terminalReasonCode)}
 	for _, dimension := range ledger.Policy.Dimensions {
 		item := RuntimeExecutionBudgetDimensionView{Dimension: dimension.Dimension, Unit: dimension.Unit, Limit: dimension.Limit, Confirmed: usage.confirmed(dimension.Dimension)}
@@ -1308,9 +1328,9 @@ func BuildRuntimeExecutionBudgetView(workspaceID common.WorkspaceID, runID commo
 			case RuntimeBudgetAllocationReserved:
 				item.Reserved += allocation.ReservedAmount
 			case RuntimeBudgetAllocationConfirmed:
-				item.Confirmed += runtimeBudgetConsumptionForAllocation(ledger.Consumptions, allocation.AllocationID).ConfirmedAmount
+				item.Confirmed += consumptions[allocation.AllocationID].ConfirmedAmount
 			case RuntimeBudgetAllocationUnknown, RuntimeBudgetAllocationExhausted:
-				item.Unknown += runtimeBudgetConsumptionForAllocation(ledger.Consumptions, allocation.AllocationID).UnknownAmount
+				item.Unknown += consumptions[allocation.AllocationID].UnknownAmount
 			}
 		}
 		used := item.Confirmed + item.Reserved + item.Unknown

@@ -95,7 +95,8 @@ func (p RuntimeTerminalSnapshotProof) ValidateRaw() error {
 
 // CompileRuntimeTerminalSnapshotSources resolves unique original CURRENT
 // accepted operations. It never chooses the most recent matching receipt or
-// substitutes a historical consistent review. Callers validate the aggregate.
+// substitutes a historical consistent review. Callers consume the formally
+// admitted owner aggregate; this source compiler does not re-admit its history.
 func CompileRuntimeTerminalSnapshotSources(source RuntimeStateRecord) ([]RuntimeTerminalSnapshotSource, error) {
 	bindings, err := RuntimeDeliveryLineageBindingsFromState(source)
 	if err != nil {

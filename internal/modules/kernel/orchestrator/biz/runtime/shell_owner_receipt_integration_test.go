@@ -432,7 +432,7 @@ func testObservedShellRepair(t *testing.T, validationEntry string, failsAgain, s
 
 	// Replaying the exact sealed execution must query the committed receipt rather
 	// than execute again or manufacture a new observation.
-	dispatch := SealedDispatch{}
+	dispatch := runtimecontract.RuntimeDispatchRecord{}
 	for _, candidate := range loaded.CompletedDispatches {
 		if candidate.ID == sealedAggregate.ActiveDispatch.ID {
 			dispatch = candidate
@@ -1220,7 +1220,7 @@ func TestShellOwnerSelectorOnlyValidationNeverCreatesRepairObservation(t *testin
 	if loaded.Facts.Resources.Manifest == nil || len(loaded.Facts.Resources.Manifest.TargetRefs) == 0 {
 		t.Fatalf("selector-only restart fixture lost its finite current manifest: %+v", loaded.Facts.Resources.Manifest)
 	}
-	dispatch := SealedDispatch{}
+	dispatch := runtimecontract.RuntimeDispatchRecord{}
 	for _, candidate := range loaded.CompletedDispatches {
 		if candidate.ID == completedDispatchID {
 			dispatch = candidate

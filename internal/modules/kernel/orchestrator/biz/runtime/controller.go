@@ -11,19 +11,10 @@ import (
 
 type RuntimeController struct {
 	*runtimeMutationKernel
-	authority          *authorityComponent
-	planning           *planningTransactionComponent
-	candidateDispatch  *candidateDispatchComponent
-	driveDelivery      *driveDeliveryComponent
-	historicalCompiler runtimecontract.RuntimeOwnerHistoricalCompiler
-}
-
-// ReleaseHistoricalCompilation is called only after the owner has drained.
-// It releases optional pure subresults, not Runtime state or recovery authority.
-func (c *RuntimeController) ReleaseHistoricalCompilation() {
-	if c != nil {
-		c.historicalCompiler.Close()
-	}
+	authority         *authorityComponent
+	planning          *planningTransactionComponent
+	candidateDispatch *candidateDispatchComponent
+	driveDelivery     *driveDeliveryComponent
 }
 
 // CandidateAdmissionCommitResult couples the persisted aggregate with the
@@ -82,7 +73,7 @@ func (c *RuntimeController) initialize(ctx context.Context, facts runtimecontrac
 	if definition.Revision != facts.DefinitionRevision {
 		return RuntimeAggregate{}, fmt.Errorf("runtime definition context revision does not match facts")
 	}
-	existing, err := c.repository.Load(ctx, facts.WorkspaceID, facts.RunID)
+	existing, err := c.load(ctx, facts.WorkspaceID, facts.RunID)
 	if err == nil {
 		if err := runtimecontract.ValidateRuntimeResultFeedbackVersion(existing.ResultFeedbackVersion); err != nil {
 			return RuntimeAggregate{}, err
@@ -133,9 +124,6 @@ func (c *RuntimeController) initialize(ctx context.Context, facts runtimecontrac
 		ExecutionBudget:       executionBudget,
 		Decision:              decision,
 	}
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
 	if err := c.transitions.Commit(ctx, aggregate, 0); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -157,14 +145,12 @@ func rejectRuntimeProgressAfterTermination(aggregate RuntimeAggregate) error {
 	return fmt.Errorf("%w: runtime administrative termination %s is already sealed", common.ErrConflict, aggregate.Termination.Kind)
 }
 
-func (c *RuntimeController) Load(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
+func (c *RuntimeController) Load(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (aggregate RuntimeAggregate, err error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	if original, ok := c.repository.(ownerStateOriginalRepository); ok {
-		return loadOwnerStateQuery(ctx, c, original, workspaceID, runID)
-	}
-	return c.repository.Load(ctx, workspaceID, runID)
+
+	return c.load(ctx, workspaceID, runID)
 }
 
 // commitAssessment is invoked only by RuntimeInternalEventAssessmentObserved.

@@ -79,7 +79,6 @@ internal/modules/application/workorchd/biz/appservice/readmodelports/workspace_s
 internal/modules/application/workorchd/biz/appservice/workspaceviewcore/types.go|projectionLifecycleState|owner_private_state|internal/modules/application/workorchd|workorchd.projection_lifecycle
 internal/modules/kernel/orchestrator/biz/runtime/candidate_admission.go|CandidateAdmissionDisposition|pure_disposition|internal/modules/kernel/orchestrator|-
 internal/modules/kernel/orchestrator/biz/runtime/dispatch_commit.go|CommitDisposition|pure_disposition|internal/modules/kernel/orchestrator|-
-internal/modules/kernel/orchestrator/biz/runtime/dispatch_commit.go|DispatchState|pure_disposition|internal/modules/kernel/orchestrator|-
 internal/modules/kernel/orchestrator/biz/runtime/failure_policy.go|FailureDisposition|pure_disposition|internal/modules/kernel/orchestrator|-
 internal/modules/kernel/orchestrator/biz/runtime/execution_budget.go|RuntimeProviderBudgetSettlementStatus|immutable_outcome|internal/modules/kernel/orchestrator|-
 internal/modules/kernel/orchestrator/pkg/events/messages.go|RuntimeGovernanceResolutionDisposition|immutable_outcome|internal/modules/kernel/orchestrator|-

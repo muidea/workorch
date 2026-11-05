@@ -13,7 +13,7 @@ import (
 // stale, governance and unknown outcomes have their own typed event lanes.
 // This receipt lane closes the exact repair in the same SM-3/SM-2 transaction,
 // retaining immutable causation without inventing another repair permission.
-func closeRejectedValidationRepairExecution(aggregate *RuntimeAggregate, dispatch SealedDispatch, admission executionEvidenceAdmission, fact runtimecontract.EvidenceFact) (bool, error) {
+func closeRejectedValidationRepairExecution(aggregate *RuntimeAggregate, dispatch runtimecontract.RuntimeDispatchRecord, admission executionEvidenceAdmission, fact runtimecontract.EvidenceFact) (bool, error) {
 	if admission.Evidence.Status != ExecutionEvidenceStatusRejected || fact.Kind != runtimecontract.EvidenceKindStateChange ||
 		admission.Evidence.Receipt == nil || admission.Evidence.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected {
 		return false, nil

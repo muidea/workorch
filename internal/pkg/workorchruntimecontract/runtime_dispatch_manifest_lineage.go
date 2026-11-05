@@ -20,6 +20,9 @@ func ValidateRuntimeAcceptedCandidateManifestLineage(
 }
 
 func validateRuntimeAcceptedCandidateManifestLineageInSession(active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord, attempts []RuntimeCandidateAttemptRecord, sessions []RuntimeCandidateRequestSession, semantic *runtimeSemanticValidationSession) error {
+	if semantic != nil && semantic.committedPreimage != nil {
+		attempts, sessions = runtimeCandidateSourcesRequiringAdmission(semantic.committedPreimage, active, completed, attempts, sessions)
+	}
 	dispatches := make([]RuntimeDispatchRecord, 0, len(completed)+1)
 	dispatches = append(dispatches, completed...)
 	if active != nil {
@@ -218,6 +221,9 @@ func validateRuntimeAcceptedAssessmentPurposePreimagesInSession(
 	sessions []RuntimeCandidateRequestSession,
 	semanticSession *runtimeSemanticValidationSession,
 ) error {
+	if semanticSession != nil && semanticSession.committedPreimage != nil && runtimeRawEqual(ledger, semanticSession.committedPreimage.SemanticPlanning) {
+		attempts, sessions = runtimeCandidateSourcesRequiringAdmission(semanticSession.committedPreimage, active, completed, attempts, sessions)
+	}
 	dispatches := make([]RuntimeDispatchRecord, 0, len(completed)+1)
 	dispatches = append(dispatches, completed...)
 	if active != nil {

@@ -1,6 +1,7 @@
 package workorcheventpayload
 
 import (
+	"math"
 	"reflect"
 	"sort"
 	"strconv"
@@ -10,11 +11,21 @@ import (
 )
 
 func canonicalDeepCopyReference(payload Payload) string {
+	return canonicalAllocationReference(payload, true)
+}
+
+// Frozen former encoder, including scalar allocations; the shallow mode is
+// the immediate pre-change path, not the older recursive deep-copy baseline.
+func canonicalAllocationReference(payload Payload, deep bool) string {
 	var builder strings.Builder
 	var fields func([]Field)
 	var value func(Value)
 	fields = func(input []Field) {
-		input = cloneFields(input)
+		if deep {
+			input = cloneFields(input)
+		} else {
+			input = append([]Field(nil), input...)
+		}
 		sort.Slice(input, func(i, j int) bool { return input[i].Name < input[j].Name })
 		for _, field := range input {
 			// 标量编码沿用既有实现；递归排序独立保留原深拷贝路径。
@@ -38,7 +49,19 @@ func canonicalDeepCopyReference(payload Payload) string {
 			}
 			builder.WriteByte(']')
 		default:
-			appendCanonicalValue(&builder, input)
+			builder.WriteString(string(input.Kind) + "=")
+			switch input.Kind {
+			case ValueString:
+				builder.WriteString(strconv.Quote(input.String))
+			case ValueBool:
+				builder.WriteString(strconv.FormatBool(input.Bool))
+			case ValueInt:
+				builder.WriteString(strconv.FormatInt(input.Int, 10))
+			case ValueUint:
+				builder.WriteString(strconv.FormatUint(input.Uint, 10))
+			case ValueFloat:
+				builder.WriteString(strconv.FormatFloat(input.Float, 'g', -1, 64))
+			}
 		}
 	}
 	fields(payload.Fields)
@@ -59,6 +82,15 @@ func canonicalNestedFixture(depth int) Payload {
 func TestCanonicalStringPreservesDeepCopyReference(t *testing.T) {
 	for _, payload := range []Payload{
 		{}, canonicalNestedFixture(12),
+		{Fields: []Field{
+			StringField("invalid/\xff\x00", "raw\x00\xff\n\t\"\\中"),
+			StringField("large", strings.Repeat("full\n原文\"", 8192)),
+			{Name: "minimum", Value: Value{Kind: ValueInt, Int: math.MinInt64}},
+			{Name: "maximum", Value: Value{Kind: ValueUint, Uint: math.MaxUint64}},
+			{Name: "negative-zero", Value: Value{Kind: ValueFloat, Float: math.Copysign(0, -1)}},
+			{Name: "infinity", Value: Value{Kind: ValueFloat, Float: math.Inf(1)}},
+			{Name: "unknown", Value: Value{Kind: "raw-unknown-kind", String: "not silently reclassified"}},
+		}},
 		{Fields: []Field{
 			{Name: "null", Value: Value{Kind: ValueNull}},
 			{Name: "uint", Value: Value{Kind: ValueUint, Uint: 42}},
@@ -120,6 +152,33 @@ func BenchmarkCanonicalNestedPayload(b *testing.B) {
 					_ = canonicalDeepCopyReference(payload)
 				} else {
 					_ = payload.CanonicalString()
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkCanonicalScalarScratch(b *testing.B) {
+	payload := canonicalNestedFixture(12)
+	for n := 0; n < 128; n++ {
+		payload.Fields = append(payload.Fields, StringField(strconv.Itoa(n), strings.Repeat("原文\n\"", 32)))
+	}
+	want := canonicalAllocationReference(payload, false)
+	if payload.CanonicalString() != want {
+		b.Fatal("canonical bytes changed")
+	}
+	for _, mode := range []string{"previous_scalar_allocations", "local_scalar_scratch"} {
+		b.Run(mode, func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				var got string
+				if mode == "previous_scalar_allocations" {
+					got = canonicalAllocationReference(payload, false)
+				} else {
+					got = payload.CanonicalString()
+				}
+				if got != want {
+					b.Fatal("canonical bytes changed")
 				}
 			}
 		})

@@ -52,7 +52,21 @@ scope 冲突、损坏或部分库存都拒绝，不能 fallback 为普通列表�
 - Runtime aggregate 对 Run 是 opaque；Run 只执行 exact scope/revision CAS，不选择 next action、candidate、dispatch、evidence 或 terminal outcome。
   物理 CAS 校验仍逐项比较全部非 opaque Run 字段；新 RuntimeState 完整替换旧账本时，不深拷贝随后丢弃的旧
   RuntimeState。新账本的 detached clone、lifecycle fence 规范化和完整比较不变；不缓存成功校验，也不改变任何
-  SM-1～SM-4 transition、预算、generation、fresh-load 或 Orchestrator 完整 aggregate gate。
+  SM-1～SM-4 transition、预算或 generation。Orchestrator 负责新事务判定，读取不重判旧业务。
+  专用 CAS 同时封存 opaque Runtime 的原件 hash；普通 SM-1/元数据写必须保留原 Runtime、hash 和 fence。
+  物理冷解码发布原件前验证 hash；正常读取不重复编码整个 Runtime。内存后端发布隔离且已计算 hash 的新写入。
+  QueryRuntimeLifecycle 提供仅含生命周期/阻塞/原scope/fence的窄只读投影；file/memory 在读锁内投影，
+  workspace-scoped 委托底层同一窄查询，不 clone 完整 Runtime 或 bootstrap。缺 hash 明确拒绝，无迁移或回退。
+  opaque 写命令通过 repository 的 `GetRuntimeStateWriteBase` 只读取 detached Run 元数据和旧 Runtime revision；
+  不为替换旧 Runtime 搬运其完整正文。workspace head 仍独占 retirement 门禁，物理 repository 锁内独占 opaque CAS。
+  新正文在物理写入口计算一次 digest，同时核对 lifecycle fence 并保存完整性身份；无法编码或不匹配以
+  `ErrRuntimeStateIntegrity` 返回 semantic rejection，不混同 transient CAS rebase。命令输入同步只读借用，
+  repository 发布新图前隔离复制，后续调用方或查询结果不能修改正式存储。Orchestrator 的 sender 隔离与
+  bootstrap/scope/revision 来源约束保留；本路径不解释 opaque Runtime 的业务含义。
+  file opaque CAS 在隔离副本上只编码一次新 Runtime JSON，直接追加到完整 Run map 的物理缓冲区；
+  lifecycle fence 与 RuntimeStateHash 消费该缓冲区中完全相同的原值 bytes。其余 Run 保留完整正文，
+  JSON 字段顺序、转义、nil/empty、存储格式与 hash 含义不变。原子发布、rename 后 durability 失败的
+  cache invalidation 和冷恢复完整性门禁共用原实现；不引入持久引用、成功缓存或历史格式选择。
 - replacement 是 SM-1 subordinate transaction，不是第二个状态机 owner；successor 只能在 predecessor 的 exact termination/clarification binding 后物化。
 - Restart 的 termination handoff 携带已 claim 的 `ReplacementRequestID + ReplacementIntentHash + RecoveryGeneration`。
   predecessor 的 Runtime 已有 convergence terminal 而 Run 尚未收尾时，Orchestrator 只交付原 terminal，不能增加第二个

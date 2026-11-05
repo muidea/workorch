@@ -17,7 +17,7 @@ func (c *planningTransactionComponent) invalidateCandidateRequestSessionForPrere
 	if err := stale.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}

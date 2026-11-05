@@ -24,7 +24,7 @@ import (
 
 // 此 fixture 只隔离已持久 scope 的 exact replay 顺序；不证明工作准入、
 // owner effect 或多轮成功。完整正例仍必须由 production owner 流程生成。
-func TestImplementationWorkScopeExactReplayDoesNotReopenAfterPhaseChange(t *testing.T) {
+func TestImplementationWorkScopeIncompleteReplayCannotBypassOwnerAdmission(t *testing.T) {
 	request := runtimecontract.RuntimeImplementationWorkScopeRequest{WorkspaceID: "ws-1", RunID: "run-1", RequestID: "persisted-request", CoverageWorkItemID: "original-cwi"}
 	observation := runtimecontract.RuntimeImplementationWorkScopeObservation{Request: request, Selection: runtimecontract.RuntimeTargetSelection{SnapshotID: "persisted-scope"}}
 	for _, phase := range []runtimecontract.RuntimeSemanticPlanningPhase{runtimecontract.RuntimeSemanticPlanningRequired, runtimecontract.RuntimeSemanticPlanningRequestOpen, runtimecontract.RuntimeSemanticPlanningFeasibilityRequired, runtimecontract.RuntimeSemanticPlanningSealed} {
@@ -36,7 +36,7 @@ func TestImplementationWorkScopeExactReplayDoesNotReopenAfterPhaseChange(t *test
 				}
 				aggregate := RuntimeAggregate{StateRevision: 19, Facts: runtimecontract.RuntimeFacts{WorkspaceID: "ws-1", RunID: "run-1"}, SemanticPlanning: runtimecontract.RuntimeSemanticPlanningLedger{Phase: phase}, ImplementationWork: runtimecontract.RuntimeImplementationWorkLedger{Rounds: []runtimecontract.RuntimeImplementationWorkRound{round}}}
 				if phase == runtimecontract.RuntimeSemanticPlanningSealed && !closed {
-					aggregate.ActiveDispatch = &SealedDispatch{ID: "persisted-dispatch"}
+					aggregate.ActiveDispatch = &runtimecontract.RuntimeDispatchRecord{ID: "persisted-dispatch"}
 				}
 				repository := &controllerRepository{aggregate: &aggregate}
 				controller, err := NewRuntimeController(repository)
@@ -49,19 +49,19 @@ func TestImplementationWorkScopeExactReplayDoesNotReopenAfterPhaseChange(t *test
 						{Kind: RuntimeInternalEventImplementationWorkScopeObserved, Scope: RuntimeInternalEventScope{WorkspaceID: "ws-1", RunID: "run-1"}, Authority: &RuntimeInternalAuthorityPayload{ImplementationWorkScopeObservation: &observation}},
 					} {
 						result, err := controller.ApplyInternalEvent(context.Background(), event)
-						if err != nil || !reflect.DeepEqual(result.Aggregate, aggregate) || repository.saves != 0 {
+						if err == nil || !reflect.DeepEqual(result.Aggregate, RuntimeAggregate{}) || repository.saves != 0 {
 							t.Fatalf("exact replay changed/reopened persisted round: err=%v saves=%d", err, repository.saves)
 						}
 					}
 				}
 				changedRequest := request.Clone()
 				changedRequest.CoverageWorkItemID = "other-cwi"
-				if _, err := controller.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{Kind: RuntimeInternalEventImplementationWorkScopeRequired, Scope: RuntimeInternalEventScope{WorkspaceID: "ws-1", RunID: "run-1"}, Authority: &RuntimeInternalAuthorityPayload{ImplementationWorkScopeRequest: &changedRequest}}); !errors.Is(err, common.ErrConflict) {
+				if _, err := controller.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{Kind: RuntimeInternalEventImplementationWorkScopeRequired, Scope: RuntimeInternalEventScope{WorkspaceID: "ws-1", RunID: "run-1"}, Authority: &RuntimeInternalAuthorityPayload{ImplementationWorkScopeRequest: &changedRequest}}); err == nil {
 					t.Fatalf("changed same-request replay accepted: %v", err)
 				}
 				changedObservation := observation.Clone()
 				changedObservation.Selection.SnapshotID = "changed-scope"
-				if _, err := controller.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{Kind: RuntimeInternalEventImplementationWorkScopeObserved, Scope: RuntimeInternalEventScope{WorkspaceID: "ws-1", RunID: "run-1"}, Authority: &RuntimeInternalAuthorityPayload{ImplementationWorkScopeObservation: &changedObservation}}); !errors.Is(err, common.ErrConflict) {
+				if _, err := controller.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{Kind: RuntimeInternalEventImplementationWorkScopeObserved, Scope: RuntimeInternalEventScope{WorkspaceID: "ws-1", RunID: "run-1"}, Authority: &RuntimeInternalAuthorityPayload{ImplementationWorkScopeObservation: &changedObservation}}); err == nil {
 					t.Fatalf("changed owner observation replay accepted: %v", err)
 				}
 				if repository.saves != 0 || !reflect.DeepEqual(*repository.aggregate, aggregate) {
@@ -170,15 +170,6 @@ func (r *implementationWorkDetachedRepository) LoadOwnerStateOriginal(ctx contex
 		return raw, aggregate, err
 	}
 	return raw, aggregate, nil
-}
-
-func (r *implementationWorkDetachedRepository) LoadTransitionPreimage(ctx context.Context, request RuntimeTransitionPreimageRequest) (RuntimeTransitionPreimage, error) {
-	workspace, run, _ := request.Scope()
-	raw, aggregate, err := r.LoadOwnerStateOriginal(ctx, workspace, run)
-	if err != nil {
-		return RuntimeTransitionPreimage{}, err
-	}
-	return request.CompileOwnerRecord(raw, aggregate)
 }
 
 // 完整 private Controller/CAS fixture；不是公开 Workspace admission 成功正例。
@@ -609,7 +600,7 @@ func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.Run
 		// The fresh owner query below runs the production complete DTO and
 		// aggregate gates, then compares every field with the event after-image.
 		fresh, err := controller.Load(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
-		if err != nil || !reflect.DeepEqual(fresh, aggregate) {
+		if err != nil || !reflect.DeepEqual(ownerStateRecord(fresh), ownerStateRecord(aggregate)) {
 			t.Fatalf("fresh full aggregate reload after %s: %v; first mismatch %s", event.Kind, err, implementationWorkFirstDifference(reflect.ValueOf(fresh), reflect.ValueOf(aggregate), "aggregate"))
 		}
 	}
@@ -881,7 +872,7 @@ func implementationWorkReceiptMatrix(t *testing.T, sealed RuntimeAggregate) {
 				t.Fatal("receipt requires exactly one aggregate CAS")
 			}
 			fresh, err := controller.Load(context.Background(), scope.WorkspaceID, scope.RunID)
-			if err != nil || !reflect.DeepEqual(fresh, result.Aggregate) {
+			if err != nil || !reflect.DeepEqual(ownerStateRecord(fresh), ownerStateRecord(result.Aggregate)) {
 				t.Fatalf("receipt fresh full aggregate: %v", err)
 			}
 			persisted, known := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(fresh.OperationReceipts, receipt.ExecutionKey, receipt.Fence)
@@ -946,7 +937,7 @@ func implementationWorkReceiptMatrix(t *testing.T, sealed RuntimeAggregate) {
 					t.Fatalf("collective/archived lateknown single CAS: %v", err)
 				}
 				fresh, err = reopened.Load(context.Background(), scope.WorkspaceID, scope.RunID)
-				if err != nil || !reflect.DeepEqual(fresh, settled.Aggregate) {
+				if err != nil || !reflect.DeepEqual(ownerStateRecord(fresh), ownerStateRecord(settled.Aggregate)) {
 					t.Fatalf("lateknown fresh full load: %v", err)
 				}
 				if mode == "accepted" && fresh.ImplementationWork.Rounds[0].CompletedReceiptSetHash == "" {
@@ -1065,7 +1056,7 @@ func implementationWorkGovernanceContinuation(t *testing.T, controller *RuntimeC
 		t.Fatal("governance continuation reopened round instead of original sealed work")
 	}
 	fresh, err := controller.Load(ctx, scope.WorkspaceID, scope.RunID)
-	if err != nil || !reflect.DeepEqual(fresh, continued.Aggregate) {
+	if err != nil || !reflect.DeepEqual(ownerStateRecord(fresh), ownerStateRecord(continued.Aggregate)) {
 		t.Fatalf("governance continuation fresh fullgate: %v", err)
 	}
 	call, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{Kind: RuntimeInternalEventDispatchExecutionRequested, Scope: scope, Transaction: &RuntimeInternalTransactionPayload{}})
@@ -1087,7 +1078,7 @@ func implementationWorkGovernanceContinuation(t *testing.T, controller *RuntimeC
 		t.Fatalf("authorized owner receipt single CAS: %v", err)
 	}
 	fresh, err = controller.Load(ctx, scope.WorkspaceID, scope.RunID)
-	if err != nil || !reflect.DeepEqual(fresh, committed.Aggregate) || fresh.ImplementationWork.Rounds[0].CompletedReceiptSetHash == "" || fresh.Facts.Coverage[0].CurrentBindingRef != nil {
+	if err != nil || !reflect.DeepEqual(ownerStateRecord(fresh), ownerStateRecord(committed.Aggregate)) || fresh.ImplementationWork.Rounds[0].CompletedReceiptSetHash == "" || fresh.Facts.Coverage[0].CurrentBindingRef != nil {
 		t.Fatalf("governance work collective/no-credit source: %v", err)
 	}
 }

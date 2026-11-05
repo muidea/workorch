@@ -117,7 +117,12 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// File adds one original-result-only delivery topic; no new effect ingress.
 	// Remove four builtin-default query/upgrade topics and the Decision
 	// request-contract repair ingress; ordinary owner query/repair topics remain.
-	const expectedProductionTopicCount = 330
+	// Shell adds two read-only participant queries: frozen input structure
+	// inspection for SM-3 and exact sealed reconciliation batches for SM-2.
+	// Neither executes operations nor grants evidence or transition authority.
+	// Run adds an opaque-state-free lifecycle read for the Runtime drive. It
+	// reports SM-1 metadata and cannot select actions or rebuild authority.
+	const expectedProductionTopicCount = 333
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the owning component contracts and README", len(contracts), expectedProductionTopicCount)
 	}
@@ -193,6 +198,32 @@ func TestFileReadDependencyQueryRemainsOwnerObservationOnly(t *testing.T) {
 		contract.Metadata.TransitionTarget != eventcontract.TransitionTargetReceiverOwnerPrivate || contract.Metadata.ScopePolicy != eventcontract.ScopePolicyWorkspaceRunStep ||
 		contract.Metadata.IdentityPolicy != eventcontract.IdentityPolicyRuntimeOperation {
 		t.Fatalf("File 原读取依赖 query 被扩大为 execution 或 transition 权威: contract=%+v message=%+v", contract, message)
+	}
+}
+
+func TestShellInputStructureAndReconciliationBatchRemainReadOnlyParticipants(t *testing.T) {
+	contracts, messages := testContractCatalog(t)
+	for _, tc := range []struct {
+		topic   string
+		machine eventcontract.StateMachine
+	}{
+		{shellevents.TopicInspectRuntimeValidationInputStructure, eventcontract.StateMachineSM3},
+		{shellevents.TopicQueryRuntimeCWIReconciliationBatch, eventcontract.StateMachineSM2},
+	} {
+		t.Run(tc.topic, func(t *testing.T) {
+			contract, found := contracts[tc.topic]
+			message, declared := messages[tc.topic]
+			if !found || !declared || contract.Owner != "shell" || message.Owner != "shell" ||
+				!slices.Equal(contract.ReceiverOwners, []string{"shell"}) || !slices.Equal(message.ReceiverOwners, []string{"shell"}) ||
+				contract.CommandClass != eventcontract.CommandClassRead || message.CommandClass != eventcontract.CommandClassRead ||
+				contract.LanePolicy != eventcontract.LanePolicyQuery || message.LanePolicy != eventcontract.LanePolicyQuery ||
+				contract.Metadata.StateMachine != tc.machine || contract.Metadata.ReducerOwner != "orchestrator" ||
+				contract.Metadata.MachineRole != eventcontract.StateMachineRoleParticipant || contract.Metadata.EffectClass != eventcontract.EffectClassReadOnly ||
+				contract.Metadata.TransitionTarget != eventcontract.TransitionTargetReceiverOwnerPrivate ||
+				contract.Metadata.ScopePolicy != eventcontract.ScopePolicyWorkspaceRun || contract.Metadata.IdentityPolicy != eventcontract.IdentityPolicyRuntimeAuthority {
+				t.Fatalf("Shell query expanded to execution/transition authority: contract=%+v message=%+v", contract, message)
+			}
+		})
 	}
 }
 

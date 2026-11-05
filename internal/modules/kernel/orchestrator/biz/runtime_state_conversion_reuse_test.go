@@ -113,13 +113,15 @@ func conversionSharedPath(value reflect.Value, pointer uintptr, path string) str
 func assertRuntimeConversionReference(t testing.TB, record runtimecontract.RuntimeStateRecord) {
 	t.Helper()
 	before, _ := json.Marshal(record)
-	want := referenceRuntimeAggregateFromRecord(record.Clone())
 	got := runtimeAggregateFromRecord(record)
-	if !reflect.DeepEqual(got, want) {
-		t.Fatal("record→aggregate changed original projection at", conversionDifference(reflect.ValueOf(got), reflect.ValueOf(want), "aggregate"))
+	// The current contract is raw identity, including malformed/nil/empty input.
+	// The former normalizing converter is retained only as historical test data.
+	want := record.Clone()
+	if roundtrip := runtimeStateRecordFromAggregate(got); !reflect.DeepEqual(roundtrip, want) {
+		t.Fatal("raw record→aggregate→record changed original at", conversionDifference(reflect.ValueOf(roundtrip), reflect.ValueOf(want), "record"))
 	}
 	assertConversionDetached(t, record, got)
-	expected := referenceRuntimeStateRecordFromAggregate(got.CloneRaw())
+	expected := record.Clone()
 	aggregateBefore, _ := json.Marshal(got)
 	saved := runtimeStateRecordFromAggregate(got)
 	if !reflect.DeepEqual(saved, expected) {
@@ -134,9 +136,7 @@ func assertRuntimeConversionReference(t testing.TB, record runtimecontract.Runti
 	if string(before) != string(after) {
 		t.Fatal("conversion changed original wire bytes")
 	}
-	if err, original := got.Validate(), want.Validate(); (err == nil) != (original == nil) || err != nil && err.Error() != original.Error() {
-		t.Fatal("conversion changed full aggregate rejection", err, original)
-	}
+
 }
 
 func TestRuntimeStateConversionReusesDetachedGraphsWithoutChangingOriginalProjection(t *testing.T) {

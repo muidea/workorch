@@ -48,7 +48,7 @@ func referenceRuntimeStateConsumerSession(r RuntimeStateRecord) error {
 	if err := ValidateRuntimeAssessmentApplicabilityGenerations(r.Reconciliation, r.ActiveDispatch, r.CompletedDispatches); err != nil {
 		return fmt.Errorf("runtime state assessment applicability generation: %w", err)
 	}
-	if err := ValidateRuntimeAssessmentAdjudications(r.Facts, r.CompletedDispatches, r.CoverageProofLineage, RuntimeLineageAssertionSources{Definition: r.Definition, Facts: r.Facts, Work: r.ImplementationWork, Semantic: r.SemanticPlanning, Active: r.ActiveDispatch, Completed: r.CompletedDispatches, Receipts: r.OperationReceipts, Governance: r.OperationGovernanceBindings, Budget: r.ExecutionBudget, EvidenceSequence: r.EvidenceSequence, Resolutions: r.GovernanceResolutions, Attempts: r.CandidateAttempts, Sessions: r.CandidateRequestSessions, ProcessedEventIDs: r.ProcessedEventIDs, ProofLineage: r.CoverageProofLineage, Confirmations: r.RepairSurfaceConfirmations}); err != nil {
+	if err := ValidateRuntimeAssessmentAdjudications(r.Facts, r.CompletedDispatches); err != nil {
 		return fmt.Errorf("runtime state assessment adjudication: %w", err)
 	}
 	if err := ValidateRuntimeDefinitionFocuses(r.Facts.DefinitionSeed, r.Facts.DefinitionFocuses); err != nil {
@@ -192,14 +192,7 @@ func referenceRuntimeStateConsumerSession(r RuntimeStateRecord) error {
 	if err := ValidateRuntimeOperationReceiptExecutionLineage(r.ActiveDispatch, r.CompletedDispatches, r.OperationReceipts); err != nil {
 		return err
 	}
-	if err := ValidateRuntimeHistoricalBehaviorCompletions(RuntimeLineageAssertionSources{
-		Definition: r.Definition, Facts: r.Facts, Semantic: r.SemanticPlanning, Completed: r.CompletedDispatches,
-		Receipts: r.OperationReceipts, ProcessedEventIDs: r.ProcessedEventIDs, Reconciliation: r.Reconciliation,
-		Work: r.ImplementationWork, Active: r.ActiveDispatch, Governance: r.OperationGovernanceBindings,
-		Budget: r.ExecutionBudget, EvidenceSequence: r.EvidenceSequence, Resolutions: r.GovernanceResolutions,
-		Attempts: r.CandidateAttempts, Sessions: r.CandidateRequestSessions,
-		ProofLineage: r.CoverageProofLineage, Confirmations: r.RepairSurfaceConfirmations,
-	}); err != nil {
+	if err := ValidateRuntimeHistoricalBehaviorCompletions(r.Facts, r.CompletedDispatches); err != nil {
 		return err
 	}
 	for _, invalidation := range r.PrerequisiteInvalidations {

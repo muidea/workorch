@@ -31,7 +31,12 @@ func (k *runtimeMutationKernel) load(ctx context.Context, workspaceID common.Wor
 	if k == nil || k.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	return k.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := k.repository.Load(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+
+	return aggregate, nil
 }
 
 func (k *runtimeMutationKernel) commit(ctx context.Context, aggregate RuntimeAggregate, expectedRevision uint64) error {
@@ -39,18 +44,6 @@ func (k *runtimeMutationKernel) commit(ctx context.Context, aggregate RuntimeAgg
 		return common.ErrInvalidArgument
 	}
 	return k.transitions.Commit(ctx, aggregate, expectedRevision)
-}
-
-// validateAggregate preserves each handler's original full invariant gate and
-// error position. Only an event-local kernel may share exact-raw pure results;
-// direct callers and standalone compilers always use independent Validate.
-func (k *runtimeMutationKernel) validateAggregate(aggregate RuntimeAggregate) error {
-	if k != nil && k.transitions != nil {
-		if transaction := k.transitions.ownerTransaction; transaction != nil && transaction.loaded && transaction.validate != nil {
-			return transaction.validate(nil, aggregate)
-		}
-	}
-	return aggregate.Validate()
 }
 
 // The following components are deliberately private and stay in this Go

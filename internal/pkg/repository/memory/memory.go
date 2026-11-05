@@ -2301,6 +2301,10 @@ func (r *RunRepository) create(item *run.Run, allocateID bool) error {
 	if err := run.ValidateRunRuntimeBootstrapsRaw(item); err != nil {
 		return err
 	}
+	digest, err := run.RuntimeStateWriteHash(item)
+	if err != nil {
+		return err
+	}
 	if err := validateMemoryRunInventory(r.items); err != nil {
 		return err
 	}
@@ -2340,6 +2344,7 @@ func (r *RunRepository) create(item *run.Run, allocateID bool) error {
 		break
 	}
 	item.WorkspaceRunGeneration = watermark
+	item.RuntimeStateHash = digest
 	if item.Revision == 0 {
 		item.Revision = 1
 	}
@@ -2497,6 +2502,9 @@ func (r *RunRepository) Update(ctx context.Context, item *run.Run) error {
 	if err := run.ValidateExecutionIntentReceiptTransition(r.items[key], item, false); err != nil {
 		return err
 	}
+	if err := run.ValidateRuntimeStatePreserved(r.items[key], item); err != nil {
+		return err
+	}
 	r.items[key] = cloneRun(item)
 	return nil
 }
@@ -2548,6 +2556,9 @@ func (r *RunRepository) CompareAndSwap(ctx context.Context, item *run.Run, expec
 	if err := run.ValidateExecutionIntentReceiptTransition(current, item, true); err != nil {
 		return err
 	}
+	if err := run.ValidateRuntimeStatePreserved(current, item); err != nil {
+		return err
+	}
 	item.Revision = expectedRevision + 1
 	r.items[key] = cloneRun(item)
 	return nil
@@ -2584,6 +2595,11 @@ func (r *RunRepository) CompareAndSwapRuntimeState(ctx context.Context, item *ru
 	if err := run.ValidateOpaqueRuntimeStateCAS(current, item, expectedRuntimeStateRevision); err != nil {
 		return err
 	}
+	digest, err := run.RuntimeStateWriteHash(item)
+	if err != nil {
+		return err
+	}
+	item.RuntimeStateHash = digest
 	item.Revision = expectedRevision + 1
 	r.items[key] = cloneRun(item)
 	return nil

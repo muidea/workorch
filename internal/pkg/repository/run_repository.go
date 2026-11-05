@@ -15,6 +15,8 @@ type RunRepository interface {
 	CreateNextWorkspaceRun(context.Context, *run.Run) error
 	Get(context.Context, common.RunID) (*run.Run, error)
 	GetByWorkspaceID(context.Context, common.WorkspaceID, common.RunID) (*run.Run, error)
+	GetRuntimeLifecycle(context.Context, common.WorkspaceID, common.RunID) (run.RuntimeLifecycleState, error)
+	GetRuntimeStateWriteBase(context.Context, common.WorkspaceID, common.RunID) (run.RuntimeStateWriteBase, error)
 	List(context.Context) ([]*run.Run, error)
 	ListByWorkspaceID(context.Context, common.WorkspaceID) ([]*run.Run, error)
 	Update(context.Context, *run.Run) error

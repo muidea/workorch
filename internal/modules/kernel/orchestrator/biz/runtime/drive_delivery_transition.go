@@ -17,7 +17,7 @@ func (c *driveDeliveryComponent) requestTermination(ctx context.Context, workspa
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || requestedBy == "" || reason == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -67,9 +67,7 @@ func (c *driveDeliveryComponent) requestTermination(ctx context.Context, workspa
 	}
 	aggregate.Termination = &term
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}

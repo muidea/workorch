@@ -46,6 +46,9 @@ type RuntimeValidationInputReviewSubject struct {
 	ProtocolRef string
 	Hash        string
 	Files       []RuntimeValidationInputReviewFile
+	// Optional owner-declared method for this exact review transaction. It is
+	// not inferred from current defaults or appended to frozen old subjects.
+	Recipe *RuntimeValidationRecipe `json:",omitempty"`
 	// Optional owner-authored limits on what these inputs execute/observe. A
 	// reviewer must not infer a wider proof scope from recipe names or paths.
 	ScopeContractRef            string                              `json:",omitempty"`
@@ -163,7 +166,8 @@ func writeRuntimeSemanticInputReviewInformationHash(h interface{ Write([]byte) (
 }
 
 func (s RuntimeValidationInputReviewSubject) Clone() RuntimeValidationInputReviewSubject {
-	s.Files = append([]RuntimeValidationInputReviewFile(nil), s.Files...)
+	s.Recipe = cloneRuntimeInputRecipe(s.Recipe)
+	s.Files = slices.Clone(s.Files)
 	s.LineageAssertions = slices.Clone(s.LineageAssertions)
 	s.DiagnosticSources = slices.Clone(s.DiagnosticSources)
 	return s
@@ -197,7 +201,7 @@ func RuntimeValidationInputContentHash(content string) string {
 // mapping. Changing a required check, supplement, recipe or criterion identity
 // invalidates a report even if every input byte stayed unchanged.
 func StableRuntimeValidationInputReviewSubjectHash(s RuntimeValidationInputReviewSubject, b RuntimeValidationProofRequirementBinding) string {
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, s.ProtocolRef)
 	writeHashString(h, b.RequirementHash)
 	writeHashString(h, b.DefinitionRevision)
@@ -226,10 +230,18 @@ func StableRuntimeValidationInputReviewSubjectHash(s RuntimeValidationInputRevie
 		writeHashString(h, string(payload))
 	}
 	writeRuntimeDiagnosticSourceSubjectHash(h, s)
+	if s.Recipe != nil {
+		payload, _ := json.Marshal(s.Recipe)
+		writeHashString(h, "validation-input-declared-method")
+		writeHashString(h, string(payload))
+	}
 	return "runtime-input-review-" + hex.EncodeToString(h.Sum(nil))
 }
 
 func (s RuntimeValidationInputReviewSubject) ValidateAgainstBinding(b RuntimeValidationProofRequirementBinding) error {
+	if s.Recipe != nil && (s.Recipe.ValidateDeclaration() != nil || s.Recipe.ID != b.ValidationRecipeID) {
+		return fmt.Errorf("validation input review method differs from original binding")
+	}
 	if err := validateRuntimeDiagnosticSourceSubject(s); err != nil {
 		return err
 	}

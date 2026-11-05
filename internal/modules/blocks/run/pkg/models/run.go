@@ -250,6 +250,9 @@ type Run struct {
 	// cannot inherit predecessor coverage credit.
 	ReconciliationScope runtimecontract.RuntimeCWIReconciliationScope
 	RuntimeState        *runtimecontract.RuntimeStateRecord
+	// RuntimeStateHash binds the opaque bytes saved by the Runtime CAS. It proves
+	// persistence integrity, never semantic validity or permission to execute.
+	RuntimeStateHash string
 	// RuntimeLifecycleFence is Orchestrator-authored opaque identity persisted
 	// beside RuntimeState. Run compares it without decoding aggregate content.
 	RuntimeLifecycleFence *runtimecontract.RuntimeOpaqueLifecycleFence

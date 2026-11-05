@@ -79,7 +79,7 @@ type runtimeCandidateEffectPolicyProjection struct {
 
 type runtimeCandidateOperationContractProjection struct {
 	InputCoverageRevisionTasks  []runtimeInputCoverageRevisionTask                    `json:"inputCoverageRevisionTasks,omitempty"`
-	InputRevision               *runtimecontract.RuntimeValidationInputRevision       `json:"inputRevision,omitempty"`
+	InputRevision               *runtimeInputRevisionProjection                       `json:"inputRevision,omitempty"`
 	InputRepair                 *runtimecontract.RuntimeValidationInputRepair         `json:"inputRepair,omitempty"`
 	Kind                        string                                                `json:"kind"`
 	OwnerModuleID               string                                                `json:"ownerModuleId,omitempty"`
@@ -389,7 +389,7 @@ func runtimeCandidateOperationContractsForManifest(values []runtimecontract.Runt
 		auxiliaryVariantSelectable := hasAuxiliaryRule && auxiliaryRule.VariantID == ""
 		target := operation.Target.Normalized()
 		projection := runtimeCandidateOperationContractProjection{
-			InputRevision:               operation.InputRevision.Clone(),
+			InputRevision:               inputRevisionForProvider(operation.InputRevision),
 			InputCoverageRevisionTasks:  runtimeInputCoverageRevisionTasks(operation.InputRevision),
 			InputRepair:                 operation.InputRepair.Clone(),
 			Kind:                        operation.Kind,
@@ -433,7 +433,8 @@ func runtimeCandidateOperationContractsForManifest(values []runtimecontract.Runt
 			projection.Rules = append([]string{"Executable rules describe the locally compiled operation. Target-bound parameters are supplied from sealed owner preimages, not by the provider; omit them even when an executable rule requires their presence."}, projection.Rules...)
 		}
 		if operation.InputRevision != nil {
-			projection.Rules = append(projection.Rules, "Revise only the supplied original reviewed input to address its exact conflict findings while preserving every immutable Goal/DoD criterion. inputCoverageRevisionTasks uses zero-based indexes into inputRevision.report.checks and each check's obligations. Use that worklist with the complete original input/report and diagnosticSources: retain covered assertions, add real assertions for missing behavioral obligations, resolve conflicts and preserve unknown findings until independently answered. Do not replace the full C1 original criteria or source declarations with this worklist, generic checks or self-claims. This real work effect grants no validation credit; a fresh independent input review and original validation remain mandatory.")
+			projection.Rules = append(projection.Rules, "inputRevision.Recipe is the exact original owner-declared validation method being maintained, not a selectable operation. Its TimeoutMillis is the total declared operation limit shared by all required stages, preparation and cleanup; 0 means owner default, not unlimited or the maximum permitted value. A parent deadline may be earlier. Preserve the original observations and criteria; report infeasibility rather than shortening required samples, skipping stages or changing the recipe.")
+			projection.Rules = append(projection.Rules, "Revise only the supplied original observed input to address its exact semantic findings or typed owner structural diagnostic while preserving every immutable Goal/DoD criterion. An ownerObservation is structural source evidence, not a semantic report; its maintenance files are original bytes, and it grants no readiness. inputCoverageRevisionTasks uses zero-based indexes into inputRevision.report.checks and each check's obligations. Use that worklist with the complete original input/report and diagnosticSources: retain covered assertions, add real assertions for missing behavioral obligations, resolve conflicts and preserve unknown findings until independently answered. Do not replace the full C1 original criteria or source declarations with this worklist, generic checks or self-claims. This real work effect grants no validation credit; a fresh independent input review and original validation remain mandatory.")
 		}
 		if operation.InputRepair != nil {
 			projection.Rules = append(projection.Rules, "Apply only the exact input symbol corrections. Preserve every other byte, declaration, assertion and original check. The resource owner must prove both sealed content hashes before any write; this repair grants no validation credit.")

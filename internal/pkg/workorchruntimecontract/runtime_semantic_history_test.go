@@ -57,7 +57,7 @@ func TestRuntimeSemanticHistorySegmentsPreserveBodiesRestartAndBudget(t *testing
 				t.Fatal(err)
 			}
 			if count <= 16 && strings.Contains(string(data), "HistoryArchive") {
-				t.Fatal("legacy wire changed without rollover")
+				t.Fatal("archive appeared before rollover")
 			}
 			var reopened RuntimeSemanticPlanningLedger
 			if err := json.Unmarshal(data, &reopened); err != nil {
@@ -87,7 +87,7 @@ func TestRuntimeSemanticHistorySegmentsPreserveBodiesRestartAndBudget(t *testing
 			if count > 0 && ValidateRuntimeSemanticProofBatchLimits(reopened, limits) == nil {
 				t.Fatal("archive bypassed original proof budget")
 			}
-			cloned := ledger.Clone()
+			cloned := ledger.CloneRaw()
 			if !reflect.DeepEqual(cloned.HistoryArchive, ledger.HistoryArchive) {
 				t.Fatal("clone rewrote archive")
 			}

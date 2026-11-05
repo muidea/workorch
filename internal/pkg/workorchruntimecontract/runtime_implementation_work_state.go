@@ -138,6 +138,11 @@ func validateRuntimeImplementationWorkStateInSession(definition RuntimeDefinitio
 	if semanticSession == nil {
 		return ValidateRuntimeImplementationWorkState(definition, facts, ledger, semantic, active, completed, receipts, governance, budget)
 	}
+	if semanticSession.committedPreimage != nil {
+		// Formal transitions already own an isolated original. Do not allocate
+		// another complete history graph merely to memoize this consumer.
+		return validateRuntimeImplementationWorkStateComplete(definition, facts, ledger, semantic, active, completed, receipts, governance, budget, semanticSession)
+	}
 	raw := RuntimeStateRecord{Definition: definition, Facts: facts, ImplementationWork: ledger, SemanticPlanning: semantic, ActiveDispatch: active, CompletedDispatches: completed, OperationReceipts: receipts, OperationGovernanceBindings: governance, ExecutionBudget: budget}
 	for _, prior := range semanticSession.workStates {
 		if runtimeRawEqual(prior, raw) {
@@ -154,7 +159,7 @@ func validateRuntimeImplementationWorkStateInSession(definition RuntimeDefinitio
 // The complete original gate runs before any successful raw preimage is saved.
 // A public independent consumer always executes this gate afresh.
 func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinitionContext, facts RuntimeFacts, ledger RuntimeImplementationWorkLedger, semantic RuntimeSemanticPlanningLedger, active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord, receipts []RuntimeOperationReceipt, governance []RuntimeOperationGovernanceBinding, budget RuntimeExecutionBudgetLedger, semanticSession *runtimeSemanticValidationSession) error {
-	if err := validateRuntimeInputRevisionState(definition, facts, ledger, semantic); err != nil {
+	if err := validateRuntimeInputRevisionState(definition, facts, ledger, semantic, semanticSession); err != nil {
 		return err
 	}
 	if preview := ledger.ScopePreview; preview != nil {
@@ -177,6 +182,18 @@ func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinition
 			return fmt.Errorf("implementation purpose choice is invalid or duplicated")
 		}
 		seenChoices[choice.SemanticManifestHash] = true
+		if semanticSession != nil && semanticSession.committedPreimage != nil {
+			committed := false
+			for _, prior := range semanticSession.committedPreimage.ImplementationWork.PurposeChoices {
+				if runtimeRawEqual(prior, choice) {
+					committed = true
+					break
+				}
+			}
+			if committed {
+				continue
+			}
+		}
 		matches := 0
 		for _, history := range semantic.AllHistory() {
 			snapshot := history.Snapshot
@@ -248,6 +265,13 @@ func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinition
 	joined := map[string]bool{}
 	outstanding := 0
 	for _, round := range ledger.Rounds {
+		if semanticSession.completedWorkRound(round) {
+			joined[round.DispatchID] = true
+			for _, id := range round.GovernanceDispatchIDs {
+				joined[id] = true
+			}
+			continue
+		}
 		choiceMatches := 0
 		for _, choice := range ledger.PurposeChoices {
 			if choice.Purpose == RuntimeImplementationWorkPurposeEffect && choice.CoverageWorkItemID == round.CoverageWorkItemID && choice.ScopeRequestID == round.ScopeRequest.RequestID {
@@ -260,7 +284,7 @@ func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinition
 		if round.CompletedReceiptSetHash == "" && round.FailedReceiptHash == "" {
 			outstanding++
 		}
-		if round.WorkingBinding != nil {
+		if round.WorkingBinding != nil && !semanticSession.committedWorkRound(round) {
 			intent, err := resolveRuntimeImplementationWorkIntentInSession(round, semantic, semanticSession)
 			if err != nil {
 				return err

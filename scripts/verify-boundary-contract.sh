@@ -2471,7 +2471,7 @@ fi
 matches="$(
   find internal/modules/kernel/orchestrator/biz -maxdepth 1 -type f -name '*.go' ! -name '*_test.go' -print0 |
     xargs -0 -r grep -n -E -- '\.runtimeController\.[A-Z][A-Za-z0-9_]*\(' |
-    grep -v -E -- '\.runtimeController\.(ApplyInternalEvent|Load|QueryOperationReceipt|CompileEvidenceApplicabilityRead)\(' |
+    grep -v -E -- '\.runtimeController\.(ApplyInternalEvent|Load|QueryOperationReceipt)\(' |
     # Only the drained owner's lifecycle shell may discard pure compilation
     # inputs. This is not a reducer/transition facade; adapters remain forbidden.
     grep -v -E -- '^internal/modules/kernel/orchestrator/biz/owner.go:[0-9]+:[[:space:]]*m\.runtimeController\.ReleaseHistoricalCompilation\(\)$' || true
@@ -2541,7 +2541,7 @@ fi
 # All reducer/CAS mutation handlers are package-private.
 runtime_controller_unreviewed_exports="$(
   grep -R -n -E --include='*.go' --exclude='*_test.go' -- '^func \(c \*RuntimeController\) [A-Z][A-Za-z0-9_]*\(' "$runtime_transition_root" |
-    grep -v -E -- ' (ApplyInternalEvent|Load|QueryOperationReceipt|CompileEvidenceApplicabilityRead)\(' |
+    grep -v -E -- ' (ApplyInternalEvent|Load|QueryOperationReceipt)\(' |
     grep -v -E -- '^internal/modules/kernel/orchestrator/biz/runtime/controller.go:[0-9]+:func \(c \*RuntimeController\) ReleaseHistoricalCompilation\(\) \{$' || true
 )"
 if [[ -n "$runtime_controller_unreviewed_exports" ]]; then
@@ -2553,16 +2553,24 @@ $runtime_controller_unreviewed_exports
 
 Add owner mutation as a concrete RuntimeInternalEvent and package-private
 handler. State mutation is only ApplyInternalEvent; reviewed reads are Load,
-QueryOperationReceipt and the complete pure CompileEvidenceApplicabilityRead
-compiler. The only non-state lifecycle exception is
+QueryOperationReceipt. Applicability reads consume the owner-returned aggregate
+query product, without a second complete compiler. The only non-state lifecycle exception is
 ReleaseHistoricalCompilation after owner drain.
 EOF
   exit 1
 fi
 if ! grep -q -E -- 'func \(c \*RuntimeController\) Load\(' "$runtime_transition_root/controller.go" ||
    ! grep -q -E -- 'func \(c \*RuntimeController\) QueryOperationReceipt\(' "$runtime_transition_root/operation_receipt.go" ||
-   ! grep -q -E -- 'func \(c \*RuntimeController\) CompileEvidenceApplicabilityRead\(' "$runtime_transition_root/evidence_applicability_transition.go"; then
+   ! grep -q -E -- 'func \(a RuntimeAggregate\) EvidenceApplicabilityRead\(' "$runtime_transition_root/owner_read_projection.go"; then
   echo "boundary contract violation: RuntimeController scoped read surface is incomplete" >&2
+  exit 1
+fi
+
+# Drive consumes the owner result; the retired complete raw-query facade must
+# not return as a parallel authority entry.
+if ! grep -q -F -- 'aggregate.EvidenceApplicabilityRead()' internal/modules/kernel/orchestrator/biz/runtime_evidence_applicability_drive.go ||
+   grep -R -q -E --include='*.go' --exclude='*_test.go' -- '^func (\(c \*RuntimeController\) CompileEvidenceApplicabilityRead|(CompileRuntimeEvidenceApplicabilityRead|CompileRuntimeEvidenceApplicabilityRequest|NextRuntimeEvidenceApplicabilityRequest))\(' "$runtime_transition_root"; then
+  echo "boundary contract violation: applicability drive must consume the single owner query product" >&2
   exit 1
 fi
 
@@ -4767,15 +4775,17 @@ for marker in \
 		exit 1
 	fi
 done
-runtime_drive_lease_invariant="$(sed -n '/^func validateRuntimeAggregateSM4DriveLease(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/aggregate_invariant.go)"
+# The canonical record admission owns this rule; retaining the former
+# aggregate duplicate would defeat the single-authority boundary.
+runtime_drive_lease_invariant="$(sed -n '/^func (r RuntimeStateRecord) validateInSourceSession(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_state.go)"
 for marker in \
-	'a.Termination != nil' \
-	'a.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry' \
-	'a.DriveLease.FailureSignature != "terminal-delivery"'; do
-	if ! grep -q -F -- "$marker" <<<"$runtime_drive_lease_invariant"; then
-		echo "boundary contract violation: administrative terminal retained a non-canonical drive lease ($marker)" >&2
-		exit 1
-	fi
+ 'r.Termination != nil' \
+ 'r.DriveLease.Reason != RuntimeDriveLeaseReasonDeliveryRetry' \
+ 'r.DriveLease.FailureSignature != "terminal-delivery"'; do
+ if ! grep -q -F -- "$marker" <<<"$runtime_drive_lease_invariant"; then
+  echo "boundary contract violation: administrative terminal retained a non-canonical drive lease ($marker)" >&2
+  exit 1
+ fi
 done
 runtime_synchronous_drive="$(sed -n '/^func (m \*Biz) driveRuntime(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime_drive.go)"
 for marker in \
@@ -4900,8 +4910,7 @@ for marker in \
 	fi
 done
 for validator in \
-	'internal/pkg/workorchruntimecontract/runtime_state.go' \
-	'internal/modules/kernel/orchestrator/biz/runtime/aggregate_invariant.go'; do
+	'internal/pkg/workorchruntimecontract/runtime_state.go'; do
 	if ! grep -q -F -- 'ValidateRuntimeNonTerminalRecoveryLinearization' "$validator"; then
 		echo "boundary contract violation: persisted Runtime validator bypasses nonterminal recovery linearization ($validator)" >&2
 		exit 1
@@ -5075,10 +5084,10 @@ if grep -q -E -- 'binding\.(TargetRefs|ProspectiveTargetRefs)' <<<"$receipt_targ
 fi
 dispatch_manifest_target_seal="$(sed -n '/^func SealDispatchWithManifestAndPreSealAuthority(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/dispatch_commit.go)"
 dispatch_intrinsic_cold_entry="$(sed -n '/^func (d RuntimeDispatchRecord) ValidateIntrinsic(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_state.go)"
-dispatch_fresh_load_target_validation="$(sed -n '/^func (d RuntimeDispatchRecord) validateIntrinsicInLineageIndex(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_state.go)"
+dispatch_fresh_load_target_validation="$(sed -n '/^func (d RuntimeDispatchRecord) ValidateIntrinsic(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_state.go)"
 dispatch_authority_hash="$(sed -n '/^func StableRuntimeDispatchAuthorityHash(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_state.go)"
 if [[ "$(grep -c -F -- 'RuntimeDispatchOperationTargetAuthorizationsFromManifest(manifest, candidate)' <<<"$dispatch_manifest_target_seal" || true)" -ne 1 ]] ||
-	! grep -q -F -- 'return d.validateIntrinsicInLineageIndex(nil)' <<<"$dispatch_intrinsic_cold_entry" ||
+	! grep -q -F -- 'ValidateRuntimeDispatchOperationTargetAuthorizations(d.Candidate, d.OperationTargetAuthorizations)' <<<"$dispatch_intrinsic_cold_entry" ||
 	! grep -q -F -- 'ValidateRuntimeDispatchOperationTargetAuthorizations' <<<"$dispatch_fresh_load_target_validation" ||
 	! grep -q -F -- 'StableRuntimeDispatchOperationTargetAuthorizationsHash(dispatch.OperationTargetAuthorizations)' <<<"$dispatch_authority_hash"; then
 	echo "boundary contract violation: final dispatch seal, fresh-load or authority hash lost sealed target authorization" >&2
@@ -5502,6 +5511,7 @@ done
 prospective_collective_runtime="$(cat \
 	internal/modules/kernel/orchestrator/biz/runtime/prospective_receipt_set.go \
 	internal/modules/kernel/orchestrator/biz/runtime/authority_assessment_transition.go \
+	internal/modules/kernel/orchestrator/biz/runtime/owner_reload_admission.go \
 	internal/modules/kernel/orchestrator/biz/runtime/aggregate_invariant.go)"
 for marker in \
 	'runtimeProspectiveCoverageKindComplete' \
@@ -5811,11 +5821,15 @@ fi
 # applicability, and only the Orchestrator SM-2 aggregate may seal/credit the
 # resulting proof. No Workspace-side compiler or recipe-derived synthetic
 # receipt check may recreate a second authority path.
+# The shared semantic-history validator also recompiles original Definition
+# requirements to reverse-prove retained structural maintenance catalogs. This
+# is a pure source check, not another admission or binding producer.
 validation_requirement_callsites="$(grep -R -l -E --include='*.go' --exclude='*_test.go' -- 'CompileRuntimeValidationProofRequirements\(' internal | sort)"
 expected_validation_requirement_callsites="$(printf '%s\n' \
 	internal/pkg/bootstrapcompiler/runtime_bootstrap.go \
 	internal/modules/kernel/orchestrator/biz/runtime/aggregate_invariant.go \
 	internal/modules/kernel/orchestrator/biz/runtime_prerequisite_drive.go \
+	internal/pkg/workorchruntimecontract/runtime_semantic_definition_session.go \
 	internal/pkg/workorchruntimecontract/runtime_semantic_obligation.go \
 	internal/pkg/workorchruntimecontract/runtime_validation_proof_requirement.go | sort)"
 if [[ "$validation_requirement_callsites" != "$expected_validation_requirement_callsites" ]]; then
@@ -5902,7 +5916,7 @@ for marker in \
 		exit 1
 	fi
 done
-if ! grep -q -F 'ValidateRuntimeSemanticLedgerDefinitionSources(a.SemanticPlanning, a.Facts.DefinitionSeed, a.Facts.DefinitionFocuses)' internal/modules/kernel/orchestrator/biz/runtime/aggregate_invariant.go ||
+if ! grep -q -F 'gate.ValidateDefinitionSources(a.SemanticPlanning, a.Facts.DefinitionSeed, a.Facts.DefinitionFocuses)' internal/modules/kernel/orchestrator/biz/runtime/owner_reload_admission.go ||
 	! grep -q -F 'validateRuntimeSemanticManifestDefinitionInSession(*ledger.Manifest, seed, focuses, session)' internal/pkg/workorchruntimecontract/runtime_semantic_definition_session.go ||
 	! grep -q -F 'validateRuntimeSemanticManifestDefinitionInSession(*generation.Snapshot.Manifest, seed, focuses, session)' internal/pkg/workorchruntimecontract/runtime_semantic_definition_session.go ||
 	! grep -q -F 'func ValidateRuntimeSemanticPlanManifestAgainstDefinition' internal/pkg/workorchruntimecontract/runtime_semantic_contract.go ||

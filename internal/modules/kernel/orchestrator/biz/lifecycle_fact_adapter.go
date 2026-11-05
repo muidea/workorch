@@ -6,6 +6,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -171,13 +172,12 @@ func validateRunGovernanceWaitAcknowledgement(response runevents.RunLifecycleCom
 }
 
 func validateRunContinuationAcknowledgement(response runevents.RunLifecycleCommandResult, fact runevents.RuntimeContinuationEligibleFact, stateRevision uint64) error {
-	run := response.Run
-	if run == nil || run.WorkspaceID != fact.WorkspaceID || run.ID != fact.RunID || run.RuntimeState == nil || run.RuntimeLifecycleFence == nil ||
-		run.RuntimeState.StateRevision != stateRevision || run.RuntimeLifecycleFence.RuntimeStateRevision != stateRevision ||
-		run.RuntimeLifecycleFence.GovernanceFenceID != runtimeGovernanceLifecycleFenceID(fact.AuthoritySnapshotID, fact.DispatchID) ||
-		run.RuntimeLifecycleFence.GovernanceResolutionID != fact.ResolutionID ||
-		run.RuntimeLifecycleFence.TerminalFenceID != "" ||
-		run.State != common.RunStateActive || run.BlockingTicketID != "" || run.BlockingApprovalID != "" {
+	return validateRunContinuationLifecycle(runtimeLifecycleView(response.Run), fact, stateRevision)
+}
+
+func validateRunContinuationLifecycle(run runmodel.RuntimeLifecycleState, fact runevents.RuntimeContinuationEligibleFact, stateRevision uint64) error {
+	if run.WorkspaceID != fact.WorkspaceID || run.RunID != fact.RunID || run.LifecycleFence == nil || run.RuntimeStateRevision != stateRevision || run.LifecycleFence.RuntimeStateRevision != stateRevision ||
+		run.LifecycleFence.GovernanceFenceID != runtimeGovernanceLifecycleFenceID(fact.AuthoritySnapshotID, fact.DispatchID) || run.LifecycleFence.GovernanceResolutionID != fact.ResolutionID || run.LifecycleFence.TerminalFenceID != "" || run.State != common.RunStateActive || run.BlockingTicketID != "" || run.BlockingApprovalID != "" {
 		return fmt.Errorf("run owner did not acknowledge the exact governance continuation")
 	}
 	return nil
@@ -222,7 +222,7 @@ func continuationFromGovernanceCommit(
 	// governance request. Commit may already have sealed a successor authority,
 	// so using aggregate.Decision.AuthoritySnapshot here would lose the binding
 	// that Run must verify against GovernanceResolutions.
-	record := runtimeStateRecordFromAggregate(aggregate)
+	record := runtimecontract.RuntimeStateRecord(aggregate)
 	handoff, governed, err := runtimeGovernanceLifecycleHandoffFromState(&record)
 	if err != nil {
 		return runtimeGovernanceLifecycleHandoff{}, 0, err

@@ -435,6 +435,9 @@ func TestRuntimeAggregateShellValidationProofApplicabilitySurvivesSerializationA
 		len(loaded.Resources.OperationAdmissibilities[0].ValidationSurfaces[0].ProofRequirementBindings) != 2 {
 		t.Fatalf("serialization lost immutable proof lineage: %+v", loaded)
 	}
+	t.Run("formal catalog source transitions", func(t *testing.T) {
+		assertRuntimeValidationCatalogSourceTransitions(t, loaded)
+	})
 	for _, test := range []struct {
 		name   string
 		mutate func(*runtimecontract.RuntimeFacts)
@@ -836,7 +839,7 @@ func TestRuntimeAggregateValidationPhasesRejectOwnedInvalidState(t *testing.T) {
 		{
 			name: "sm3 active dispatch",
 			mutate: func(value *RuntimeAggregate) {
-				value.ActiveDispatch = &SealedDispatch{}
+				value.ActiveDispatch = &runtimecontract.RuntimeDispatchRecord{}
 			},
 			validate: validateRuntimeAggregateSM3ActiveDispatch,
 		},

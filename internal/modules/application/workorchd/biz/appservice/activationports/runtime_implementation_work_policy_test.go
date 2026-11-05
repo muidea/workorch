@@ -65,8 +65,8 @@ func TestRuntimeImplementationWorkPolicyInputIsLosslessAndUnavailable(t *testing
 	if err := contract.ValidateExecutableAdmission(); !errors.Is(err, runtimecontract.ErrRuntimeImplementationWorkUnavailable) {
 		t.Fatalf("unimplemented execution accepted: %v", err)
 	}
-	// Keep the closed wire shape and all typed fields in lockstep. A newly
-	// allowed name must not become a silent producer/consumer mismatch.
+	// Keep the closed current configuration and executable typed fields in
+	// lockstep. Sealed source-image metadata is deliberately not a new input.
 	fields := runtimeProfileFields("implementationWork")
 	known := map[string]bool{}
 	for _, key := range strings.Fields(fields.text + " " + fields.boolean + " " + fields.integer + " " + fields.stringList) {
@@ -78,6 +78,12 @@ func TestRuntimeImplementationWorkPolicyInputIsLosslessAndUnavailable(t *testing
 	typ := reflect.TypeOf(expected)
 	for i := 0; i < typ.NumField(); i++ {
 		key := strings.Split(typ.Field(i).Tag.Get("json"), ",")[0]
+		if key == "maxInputRevisionsPerCWI" {
+			if known[key] {
+				t.Fatal("source-only cumulative count was readmitted as configuration")
+			}
+			continue
+		}
 		if !known[key] {
 			t.Fatalf("typed field %s has no exact raw guard", key)
 		}
@@ -98,6 +104,10 @@ func TestRuntimeImplementationWorkPolicyMalformedInputCannotDisappear(t *testing
 		}
 	}
 	for name, change := range map[string]func(map[string]any){
+		"source-only cumulative count": func(p map[string]any) {
+			p["inputRevisionProtocolRef"] = runtimecontract.RuntimeValidationInputRevisionProtocolV1
+			p["maxInputRevisionsPerCWI"] = 4
+		},
 		"unknown field":        func(p map[string]any) { p["nextAction"] = "execute" },
 		"wrong case":           func(p map[string]any) { p["OwnerModuleID"] = p["ownerModuleId"]; delete(p, "ownerModuleId") },
 		"wrong bool":           func(p map[string]any) { p["protectValidationInputs"] = "true" },

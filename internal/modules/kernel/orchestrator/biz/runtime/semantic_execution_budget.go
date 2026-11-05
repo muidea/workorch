@@ -7,12 +7,11 @@ import (
 )
 
 // SemanticExecutionBudget reads the exact pre-submission owner snapshot. It
-// cannot reconstruct an older budget from a newer aggregate revision.
+// cannot reconstruct an older budget from a newer aggregate revision. The
+// owner has admitted the aggregate; this consumer checks the current budget
+// sources and request binding rather than re-admitting its full history.
 func SemanticExecutionBudget(a RuntimeAggregate, c runtimecontract.RuntimeSemanticPlanRequestContext, m runtimecontract.RuntimeSemanticPlanManifest) (runtimecontract.RuntimeSemanticExecutionBudget, error) {
 	invalid := runtimecontract.RuntimeSemanticExecutionBudget{}
-	if err := a.Validate(); err != nil {
-		return invalid, err
-	}
 	if c.WorkspaceID != a.Facts.WorkspaceID || c.RunID != a.Facts.RunID || c.Definition.Revision != a.Definition.Revision || c.Definition.StartupInputHash != a.Definition.StartupInputHash ||
 		c.DefinitionSeed.Hash != a.Facts.DefinitionSeed.Hash || a.SemanticPlanning.Manifest == nil || m.Hash != a.SemanticPlanning.Manifest.Hash ||
 		c.CoverageProgress.SourceStateRevision != a.StateRevision || c.CoverageProgress.EvidenceRevision != a.Facts.EvidenceRevision ||
@@ -29,7 +28,7 @@ func SemanticExecutionBudget(a RuntimeAggregate, c runtimecontract.RuntimeSemant
 	if err != nil {
 		return invalid, err
 	}
-	durable, err := runtimecontract.RuntimeDurableDispatchUsage(sealedDispatchRecord(a.ActiveDispatch), sealedDispatchesToRuntimeRecords(a.CompletedDispatches), a.CandidateAttempts)
+	durable, err := runtimecontract.RuntimeDurableDispatchUsage(sealedDispatchRecord(a.ActiveDispatch), (a.CompletedDispatches), a.CandidateAttempts)
 	if err != nil {
 		return invalid, err
 	}

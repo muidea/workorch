@@ -1,7 +1,6 @@
 package workorchruntimecontract
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"sort"
@@ -91,7 +90,7 @@ func validateRuntimeSemanticPlanBatchFeasibilityResultWithValidatedManifest(r Ru
 func StableRuntimeSemanticPlanBatchFeasibilityResultHash(result RuntimeSemanticPlanBatchFeasibilityResult) string {
 	result = result.Normalized()
 	result.Hash = ""
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-semantic-batch-feasibility")
 	writeHashString(h, result.BatchID)
 	writeHashString(h, result.BatchHash)
@@ -211,7 +210,7 @@ func SameRuntimeSemanticPlanBatchImmutableIdentity(left, right RuntimeSemanticPl
 func StableRuntimeSemanticPlanBatchHash(batch RuntimeSemanticPlanBatch) string {
 	batch = batch.Normalized()
 	batch.Hash = ""
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-semantic-plan-batch")
 	writeHashString(h, batch.BatchID)
 	writeHashString(h, batch.ManifestHash)

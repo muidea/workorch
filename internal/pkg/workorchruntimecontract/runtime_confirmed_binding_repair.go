@@ -13,9 +13,10 @@ func runtimeConfirmedBindingRepairSatisfied(binding CoverageEvidenceBinding, sou
 }
 
 func runtimeConfirmedBindingRepairInSession(binding CoverageEvidenceBinding, sources RuntimeLineageAssertionSources, cutoff string, session *runtimeHistoricalPreimageSession) bool {
-	if binding.Validate() != nil || !runtimeCanonicalLineageCutoff(cutoff) || sources.Budget.Validate() != nil || runtimeValidateLineageOperationsInSession(sources, session) != nil || validateRuntimeRepairSurfaceConfirmationRecordsInIndex(sources.Confirmations, session.lineageIndex()) != nil || !runtimeFreshBindingInputReviewInSession(binding, sources.Semantic, session) {
-		return false
-	}
+	// Currentness is a necessary condition of this consumer. An old binding
+	// cannot consume a repair, regardless of the unrelated source graph. Reject
+	// it before rebuilding that graph; every possible success still traverses
+	// the complete original guards below. This is not retained proof/credit.
 	current := 0
 	for _, item := range sources.Facts.Coverage {
 		if item.ID == binding.CoverageWorkItemID && item.CurrentBindingRef != nil && runtimeLineageBindingMatches(binding, item.ID, *item.CurrentBindingRef) {
@@ -25,17 +26,38 @@ func runtimeConfirmedBindingRepairInSession(binding CoverageEvidenceBinding, sou
 	if current != 1 {
 		return false
 	}
-	for _, repair := range sources.Completed {
-		if repair.RepairCommitment == nil || repair.State != RuntimeDispatchStateCommitted || repair.Candidate.StateChange == nil || repair.Candidate.Validation != nil || repair.ImplementationWorkCommitment != nil || !RuntimeCoverageEvidenceBindingProjectionsEqual(repair.CoverageBindings, []CoverageEvidenceBinding{binding}) {
-			continue
+	// No eligible repair dispatch means this consumer cannot succeed. Select
+	// the original ordered members before rebuilding unrelated operation,
+	// budget and review sources. A selection is not receipt/repair proof: every
+	// possible success still crosses all original guards below. A repair member
+	// must be strictly after its rejected baseline and no later than cutoff;
+	// a baseline at/after cutoff therefore cannot supply this historical proof.
+	// This filter never admits a source or bypasses complete ledger validation.
+	var repairs []int
+	for i, repair := range sources.Completed {
+		if repair.RepairCommitment != nil && repair.State == RuntimeDispatchStateCommitted && repair.Candidate.StateChange != nil && repair.Candidate.Validation == nil && repair.ImplementationWorkCommitment == nil && EvidenceRevisionAfter(cutoff, repair.Transaction.EvidenceRevision) && RuntimeCoverageEvidenceBindingProjectionsEqual(repair.CoverageBindings, []CoverageEvidenceBinding{binding}) {
+			repairs = append(repairs, i)
 		}
+	}
+	if len(repairs) == 0 {
+		return false
+	}
+	if binding.Validate() != nil || !runtimeCanonicalLineageCutoff(cutoff) ||
+		sources.Budget.Validate() != nil ||
+		runtimeValidateLineageOperationsInSession(sources, session) != nil ||
+		ValidateRuntimeRepairSurfaceConfirmationRecords(sources.Confirmations) != nil ||
+		!runtimeFreshBindingInputReviewInSession(binding, sources.Semantic, session) {
+		return false
+	}
+	for _, i := range repairs {
+		repair := sources.Completed[i]
 		c := *repair.RepairCommitment
 		// This first bounded version supports the exact original dispatch, not
 		// a partial/governance-resume set assembled across different dispatches.
 		if ValidateRuntimeDispatchRepairCommitmentProjection(repair.RepairCommitmentHash, repair.RepairCommitment) != nil || c.InputRepair != nil || c.OriginDispatchID != repair.ID || c.FocusID != repair.Transaction.FocusID || !slices.Equal(c.Closure.CoverageWorkItemIDs, []common.CoverageWorkItemID{binding.CoverageWorkItemID}) {
 			continue
 		}
-		rejected, receipt, operation, ok := runtimeConfirmedBindingRepairSourceInIndex(binding, sources, repair, session.lineageIndex())
+		rejected, receipt, operation, ok := runtimeConfirmedBindingRepairSource(binding, sources, repair)
 		if !ok {
 			continue
 		}
@@ -76,7 +98,7 @@ func runtimeConfirmedBindingRepairInSession(binding CoverageEvidenceBinding, sou
 		last, complete := rejected.Revision, true
 		for _, member := range operations {
 			owner, known := RuntimeOperationDescriptorForKind(member.Kind)
-			fact, receipt, valid := runtimeLineageOperationFactFromLedgersInIndex(repair, member, sources, true, true, false, session.lineageIndex())
+			fact, receipt, valid := runtimeLineageOperationFactFromLedgers(repair, member, sources, true, true, false)
 			if !known || owner.OwnerModuleID != c.RepairOwnerModuleID || !slices.Contains(route.RepairOperationKinds, member.Kind) || !valid || !receipt.Changed || !RuntimeEffectIsDurable(receipt.ObservedEffectScope) || !slices.Equal(member.BindingRefs, []string{binding.ID}) || len(receipt.TargetRefs) == 0 || !runtimeTargetRefsSubset(receipt.TargetRefs, c.Closure.GroundedTargetRefs) || !EvidenceRevisionAfter(fact.Revision, rejected.Revision) || EvidenceRevisionAfter(fact.Revision, cutoff) {
 				complete = false
 				break
@@ -85,7 +107,7 @@ func runtimeConfirmedBindingRepairInSession(binding CoverageEvidenceBinding, sou
 				last = fact.Revision
 			}
 		}
-		if complete && runtimeConfirmedBindingFreshValidationInIndex(binding, sources, c, last, cutoff, session.lineageIndex()) {
+		if complete && runtimeConfirmedBindingFreshValidation(binding, sources, c, last, cutoff) {
 			return true
 		}
 	}
@@ -93,10 +115,6 @@ func runtimeConfirmedBindingRepairInSession(binding CoverageEvidenceBinding, sou
 }
 
 func runtimeConfirmedBindingRepairSource(binding CoverageEvidenceBinding, sources RuntimeLineageAssertionSources, repair RuntimeDispatchRecord) (EvidenceFact, RuntimeOperationReceipt, RuntimeOperation, bool) {
-	return runtimeConfirmedBindingRepairSourceInIndex(binding, sources, repair, nil)
-}
-
-func runtimeConfirmedBindingRepairSourceInIndex(binding CoverageEvidenceBinding, sources RuntimeLineageAssertionSources, repair RuntimeDispatchRecord, index *runtimeOwnerLineageIndex) (EvidenceFact, RuntimeOperationReceipt, RuntimeOperation, bool) {
 	c := *repair.RepairCommitment
 	var fact EvidenceFact
 	var receipt RuntimeOperationReceipt
@@ -110,8 +128,8 @@ func runtimeConfirmedBindingRepairSourceInIndex(binding CoverageEvidenceBinding,
 			if member.ID != c.SourceOperationID {
 				continue
 			}
-			f, r, valid := runtimeLineageOperationFactFromLedgersInIndex(dispatch, member, sources, false, false, true, index)
-			if !valid || f.Kind != EvidenceKindValidation || f.ID != c.SourceEvidenceFactID || StableRuntimeEvidenceFactHash(f) != c.SourceEvidenceFactHash || f.AuthoritySnapshotID != c.SourceAuthoritySnapshotID || StableRuntimeOperationHash(member) != c.SourceOperationHash || r.ExecutionKey != c.SourceReceiptExecutionKey || r.Fence != c.SourceReceiptFence || index.receiptHash(r) != c.SourceReceiptHash || f.Revision != c.Closure.BaselineEvidenceRevision || f.Revision != repair.Transaction.EvidenceRevision || f.FailureSignature != c.Closure.GapSignature || len(f.CoverageWorkItemIDs) != 0 && !slices.Equal(f.CoverageWorkItemIDs, c.Closure.CoverageWorkItemIDs) || !slices.Equal(f.BindingRefs, []string{binding.ID}) || r.Feedback == nil || r.Feedback.OriginalDiagnostic == nil || r.Feedback.OriginalDiagnostic.ValidationDiagnostic == nil {
+			f, r, valid := runtimeLineageOperationFactFromLedgers(dispatch, member, sources, false, false, true)
+			if !valid || f.Kind != EvidenceKindValidation || f.ID != c.SourceEvidenceFactID || StableRuntimeEvidenceFactHash(f) != c.SourceEvidenceFactHash || f.AuthoritySnapshotID != c.SourceAuthoritySnapshotID || StableRuntimeOperationHash(member) != c.SourceOperationHash || r.ExecutionKey != c.SourceReceiptExecutionKey || r.Fence != c.SourceReceiptFence || StableRuntimeOperationReceiptHash(r) != c.SourceReceiptHash || f.Revision != c.Closure.BaselineEvidenceRevision || f.Revision != repair.Transaction.EvidenceRevision || f.FailureSignature != c.Closure.GapSignature || len(f.CoverageWorkItemIDs) != 0 && !slices.Equal(f.CoverageWorkItemIDs, c.Closure.CoverageWorkItemIDs) || !slices.Equal(f.BindingRefs, []string{binding.ID}) || r.Feedback == nil || r.Feedback.OriginalDiagnostic == nil || r.Feedback.OriginalDiagnostic.ValidationDiagnostic == nil {
 				continue
 			}
 			fact, receipt, operation, matches = f, r, member, matches+1
@@ -121,10 +139,6 @@ func runtimeConfirmedBindingRepairSourceInIndex(binding CoverageEvidenceBinding,
 }
 
 func runtimeConfirmedBindingFreshValidation(binding CoverageEvidenceBinding, sources RuntimeLineageAssertionSources, c RuntimeDispatchRepairCommitment, repairRevision, cutoff string) bool {
-	return runtimeConfirmedBindingFreshValidationInIndex(binding, sources, c, repairRevision, cutoff, nil)
-}
-
-func runtimeConfirmedBindingFreshValidationInIndex(binding CoverageEvidenceBinding, sources RuntimeLineageAssertionSources, c RuntimeDispatchRepairCommitment, repairRevision, cutoff string, index *runtimeOwnerLineageIndex) bool {
 	proof, found := CoverageEvidenceProofForKind(binding, EvidenceKindValidation)
 	if !found {
 		return false
@@ -149,7 +163,7 @@ func runtimeConfirmedBindingFreshValidationInIndex(binding CoverageEvidenceBindi
 		var accepted []EvidenceFact
 		last, complete := repairRevision, true
 		for _, member := range operations {
-			fact, receipt, valid := runtimeLineageOperationFactFromLedgersInIndex(dispatch, member, sources, true, false, false, index)
+			fact, receipt, valid := runtimeLineageOperationFactFromLedgers(dispatch, member, sources, true, false, false)
 			if !valid || MatchCoverageEvidenceBindingReceipt(binding, EvidenceKindValidation, member, receipt) != nil || fact.Kind != EvidenceKindValidation || !slices.Equal(fact.BindingRefs, []string{binding.ID}) || !slices.Equal(fact.CoverageWorkItemIDs, c.Closure.CoverageWorkItemIDs) || !EvidenceRevisionAfter(fact.Revision, repairRevision) || EvidenceRevisionAfter(fact.Revision, cutoff) || fact.Validation == nil || !RuntimeValidationObservationSatisfiesCoverageProof(proof, *fact.Validation) {
 				complete = false
 				break

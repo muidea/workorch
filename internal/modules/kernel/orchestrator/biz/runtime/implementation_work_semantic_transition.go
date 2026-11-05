@@ -56,7 +56,7 @@ func projectImplementationPurpose(a *RuntimeAggregate) (bool, error) {
 	}
 	a.ImplementationWork.PurposeChoices = append(a.ImplementationWork.PurposeChoices, choice)
 	a.ImplementationWork.ScopePreview = nil
-	snapshot := ledger.WithoutHistory().Clone()
+	snapshot := ledger.WithoutHistory().CloneRaw()
 	history := runtimecontract.RuntimeSemanticPlanningGeneration{RetiredAtStateRevision: a.StateRevision + 1, Reason: runtimecontract.RuntimeSemanticPlanningRetirementImplementationPurpose, Snapshot: snapshot}
 	if err := history.Validate(); err != nil {
 		return false, err

@@ -4,8 +4,7 @@ import "testing"
 
 func TestRuntimeAssessmentAdjudicationMissingAuthorityFailsClosed(t *testing.T) {
 	s := historicalSessionFixture(t)
-	session := &runtimeHistoricalPreimageSession{sourceCompiler: &runtimeHistoricalSourceCompiler{}}
-	if err := validateRuntimeAssessmentAdjudicationsInSession(s.Facts, s.Completed, s.ProofLineage, s, session); err != nil {
+	if err := ValidateRuntimeAssessmentAdjudications(s.Facts, s.Completed); err != nil {
 		t.Fatal(err)
 	}
 	checked := 0
@@ -18,8 +17,8 @@ func TestRuntimeAssessmentAdjudicationMissingAuthorityFailsClosed(t *testing.T) 
 			dispatch.AssessmentAuthorityInput = nil
 			for range 2 {
 				for _, err := range []error{
-					ValidateRuntimeAssessmentAdjudication(dispatch, fact, s.Facts, s.Completed, s.ProofLineage, s),
-					validateRuntimeAssessmentAdjudicationInSession(dispatch, fact, s.Facts, s.Completed, s.ProofLineage, s, session),
+					ValidateRuntimeAssessmentAdjudication(dispatch, fact, s.Facts),
+					ValidateRuntimeAssessmentAdjudication(dispatch, fact, s.Facts),
 				} {
 					if err == nil || err.Error() != "runtime assessment adjudication requires assessment dispatch authority" {
 						t.Fatalf("missing authority did not fail closed: %v", err)
@@ -59,7 +58,7 @@ func TestRuntimeAssessmentAdjudicationMissingAuthorityPreservesPriorErrors(t *te
 					t.Fatal("fixture omitted prior malformed-adjudication gate")
 				}
 				for range 2 {
-					got := ValidateRuntimeAssessmentAdjudication(d, fact, s.Facts, s.Completed, s.ProofLineage, s)
+					got := ValidateRuntimeAssessmentAdjudication(d, fact, s.Facts)
 					if cwiFocusBindingsError(got) != cwiFocusBindingsError(want) {
 						t.Fatalf("missing authority overtook prior gate %d: %v != %v", arm, got, want)
 					}

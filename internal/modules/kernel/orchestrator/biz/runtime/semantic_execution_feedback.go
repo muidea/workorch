@@ -36,7 +36,7 @@ func SemanticExecutionFeedback(a RuntimeAggregate, c runtimecontract.RuntimeSema
 				if string(fact.ID) != triggerRef || fact.FailureSignature != r.FailureSignature || fact.Kind != runtimecontract.EvidenceKindValidation {
 					continue
 				}
-				dispatches := append([]SealedDispatch(nil), a.CompletedDispatches...)
+				dispatches := append([]runtimecontract.RuntimeDispatchRecord(nil), a.CompletedDispatches...)
 				if a.ActiveDispatch != nil {
 					dispatches = append(dispatches, *a.ActiveDispatch)
 				}

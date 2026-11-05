@@ -3,11 +3,14 @@ package workorchruntimecontract
 import (
 	"fmt"
 	"sync"
+
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 // RuntimeOwnerInvariantSourceGate supplies complete pure validators only during
 // the synchronous owner continuation. It is not a session or a successful
-// product: every method requires all original inputs and executes every join.
+// product: every method requires all original inputs. Complete candidate-source
+// results may be reused only for exact raw inputs within this transaction.
 // A nil gate is the independent cold path. A captured non-nil gate is revoked
 // on continuation return, including panic. No gate is retained across images.
 // runtime-owner-invariant-source-compiler/v1 changes wiring, not the historical
@@ -118,5 +121,34 @@ func (g *RuntimeOwnerInvariantSourceGate) ValidateAssessmentSources(ledger Runti
 			return fmt.Errorf("accepted runtime assessment semantic ledger: %w", err)
 		}
 		return validateRuntimeAcceptedAssessmentPurposePreimagesInSession(ledger, active, completed, attempts, sessions, s)
+	})
+}
+
+// Candidate source consumers are independent complete gates. A nil receiver is
+// the original cold validator; transaction-local reuse requires all raw inputs.
+func (g *RuntimeOwnerInvariantSourceGate) ValidateCandidateAttempts(workspace common.WorkspaceID, run common.RunID, values []RuntimeCandidateAttemptRecord) error {
+	if g == nil {
+		return ValidateRuntimeCandidateAttemptRecordsForScope(workspace, run, values)
+	}
+	return g.validate(func(s *runtimeSemanticValidationSession) error {
+		return validateRuntimeCandidateAttemptSourcesInSession(workspace, run, values, s)
+	})
+}
+
+func (g *RuntimeOwnerInvariantSourceGate) ValidateCandidateRequests(values []RuntimeCandidateRequestSession) error {
+	if g == nil {
+		return ValidateRuntimeCandidateRequestSessions(values)
+	}
+	return g.validate(func(s *runtimeSemanticValidationSession) error {
+		return validateRuntimeCandidateRequestSourcesInSession(values, s)
+	})
+}
+
+func (g *RuntimeOwnerInvariantSourceGate) ValidateCandidateManifestSources(active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord, attempts []RuntimeCandidateAttemptRecord, sessions []RuntimeCandidateRequestSession) error {
+	if g == nil {
+		return ValidateRuntimeAcceptedCandidateManifestLineage(active, completed, attempts, sessions)
+	}
+	return g.validate(func(s *runtimeSemanticValidationSession) error {
+		return validateRuntimeCandidateManifestSourcesInSession(active, completed, attempts, sessions, s)
 	})
 }

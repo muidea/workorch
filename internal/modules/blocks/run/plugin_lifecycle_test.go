@@ -139,13 +139,13 @@ func TestRunLifecycleFailedUnsubscribeKeepsOwnerAndResumesLedger(t *testing.T) {
 		}
 		seen[topic] = true
 	}
-	if len(seen) != 24 || !seen[runevents.TopicObserveWorkspacePreparationHistory] || !seen[runevents.TopicQueryWorkspaceExecutionIntentReceipt] || hub.unsubscribeCalls != 25 {
+	if len(seen) != 25 || !seen[runevents.TopicObserveWorkspacePreparationHistory] || !seen[runevents.TopicQueryWorkspaceExecutionIntentReceipt] || hub.unsubscribeCalls != 26 {
 		t.Fatalf("release ledger: topics=%d calls=%d", len(seen), hub.unsubscribeCalls)
 	}
 	if err := manager.TeardownChecked(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if hub.unsubscribeCalls != 25 {
+	if hub.unsubscribeCalls != 26 {
 		t.Fatal("duplicate manager teardown repeated release")
 	}
 }

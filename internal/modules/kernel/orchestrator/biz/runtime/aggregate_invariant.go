@@ -6,92 +6,20 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/governancecheck"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// Validate remains the single complete aggregate invariant gate. The private
-// validators are ordered to preserve the historical fail-fast sequence while
-// making each state-machine responsibility reviewable in isolation.
+// Validate admits a cold aggregate through the same canonical record rules
+// and aggregate-only joins used by owner reload and Commit after-images.
 func (a RuntimeAggregate) Validate() error {
-	if err := runtimecontract.ValidateRuntimeDefinitionLineageAssertions(a.Facts.DefinitionFocuses, a.Facts.Activation.ExecutionContract.ProfileContracts); err != nil {
-		return err
-	}
-	if err := runtimecontract.ValidateRuntimeResultFeedbackVersion(a.ResultFeedbackVersion); err != nil {
-		return err
-	}
-	// 同次完整门禁只生成一次 detached dispatch；各阶段仍执行原完整校验。
-	var active *runtimecontract.RuntimeDispatchRecord
-	if a.ActiveDispatch != nil {
-		value := sealedDispatchToRuntimeRecord(*a.ActiveDispatch)
-		active = &value
-	}
-	completed := sealedDispatchesToRuntimeRecords(a.CompletedDispatches)
-	return runtimecontract.ValidateRuntimeConvergenceSourcesAndSemanticLedger(
-		runtimeLineageAssertionSourcesWithDispatches(a, active, completed), a.Decision.RequiredOutput, a.StateRevision,
-		func() error { return validateRuntimeAggregateSM2BeforeSemantic(a, active, completed) },
-		func() error { return a.validateAfterSemanticSources(active, completed) })
+	return runtimecontract.CompileRuntimeOwnerStateTransaction(func(validate func(runtimecontract.RuntimeOwnerStateSourceImage) error) error {
+		return validate(ownerStateSourceImage(nil, a))
+	})
 }
 
 // Only Validate and the complete owner-local DTO/aggregate compiler call this
 // continuation, immediately after their complete ordered source gates.
-func (a RuntimeAggregate) validateAfterSemanticSources(active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
-	return a.validateAfterSemanticSourcesInGate(active, completed, nil)
-}
-
-func (a RuntimeAggregate) validateAfterSemanticSourcesInGate(active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord, gate *runtimecontract.RuntimeOwnerInvariantSourceGate) error {
-	if err := validateRuntimeAggregateSM2AfterSemanticInGate(a, gate); err != nil {
-		return err
-	}
-	if err := validateRuntimeAggregateSM3ActiveDispatch(a); err != nil {
-		return err
-	}
-	if err := validateRuntimeAggregateActivationFence(a); err != nil {
-		return err
-	}
-	if err := validateRuntimeAggregateSM3CandidateTransactionInGate(a, active, completed, gate); err != nil {
-		return err
-	}
-	if err := validateRuntimeAggregateExecutionBudget(a); err != nil {
-		return err
-	}
-	if err := validateRuntimeAggregateRecoverableWaits(a); err != nil {
-		return err
-	}
-	if err := validateRuntimeAggregateOperationRecoveryAuthorizations(a, active, completed); err != nil {
-		return err
-	}
-	if err := validateRuntimeAggregateGovernanceLedgers(a, active, completed); err != nil {
-		return err
-	}
-	if err := validateRuntimeAggregateSM4DeliveryAcknowledgements(a); err != nil {
-		return err
-	}
-	if err := validateRuntimeAggregateSM2RepairLedgers(a); err != nil {
-		return err
-	}
-	if err := validateRuntimeAggregateSM4DriveLease(a); err != nil {
-		return err
-	}
-	return validateRuntimeAggregateCrossMachineFences(a, active, completed)
-}
-
-func validateRuntimeAggregateOperationRecoveryAuthorizations(a RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
-	if err := runtimecontract.ValidateRuntimeOperationRecoveryAuthorizations(
-		a.Facts.WorkspaceID,
-		a.Facts.RunID,
-		active,
-		completed,
-		a.OperationReceipts,
-		a.OperationRecoveryAuthorizations,
-		a.Facts.Recovery,
-		a.StateRevision,
-	); err != nil {
-		return fmt.Errorf("runtime aggregate operation recovery authorization: %w", err)
-	}
-	return nil
-}
 
 func validateRuntimeAggregateRecoverableWaits(a RuntimeAggregate) error {
 	seen := make(map[string]struct{}, len(a.RecoverableWaits))
@@ -128,108 +56,6 @@ func validateRuntimeAggregateRecoverableWaits(a RuntimeAggregate) error {
 	return nil
 }
 
-func validateRuntimeAggregateExecutionBudget(a RuntimeAggregate) error {
-	if err := a.ExecutionBudget.Validate(); err != nil {
-		return fmt.Errorf("runtime aggregate execution budget: %w", err)
-	}
-	if !runtimecontract.SameRuntimeExecutionBudgetPolicy(a.ExecutionBudget.Policy, a.Facts.ExecutionBudgetPolicy) {
-		return fmt.Errorf("runtime aggregate execution budget policy does not match activation facts")
-	}
-	return nil
-}
-
-func validateRuntimeAggregateSM2BeforeSemantic(a RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
-	if a.Facts.WorkspaceID == "" || a.Facts.RunID == "" {
-		return fmt.Errorf("runtime aggregate requires workspace and run scope")
-	}
-	if err := runtimecontract.ValidateRuntimeStateCWILedger(a.Facts, a.Reconciliation); err != nil {
-		return err
-	}
-	if err := validateRuntimeCWISemanticRebindingFocusProjections(a.Facts); err != nil {
-		return err
-	}
-	if err := runtimecontract.ValidateRuntimeCWIBindingRetirementsAgainstExecution(a.Facts, active, completed, a.OperationReceipts); err != nil {
-		return err
-	}
-	if err := validateRuntimeProspectiveCoverageCollectiveCredit(a); err != nil {
-		return err
-	}
-	if err := a.Facts.Validate(); err != nil {
-		return err
-	}
-	if err := validateRuntimeAggregateValidationProofApplicability(a); err != nil {
-		return err
-	}
-	return nil
-}
-
-func validateRuntimeAggregateSM2AfterSemantic(a RuntimeAggregate) error {
-	return validateRuntimeAggregateSM2AfterSemanticInGate(a, nil)
-}
-
-func validateRuntimeAggregateSM2AfterSemanticInGate(a RuntimeAggregate, gate *runtimecontract.RuntimeOwnerInvariantSourceGate) error {
-	if err := runtimecontract.ValidateRuntimeSemanticProofBatchLimits(a.SemanticPlanning, a.Facts.Activation.ExecutionContract.ExecutionLimits); err != nil {
-		return err
-	}
-	if err := gate.ValidateDefinitionSources(a.SemanticPlanning, a.Facts.DefinitionSeed, a.Facts.DefinitionFocuses); err != nil {
-		return err
-	}
-	for idx, history := range a.SemanticPlanning.AllHistory() {
-		if history.Snapshot.Manifest == nil {
-			// The typed ledger validator already rejects this shape; retain an
-			// aggregate-level guard so a future history representation cannot
-			// cross workspace/run ownership silently.
-			return fmt.Errorf("runtime aggregate semantic generation %d has no manifest", idx)
-		}
-		if history.Snapshot.Manifest.WorkspaceID != a.Facts.WorkspaceID || history.Snapshot.Manifest.RunID != a.Facts.RunID {
-			return fmt.Errorf("runtime aggregate semantic generation %d scope mismatch", idx)
-		}
-	}
-	if err := validateRuntimeSemanticBindingPreimagesInGate(a, gate); err != nil {
-		return err
-	}
-	if err := validateRuntimeSemanticBindingPurposeInvariantInGate(a, gate); err != nil {
-		return err
-	}
-	if a.SemanticPlanning.DefinitionSeed.Hash != a.Facts.DefinitionSeed.Hash {
-		return fmt.Errorf("runtime aggregate semantic planning seed does not match facts")
-	}
-	if err := a.Reconciliation.Validate(); err != nil {
-		return fmt.Errorf("runtime aggregate reconciliation ledger: %w", err)
-	}
-	if err := runtimecontract.ValidateRuntimeCoverageProofLineage(a.CoverageProofLineage); err != nil {
-		return fmt.Errorf("runtime aggregate coverage proof lineage: %w", err)
-	}
-	if err := a.Definition.Validate(); err != nil {
-		return err
-	}
-	if strings.TrimSpace(a.Definition.Revision) != strings.TrimSpace(a.Facts.DefinitionRevision) {
-		return fmt.Errorf("runtime aggregate definition revision mismatch")
-	}
-	if !runtimecontract.SameRuntimeSourceObligationInventory(a.Definition.SourceObligations, a.Facts.DefinitionSeed.SourceObligations) {
-		return fmt.Errorf("runtime aggregate Definition and seed source obligations mismatch")
-	}
-	if a.Facts.DefinitionSeed.SourceObligations != nil && a.Facts.DefinitionSeed.SourceObligations.StartupInputHash != a.Definition.StartupInputHash {
-		return fmt.Errorf("runtime aggregate source obligations startup input mismatch")
-	}
-	if err := a.Decision.Validate(); err != nil {
-		return err
-	}
-	if err := validateRuntimeApplicabilityPrerequisiteProjection(a); err != nil {
-		return err
-	}
-	if terminal := a.Decision.Terminal; terminal != nil && (terminal.OriginalDiagnostic != nil ||
-		(terminal.Code == "owner_fact_convergence_exhausted" && missingOwnerFactIsUnavailable(a.Facts))) {
-		if terminal.Code != "owner_fact_convergence_exhausted" || !reflect.DeepEqual(terminal.OriginalDiagnostic, missingOwnerFactDiagnostic(a.Facts)) {
-			return fmt.Errorf("runtime terminal owner cause does not match exact-current missing owner fact")
-		}
-	}
-	if a.Decision.AuthoritySnapshot.WorkspaceID != a.Facts.WorkspaceID || a.Decision.AuthoritySnapshot.RunID != a.Facts.RunID {
-		return fmt.Errorf("runtime aggregate decision scope mismatch")
-	}
-	return nil
-}
-
 // validateRuntimeAggregateValidationProofApplicability is the fresh-load
 // reverse proof for persisted capability-owner validation catalogs.
 // The Definition inputs remain the only source of CWI identities; this gate
@@ -237,19 +63,71 @@ func validateRuntimeAggregateSM2AfterSemanticInGate(a RuntimeAggregate, gate *ru
 // owner fact is still an exact projection of those immutable inputs. It never
 // infers a recipe, rewrites a wildcard, or advances Runtime state.
 func validateRuntimeAggregateValidationProofApplicability(a RuntimeAggregate) error {
+	return validateRuntimeAggregateValidationProofApplicabilityTransition(nil, a)
+}
+
+func runtimeValidationProofSealedCatalogs(a RuntimeAggregate) []runtimecontract.RuntimeOperationAdmissibility {
 	sealedCatalogs := make([]runtimecontract.RuntimeOperationAdmissibility, 0)
 	if a.SemanticPlanning.Manifest != nil {
 		sealedCatalogs = append(sealedCatalogs, a.SemanticPlanning.Manifest.OwnerCatalogs...)
 	}
 	for _, generation := range a.SemanticPlanning.AllHistory() {
+		if v := generation.OwnerInputRevision; v != nil {
+			sealedCatalogs = append(sealedCatalogs, v.OwnerObservation.Catalog)
+		}
 		if generation.Snapshot.Manifest != nil {
 			sealedCatalogs = append(sealedCatalogs, generation.Snapshot.Manifest.OwnerCatalogs...)
 		}
 	}
-	return validateRuntimeValidationProofApplicability(a.Facts, sealedCatalogs)
+	return sealedCatalogs
 }
 
 func validateRuntimeValidationProofApplicability(facts runtimecontract.RuntimeFacts, sealedCatalogs []runtimecontract.RuntimeOperationAdmissibility) error {
+	return validateRuntimeValidationProofCatalogInputs(facts, facts.Resources.OperationAdmissibilities, sealedCatalogs)
+}
+
+// Only the owner transition supplies a formal preimage, after the committed
+// history gate. An exact catalog already judged against the same Definition
+// remains that result when moved into history. New catalogs and changed
+// Definition inputs take the complete gate; current recipe coverage is always
+// checked against the complete current collection, never the filtered delta.
+func validateRuntimeAggregateValidationProofApplicabilityTransition(previous *RuntimeAggregate, a RuntimeAggregate) error {
+	current := a.Facts.Resources.OperationAdmissibilities
+	history := runtimeValidationProofSealedCatalogs(a)
+	if previous != nil && a.Facts.DefinitionRevision == previous.Facts.DefinitionRevision &&
+		reflect.DeepEqual(a.Facts.DefinitionSeed.CoverageItems, previous.Facts.DefinitionSeed.CoverageItems) &&
+		reflect.DeepEqual(a.Facts.DefinitionFocuses, previous.Facts.DefinitionFocuses) {
+		originals := make(map[string][]runtimecontract.RuntimeOperationAdmissibility)
+		for _, values := range [][]runtimecontract.RuntimeOperationAdmissibility{previous.Facts.Resources.OperationAdmissibilities, runtimeValidationProofSealedCatalogs(*previous)} {
+			for _, catalog := range values {
+				originals[catalog.SnapshotID] = append(originals[catalog.SnapshotID], catalog)
+			}
+		}
+		unjudged := func(values []runtimecontract.RuntimeOperationAdmissibility) []runtimecontract.RuntimeOperationAdmissibility {
+			var result []runtimecontract.RuntimeOperationAdmissibility
+			for _, catalog := range values {
+				found := false
+				for _, original := range originals[catalog.SnapshotID] {
+					if reflect.DeepEqual(catalog, original) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					result = append(result, catalog)
+				}
+			}
+			return result
+		}
+		current, history = unjudged(current), unjudged(history)
+		if len(current) == 0 && len(history) == 0 {
+			return validateRuntimeCurrentValidationRecipeCoverage(a.Facts)
+		}
+	}
+	return validateRuntimeValidationProofCatalogInputs(a.Facts, current, history)
+}
+
+func validateRuntimeValidationProofCatalogInputs(facts runtimecontract.RuntimeFacts, current, sealedCatalogs []runtimecontract.RuntimeOperationAdmissibility) error {
 	requirements, err := runtimecontract.CompileRuntimeValidationProofRequirements(
 		facts.DefinitionRevision,
 		facts.DefinitionSeed.CoverageItems,
@@ -262,10 +140,13 @@ func validateRuntimeValidationProofApplicability(facts runtimecontract.RuntimeFa
 	// contract validator is the sole interpreter of binding/preparation
 	// applicability; aggregate recovery only supplies immutable Definition
 	// requirements and retained owner catalogs.
-	if err := runtimecontract.ValidateRuntimeValidationProofRequirementCatalogHistory(requirements, facts.Resources.OperationAdmissibilities, sealedCatalogs); err != nil {
+	if err := runtimecontract.ValidateRuntimeValidationProofRequirementCatalogHistory(requirements, current, sealedCatalogs); err != nil {
 		return err
 	}
+	return validateRuntimeCurrentValidationRecipeCoverage(facts)
+}
 
+func validateRuntimeCurrentValidationRecipeCoverage(facts runtimecontract.RuntimeFacts) error {
 	currentCatalogs := runtimecontract.NormalizeRuntimeOperationAdmissibilities(facts.Resources.OperationAdmissibilities)
 	currentShellCatalogs := runtimeManagedValidationShellCatalogs(currentCatalogs)
 	// Once Shell has returned its current managed-validation owner fact, every
@@ -309,9 +190,6 @@ func runtimeManagedValidationShellCatalogs(values []runtimecontract.RuntimeOpera
 // retained semantic generation back to the immutable Definition compiler
 // input. RuntimeSemanticPlanManifest cannot prove this relationship from its
 // own obligation copy; doing so would let a coordinated rewrite self-attest.
-func validateRuntimeAggregateSemanticValidationProofRequirements(a RuntimeAggregate) error {
-	return runtimecontract.ValidateRuntimeSemanticLedgerDefinitionSources(a.SemanticPlanning, a.Facts.DefinitionSeed, a.Facts.DefinitionFocuses)
-}
 
 // validateRuntimeSemanticBindingPurposeInvariant prevents an intermediate
 // owner-fact acquisition proof from becoming terminal Definition credit.  A
@@ -320,9 +198,6 @@ func validateRuntimeAggregateSemanticValidationProofRequirements(a RuntimeAggreg
 // generation history after a resource refresh.  Those manifests are read here
 // only to recover the exact per-CWI purpose; they never authorize a candidate,
 // operation, dispatch, or transition.
-func validateRuntimeSemanticBindingPurposeInvariant(a RuntimeAggregate) error {
-	return validateRuntimeSemanticBindingPurposeInvariantInGate(a, nil)
-}
 
 func validateRuntimeSemanticBindingPurposeInvariantInGate(a RuntimeAggregate, gate *runtimecontract.RuntimeOwnerInvariantSourceGate) error {
 	type bindingPurposeKey struct {
@@ -332,7 +207,11 @@ func validateRuntimeSemanticBindingPurposeInvariantInGate(a RuntimeAggregate, ga
 
 	purposes := make(map[bindingPurposeKey]runtimecontract.RuntimeSemanticEvidenceObligationPurpose)
 	addManifest := func(manifest runtimecontract.RuntimeSemanticPlanManifest) error {
-		manifest = manifest.Normalized()
+		// This join consumes only manifest identity and proof purpose. Source
+		// admission already owns the complete manifest/catalog contract; copying
+		// those unrelated bodies here does not supply a new proof. Keep the exact
+		// previous normalization/order for every field this join does consume.
+		manifest = runtimeSemanticPurposeManifest(manifest)
 		for _, obligation := range manifest.ProofObligations {
 			resolved, err := gate.ResolveObligation(obligation)
 			if err != nil {
@@ -424,80 +303,10 @@ func validateRuntimeSemanticBindingPurposeInvariantInGate(a RuntimeAggregate, ga
 	return nil
 }
 
-func validateRuntimeAggregateSM3ActiveDispatch(a RuntimeAggregate) error {
-	if a.ActiveDispatch == nil {
-		return nil
-	}
-	if err := a.ActiveDispatch.ValidateWithActivation(a.Decision, runtimecontract.RuntimeActivationForFacts(a.Facts)); err != nil {
-		return fmt.Errorf("runtime aggregate active dispatch: %w", err)
-	}
-	return nil
-}
-
-func validateRuntimeAggregateActivationFence(a RuntimeAggregate) error {
-	if a.Termination == nil {
-		return nil
-	}
-	if err := a.Termination.Validate(); err != nil {
-		return fmt.Errorf("runtime aggregate termination: %w", err)
-	}
-	if a.Termination.Revision > a.StateRevision {
-		return fmt.Errorf("runtime aggregate termination revision exceeds aggregate revision")
-	}
-	return nil
-}
-
-func validateRuntimeAggregateSM3CandidateTransaction(a RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
-	return validateRuntimeAggregateSM3CandidateTransactionInGate(a, active, completed, nil)
-}
-
-func validateRuntimeAggregateSM3CandidateTransactionInGate(a RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord, gate *runtimecontract.RuntimeOwnerInvariantSourceGate) error {
-	if err := runtimecontract.ValidateRuntimeCandidateAttemptRecordsForScope(a.Facts.WorkspaceID, a.Facts.RunID, a.CandidateAttempts); err != nil {
-		return err
-	}
-	if err := runtimecontract.ValidateRuntimeCandidateRequestSessions(a.CandidateRequestSessions); err != nil {
-		return err
-	}
-	if err := runtimecontract.ValidateRuntimeInputRevisionRequestSources(a.SemanticPlanning, a.CandidateRequestSessions); err != nil {
-		return err
-	}
-
-	if err := validateRuntimeDefinitionClarificationAggregate(a); err != nil {
-		return err
-	}
-	if err := validateRuntimeCandidateAttemptSessionBindings(a.CandidateAttempts, a.CandidateRequestSessions); err != nil {
-		return err
-	}
-	if err := validateRuntimeCandidateFeasibilityBindings(a); err != nil {
-		return err
-	}
-	if (isTerminalConvergenceState(a.Decision.State) || a.Decision.Terminal != nil) && hasPendingCandidateAttempt(a.CandidateAttempts) {
-		return fmt.Errorf("terminal runtime aggregate cannot retain a pending candidate attempt")
-	}
-	if hasUnreducedCurrentCandidateRetryFailure(a.Decision, a.CandidateAttempts) {
-		return fmt.Errorf("current runtime authority retains a failed candidate attempt 1 without reducer transition")
-	}
-	if err := validateAcceptedCandidateDispatchBindings(a.CandidateAttempts, active, completed); err != nil {
-		return err
-	}
-	if err := runtimecontract.ValidateRuntimeDispatchAdmissionLineage(
-		active,
-		completed,
-		a.CandidateAttempts,
-		a.OperationGovernanceBindings,
-	); err != nil {
-		return err
-	}
-	if err := runtimecontract.ValidateRuntimeAcceptedCandidateManifestLineage(active, completed, a.CandidateAttempts, a.CandidateRequestSessions); err != nil {
-		return err
-	}
-	if err := runtimecontract.ValidateRuntimeDurableDispatchLimits(a.Facts.Activation.ExecutionContract.ExecutionLimits, active, completed, a.CandidateAttempts); err != nil {
-		return err
-	}
-	if gate != nil {
-		return gate.ValidateAssessmentSources(a.SemanticPlanning, active, completed, a.CandidateAttempts, a.CandidateRequestSessions)
-	}
-	return runtimecontract.ValidateRuntimeAcceptedAssessmentPurposePreimagesWithValidatedSemanticLedger(a.SemanticPlanning, active, completed, a.CandidateAttempts, a.CandidateRequestSessions)
+func runtimeSemanticPurposeManifest(manifest runtimecontract.RuntimeSemanticPlanManifest) runtimecontract.RuntimeSemanticPlanManifest {
+	return (runtimecontract.RuntimeSemanticPlanManifest{
+		Hash: manifest.Hash, ProofObligations: manifest.ProofObligations,
+	}).Normalized()
 }
 
 // validateRuntimeCandidateFeasibilityBindings is the fresh-load reverse proof
@@ -575,7 +384,7 @@ func validateRuntimeCandidateFeasibilityBindings(a RuntimeAggregate) error {
 					return fmt.Errorf("runtime candidate feasibility operation %q prerequisite request has the wrong identity", operation.ID)
 				}
 			}
-			if err := validateCandidateFeasibilityObservationBinding(catalogs, operation, feasibility, manifest); err != nil {
+			if err := validateCandidateFeasibilityObservationBinding(catalogs, operation, feasibility, manifest, attempt.Transaction); err != nil {
 				return err
 			}
 			if feasibility.ReplayProof != nil {
@@ -589,34 +398,6 @@ func validateRuntimeCandidateFeasibilityBindings(a RuntimeAggregate) error {
 		}
 	}
 	return nil
-}
-
-func validateRuntimeDefinitionClarificationAggregate(a RuntimeAggregate) error {
-	if a.DefinitionClarification == nil {
-		return nil
-	}
-	if err := a.DefinitionClarification.Validate(); err != nil {
-		return fmt.Errorf("runtime Definition clarification: %w", err)
-	}
-	clarification := a.DefinitionClarification.Clone()
-	definition := a.Definition.Normalized()
-	if clarification.Observation.WorkspaceID != a.Facts.WorkspaceID || clarification.Observation.RunID != a.Facts.RunID ||
-		clarification.Observation.DefinitionRevision != definition.Revision || clarification.Observation.StartupInputHash != definition.StartupInputHash ||
-		a.Decision.State != runtimecontract.ConvergenceStateNeedGovernance ||
-		!sameRuntimeStrings(a.Decision.RequiredOutput.Normalized().AcceptedKinds, []string{runtimecontract.RuntimeDefinitionClarificationRequiredOutputKind}) ||
-		a.ActiveDispatch != nil {
-		return fmt.Errorf("runtime Definition clarification aggregate binding mismatch")
-	}
-	if clarification.Dispatch != nil && clarification.Dispatch.AuthoritySnapshotID != a.Decision.AuthoritySnapshot.ID {
-		return fmt.Errorf("runtime Definition clarification dispatch authority mismatch")
-	}
-	for _, session := range a.CandidateRequestSessions {
-		if session.LogicalRequestID == clarification.Observation.LogicalRequestID && session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete &&
-			session.Transaction.AuthoritySnapshotID == clarification.Observation.AuthoritySnapshotID {
-			return nil
-		}
-	}
-	return fmt.Errorf("runtime Definition clarification has no complete semantic request session")
 }
 
 func sameRuntimeStrings(left, right []string) bool {
@@ -665,43 +446,7 @@ func validateRuntimeCandidateAttemptSessionBindings(attempts []runtimecontract.R
 	return nil
 }
 
-func validateAcceptedCandidateDispatchBindings(attempts []runtimecontract.RuntimeCandidateAttemptRecord, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
-	for _, attempt := range attempts {
-		if attempt.State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
-			continue
-		}
-		matched := active != nil && runtimecontract.RuntimeAcceptedCandidateAttemptMatchesDispatch(attempt, *active)
-		if !matched {
-			for _, dispatch := range completed {
-				if runtimecontract.RuntimeAcceptedCandidateAttemptMatchesDispatch(attempt, dispatch) {
-					matched = true
-					break
-				}
-			}
-		}
-		if !matched {
-			return fmt.Errorf("accepted candidate attempt has no exact sealed dispatch target-authorization projection")
-		}
-	}
-	return nil
-}
-
-func validateRuntimeAggregateGovernanceLedgers(a RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
-	if err := validateRuntimeInputReviewAggregate(a); err != nil {
-		return err
-	}
-	if err := runtimecontract.ValidateRuntimeGovernanceResolutionRecords(a.GovernanceResolutions); err != nil {
-		return err
-	}
-	if err := runtimecontract.ValidateRuntimeGovernanceRequestRecords(a.GovernanceRequests); err != nil {
-		return err
-	}
-	if err := runtimecontract.ValidateRuntimeOperationGovernanceBindings(a.OperationGovernanceBindings); err != nil {
-		return err
-	}
-	if err := runtimecontract.ValidateRuntimeOperationReceipts(a.OperationReceipts); err != nil {
-		return err
-	}
+func validateRuntimeAggregateReceiptJoins(a RuntimeAggregate) error {
 	for _, receipt := range a.OperationReceipts {
 		if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || receipt.Feedback == nil || receipt.Feedback.OriginalDiagnostic == nil {
 			continue
@@ -727,10 +472,29 @@ func validateRuntimeAggregateGovernanceLedgers(a RuntimeAggregate, active *runti
 			}
 		}
 	}
-	if err := runtimecontract.ValidateRuntimeOperationReceiptExecutionLineage(active, completed, a.OperationReceipts); err != nil {
-		return err
-	}
 	return validateRuntimeAggregateEvidenceCommitLedger(a)
+}
+
+// The receipt judgment consumes these exact typed inputs. Current focus,
+// semantic proposals and recovery bookkeeping are not inputs of the original
+// receipt/evidence relation. Values are borrowed only during this pure call;
+// ownership and physical isolation stay at the owner query/CAS boundaries.
+func runtimeReceiptJoinInputs(a RuntimeAggregate) RuntimeAggregate {
+	return RuntimeAggregate{
+		Facts: runtimecontract.RuntimeFacts{
+			WorkspaceID: a.Facts.WorkspaceID, RunID: a.Facts.RunID, Evidence: a.Facts.Evidence,
+		},
+		ActiveDispatch: a.ActiveDispatch, CompletedDispatches: a.CompletedDispatches,
+		OperationReceipts: a.OperationReceipts, ProcessedEventIDs: a.ProcessedEventIDs,
+	}
+}
+
+func validateRuntimeReceiptJoinTransition(previous *RuntimeAggregate, a RuntimeAggregate) error {
+	inputs := runtimeReceiptJoinInputs(a)
+	if previous != nil && reflect.DeepEqual(runtimeReceiptJoinInputs(*previous), inputs) {
+		return nil
+	}
+	return validateRuntimeAggregateReceiptJoins(inputs)
 }
 
 type runtimeEvidenceCommitFactProjection struct {
@@ -744,7 +508,7 @@ type runtimeEvidenceCommitFactProjection struct {
 // fence. Governance clones may repeat that projection, so the fact's own
 // DispatchID resolves the dispatch that originally committed it.
 func validateRuntimeAggregateEvidenceCommitLedger(a RuntimeAggregate) error {
-	dispatches := make([]SealedDispatch, 0, len(a.CompletedDispatches)+1)
+	dispatches := make([]runtimecontract.RuntimeDispatchRecord, 0, len(a.CompletedDispatches)+1)
 	if a.ActiveDispatch != nil {
 		dispatches = append(dispatches, *a.ActiveDispatch)
 	}
@@ -865,7 +629,7 @@ func runtimeEvidenceCommitFactProjectionForID(a RuntimeAggregate, id common.Evid
 
 func validateRuntimeAggregateEvidenceCommitFact(
 	a RuntimeAggregate,
-	dispatches []SealedDispatch,
+	dispatches []runtimecontract.RuntimeDispatchRecord,
 	execution runtimecontract.RuntimeOperationExecutionRecord,
 	projection runtimeEvidenceCommitFactProjection,
 ) error {
@@ -976,15 +740,15 @@ func runtimeEvidenceFactFailureMatches(fact runtimecontract.EvidenceFact, expect
 		fact.FailureSignature == want.Signature && fact.FailureMessage == want.Message
 }
 
-func sealedDispatchByID(values []SealedDispatch, id string) (SealedDispatch, bool) {
-	var matched SealedDispatch
+func sealedDispatchByID(values []runtimecontract.RuntimeDispatchRecord, id string) (runtimecontract.RuntimeDispatchRecord, bool) {
+	var matched runtimecontract.RuntimeDispatchRecord
 	found := false
 	for _, dispatch := range values {
 		if dispatch.ID != id {
 			continue
 		}
 		if found {
-			return SealedDispatch{}, false
+			return runtimecontract.RuntimeDispatchRecord{}, false
 		}
 		matched, found = dispatch, true
 	}
@@ -997,17 +761,17 @@ func sealedDispatchByID(values []SealedDispatch, id string) (SealedDispatch, boo
 // binding the owner call to a new dispatch; the key origin therefore cannot be
 // used as the receipt's current dispatch identity. Origin/grant legality remains
 // the responsibility of the canonical execution-lineage validators.
-func operationReceiptFeedbackDispatch(a RuntimeAggregate, receipt runtimecontract.RuntimeOperationReceipt) (SealedDispatch, error) {
+func operationReceiptFeedbackDispatch(a RuntimeAggregate, receipt runtimecontract.RuntimeOperationReceipt) (runtimecontract.RuntimeDispatchRecord, error) {
 	receipt = receipt.Normalized()
 	if receipt.Feedback == nil {
-		return SealedDispatch{}, fmt.Errorf("rejected receipt has no diagnostic feedback")
+		return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("rejected receipt has no diagnostic feedback")
 	}
 	feedbackDispatchID := receipt.Feedback.Normalized().DispatchID
 	receiptRef := "runtime-receipt/" + receipt.ExecutionKey
 	receiptHash := runtimecontract.StableRuntimeOperationReceiptHash(receipt)
 
-	projected := make([]SealedDispatch, 0, 1)
-	collect := func(dispatch SealedDispatch) {
+	projected := make([]runtimecontract.RuntimeDispatchRecord, 0, 1)
+	collect := func(dispatch runtimecontract.RuntimeDispatchRecord) {
 		execution, found := operationExecutionRecord(dispatch.OperationExecutions, receipt.OperationID)
 		if !found {
 			return
@@ -1027,10 +791,10 @@ func operationReceiptFeedbackDispatch(a RuntimeAggregate, receipt runtimecontrac
 		collect(dispatch)
 	}
 	if len(projected) == 0 {
-		return SealedDispatch{}, fmt.Errorf("rejected receipt has no exact committed execution projection")
+		return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("rejected receipt has no exact committed execution projection")
 	}
 
-	var matched SealedDispatch
+	var matched runtimecontract.RuntimeDispatchRecord
 	exact := 0
 	for _, dispatch := range projected {
 		if dispatch.ID != feedbackDispatchID {
@@ -1040,33 +804,15 @@ func operationReceiptFeedbackDispatch(a RuntimeAggregate, receipt runtimecontrac
 		exact++
 	}
 	if exact == 0 {
-		return SealedDispatch{}, fmt.Errorf("feedback dispatch %q does not match an exact committed execution projection", feedbackDispatchID)
+		return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("feedback dispatch %q does not match an exact committed execution projection", feedbackDispatchID)
 	}
 	if exact != 1 {
-		return SealedDispatch{}, fmt.Errorf("feedback dispatch %q has ambiguous committed execution projections", feedbackDispatchID)
+		return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("feedback dispatch %q has ambiguous committed execution projections", feedbackDispatchID)
 	}
 	return matched, nil
 }
 
-func validateRuntimeAggregateSM4DeliveryAcknowledgements(a RuntimeAggregate) error {
-	if err := runtimecontract.ValidateRuntimeTerminalMaterialSeal(a.TerminalMaterialSeal, terminalMaterialSource(a)); err != nil {
-		return err
-	}
-	for _, acknowledgement := range a.DeliveryAcknowledgements {
-		if err := acknowledgement.Validate(); err != nil {
-			return err
-		}
-		if acknowledgement.WorkspaceID != a.Facts.WorkspaceID || acknowledgement.RunID != a.Facts.RunID {
-			return fmt.Errorf("delivery acknowledgement scope mismatch")
-		}
-	}
-	return nil
-}
-
-func validateRuntimeAggregateSM2RepairLedgers(a RuntimeAggregate) error {
-	if err := runtimecontract.ValidateRuntimeRepairSurfaceConfirmationRecords(a.RepairSurfaceConfirmations); err != nil {
-		return fmt.Errorf("runtime aggregate repair surface confirmations: %w", err)
-	}
+func validateRuntimeAggregateRepairJoins(a RuntimeAggregate) error {
 	if err := validateRuntimeRepairSurfaceConfirmationChronology(a.StateRevision, a.RepairSurfaceConfirmations); err != nil {
 		return err
 	}
@@ -1617,7 +1363,7 @@ func validateRuntimeReceiptEvidenceTargetLineage(a RuntimeAggregate, receipt run
 	return nil
 }
 
-func validateRuntimeReceiptEvidenceRejectedLineage(a RuntimeAggregate, dispatch SealedDispatch, operation runtimecontract.RuntimeOperation, execution runtimecontract.RuntimeOperationExecutionRecord, receipt runtimecontract.RuntimeOperationReceipt, receiptHash string) error {
+func validateRuntimeReceiptEvidenceRejectedLineage(a RuntimeAggregate, dispatch runtimecontract.RuntimeDispatchRecord, operation runtimecontract.RuntimeOperation, execution runtimecontract.RuntimeOperationExecutionRecord, receipt runtimecontract.RuntimeOperationReceipt, receiptHash string) error {
 	facts := a.Facts.Normalized()
 	var evidence runtimecontract.EvidenceFact
 	evidenceMatches := 0
@@ -1677,7 +1423,7 @@ func validateRuntimeReceiptEvidenceRejectedLineage(a RuntimeAggregate, dispatch 
 
 func runtimeReceiptEvidenceFailureTargetHasCurrentOwnerFreshness(
 	a RuntimeAggregate,
-	dispatch SealedDispatch,
+	dispatch runtimecontract.RuntimeDispatchRecord,
 	operation runtimecontract.RuntimeOperation,
 	execution runtimecontract.RuntimeOperationExecutionRecord,
 	observation runtimecontract.RuntimeFailureTargetObservation,
@@ -1834,7 +1580,7 @@ func runtimeConfirmedRepairSurfaceForTargets(a RuntimeAggregate, observation run
 // state-change operation owner. The confirmation itself never selects owner.
 func runtimeExpectedRepairSurfaceOwner(a RuntimeAggregate, observation runtimecontract.RuntimeValidationFailureObservation) (string, error) {
 	observation = observation.Normalized()
-	var sourceDispatch *SealedDispatch
+	var sourceDispatch *runtimecontract.RuntimeDispatchRecord
 	for index := range a.CompletedDispatches {
 		dispatch := &a.CompletedDispatches[index]
 		if dispatch.ID != observation.DispatchID || dispatch.State != DispatchStateCommitted ||
@@ -1982,7 +1728,7 @@ func currentRuntimeRepairSurfaceConfirmationContract(a RuntimeAggregate, observa
 		return "", runtimecontract.RuntimeRepairSurfaceConfirmationProtocolNone, err
 	}
 	observation = observation.Normalized()
-	var sourceDispatch *SealedDispatch
+	var sourceDispatch *runtimecontract.RuntimeDispatchRecord
 	for index := range a.CompletedDispatches {
 		dispatch := &a.CompletedDispatches[index]
 		if dispatch.ID != observation.DispatchID || dispatch.State != DispatchStateCommitted ||
@@ -2105,202 +1851,4 @@ func runtimeTargetObservationMatchesConfirmation(observation *runtimecontract.Ru
 		value.TargetRole == confirmation.Observation.TargetRole && value.ObservedRevision == confirmation.ObservedRevision &&
 		value.DiagnosticClass == "" && len(value.EvidenceRefs) == 0 && value.ContentHash == "" &&
 		sameRuntimeTargetRefs(value.TargetRefs, confirmation.ConfirmedTargetRefs)
-}
-
-func validateRuntimeAggregateSM4DriveLease(a RuntimeAggregate) error {
-	recovery := a.Facts.Recovery.Normalized()
-	if err := runtimecontract.ValidateRuntimeNonTerminalRecoveryLinearization(recovery, a.StateRevision, a.DriveLease); err != nil {
-		return fmt.Errorf("runtime aggregate recovery: %w", err)
-	}
-	if recovery.TerminalDeliveryIntervention.Validate() == nil && a.DriveLease != nil {
-		return fmt.Errorf("runtime aggregate terminal delivery intervention cannot retain automatic drive authority")
-	}
-	retired := recovery.RetiredTerminalDeliveryLease
-	retiredPresent := runtimecontract.RuntimeDriveLeasePresent(retired)
-	if retiredPresent {
-		requestBoundNonterminal := runtimecontract.RuntimeDriveLeaseBindsNonTerminalRecovery(retired) &&
-			runtimecontract.ValidateRuntimeNonTerminalRecoveryLeaseBinding(recovery, retired) == nil
-		if a.Termination == nil || retired.Validate() != nil || retired.State != runtimecontract.RuntimeDriveLeaseRunning ||
-			retired.WorkspaceID != a.Facts.WorkspaceID || retired.RunID != a.Facts.RunID || retired.AggregateRevision >= a.Termination.Revision ||
-			(retired.RecoveryRequestID != "" && !requestBoundNonterminal) ||
-			(retired.Reason == runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry && retired.FailureSignature == "terminal-delivery") {
-			return fmt.Errorf("runtime aggregate retired terminal-delivery lease does not match administrative termination")
-		}
-	} else if recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != "" {
-		return fmt.Errorf("runtime aggregate retired terminal-delivery handoff request has no exact lease")
-	}
-	if a.DriveLease == nil {
-		return nil
-	}
-	if err := a.DriveLease.Validate(); err != nil {
-		return fmt.Errorf("runtime aggregate drive lease: %w", err)
-	}
-	if a.DriveLease.WorkspaceID != a.Facts.WorkspaceID || a.DriveLease.RunID != a.Facts.RunID {
-		return fmt.Errorf("runtime aggregate drive lease scope mismatch")
-	}
-	canonicalTerminalDelivery := a.DriveLease.Reason == runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry &&
-		a.DriveLease.FailureSignature == "terminal-delivery"
-	if canonicalTerminalDelivery {
-		authorization := recovery.TerminalDeliveryRequest
-		outcome, terminal, outcomeErr := DeriveTerminalOutcome(a.Decision, a.Termination)
-		if outcomeErr != nil || !terminal {
-			return fmt.Errorf("runtime aggregate terminal-delivery lease has no sealed terminal")
-		}
-		deliveryID := runtimecontract.StableTerminalDeliveryID(a.Facts.WorkspaceID, a.Facts.RunID, a.Decision.AuthoritySnapshot.ID, outcome)
-		creatorGeneration := a.DriveLease.RecoveryGeneration - 1
-		creatorRequestID := runtimecontract.StableRuntimeTerminalDeliveryRecoveryRequestID(deliveryID, creatorGeneration)
-		phaseMatches := authorization.Validate() == nil && authorization.TerminalDeliveryID == deliveryID &&
-			((authorization.FailedLeaseGeneration == creatorGeneration && authorization.RequestID == creatorRequestID) ||
-				(a.DriveLease.State == runtimecontract.RuntimeDriveLeaseRunning && authorization.FailedLeaseGeneration == a.DriveLease.RecoveryGeneration &&
-					authorization.RequestID == runtimecontract.StableRuntimeTerminalDeliveryRecoveryRequestID(deliveryID, a.DriveLease.RecoveryGeneration)))
-		if a.DriveLease.RecoveryRequestID != creatorRequestID || !phaseMatches {
-			return fmt.Errorf("runtime aggregate terminal-delivery lease does not match its persisted recovery request")
-		}
-	} else if runtimecontract.RuntimeDriveLeaseBindsNonTerminalRecovery(*a.DriveLease) {
-		if err := runtimecontract.ValidateRuntimeNonTerminalRecoveryLeaseBinding(recovery, *a.DriveLease); err != nil {
-			return fmt.Errorf("runtime aggregate drive lease: %w", err)
-		}
-		// The worker holding this exact running request may seal ordinary
-		// convergence before its exit settlement releases the lease or performs
-		// first terminal delivery. A scheduled lease has not entered that worker
-		// cut, and administrative termination owns a separate retired-lease lane.
-		if a.Termination != nil || (isTerminalConvergenceState(a.Decision.State) && a.DriveLease.State != runtimecontract.RuntimeDriveLeaseRunning) {
-			return fmt.Errorf("runtime aggregate terminal state cannot retain nonterminal recovery authority outside an exact running convergence handoff")
-		}
-	} else if a.DriveLease.RecoveryRequestID != "" {
-		return fmt.Errorf("runtime aggregate non-terminal lease carries terminal recovery request")
-	}
-	if retiredPresent && a.DriveLease.RecoveryGeneration == retired.RecoveryGeneration+1 &&
-		recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != a.DriveLease.RecoveryRequestID {
-		return fmt.Errorf("runtime aggregate retired terminal-delivery successor is not bound to its handoff request")
-	}
-	if a.Termination != nil && (a.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry ||
-		a.DriveLease.FailureSignature != "terminal-delivery") {
-		return fmt.Errorf("administratively terminated runtime aggregate can retain only the canonical terminal-delivery retry lease")
-	}
-	return nil
-}
-
-func validateRuntimeAggregateCrossMachineFences(a RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
-	if err := validateRuntimeGovernanceRequestDispatchBindings(a, active, completed); err != nil {
-		return err
-	}
-	if err := validateRuntimeOperationGovernanceBindingFences(a, active, completed); err != nil {
-		return err
-	}
-	return validateRuntimeGovernanceResolutionBindings(a)
-}
-
-func validateRuntimeGovernanceRequestDispatchBindings(a RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
-	return runtimecontract.ValidateRuntimeGovernanceRequestDispatchLineage(a.GovernanceRequests, active, completed)
-}
-
-func validateRuntimeOperationGovernanceBindingFences(a RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
-	if err := runtimecontract.ValidateRuntimeDispatchExecutionKeyLineage(
-		a.Facts.WorkspaceID,
-		a.Facts.RunID,
-		active,
-		completed,
-		a.OperationGovernanceBindings,
-	); err != nil {
-		return err
-	}
-	for _, rawBinding := range a.OperationGovernanceBindings {
-		binding := rawBinding.Normalized()
-		var source *SealedDispatch
-		for idx := range a.CompletedDispatches {
-			if a.CompletedDispatches[idx].ID == binding.OperationDispatchID {
-				value := a.CompletedDispatches[idx]
-				source = &value
-				break
-			}
-		}
-		if source == nil || source.State != DispatchStateCommitted {
-			return fmt.Errorf("operation governance binding source dispatch %q is not completed", binding.OperationDispatchID)
-		}
-		execution, found := operationExecutionRecord(source.OperationExecutions, binding.OperationID)
-		if !found || !governancecheck.BindingMatchesExecution(binding, execution) {
-			return fmt.Errorf("operation governance binding source execution does not match sealed receipt")
-		}
-		receipt, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(a.OperationReceipts, binding.ExecutionKey, binding.Fence)
-		if !found || !governancecheck.BindingMatchesReceipt(binding, receipt) {
-			return fmt.Errorf("operation governance binding has no matching governance receipt")
-		}
-		if binding.State == runtimecontract.RuntimeOperationGovernanceBindingSuspended {
-			continue
-		}
-		bound := false
-		for _, request := range a.GovernanceRequests {
-			if governancecheck.BindingMatchesRequest(binding, request) {
-				bound = true
-				break
-			}
-		}
-		if !bound {
-			return fmt.Errorf("operation governance binding has no matching ticket request")
-		}
-	}
-	governedExecutions := make([]runtimecontract.RuntimeOperationExecutionRecord, 0)
-	if a.ActiveDispatch != nil {
-		governedExecutions = append(governedExecutions, a.ActiveDispatch.OperationExecutions...)
-	}
-	for _, dispatch := range a.CompletedDispatches {
-		governedExecutions = append(governedExecutions, dispatch.OperationExecutions...)
-	}
-	if err := runtimecontract.ValidateRuntimeOperationGovernanceExecutionBindings(a.OperationGovernanceBindings, governedExecutions); err != nil {
-		return err
-	}
-	if err := runtimecontract.ValidateRuntimeOperationGovernanceGrantLineage(a.OperationGovernanceBindings, a.GovernanceResolutions, a.Facts.Evidence.Accepted, a.Facts.Evidence.Rejected); err != nil {
-		return err
-	}
-	return nil
-}
-
-func validateRuntimeGovernanceResolutionBindings(a RuntimeAggregate) error {
-	for _, resolution := range a.GovernanceResolutions {
-		resolution = resolution.Normalized()
-		if resolution.WorkspaceID != a.Facts.WorkspaceID || resolution.RunID != a.Facts.RunID {
-			return fmt.Errorf("runtime aggregate governance resolution scope mismatch")
-		}
-		matched := false
-		bound := false
-		for _, request := range a.GovernanceRequests {
-			if governancecheck.ResolutionRecordMatchesRequest(resolution, request) {
-				bound = true
-				break
-			}
-		}
-		for _, dispatch := range a.CompletedDispatches {
-			if dispatch.State == DispatchStateCommitted && governancecheck.ResolutionRecordMatchesDispatch(resolution, governancecheck.DispatchFacts{
-				DispatchID: dispatch.ID, AuthoritySnapshotID: dispatch.Transaction.AuthoritySnapshotID,
-				CandidateGovernance: dispatch.Candidate.Governance != nil,
-			}) {
-				matched = true
-				break
-			}
-		}
-		if !matched || !bound {
-			return fmt.Errorf("runtime aggregate governance resolution has no completed governed dispatch")
-		}
-	}
-	return nil
-}
-
-func hasPendingCandidateAttempt(values []runtimecontract.RuntimeCandidateAttemptRecord) bool {
-	for _, value := range values {
-		if value.State == runtimecontract.RuntimeCandidateAttemptStatePending {
-			return true
-		}
-	}
-	return false
-}
-
-func hasUnreducedCurrentCandidateRetryFailure(decision runtimecontract.RuntimeDecision, values []runtimecontract.RuntimeCandidateAttemptRecord) bool {
-	current := decision.AuthorityTransaction()
-	for _, value := range values {
-		if value.Attempt == 1 && value.State == runtimecontract.RuntimeCandidateAttemptStateFailed && runtimecontract.SameAuthorityContract(value.Transaction, current) {
-			return true
-		}
-	}
-	return false
 }

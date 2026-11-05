@@ -18,6 +18,16 @@ func assertRuntimeValidationSurfaceSinglePass(t testing.TB, surface RuntimeValid
 		if (got == nil) != (want == nil) || (got != nil && got.Error() != want.Error()) {
 			t.Fatalf("surface 接受／拒绝顺序不等价: got=%v want=%v", got, want)
 		}
+		value, compiledErr := validateAndNormalizeRuntimeValidationSurface(surface)
+		if (compiledErr == nil) != (want == nil) || (compiledErr != nil && compiledErr.Error() != want.Error()) {
+			t.Fatalf("surface compiler first error: got=%v want=%v", compiledErr, want)
+		}
+		if compiledErr == nil && !reflect.DeepEqual(value, surface.Normalized()) {
+			t.Fatal("surface compiler changed detached canonical output")
+		}
+		if compiledErr != nil && !reflect.DeepEqual(value, RuntimeValidationSurface{}) {
+			t.Fatal("rejected surface compiler returned partial output")
+		}
 	}
 	after, _ := json.Marshal(surface)
 	if string(before) != string(after) {

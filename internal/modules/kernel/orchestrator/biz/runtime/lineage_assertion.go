@@ -5,10 +5,10 @@ import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimec
 func runtimeLineageAssertionSources(aggregate RuntimeAggregate) runtimecontract.RuntimeLineageAssertionSources {
 	var active *runtimecontract.RuntimeDispatchRecord
 	if aggregate.ActiveDispatch != nil {
-		value := sealedDispatchToRuntimeRecord(*aggregate.ActiveDispatch)
+		value := (*aggregate.ActiveDispatch)
 		active = &value
 	}
-	return runtimeLineageAssertionSourcesWithDispatches(aggregate, active, sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches))
+	return runtimeLineageAssertionSourcesWithDispatches(aggregate, active, (aggregate.CompletedDispatches))
 }
 
 func runtimeLineageAssertionSourcesWithDispatches(aggregate RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) runtimecontract.RuntimeLineageAssertionSources {

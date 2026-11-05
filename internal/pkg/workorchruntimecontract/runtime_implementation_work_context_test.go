@@ -42,7 +42,7 @@ func TestImplementationWorkContentAndIntentAreExactOriginalInputs(t *testing.T) 
 		t.Fatalf("exact wire replay: %v", err)
 	}
 	schema, err := RuntimeSemanticPlanJSONSchemaForRequest(m, d.PlanStep, "", 0, nil)
-	if err != nil || !strings.Contains(schema, "implementationIntent") || !strings.Contains(schema, w.Scope.Content.Hash()) {
+	if err != nil || !strings.Contains(schema, "implementationIntent") || strings.Contains(schema, `"contentHash"`) {
 		t.Fatalf("missing exact intent schema: %v", err)
 	}
 	for name, mutate := range map[string]func(*RuntimeSemanticPlanDocument){

@@ -360,6 +360,8 @@ func seedRunReplacementCrashPredecessor(t *testing.T, runs repository.RunReposit
 	if err := runs.CreateNextWorkspaceRun(context.Background(), item); err != nil {
 		t.Fatalf("create active predecessor: %v", err)
 	}
+	previousRuntimeRevision := item.RuntimeState.StateRevision
+	item.RuntimeState.StateRevision++
 	item.RuntimeState.Facts.RunID = item.ID
 	item.RuntimeLifecycleFence = &runtimecontract.RuntimeOpaqueLifecycleFence{
 		WorkspaceID:          workspaceID,
@@ -370,7 +372,7 @@ func seedRunReplacementCrashPredecessor(t *testing.T, runs repository.RunReposit
 		BootstrapHash:        runtimecontract.StableRuntimeBootstrapHash(bootstrap),
 		TerminalFenceID:      runReplacementTerminalDeliveryID(),
 	}
-	if err := runs.Update(context.Background(), item); err != nil {
+	if err := runs.CompareAndSwapRuntimeState(context.Background(), item, item.Revision, previousRuntimeRevision); err != nil {
 		t.Fatalf("seal predecessor Runtime fence: %v", err)
 	}
 	return item

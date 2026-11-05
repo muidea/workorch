@@ -449,18 +449,27 @@ func writeHashRuntimeCandidateOperationSetViolation(h hashStringWriter, violatio
 }
 
 func ValidateRuntimeCandidateRequestSessions(values []RuntimeCandidateRequestSession) error {
+	return validateRuntimeCandidateRequestSessionsTransition(values, nil)
+}
+
+func validateRuntimeCandidateRequestSessionsTransition(values []RuntimeCandidateRequestSession, previous *RuntimeStateRecord) error {
 	seen := map[string]struct{}{}
 	for _, value := range values {
 		// Validate the exact persisted DTO before normalization. Session.Validate
 		// contains the raw-canonical manifest and repair-commitment fences.
-		if err := value.Validate(); err != nil {
-			return fmt.Errorf("runtime candidate request session: %w", err)
+		if !committedRuntimeCandidateRequest(previous, value) {
+			if err := value.Validate(); err != nil {
+				return fmt.Errorf("runtime candidate request session: %w", err)
+			}
 		}
-		value = value.Normalized()
-		if _, found := seen[value.LogicalRequestID]; found {
-			return fmt.Errorf("runtime candidate request session %q is duplicated", value.LogicalRequestID)
+		// Validate already checked the complete raw session. This collection
+		// consumer needs only its normalized identity; do not clone the full
+		// manifest, repair commitment and input again merely to build the set.
+		logicalRequestID := strings.TrimSpace(value.LogicalRequestID)
+		if _, found := seen[logicalRequestID]; found {
+			return fmt.Errorf("runtime candidate request session %q is duplicated", logicalRequestID)
 		}
-		seen[value.LogicalRequestID] = struct{}{}
+		seen[logicalRequestID] = struct{}{}
 	}
 	return nil
 }

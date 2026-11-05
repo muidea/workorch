@@ -63,7 +63,7 @@ type RuntimeInternalEventResult struct {
 // RuntimeController to the Orchestrator Biz. It validates the owner-private
 // envelope and remains the exhaustive kind gate; concrete reducers stay behind
 // four private payload-family routes that share the same mutation kernel.
-func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event RuntimeInternalEvent) (RuntimeInternalEventResult, error) {
+func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event RuntimeInternalEvent) (result RuntimeInternalEventResult, err error) {
 	if c == nil || c.runtimeMutationKernel == nil || c.repository == nil || c.authority == nil || c.planning == nil || c.candidateDispatch == nil || c.driveDelivery == nil {
 		return RuntimeInternalEventResult{}, common.ErrInvalidArgument
 	}
@@ -77,7 +77,8 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 	if err := event.validateEnvelope(); err != nil {
 		return RuntimeInternalEventResult{}, err
 	}
-	if original, ok := c.repository.(ownerStateOriginalRepository); ok {
+	if c.transitions.ownerTransaction == nil {
+		original, _ := c.repository.(ownerStateOriginalRepository)
 		return c.applyOwnerStateTransaction(ctx, event, original)
 	}
 

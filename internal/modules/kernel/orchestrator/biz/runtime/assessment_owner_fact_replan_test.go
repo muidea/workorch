@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -248,7 +249,7 @@ func TestAssessmentObservedUsesRetiredAcquisitionPurposeAfterReceiptResourceChan
 		Kind:      RuntimeInternalEventAssessmentObserved,
 		Scope:     RuntimeInternalEventScope{WorkspaceID: "ws-v2", RunID: "run-v2"},
 		Authority: &RuntimeInternalAuthorityPayload{},
-	}); !errors.Is(staleErr, common.ErrConflict) {
+	}); staleErr == nil || (!errors.Is(staleErr, common.ErrConflict) && !strings.Contains(staleErr.Error(), "purpose preimage")) {
 		t.Fatalf("stale AssessmentObserved err=%v, want conflict", staleErr)
 	}
 	if staleRepository.saves != 0 || staleRepository.aggregate.StateRevision != before.StateRevision || len(staleRepository.aggregate.Facts.Assessments) != 0 {

@@ -34,7 +34,7 @@ func (c *driveDeliveryComponent) openRecoverableWait(ctx context.Context, record
 	if c == nil || c.repository == nil || record.WorkspaceID == "" || record.RunID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, record.WorkspaceID, record.RunID)
+	aggregate, err := c.load(ctx, record.WorkspaceID, record.RunID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -74,9 +74,7 @@ func (c *driveDeliveryComponent) openRecoverableWait(ctx context.Context, record
 	expectedRevision := aggregate.StateRevision
 	aggregate.RecoverableWaits = append(aggregate.RecoverableWaits, record)
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -87,7 +85,7 @@ func (c *driveDeliveryComponent) claimRecoverableWaitProbe(ctx context.Context, 
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(waitID) == "" || leaseGeneration == 0 {
 		return RuntimeAggregate{}, false, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, false, err
 	}
@@ -117,9 +115,7 @@ func (c *driveDeliveryComponent) claimRecoverableWaitProbe(ctx context.Context, 
 	expectedRevision := aggregate.StateRevision
 	aggregate.RecoverableWaits[idx].Status = runtimecontract.RuntimeRecoverableWaitProbeClaimed
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, false, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, false, err
 	}
@@ -127,7 +123,7 @@ func (c *driveDeliveryComponent) claimRecoverableWaitProbe(ctx context.Context, 
 }
 
 func (c *driveDeliveryComponent) deferRecoverableWaitProbe(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, waitID, now, probeResultHash string) (RuntimeAggregate, error) {
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -158,9 +154,7 @@ func (c *driveDeliveryComponent) deferRecoverableWaitProbe(ctx context.Context, 
 	aggregate.RecoverableWaits[idx].Status = runtimecontract.RuntimeRecoverableWaitWaiting
 	aggregate.RecoverableWaits[idx].NextEligibleAt = next.UTC().Format(time.RFC3339Nano)
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -168,7 +162,7 @@ func (c *driveDeliveryComponent) deferRecoverableWaitProbe(ctx context.Context, 
 }
 
 func (c *driveDeliveryComponent) exhaustRecoverableWait(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, waitID, probeResultHash, code string) (RuntimeAggregate, error) {
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -200,9 +194,7 @@ func (c *driveDeliveryComponent) exhaustRecoverableWait(ctx context.Context, wor
 	}
 	aggregate.Facts, aggregate.Decision = facts, decision
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -210,7 +202,7 @@ func (c *driveDeliveryComponent) exhaustRecoverableWait(ctx context.Context, wor
 }
 
 func (c *driveDeliveryComponent) retireRecoverableWait(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, waitID string) (RuntimeAggregate, error) {
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -221,9 +213,7 @@ func (c *driveDeliveryComponent) retireRecoverableWait(ctx context.Context, work
 	expectedRevision := aggregate.StateRevision
 	aggregate.RecoverableWaits[idx].Status = runtimecontract.RuntimeRecoverableWaitRetired
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -257,9 +247,7 @@ func (c *driveDeliveryComponent) expireRecoverableWait(ctx context.Context, aggr
 	}
 	aggregate.Facts, aggregate.Decision = facts, decision
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, false, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, false, err
 	}

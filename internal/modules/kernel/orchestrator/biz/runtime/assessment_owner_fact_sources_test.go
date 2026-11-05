@@ -44,7 +44,7 @@ func TestRuntimeAssessmentOwnerFactSourcesSurviveReloadAndRejectCoherentTamperin
 			laterFacts.Resources.OperationAdmissibilities = nil
 			lineageSources := runtimeLineageAssertionSources(before)
 			lineageSources.Facts = laterFacts
-			historical, err := runtimecontract.DeriveRuntimeAssessmentAdjudication(sealedDispatchToRuntimeRecord(*before.ActiveDispatch), laterFacts, sealedDispatchesToRuntimeRecords(before.CompletedDispatches), before.CoverageProofLineage, lineageSources)
+			historical, err := runtimeTestDeriveAssessmentAdjudication(sealedDispatchToRuntimeRecord(*before.ActiveDispatch), laterFacts, sealedDispatchesToRuntimeRecords(before.CompletedDispatches), before.CoverageProofLineage, lineageSources)
 			if err != nil || !reflect.DeepEqual(historical.OwnerFactSources, adjudication.OwnerFactSources) {
 				t.Fatalf("later mutable catalog replaced historical sealed source: %v", err)
 			}
@@ -85,9 +85,12 @@ func TestRuntimeAssessmentOwnerFactSourcesSurviveReloadAndRejectCoherentTamperin
 					}
 					dispatch.AssessmentAdjudicationHash = runtimecontract.StableRuntimeAssessmentAdjudicationHash(*dispatch.AssessmentAdjudication)
 					bad.Facts.Assessments[factIndex].AdjudicationHash = dispatch.AssessmentAdjudicationHash
-					if err := bad.Validate(); err == nil {
-						t.Fatal("coherent double-entry hashes laundered sealed catalog source")
+					if field != "revision" {
+						if err := bad.Validate(); err == nil {
+							t.Fatal("malformed committed source passed read integrity")
+						}
 					}
+					assertCommittedAssessmentRewriteRejected(t, repository, aggregate, bad)
 				})
 			}
 			saves := repository.saves

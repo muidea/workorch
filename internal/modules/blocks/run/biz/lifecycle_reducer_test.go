@@ -75,7 +75,7 @@ func seedRuntimeTerminalRun(t *testing.T, runs *memory.RunRepository, state comm
 	}
 	run.RuntimeLifecycleFence = &runtimecontract.RuntimeOpaqueLifecycleFence{
 		WorkspaceID: "ws-1", RunID: "run-1", RuntimeStateRevision: 3,
-		RuntimeStateRef: runevents.RuntimeStateRef("ws-1", "run-1", 3), RuntimeStateHash: "opaque-state", BootstrapHash: "opaque-bootstrap", TerminalFenceID: "td-1",
+		RuntimeStateRef: runevents.RuntimeStateRef("ws-1", "run-1", 3), RuntimeStateHash: runtimecontract.StableRuntimeStateRecordHash(*run.RuntimeState), BootstrapHash: "opaque-bootstrap", TerminalFenceID: "td-1",
 	}
 	if err := runs.Create(context.Background(), run); err != nil {
 		t.Fatalf("seed current run: %v", err)
@@ -412,9 +412,13 @@ func TestGenericRunUpdateDoesNotPublishLifecycleFactOrChangeSM1(t *testing.T) {
 	bootstrap := runtimecontract.RuntimeBootstrap{}
 	state := runtimecontract.RuntimeStateRecord{StateRevision: 1}
 	seed.RuntimeBootstrap = &bootstrap
-	seed.RuntimeState = &state
 	if err := runs.Update(context.Background(), seed); err != nil {
 		t.Fatalf("seed Runtime state: %v", err)
+	}
+	seed, _ = runs.GetByWorkspaceID(context.Background(), seed.WorkspaceID, seed.ID)
+	seed.RuntimeState = &state
+	if err := runs.CompareAndSwapRuntimeState(context.Background(), seed, seed.Revision, 0); err != nil {
+		t.Fatal(err)
 	}
 	received := make(chan runevents.RunStateChangedData, 1)
 	observer := magicevent.NewSimpleObserverWithMatchID("/run/consumers/update-test", "/run/consumers/update-test", hub)
@@ -481,10 +485,10 @@ func TestRuntimeAggregatePersistenceRebasesUnrelatedRunModelWrite(t *testing.T) 
 	nextState := currentState.Clone()
 	nextState.StateRevision++
 	expected := currentState.StateRevision
-	result, err := biz.updateRuntimeState(ctx, &runmodel.Run{
+	result, err := biz.updateRuntimeState(ctx, runtimeWriteBaseFixture(t, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: definition.GoalID, DoDID: definition.DoDID, DefinitionRevision: definition.Revision,
 		RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
-	}, runevents.StoreRuntimeStateRecordCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected})
+	}), runevents.StoreRuntimeStateRecordCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected})
 	if err != nil {
 		t.Fatalf("Runtime aggregate update: %v", err)
 	}
@@ -525,10 +529,10 @@ func TestRuntimeAggregatePersistenceRejectsAggregateRevisionRace(t *testing.T) {
 	nextState := currentState.Clone()
 	nextState.StateRevision++
 	expected := currentState.StateRevision
-	result, err := biz.updateRuntimeState(ctx, &runmodel.Run{
+	result, err := biz.updateRuntimeState(ctx, runtimeWriteBaseFixture(t, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: definition.GoalID, DoDID: definition.DoDID, DefinitionRevision: definition.Revision,
 		RuntimeBootstrap: &bootstrap, RuntimeState: &currentState,
-	}, runevents.StoreRuntimeStateRecordCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected})
+	}), runevents.StoreRuntimeStateRecordCommand{RunID: "run-v2", WorkspaceID: "ws-v2", RuntimeState: &nextState, ExpectedRuntimeStateRevision: &expected})
 	if err != nil || result.RuntimeStateUpdate == nil || result.RuntimeStateUpdate.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryAggregateRevisionMismatch ||
 		result.RuntimeStateUpdate.ExpectedRuntimeRevision != expected || result.RuntimeStateUpdate.ObservedRuntimeRevision != expected+1 {
 		t.Fatalf("aggregate revision race result=%+v err=%v", result.RuntimeStateUpdate, err)
@@ -558,6 +562,12 @@ func (r *runtimeStateCASRaceRepository) CompareAndSwapRuntimeState(ctx context.C
 		changed.RuntimeState = &next
 	} else if r.mutateModelOnly {
 		changed.FailureReason = "unrelated-owner-write"
+	}
+	if r.mutateAggregate {
+		if err := r.RunRepository.CompareAndSwapRuntimeState(ctx, &changed, current.Revision, current.RuntimeState.StateRevision); err != nil {
+			return err
+		}
+		return common.ErrConflict
 	}
 	if err := r.RunRepository.CompareAndSwap(ctx, &changed, current.Revision); err != nil {
 		return err
@@ -614,4 +624,13 @@ func TestLifecycleHandlerStaleTerminalDoesNotChangeRun(t *testing.T) {
 	if err != nil || stored.State != common.RunStateActive {
 		t.Fatalf("stored must remain active: %+v err=%v", stored, err)
 	}
+}
+
+func runtimeWriteBaseFixture(t *testing.T, item *runmodel.Run) runmodel.RuntimeStateWriteBase {
+	t.Helper()
+	base, err := runmodel.RuntimeStateWriteBaseFromRun(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base
 }

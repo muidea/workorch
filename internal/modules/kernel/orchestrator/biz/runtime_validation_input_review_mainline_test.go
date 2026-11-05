@@ -73,6 +73,7 @@ type validationInputReviewMainlineOptions struct {
 	AdditionalTerminalSnapshotConsumer bool
 	SubmittedSettlementFault           string
 	DuplicateInitialReview             bool
+	InvalidRevisionCandidate           bool
 }
 
 func TestDriveRuntimeCorrectedReviewStillRequiresInputRevision(t *testing.T) {
@@ -340,6 +341,10 @@ func %s(t *testing.T) {
 			if mode == "input_revision_long" || mode == "input_revision_budget" {
 				initialFiles[target] = strings.Replace(initialFiles[target], `strings.TrimSpace(string(out))!="4"`, `strings.TrimSpace(string(out))==""`, 1)
 				initialFiles[target] = strings.Replace(initialFiles[target], "\n}\n", "\n"+runtimeLongInputRevisionMarkers()+"\n}\n", 1)
+			} else if mode == "input_revision_structure" {
+				if target == inputTargets["cwi-2"] {
+					initialFiles[target] += "func init() {}\n"
+				}
 			} else if mode == "input_revision_omission" {
 				initialFiles[target] = strings.Replace(initialFiles[target], `strings.TrimSpace(string(out))!="4"`, `strings.TrimSpace(string(out))==""`, 1)
 			} else {
@@ -633,6 +638,20 @@ func %s(t *testing.T) {
 			}
 			if strings.HasPrefix(mode, "input_revision") && command.CandidateManifest.ImplementationWorkingBinding != nil {
 				candidate = runtimeInputRevisionMainlineCandidate(command, inputTargets["cwi-2"], mode)
+				if options.InvalidRevisionCandidate {
+					if command.CandidateAttempt == 0 {
+						invalid := "func TestMain(m *testing.M) {}\n"
+						candidate.StateChange.Operations[0].Operation.Parameters[1].String = &invalid
+					} else {
+						content, err := os.ReadFile(filepath.Join(directory, inputTargets["cwi-2"]))
+						if err != nil || string(content) != initialFiles[inputTargets["cwi-2"]] {
+							t.Fatal("invalid candidate wrote input before correction")
+						}
+						if command.CandidateCorrectionObservation == nil || command.CandidateCorrectionObservation.Code != "candidate_owner_constraint_nonconformant" {
+							t.Fatal("structural failure bypassed existing correction")
+						}
+					}
+				}
 				break
 			}
 			oldText, newText := "return 2", "return 4"
@@ -657,9 +676,15 @@ func %s(t *testing.T) {
 	})
 	t.Cleanup(func() { provider.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	evidenceRecords := memory.NewEvidenceRecordRepository()
+	var stateRepository runtime.RuntimeStateRepository = runtimeStateRepository{hub: hub}
+	var structureRepository *inputStructureCheckingRepository
+	if options.InvalidRevisionCandidate {
+		structureRepository = &inputStructureCheckingRepository{runtimeStateRepository: runtimeStateRepository{hub: hub}, t: t}
+		stateRepository = structureRepository
+	}
 	newModule := func() *Biz {
 		owner := newRuntimeTestOwner()
-		if err := owner.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
+		if err := owner.ConfigureRuntimeRepository(stateRepository); err != nil {
 			t.Fatal(err)
 		}
 		module := newTestBiz(owner, hub, &recordingBackgroundRoutine{})
@@ -680,7 +705,7 @@ func %s(t *testing.T) {
 	})
 	var crash *runtimeSaveCrashRepository
 	if cut != "" && !deliveryCut && !materialCut {
-		crash = &runtimeSaveCrashRepository{delegate: runtimeStateRepository{hub: hub}, after: cut != "before_shell_applicability", marker: cut, match: func(a runtime.RuntimeAggregate) bool {
+		crash = &runtimeSaveCrashRepository{delegate: stateRepository, after: cut != "before_shell_applicability", marker: cut, match: func(a runtime.RuntimeAggregate) bool {
 			switch cut {
 			case "after_assessment_submission":
 				for _, session := range a.CandidateRequestSessions {
@@ -693,6 +718,15 @@ func %s(t *testing.T) {
 				for _, value := range a.Facts.EvidenceApplicabilityObservations {
 					if value.CurrentDependencies != nil && len(value.CurrentDependencies.Entries) != 0 && strings.HasPrefix(value.CurrentDependencies.Entries[0].OwnerInstanceID, runtimecontract.RuntimeModuleShell+"/") {
 						return true
+					}
+				}
+				return false
+			case "after_input_structure_rejection":
+				for _, attempt := range a.CandidateAttempts {
+					for _, record := range attempt.Feasibilities {
+						if record.InputStructure != nil && record.InputStructure.Code != "" {
+							return true
+						}
 					}
 				}
 				return false
@@ -923,7 +957,7 @@ func %s(t *testing.T) {
 			}
 			if cut == "after_assessment_submission" {
 				original := loaded.CloneRaw()
-				if _, required, err := runtime.NextRuntimeEvidenceApplicabilityRequest(loaded); err != nil || required {
+				if _, required, err := runtimeNextEvidenceApplicabilityRequestForTest(loaded); err != nil || required {
 					t.Fatalf("unsettled submission allowed fresh dependency query: %v", err)
 				}
 				run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
@@ -1040,7 +1074,7 @@ func %s(t *testing.T) {
 		t.Logf("terminal original diagnostic: %s", diag)
 	}
 	submissionUnknown := cut == "after_assessment_submission"
-	success := (mode == "consistent" || mode == "clarify" || (mode == "input_revision" || mode == "input_revision_omission" || mode == "input_revision_long") || projectBehaviorRepair) && !submissionUnknown
+	success := (mode == "consistent" || mode == "clarify" || (mode == "input_revision" || mode == "input_revision_omission" || mode == "input_revision_long" || mode == "input_revision_structure") || projectBehaviorRepair) && !submissionUnknown
 	if (completed.Decision.State == runtimecontract.ConvergenceStateComplete) != success {
 		for _, receipt := range completed.OperationReceipts {
 			if receipt.Outcome == runtimecontract.RuntimeOperationOutcomeRejected {
@@ -1138,6 +1172,8 @@ func %s(t *testing.T) {
 				}
 			} else if mode == "input_revision_cycle" {
 				// Two visits to each full physical preimage are allowed; the next is blocked.
+			} else if mode == "input_revision_structure" {
+				expectedInput = strings.Replace(expectedInput, "func init() {}\n", "", 1)
 			} else if mode == "input_revision_omission" {
 				expectedInput = strings.Replace(expectedInput, `strings.TrimSpace(string(out))==""`, `strings.TrimSpace(string(out))!="4"`, 1)
 			} else {
@@ -1152,6 +1188,9 @@ func %s(t *testing.T) {
 		t.Fatalf("restart cut not reached: %s", cut)
 	}
 	if strings.HasPrefix(mode, "input_revision") {
+		if options.InvalidRevisionCandidate && !structureRepository.checked {
+			t.Fatal("input revision never persisted structural owner observation")
+		}
 		classifiedReviews := reviewCalls
 		if options.DuplicateInitialReview {
 			if !duplicateSent || !preciseCorrectionSeen {
@@ -1160,6 +1199,22 @@ func %s(t *testing.T) {
 			classifiedReviews-- // Malformed fixture is not an admitted review.
 		}
 		assertRuntimeInputRevisionMainline(t, completed, classifiedReviews, mode)
+		if options.InvalidRevisionCandidate {
+			rejected := 0
+			for _, attempt := range completed.CandidateAttempts {
+				for _, record := range attempt.Feasibilities {
+					if record.InputStructure != nil && record.InputStructure.Code != "" {
+						rejected++
+						if record.ReplayProof != nil {
+							t.Fatal("rejected postimage gained replay grant")
+						}
+					}
+				}
+			}
+			if rejected != 1 {
+				t.Fatalf("structural rejection lost/repeated: %d", rejected)
+			}
+		}
 	}
 	if projectBehaviorRepair && behaviorRepairs != 1 {
 		t.Fatal("same-binding implementation repair was missing or repeated")

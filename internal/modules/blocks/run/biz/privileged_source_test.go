@@ -267,7 +267,7 @@ func runLifecycleSourceTestGovernanceRun(state common.RunState, resolutionID str
 		State: state, BlockingTicketID: blockingTicketID, CreatedAt: "2026-08-30T00:00:00Z",
 		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{}, RuntimeState: &runtimecontract.RuntimeStateRecord{StateRevision: 3},
 		RuntimeLifecycleFence: &runtimecontract.RuntimeOpaqueLifecycleFence{
-			WorkspaceID: common.WorkspaceID("workspace-source-" + suffix), RunID: common.RunID("run-source-" + suffix), RuntimeStateRevision: 3,
+			WorkspaceID: common.WorkspaceID("workspace-source-" + suffix), RunID: common.RunID("run-source-" + suffix), RuntimeStateRevision: 3, RuntimeStateHash: runtimecontract.StableRuntimeStateRecordHash(runtimecontract.RuntimeStateRecord{StateRevision: 3}),
 			GovernanceFenceID:      "runtime-governance/authority-source-" + suffix + "/dispatch-source-" + suffix,
 			GovernanceResolutionID: common.ResolutionID(resolutionID),
 		},
@@ -291,7 +291,7 @@ func runLifecycleSourceTestTerminalRun() *runmodel.Run {
 		RuntimeLifecycleFence: &runtimecontract.RuntimeOpaqueLifecycleFence{
 			WorkspaceID: "workspace-source-terminal", RunID: "run-source-terminal", RuntimeStateRevision: state.StateRevision,
 			RuntimeStateRef:  runevents.RuntimeStateRef("workspace-source-terminal", "run-source-terminal", state.StateRevision),
-			RuntimeStateHash: "runtime-state-source-terminal", BootstrapHash: "bootstrap-source-terminal", TerminalFenceID: "terminal-source-terminal",
+			RuntimeStateHash: runtimecontract.StableRuntimeStateRecordHash(state), BootstrapHash: "bootstrap-source-terminal", TerminalFenceID: "terminal-source-terminal",
 		},
 	}
 }

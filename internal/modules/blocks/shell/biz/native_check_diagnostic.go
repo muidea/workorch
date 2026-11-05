@@ -2,6 +2,7 @@ package shell
 
 import (
 	"fmt"
+	"strings"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -38,4 +39,41 @@ func shellNativeCheckReadinessDiagnostic(inspection shellNativeCheckInspection, 
 		diagnostic.Truncated, diagnostic.OmittedReason = true, "native_check_target_diagnostic_limit"
 	}
 	return diagnostic
+}
+
+// A grammar or assertion defect in existing owner inputs is reparable only
+// within those same observed resources. Scope, I/O, capacity and unsupported
+// protocol failures cannot acquire mutation authority from their error text.
+func shellValidationInputMaintenance(directory string, refs []string, inspection shellNativeCheckInspection, requirement runtimecontract.RuntimeValidationProofRequirement, recipe runtimecontract.RuntimeValidationRecipe, checks []runtimecontract.RuntimeValidationCheckAttestationBinding) *runtimecontract.RuntimeValidationInputMaintenance {
+	switch inspection.Code {
+	case "native_check_versioned_contract_invalid", "native_check_source_invalid", "native_check_signature_invalid", "native_check_assertion_unresolved", "native_check_missing", "native_check_ambiguous", "native_check_runner_override":
+	default:
+		return nil
+	}
+	b, err := runtimecontract.RuntimeValidationProofRequirementBindingForRecipe(requirement, recipe.ID, checks...)
+	if err != nil {
+		return nil
+	}
+	subject, code := shellReadValidationInputSubject(directory, refs, b, false)
+	if code != "" {
+		return nil
+	}
+	pkg, err := shellIsolatedValidationPackage(checks)
+	if err != nil || pkg == "" {
+		return nil
+	}
+	targets := normalizeShellStrings(inspection.TargetRefs)
+	if len(targets) == 0 {
+		targets = []string{shellValidationNativeCheckTargetRef(requirement, checks...)}
+	}
+	for _, target := range targets {
+		if !strings.HasPrefix(target, pkg+"/") {
+			return nil
+		}
+	}
+	m := &runtimecontract.RuntimeValidationInputMaintenance{Binding: b, Recipe: &recipe, Files: subject.Files, TargetRefs: targets}
+	if m.Validate(requirement, recipe.ID) != nil {
+		return nil
+	}
+	return m
 }

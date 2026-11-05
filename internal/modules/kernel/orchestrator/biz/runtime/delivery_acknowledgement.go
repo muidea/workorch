@@ -22,7 +22,7 @@ func (c *driveDeliveryComponent) recordDeliveryAcknowledgement(ctx context.Conte
 		return RuntimeAggregate{}, false, err
 	}
 	acknowledgement = acknowledgement.CloneRaw()
-	aggregate, err := c.repository.Load(ctx, acknowledgement.WorkspaceID, acknowledgement.RunID)
+	aggregate, err := c.load(ctx, acknowledgement.WorkspaceID, acknowledgement.RunID)
 	if err != nil {
 		return RuntimeAggregate{}, false, err
 	}
@@ -45,9 +45,7 @@ func (c *driveDeliveryComponent) recordDeliveryAcknowledgement(ctx context.Conte
 	expected := aggregate.StateRevision
 	aggregate.DeliveryAcknowledgements = append(aggregate.DeliveryAcknowledgements, acknowledgement)
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, false, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expected); err != nil {
 		return RuntimeAggregate{}, false, err
 	}

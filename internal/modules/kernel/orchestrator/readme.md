@@ -28,6 +28,130 @@ capability resource state。
 [`recoverable-wait.md`](../../../../docs/00-core/runtime/recoverable-wait.md)。本 README 只固定该规范在 Orchestrator 的 owner、
 交互和可执行验收落点，不复制专题全文。
 
+### 唯一规则与消费边界（基础约束）
+
+同一事务、同一输入、同一规则只由所属 owner 接纳一次。内部消费者使用正式 typed 结果，不各自重建完整事实图来再次裁决。
+纯转换保持原值；公共原件接纳、不同的前后像、跨 owner 来源/权限/幂等/fence/CAS 是各自不同责任。
+Run 只负责生命周期及 opaque CAS；SM-2 决定范围、适用性、credit 与收敛；SM-3 封存请求/dispatch；
+能力 owner 执行并保全唯一 receipt；Result 保存已判结论；三方 ACK 不能合并。恢复按原 executionKey/fence 查询，不能重复 effect。
+
+| 规则 | 唯一实现与入口 | 消费者与输入变化 |
+| --- | --- | --- |
+| 新输入与 CAS 后像的共同结构、semantic/history/dispatch/receipt/预算/治理/终态规则 | `RuntimeStateRecord.validateInSourceSession`，由 owner image admission 调用 | 未接纳 struct 走 `AdmitRuntimeOwnerStateRecord`；后像绑定真实前像，仅新输入及变化依赖重新接纳 |
+| 正式 owner 原件读取与恢复 | Run 物理存储完整性入口 + `ReadCommittedRuntimeOwnerStateRecord` | 检查 scope/revision、原件完整性和交付 ledger；不重新裁决历史业务，不将任意外部 struct 当正式结果 |
+| 精确转换与独有 aggregate 关联 | `owner_state_record.go` 原值转换；`validateOwnerAggregateJoins` | 原件与转换逐值不等明确拒绝；独有 Definition、binding、repair、receipt-evidence joins 保留 |
+| 事件前像 | private `ownerStateTransaction` | 从正式 owner 查询取得隔离原件；同次事件保留精确前像，后像验证不可改写原结果，Run CAS 原子核验并发 revision；未接纳 repository 输入仍走完整 admission |
+| 证据适用性下一次读取 | owner 接纳/事件结果边界 `withOwnerReadProjection` | drive 只消费 `EvidenceApplicabilityRead` 普通 detached 查询数据；新 revision 由 owner 重建，不重入全图校验 |
+| semantic generation 范围及适用输入 | `semanticManifestIdentity` / `CompileRuntimeSemanticManifest` | drive 运输 owner 编译结果；seal 在当前前像绑定同一规则。未证明可拆分的 all-eligible 合取仍保留 |
+| 原始业务证据与 effect | 原 capability owner receipt、SM-3 dispatch/executionKey/fence | 查询投影无执行/验收权；重复、响应丢失与恢复不得再次执行来证明原结果 |
+
+没有独立生产用途的 combined raw applicability compiler 已撤出生产。测试中的旧完整 aggregate/conversion 路径只作独立对照，
+不参与运行时裁决。新增规则先归属上述入口，禁止在 handler、adapter、drive 或 presenter 添加相同完整判断。
+`AGENTS.md` 将此要求作为后续开发的基础约束；结构测试与非空固定输入回归共同防止恢复重复路径。
+
+正式 semantic 变更与恢复使用 `CloneRaw` 保留 nil/empty、原正文及 segmented history；新输入的
+`Normalized` 编译不作为旧结果复制。SM-4 只读 ledger 不复制或规范化历史。`AppendHistory` 检查新退役
+generation 并保全原值，最终 ledger 在唯一 CAS 后像接纳；内部事务不先重跑一次完整历史校验。
+catalog 的原始集合在 Facts 入口编译一次；正式后像只为新或改变的 exact catalog 重新判定 Definition
+proof 参与关系，原义务改变时重新接纳整个受影响范围。当前声明 recipe 的完整覆盖仍检查完整 current
+collection，不能用筛选后的新成员替代。原 catalog、receipt、evidence 及 semantic history 仍受不可改写门禁保护。
+applicability observation 同样消费精确前像的原来源裁决，保留当前 revision、集合顺序/重复和 reconciliation
+引用；新 observation 完整反查原 evidence/receipt，不把 hash 相同当接纳凭据。
+receipt/evidence 关联只消费 scope、active/completed dispatch、receipt、evidence 和 processed-event fence。
+无关 semantic 请求、当前 focus 或恢复元数据变化不重判原 receipt；这些来源实际变化时执行同一完整关联门禁。
+精确投影只在本次调用内借用，所有 owner query/CAS 隔离及已提交原件不可改写规则不变。
+
+推进签名只将实际参与该查询的 Facts 字段交给同一 normalizer，semantic ledger 只读借用。
+无关 catalog、Definition、证据正文的复制不属于进展查询；签名本身不授予普通验证、assessment 或终态 credit。
+semantic binding 的用途关联同样只规范化实际消费的 manifest Hash/ProofObligations，保留原义务排序与
+逐项用途解析；完整 catalog 和 manifest 来源仍由唯一接纳入口校验。该投影既不改写原件，也不将
+owner-fact acquisition、implementation 或 repair 的中间结果转为 Definition 终验 credit。
+
+semantic 请求的 history、budget、work-context 投影消费同一正式 owner aggregate，不再分别调用完整
+`RuntimeAggregate.Validate`。原件接纳与事件后像仍由唯一 owner gate 负责；投影保留当前请求 scope、
+Definition/startup/seed、manifest、revision、限额及 exact intent/receipt 来源关联。损坏的外部原件仍须
+在 `AdmitRuntimeOwnerStateRecord` 拒绝；不能将投影当作任意外部 struct 的准入入口。
+SM-3 请求准备与 SM-4 正式结果消费受影响；provider 输入、C0-C5、冻结请求、权限预算、ordinary
+validation/assessment 和三 ACK 不变。该收口不表示 input-revision 历史编译或终态消费的完整重验已经撤出。
+
+适用性查询的 request 与原操作 read source 由同一次私有编译共同返回；owner 查询投影不再为同一来源连续编译两次。
+request-only 消费者使用同一入口的请求部分；写入 observation 时仍真实重新读取 owner，并独立反查原来源与版本窗口。
+当前 revision/generation 的 observation 成员先做精确筛选，再为该原 evidence 计算一次 hash；旧 stale 否决规则保持不变。
+这些结果只在当前调用中流转，不保留跨事务成功状态，不授予 effect、readiness 或验收 credit。
+
+跨 current/remaining/completed focus 的证据归属统一调用 proof 的 `EvidenceAppliesToAnyFocusWithLineage`。
+本次纯查询只规范化一次共同 CWI ledger/适用性 observation，统一判定一次同 evidence 的 stale/historical-purpose 条件，
+再逐 focus 规范化并按原始成员顺序执行原 current binding/equivalent lineage 规则；不把原始成员替换成规范化后的新集合。
+原单成员与批量入口共用底层规则。共同字段仅在调用内使用，新 revision、下一事件、owner 写入与重载仍重新计算，
+不保留完整 Facts PASS、不新增 authority 或 credit、不改变 SM-2/3/4 事务及 SM-1 生命周期。
+
+assessment 原始输入与 adjudication 的唯一 validator 在同次 raw-canonical 比较时计算 detached 规范化结果，
+通过后直接交给当前 derive/历史复核消费者；失败只返回错误及零值，不再次规范化同一正文。
+原始规范性拒绝、首错顺序、来源/transaction/binding、依赖与 double-entry hash 规则保持；
+该结果不跨调用持久化，owner 新前像与后像仍独立接纳，不替代普通验证、独立 assessment 或终态 ACK。
+
+surface 编译从同一次 preparation 原始校验取得规范化正文，集合 duplicate/覆盖检查仍按原始顺序执行，
+成功输出按唯一 normalizer 的顺序排序。私有校验只读借用原诊断；surface 输出边界恰好一次 detached 复制，
+完整原诊断、source checks、native attestations、target constraint 与首错均保留，不重新规范化同一 preparation。
+confirmed-repair lineage 先按原条件选择有序 repair dispatch；无候选直接返回不满足，不展开无关来源。
+存在候选时仍完整核验预算、操作来源、review、confirmation、receipt/fence 及更晚普通验证，选择本身零 credit。
+
+confirmed-repair aggregate 关联只投影实际读取的 accepted/rejected evidence 集合，再使用唯一 Facts normalizer 的
+原集合规则；不为来源反查复制无关 Definition、assessment、catalog 或资源正文。同次 mandatory-commitment 批量
+检查共用一份完整 rejected 集合，每个 dispatch 仍独立反查原 receipt、executionKey/fence、binding 与精确来源。
+不逐条替代集合规范化，原排序、空 ID 排除、重复 ID first-wins 和首错顺序不变；这些是纯查询投影，不是原件
+接纳成功或跨事务缓存。`repair_source_projection*_test.go` 冻结改前完整算法，对照真实封存 repair 正例、完整归档、
+原文／正文篡改、重复顺序、缺项、错 scope、JSON 重载及全部 Facts 字段漂移，并核对返回值与原件隔离。
+SM-2/3/4 仍使用原 owner joins 与事务；SM-1、资源预算、普通 validation/assessment、CWI credit 与三 ACK 不变。
+
+### 已提交 assessment 权威结果的生命周期
+
+SM-2 的 `AssessmentObserved` 私有迁移产生 `RuntimeAssessmentAdjudication`，与原 dispatch、
+`RuntimeAssessmentFact` 和 double-entry hash 在同一 CAS 正式保存。SM-3 的原封存输入不变，
+post-seal adjudication 不进入 dispatch authority hash。正式结果保留原义务、scope、版本和当时语义。
+
+record admission、owner 查询／事件前像、后像、历史 acceptance 及冷恢复统一调用
+`ValidateRuntimeAssessmentAdjudications` / `ValidateRuntimeAssessmentAdjudication` 消费正式结果。
+这两个入口不接收完整 lineage/semantic 证明图或 compiler session，不重跑历史 classifier；只检查
+raw 结构、Workspace/Run、原 Definition 来源、事务与 coverage 身份、双记账 hash、选中 evidence 的原文
+hash/依赖/cutoff，以及 owner-fact 的原 catalog/selector 来源。完整原件、receipt/fence、来源链和集合
+chronology 仍由各自唯一门禁核验；读取完整性不得重新解释历史 postcondition。
+同一 CAS 的 owner-fact handoff 消费刚产生的正式结果及 exact preimage，不再次推导其 adjudication。
+
+唯一 aggregate CAS 边界比较实际 owner 前像：已提交 assessment facts 及原 completed assessment dispatch
+不可改写／删除；自算两份新 hash 不能替换旧裁决。新增结果只能关闭前像中的唯一 active assessment，
+并保持原 sealed dispatch 全文；初始 aggregate 不得夹带历史 assessment。纯读取不能证明任意外部
+struct 已被 owner 接纳，source/dispatch admission 与 CAS 边界不能被绕过。
+
+新 owner 观察、依赖变化与新的合法事务只处理受影响的当前适用性。失效时撤销当前 credit、重开 CWI，
+仍须 fresh 普通验证与新 assessment；旧裁决和 receipt 保留，不重执行 effect、不重置预算、不复活终态。
+SM-2 保持 all-of 与当前 credit 权威；SM-3 保持原 dispatch/receipt；SM-4 消费／恢复／交付，SM-1 与三 ACK 不变。
+没有新缓存、已校验标志、持久化字段、Profile 开关或兼容路径。
+
+原完整历史 classifier 只在 test-only `runtime_assessment_committed_audit_test.go` 显式离线重放。
+新结果生产仍在正式 SM-2 提交路径完整判断；输入来源／purpose／repair 的其它门禁不因本项自动退役。
+新提交统一调用 `CompileRuntimeAssessmentEvaluation`。同一封存输入只选择一次证据并判断一次 proof、
+owner-fact 缺项、verification policy 与 lineage；coverage、owner-fact-only 分流及 adjudication 消费同一
+typed 产物。该产物只在本次 owner 提交调用内存在，不是持久化 PASS、缓存或第二 authority。
+证据等级与独立来源策略共用 `RuntimeVerificationEvidencePolicySatisfied`；非 assessment 的 receipt closure
+在其自身事务选择适用证据后消费同一策略实现。业务规则不得借合并过程放宽，Level 5 也不能由多个普通 receipt 拼成。
+
+### 已提交历史行为与验收结果
+
+`RuntimeHistoricalBehaviorCompletion` 在原完整 effect receipt/evidence CAS 首次形成；
+`RuntimeHistoricalAcceptanceProof` 在原普通 assessment CAS 形成，消费前者的正式结果并完整判断本次尚未裁决的
+独立验收。首次生产保留原 semantic、owner feasibility、receipt/fence、cutoff、原 all-of 检查与来源门禁。
+读取、恢复与终态材料只消费已保存结果。`ValidateRuntimeHistoricalBehaviorCompletions` 仅接收 Facts 和
+completed dispatch，核对 Definition 声明、绑定谱系、原 execution/evidence/hash 成员与 assessment 结果引用，
+不接收完整 semantic/provider/recovery 图，不重新编译原业务结论。终态材料另查普通 consumer 的当前 proof 适用性。
+旧历史行为与验收记录不可修改或删除；新增记录必须关闭真实 CAS 前像中的原 active dispatch，原 sealed input
+不变，行为来源的 completed dispatch 也不可协调重写。旧完整重放在 test-only
+`runtime_historical_committed_audit_test.go` 显式执行，不能作为常规读取前置步骤。
+consumer 依赖失效时撤销前驱当前 credit，保留原行为及全部验收历史，只对受影响 consumer 进行 fresh 验证与新 assessment。
+上述边界不合并普通验证／assessment／三 ACK，不声明公开 fullflow 或整个业务流已经通过验收。
+回归落点为 `runtime_assessment_committed_result_test.go`、`assessment_committed_result_transition_test.go`，
+以及既有 applicability/reopen、assessment CAS 失败／响应丢失、冷恢复与终态交付主链。
+
 ### Single-owner mutation contract
 
 - 外部 concrete result、owner receipt、governance resolution 和 delivery acknowledgement 必须先映射为
@@ -39,18 +163,16 @@ capability resource state。
   EventHub ingress、多个 CAS 或由某个 sibling state machine 事后补写。
 - `runtimeMutationKernel` 唯一持有 repository port 与 `RuntimeTransitionCoordinator`；authority、planning transaction、
   candidate dispatch、drive delivery component 只共享该 kernel，不持有 sibling、Hub 或第二份 aggregate。
-- `RuntimeAggregate.Validate` 顺序验证 SM-2、SM-3、SM-4 及 cross-machine fence。所有合法变化经一次 semantic CAS；
+- `RuntimeAggregate.Validate` 通过唯一 owner image admission 验证 SM-2、SM-3、SM-4 及 cross-machine fence。所有合法变化经一次 semantic CAS；
   projection、timer、adapter 和 shared contract package都不能直接写 aggregate。
   private transition 完成写集后直接提交同一 aggregate 时，由 `RuntimeTransitionCoordinator.Commit` 统一执行完整校验，
   不在无中间变更的相邻调用处重复验证；revision fence、普通 repository Save 与 fresh-load 的原始校验仍保留。
-- `runtime-transition-preimage/v1` 只用于本 owner 的单次 `Commit`：coordinator 私有调用身份绑定
-  workspace/run/expected revision，adapter 每次经 Run typed query 真实重载、完整校验原 DTO；
-  `RuntimeTransitionPreimageRequest.Compile` 在独立 raw graph 上完整校验 aggregate 后生成 private-field typed 前像。
-  仅本次 coordinator 可一次消费，仍核验 scope/revision、全部五项迁移门禁、after-image 与 CAS。
-  零值、跨调用、重复消费、未知版本、序列化和调用结束后均拒绝；不持久化、不跨调用缓存、不接受成功标志/hash。
-  普通 Load/recovery/Save 和未实现此 owner-local complete-load 接线的 repository 仍完整校验；没有新的 owner、
-  SM transition、预算或 provider/effect 权限。`transition_preimage_test.go` 固定完整原值、alias、生命周期和拒绝边界，
-  `runtime_state_repository_test.go` 通过真实 Run owner 验证原始 DTO 门禁、逐次重载及 CAS/restart。
+- 正式事件在首次 Load 取得独立前像，完成写集后在同一 `RuntimeTransitionCoordinator.Commit` 接纳后像，
+  检查原结果不可改写与本次迁移不变量，最后由 Run owner 的真实 CAS 裁决并发；不为 Commit 再读取整份 Run。
+  正式读取/恢复消费 Run 返回的原件，只核对当前身份、引用与交付账本。未接纳快照和显式离线审计仍完整接纳，
+  不把调用方 completed/hash 当作已提交。独立 coordinator 的前像读取不用于生产事件间共享状态。
+  `runtime_owner_integrity_test.go` 和 `runtime_owner_state_transaction_owner_test.go` 覆盖真实 owner 的原件损坏、
+  CAS前中断、CAS后响应丢失、独立重建和 duplicate；原版本边、权限预算和四机边界不变。
 - 纯校验只可在同一次调用内复用本地规范化值：SM-2 binding hash 保持原字段、顺序和完整内容重算；SM-3 session
   可把本次完整 raw-canonical/source/hash 校验得到的 detached manifest 交给私有 wire compiler，不能仅凭调用者 hash
   推断成功。semantic assessment 前像重建可将同一 generation 完整校验所得的私有 manifest 产物复用于逐批 binding compiler，
@@ -172,7 +294,7 @@ capability resource state。
   dispatch candidate 采用 raw detached Clone，目录 MCP 嵌套集合在规范化投影中同样隔离；不洗掉非法原文。
   `runtime_state_conversion_reference_test.go` 保留原四个转换路径，
   `runtime_state_conversion_reuse_test.go` 固定完整逐字段产物、nil/empty、原 bytes、全图 storage 隔离、
-  首个 aggregate 错误、重载、fuzz 与分配；Load 的完整 DTO/aggregate 和 Save/CAS 门禁不减少，四机和预算不变。
+  首个 aggregate 错误、重载、fuzz 与分配；Load 的共同规则及 aggregate 独有 joins 和 Save/CAS 边界完整保留，四机和预算不变。
   catalog 内逐项完整校验后产生的 detached surface 仅按原 ID 稳定排序再复用，不在整 catalog 规范化时重复深拷贝；
   raw input-review、重复 surface、owner/revision、recipe 与 snapshot 门禁及其拒绝顺序不变。
   `runtime_owner_catalog_surface_reuse_test.go` 固定 ready/preparation 多 surface 排序、嵌套隔离、V2 原读取前像、
@@ -445,7 +567,7 @@ owner postcondition：exact requirement 与 pre-seal catalog snapshot 单独记�
 observation 分域 hash；classifier 与 dependency projection 共用同一字段观察，独立旧 classifier reference 固定布尔结果等价。
 整 catalog observed revision、无关 targets 或 diagnostic 不进入 scoped dependency revision。
 matching catalog 缺失保留 requirement 和 nil source，不伪造 absence。来源与完整依赖正文进入 adjudication hash，raw clone、
-normalization 和 JSON reload 保全 detached 正文，fresh-load 从原 `AssessmentAuthorityInput` 重编后 exact-match。
+normalization 和 JSON reload 保全 detached 正文；fresh-load 核对原 `AssessmentAuthorityInput` 的 catalog/selector 身份和原结果完整性，不重算历史 postcondition。
 `runtime_assessment_owner_fact_sources_test.go` 与 `biz/runtime/assessment_owner_fact_sources_test.go` 固定独立 observation
 oracle、无关变化、相交变化、raw/hash/重复/Definition 门禁和协调篡改；既有 recovery 测试覆盖 CAS 前失败与响应丢失。
 真实 File/Shell/Run mainline 与三 owner ACK 恢复验证原 catalog 来源。这仍不覆盖 classifier 的所有 binding/lineage/guard
@@ -505,10 +627,10 @@ File adapter 在原 read 或显式 versioned mutation owner 边界封装 query�
 `biz/runtime/operation_read_source_compiler_test.go` 固定 claimed/missing/nil 来源拒绝、owner-committed 与重载等价；
 实际 File 组合回归对照原执行 request，覆盖 completed dispatch、来源篡改、返回隔离与 owner 重建后重编。
 source compiler 和 query 自身不写 CAS/credit/预算；只有 SM-2 private applicability event 可提交观察与裁决。
-`CompileRuntimeEvidenceApplicabilityRead` 在同次完整 aggregate 门禁内同时编译适用性 request 与 detached 原 receipt
-读取来源；公开独立 source/request 入口仍各自执行完整门禁。内部 continuation 不接收已验证标志，不缓存结果，
-只在同一原始 aggregate 上复用本次已执行的完整遍历。File/Shell typed query 仍核验原 receipt/key/fence，SM-2
-观察写入仍独立反查来源、当前版本及 CAS。SM-4 仅减少重复只读编译，不改变 SM-1/2/3、预算、credit 或恢复权威。
+owner 结果边界统一编译适用性 request 与 detached 原 receipt 读取来源，drive 通过
+`RuntimeAggregate.EvidenceApplicabilityRead` 消费该 revision 的普通查询数据。旧 combined raw compiler 仅保留测试 oracle，
+仅有独立生产调用方的 operation source 入口仍用于原件边界；无生产用途的 request/next raw wrappers 已撤出生产。私有查询产物不授予 writer 权限；File/Shell typed query 仍核验原
+receipt/key/fence，SM-2 观察写入仍核对来源、当前版本及 CAS。SM-4 不重入完整 aggregate 准入，预算、credit 与恢复权威不变。
 `runtime_file_applicability_mainline_test.go` 配对真实 File mutation/query 与 SM-2；
 其中 matching/changed/missing × CAS 前中断/CAS 后响应丢失重建实际 File owner/controller，并原 JSON reload；
 before-CAS 仅重查保存一次、after-CAS 不重复观察，原 receipt/effect/预算不变。相同 Hub 和 Workspace/CAS fixture
@@ -574,188 +696,151 @@ effect。SM-4 材料反查同一原用途来源及当前普通 proof，原 Crite
 合同测试；`biz/runtime/historical_behavior_transition_test.go` 是 detached projection／transition gate 测试，均不冒充
 真实 owner/CAS 恢复主链、fresh OS-process、公开 fullflow 或 live。
 
-历史行为／验收消费者在同次完整反查内只读复用 semantic-purpose 前像索引；首次仍完整遍历原 ledger，
-后续命中须比较独立 raw clone 的完整 ledger，不依据 manifest/binding hash 授信。失败不保存成功产物，
-每项 endpoint、binding、startup、receipt/evidence、assessment/cutoff/current-consumer 门禁仍按原次序执行。
-`runtime_historical_preimage_session_reference_test.go` 保留原完整三类消费者，fixture/公开归档对照固定完整结果、
-首个错误、原输入、返回隔离、重载／后续变化、fuzz 与含首次反查的成本；不改变 SM-1～SM-4、credit、预算或 availability。
+首次历史行为／验收生产中的 semantic-purpose 编译保留原始来源核对；正式结果读取不再触发该编译，
+也不登记完整历史图的“已通过”标志。`runtime_historical_preimage_session_reference_test.go` 保留原完整离线
+重放对照；`runtime_historical_committed_result_test.go` 覆盖正式结果重载、错域／缺失／原文损坏／成员篡改拒绝及
+当前 credit 撤销后的历史保留；完整行为重放与来源完整性读取分属不同责任，不要求两者在任意未接纳原件上首错相同。
 
-同一历史验收／assessment 调用的 execution 来源映射、repair 历史与 fresh input-review 消费者共用上述完整前像；
-各自仍独立验证 exact source、ordinary binding、confirmation、receipt/evidence、截止点与预算。
-公开独立 review compiler 不保留成功前像，历史 ledger 或嵌套原值变化须重新完整反查；不暴露 caller 成功标志。
-`runtime_lineage_preimage_session_reference_test.go` 固定原完整消费者及 assessment history 路径，fixture／公开归档
-对照完整结果、拒绝顺序、原 bytes、重载／后续篡改、返回隔离、fuzz 与成本；不新增四机转换或开放 availability。
+完整冷审计使用唯一 `RuntimeStateRecord.validateInSourceSession`，aggregate 仅追加其独有 joins。
+工作、semantic、candidate、receipt、assessment 与历史来源的临时纯编译产物只在该同步调用中存在；
+公开入口不继承前一调用的成功。正式读取不运行冷审计，也不通过离线重放重新建立 authority。
+旧完整算法仅用于显式离线反例对照；同 hash 原文篡改、nil/empty、缺项、重复、错 scope、返回隔离与重载继续覆盖。
+`RuntimeAggregate.Validate` 和 `AdmitRuntimeOwnerStateRecord` 是冷入口，不能把任意 completed/hash 当正式接纳。
+原 `ValidateRuntimeStateReloadSourcePair`、one-shot preimage 凭据、跨事件历史 compiler 及生产 lineage index 已撤出。
 
-同一次私有历史／assessment 校验中的 owner receipt、retired repair 与 confirmed ordinary-binding repair
-可复用完整 operation lineage 门禁的成功前像。前像完整包含 scope、active/completed dispatch、attempt/session、
-governance/resolution、accepted/rejected evidence 与 owner receipts；首次仍按原次序执行全部七项门禁。
-命中比较 detached raw 全文，失败不登记；binding、预算、confirmation、source、cutoff 和 fresh validation
-仍独立完整核验。`runtime_lineage_operation_session_test.go` 固定逐集合漂移、嵌套 alias、JSON 重载、
-后续独立调用及真实只读归档 oracle；不跨 Load/CAS/公共消费调用保留成功，终态独立入口仍完整反查。
+### 当前正式结果的提交与消费边界
 
-同一次 `RuntimeStateRecord.Validate` 的 work、assessment、semantic ledger、accepted-purpose 和历史验收
-消费者可共享私有 semantic／历史前像 session；work-round guard 也使用该调用内的完整源校验产物。
-每项完整 gate 及原首错次序保留，前像命中仍逐次比较 detached exact raw，不按 hash 授信；public consumer、
-后续 Validate、独立 aggregate 前像与 CAS 校验重新开始，不携带 caller 已校验标志或持久化成功凭据。
-`runtime_state_consumer_session_reference_test.go` 固定原完整 record gate／次序，fixture 和显式只读公开归档
-对照原值、混合失败、同 hash raw 漂移、重载、后续调用、fuzz 和包含首次校验的成本。
-此纯值复用不改变 SM-2／SM-3 acceptance、SM-1／SM-4 转换、预算、保存或恢复权威。
+`RuntimeStateRecord` 是唯一字段表示；Orchestrator 的 `RuntimeAggregate` 是同一 underlying record 的本地方法类型，
+不重复定义字段，不再导出 dispatch/state 的别名 facade。dispatch 直接使用 focused typed contract。
+纯内部消费者借用当前只读表示；Run/EventHub、持久化和公开返回边界保持 detached 原值。
 
-同次私有工作／历史／assessment 来源校验还可保存完整 work-state gate 的成功 raw 前像：原 Definition、
-全部 Facts、work/semantic ledger、active/completed dispatch、receipt、governance 与 budget 必须完全相等。
-purpose vocabulary 重编译、round/dispatch/receipt-set、unknown 消费及所有旧首错门禁在首次仍完整执行；
-失败不登记。公开独立 `ValidateRuntimeImplementationWorkState` 总是执行完整门禁，不保存这份成功前像。
-`runtime_work_state_preimage_session_test.go` 与冻结原完整 compiler gate 核对逐参数漂移、原输入、alias、
-JSON 重载、后续调用、fuzz 和公开只读归档；成功前像不离开本次私有 scope。
+`ApplyInternalEvent` 在 envelope/kind gate 后建立一次局部事务。真实 owner Load 取得独立前像，reducer 形成后像；
+Commit 只对完整 typed 输入发生变化的规则执行接纳，再执行原前后像不变量，最后由 Run 完成真实 CAS。
+同一事件不再次搬运整个 Run 来寻找前像；并发以实际 revision CAS 为最终 fence。
+新 CAS 前失败没有已提交结果；CAS 后响应丢失由新 controller 从正式结果幂等续驱，不重做 effect 或消费。
+初始／未接纳快照仍走完整 `AdmitRuntimeOwnerStateRecord`／`Validate`，不能把任意调用方的 hash 或 completed 声明当正式接纳。
 
-同一 work 源反查中的 round、working binding、dispatch commitment 和 collective receipt-set
-也可复用上述完整 catalog gate；各自的 round/hash、原 scope、proposal/feasibility、排除集合与 receipt/fence
-仍完整反证。mutation-input 集合先逐 catalog 校验再检查 prerequisite 重复，保留原错误顺序和 raw-canonical 门禁；
-公开独立 round／binding／receipt-set 入口不复用前次成功。`runtime_work_round_catalog_session_reference_test.go`
-保留原完整 round／binding 算法，对照完整结果、首错、同 hash raw 漂移、nil/empty、重载、后续变化和 fuzz。
+Run 只保存 opaque Runtime，不执行 SM-2/3/4 业务判定。专用 Runtime CAS 原子写入原值完整性 hash，
+持久化原件在物理冷解码并发布到现有不可变存储缓存前核对 hash；正式读取核对 scope/ref/revision，
+不重复序列化完整状态计算 hash，再由 Orchestrator 消费当前 header、引用与交付账本。
+内存后端只发布已隔离的新写入；不引入业务 PASS 缓存。hash 是原件完整性校验，不是 semantic certificate 或执行权限。普通 SM-1/元数据更新必须保留 opaque state、
+hash 与 lifecycle fence。workspace-scoped 持久化继续走底层专用 Runtime CAS，不能借普通 Run CAS 写入。
+这是唯一当前存储合同；不增加缺 hash 回退、自动迁移或历史重新接纳。原归档按原样保全，
+当前合同未接纳的输入不能通过补算 hash 获得业务 authority。
 
-同次完整 round 门禁成功后可保存 detached raw round，后续 round／dispatch／receipt-set 消费者只有完整原值
-相等时才复用；首次失败不形成成功前像，公开独立入口仍完整重验。scope/compiler 与原 hash、catalog、binding
-门禁不变；`runtime_work_round_preimage_session_test.go` 用原完整 round oracle 固定首错、嵌套 alias 隔离、
-同 hash raw 漂移、重载、后续调用、fuzz 及包含首次校验的真实只读归档成本。
+`QueryRuntimeLifecycleCommand/Result` 是 Run-owned 窄查询，包含 drive 所需 SM-1 状态、revision、bootstrap identity、
+阻塞、reconciliation scope 与 lifecycle fence，不携带完整 bootstrap/Runtime。接收 owner 在同一读屏障核对来源和 scope。
+SM-4 每步刷新该投影；初始化仍读取一次完整 Run。file/memory repository 在自身读锁内直接投影窄状态，
+workspace-scoped repository 委托同一窄入口，不为此查询 clone 完整 Run。该改动没有增加存储分片或新 owner。
 
-aggregate 的连续历史行为／工作／evidence／applicability／assessment 来源门禁统一由
-`ValidateRuntimeConvergenceSourceLedgers` 纯校验；私有 semantic／历史前像不离开这一次完整调用。
-每个 interstitial gate、原拒绝标签与次序保持不变，aggregate 后续四机、独立前像、DTO、Load、Save/CAS 门禁保留。
-`runtime_convergence_source_ledgers_reference_test.go` 与 `biz/runtime/aggregate_source_session_reference_test.go`
-保全原完整独立消费者次序，fixture／只读归档核对首错、原输入、重复、重载、后续漂移和 fuzz。
-逐代 manifest→Definition 反查同样在完整调用内共享精确 raw manifest/catalog/seed 与成功 focus 前像，
-每代 CWI 全文、普通义务、repair route、Profile 声明和逐 catalog 身份仍完整反编；公开单 manifest 入口重新开始。
-`runtime_semantic_definition_session_reference_test.go` 保全原独立完整反查，固定原值、首错、raw alias、
-同 hash source drift、重载、fuzz 和包含首次校验成本的归档对照。以上只读复用不新增四机转换、
-状态、成功凭据、跨调用缓存、预算或公开 availability。
+Run opaque 写入读取 `RuntimeStateWriteBase`：仅 detached Run 元数据及旧 aggregate revision，
+不读取或复制随后被替换的旧 Runtime。workspace head 只判断 retirement，物理 repository 锁内独占
+opaque CAS、完整新值 hash/fence 核对与发布；完整新值只有存储隔离的必要 clone，不在 Run 本地 wrapper 再复制。
+写入无法编码或 hash 不符是 `ErrRuntimeStateIntegrity`，映射 semantic rejection，不按并发冲突重复尝试。
+Orchestrator 的跨 owner 输入隔离、Run 物理 revision rebase、真实 aggregate CAS 和 reader 返回隔离继续保留。
 
-`runtime-owner-state-joint-preimage/v1` 只在 SM-4 重新读取 Run owner 的单次 Commit 前像编译内复用
-DTO→aggregate 的纯来源子校验产物。完整 raw DTO 先验证，aggregate 的声明／feedback／来源与全部剩余
-invariant 保持原首错次序；成功命中须比较独立原值的完整子树，转换差异重新完整反证，不凭 hash 授信。
-`ValidateRuntimeStateReloadSourcePair` 不返回 session／成功凭据；owner 的 `CompileOwnerRecord` 通过同步纯
-continuation 按原顺序执行全部 interstitial／剩余 aggregate 门禁，只返回同次调用的一次性 detached 产品。
-aggregate source 与其后原位置的 semantic-ledger gate 也在一次完整调用内共享私有上下文；continuation
-不接收任何 session、成功子产物或已验证标志，不进入 owner I/O。独立 aggregate Validate 每次重新创建
-本次上下文，不从 joint／前次调用借用。普通 Load/recovery/Save、独立 Validate、
-after-image、scope/revision、跨机迁移与 Run CAS 均保持完整校验，不跨调用／重启缓存。
-`biz/runtime_owner_state_joint_preimage_test.go` 对照独立 DTO＋aggregate 路径，覆盖两侧独立篡改、同 hash
-raw 漂移、首错、原值／返回隔离、后续调用、序列化拒绝、只读公开归档及 fuzz；原真实 Run-owner
-preimage CAS 回归继续覆盖提交前失败、提交后响应丢失和并发写入。完整 Commit benchmark 包含首次校验，
-不以局部成本变化证明公开 fullflow 或 live 已完成；SM-1～SM-4 的 transition、预算和 availability 不变。
+SM-4 的 1024 步仅是一次 drive 调度批次。确有正式 revision 推进时沿既有 persisted-pending 让出并重驱；
+无进展仍拒绝，累计工作轮数不成为停止预算。provider、effect、receipt、assessment、terminal seal 和各 ACK 的持久断点不合并。
 
-`runtime-owner-state-transition-transaction/v1` 由 `ApplyInternalEvent` 在完整 envelope／kind gate 后创建
-一次局部 controller/kernel；`owner_state_transaction.go` 只包装首次 Load，coordinator 仍持原 repository
-直接重读前像并 CAS。具体 handler、纯 reducer 和原位置完整 invariant 不变，既有 SM-2／SM-3／SM-4
-协调写集与首错顺序不变，SM-1 不变；普通 Load/recovery/Save 与公开独立 Validate 每次重新开始。
-`CompileRuntimeOwnerStateTransaction` 在词法调用内保留纯 source／semantic 子产物，不导出 session、成功
-凭据或已验证标志。owner 两组 before／after-semantic invariant 分别反查完整 detached aggregate raw 超集，
-精确原文相等才共享本次成功，变化、失败或另一组均不能命中；source／semantic／预算／迁移／CAS 门禁保留。
-退出、异常及 panic 均撤销 gate；禁止递归／并发使用，Commit 的一次性 request 原子清除 compiler 引用。
-上下文不进入共享 controller、context、EventHub、持久化、结果或下一事件，不凭 hash 授信，不增加执行权限。
-唯一跨事件纯子树例外是 `runtime-owner-historical-subtree-compiler/v2`：controller 私有
-`RuntimeOwnerHistoricalCompiler` 仅保留同一 workspace/run 的 detached semantic manifest/document、catalog、
-Definition 与工作 scope/round 纯子产物，完整 raw 精确相等才可复用；所有当前状态门禁仍逐事件运行。
-已退休 semantic generation 的完整 raw／normalized 双参数门禁及其完整用途前像也在白名单内，
-enclosing ledger 的 current、append-order、duplicate 与 Definition join 每次执行，active 用途前像不缓存。
-完整 work-state／historical-source／owner invariant／Commit 产品不在跨事件白名单内。并发／递归走独立冷编译，
-事件失败／panic、scope 切换整体淘汰；成功事件以确定性有界子集保留最多 128 个完整条目（包含嵌套 document），
-超限只淘汰纯子产物，不清空仍可保留的子集，不改原始 owner 数据。优先保留 seed／scope／round／历史来源和节点，
-再保留 catalog、完整 manifest 及剩余额度内的 document。map key 排序仅决定淘汰顺序，命中仍逐原值核验；
-淘汰后走原完整冷门禁。真实排空后 Close 释放，重启从冷状态重新读取。
-此例外只影响 SM-2/3/4 私有事件的纯编译成本，SM-1、全部 transition、预算、scope/revision、CAS 和 availability 不变。
-`runtime-owner-query-reload-compiler/v1` 另外允许 `RuntimeController.Load` 使用同一个私有历史纯编译器：
-每次通过 `LoadOwnerStateOriginal` 真实向 Run owner 读取并独立转换，完整执行 DTO→aggregate 原顺序门禁，
-仅复用 exact-raw 白名单纯子产物。当前 Facts／预算、两组 owner invariant 均重新完整执行，不保留 aggregate
-成功前像或导出凭据，错误返回零 aggregate；查询不运行 reducer、Save 或 CAS。普通 repository Load/recovery/Save、
-独立 Validate 与 Commit 合同不变，无 raw 接线时回退原 Load。查询与事件遵循同一 scope、失败／panic、并发冷路径、
-淘汰和真实排空后关闭规则；不增加四机转换、权限或预算，不改变十分钟 fullflow 与 availability。
-`runtime-owner-applicability-read-compiler/v1` 将 SM-4 的证据适用性读取投影接到同一私有历史纯编译器。
-`RuntimeController.CompileEvidenceApplicabilityRead` 对每次完整 aggregate raw 执行与独立 `Validate` 相同顺序的
-全部门禁，只有白名单内完整精确相等的历史子产物可复用；请求、source、当前 Facts／applicability／budget、
-owner invariant 或 aggregate 成功均不保留。该方法不读取 Run owner、不运行 reducer／CAS，输入来自原 drive
-重载／已提交迁移的 aggregate；它不是一次新的重载证明。随后仍真实查询 capability owner，并由原 private
-observation event 重新读取 Run owner、反查来源及 revision、执行全部迁移与 CAS。独立公开 compiler 保持冷门禁，
-不导出 unchecked continuation／成功凭据，不扩大 128 条上限；失败、scope 切换、并发冷路径、Close 与重启规则不变。
-`runtime/evidence_applicability_owner_compiler_test.go` 对照完整冷结果与首错，覆盖当前预算、receipt、scope、重复、
-返回隔离、关闭、重建与并发；只读公开归档 oracle／benchmark 同时包含真实历史子树，不冒充全链路通过。
+reconciliation 新 batch 在原接纳 CAS 反查原 accepted receipt/sealed scope。正式历史不再重编业务来源，
+历史前缀只许原样保留；归档只许移动原 current generation。已有 batch 的 request/result 不可改写，
+新 observation 仍须完整证明原执行来源，不能靠自算 hash 授 credit。
+原 Definition、semantic 历史、purpose、已成功完成的工作轮、证据和 receipt 不可改写；完成的 dispatch 结果按原值保留。
+原未完成、失效或等待治理的 dispatch 的迟到 owner 回执仍可按原身份补齐进度，不能将归档当作全部执行已完成。
+SM-2 内部归约/decision seal 只推导本次决定，完整 facts 接纳归统一后像 CAS；独立 raw 归约入口仍完整接纳。
 
-可选 Go execution trace 在 query reload、private event transaction／load、drive transition、applicability、
-Commit／reread 和 Run query／CAS 记录固定 `workorch.runtime.*` 区段。区段不携带 Workspace、Run、provider
-原文、配置或凭据，不进入持久账本、EventHub DTO 或 authority；关闭 trace 时不收集区域诊断。
-`scripts/lib/runtime-trace-summary.py` 流式读取完整 `go tool trace -d=parsed` 输出，按 goroutine 配对嵌套区段，
-分别统计 inclusive／self wall time；并发与嵌套不能相加为端到端耗时，wall time 不能称为 CPU time。
-缺区段、未结束、错配或非单调时序不能记完整通过。该诊断不改变 SM-1～SM-4、预算、恢复或十分钟判据。
+controller 不保留跨事件历史编译器、保留额度或查询影子权威。旧 raw-node 对照算法只存在于显式离线审计测试，
+生产 lexical compiler 的临时产物随本次接纳结束释放。完整离线重放不在正式 Load/recovery 的前置路径。
+`EvidenceApplicabilityRead` 仅在 drive 实际需要时计算本次 typed 查询；返回值不保存到 aggregate，
+不授 receipt/预算/credit，后继 observation 仍由原 private event 接纳。
 
-`runtime-owner-lineage-subgraph-compiler/v1` 追加 owner-private 历史纯节点索引：只保留完整原门禁通过的
-closed dispatch intrinsic、operation-admissibility catalog、owner receipt 与 repair-surface confirmation raw 副本。
-候选身份不授信，每次命中完整精确比较所有实际参数、嵌套原值及 nil／empty；active dispatch intrinsic 不缓存，
-raw／normalized 子参数沿用原调用位置，不能以规范化掩盖漂移。已验证 receipt 的纯 hash 产物仅在原 hash 位置、
-完整 raw 精确命中后复用，不凭 hash 授信、不代替 join。集合分区／scope／顺序／重复、candidate admission、
-request／dispatch／execution-key／governance、receipt／execution／evidence／processed fence 跨账本 join 仍每次执行，
-当前 Facts、版本／applicability、预算、cutoff、后续失败与所有原首错门禁不变。完整 repair／assessment／lineage-source
-或 aggregate 成功不跨事件保存；普通独立 validator 不借用索引。新增节点计入原 128 条完整上限，沿用同一 scope、
-失败／panic、并发冷路径、淘汰和关闭规则，不持久化、不导出凭据、不跨重启。SM-2/3/4 只变纯编译成本，
-SM-1、transition、owner I/O、scope/revision、after-image、CAS、effect、预算及十分钟 fullflow／availability 不变；
-完整路径成本倒退则撤回。`runtime_owner_lineage_index_test.go` 对照独立门禁覆盖完整 raw 字段漂移、alias 隔离、
-nil／empty、同身份命中、active／failed 零保留、重复／顺序／scope／跨账本 join 与只读公开归档。
-`runtime/owner_state_query_test.go` 对照独立 DTO＋aggregate 门禁，固定首错、当前漂移、逐次读取、错误重试、
-返回隔离、并发冷路径、事件交替与 fuzz；`biz/runtime_owner_query_test.go` 验证真实 Run owner 的 revision
-可见性、零查询写入、stale CAS、文件重启，以及只读公开归档漂移和包含首次编译的完整查询 benchmark。
-`runtime_owner_historical_compiler_test.go`、`runtime/owner_historical_compiler_test.go` 对照冷完整门禁固定
-漂移、首错、原值／nil-empty 隔离、生命周期、并发、淘汰和只读归档；真实 owner CAS／restart 回归继续适用。
-`runtime/owner_state_transaction_test.go` 对照完整独立门禁，固定 raw／converted 漂移、独立 owner gate、
-原值隔离、错误顺序、关闭、失败、panic、递归／并发拒绝、重复事件、stale／CAS failure 与 fuzz；
-`biz/runtime_owner_state_transaction_owner_test.go` 验证真实 Run owner 的两次读取、CAS 前中断／后响应丢失，
-重建文件 repository 与 owner 后精确续驱且不重复消费预算或 effect。完整事务 benchmark 包含首次 Load、
-具体 reducer、after-image、Commit 重读、全部迁移与 CAS 调用；不代表公开 fullflow 或 live 已通过。
+SM影响：SM-1 的 opaque CAS/fence；SM-2/3 的新事务接纳与原结果消费；SM-4 的窄读取、恢复和有序交付。
+不改变原 Goal/DoD、all-of、权限预算、独立普通验证、assessment 或 Result→Workspace→Run 三 ACK。
+真实 owner 测试覆盖 file/workspace-scoped 的 CAS前中断、CAS后响应丢失、重新构造 owner/controller 与 duplicate；
+冷审计测试继续覆盖 raw 漂移、真实缺项、原值隔离、并发和预算。整体完成状态以公开流程与部署验收证据为准。
 
-`runtime-owner-invariant-source-compiler/v1` 将 owner after-semantic continuation 的 Definition 来源、accepted
-batch binding、document／feasibility、obligation-purpose 及 accepted-assessment 来源反查接到既有私有历史纯编译器，原门禁位置、原始参数、
-全部 join 与首错次序不变。`RuntimeOwnerInvariantSourceGate` 仅提供完整纯校验方法；不导出 semantic session、
-成功凭据或 caller 已验证标志，返回的 binding／purpose 是普通 detached 纯值，不授执行或终验权。
-assessment gate 每次完整验证原 ledger 后执行全部 attempt／session／dispatch join，不借用 caller 已验证假设。
-nil gate 走独立冷校验，非 nil 零值／关闭／递归／并发 gate 拒绝；continuation 退出或 panic 清除引用，
-失败 sticky 且不能由 owner 忽略后返回成功。owner contextual error 保留，跨事件仍只保留既有白名单子产物，
-不保留完整反查／inventory／owner invariant／aggregate 成功，不扩大 128 条总限。
-当前 focus/CWI/candidate/dispatch/reconciliation、Facts、版本／applicability、预算和全部剩余 invariant 仍完整执行；
-SM-2/3/4 只变纯编译接线，SM-1、所有 transition、真实 Run 重读、scope/revision、after-image、迁移、CAS、effect
-和十分钟 fullflow／availability 不变，成本倒退撤回。独立 Validate、普通 repository、冷重启和既有恢复路径不授信。
-`runtime_owner_invariant_sources_test.go` 用独立完整 gate 对照完整产物、首错、同 hash raw 漂移、nil/empty、owner
-缺失／重复、返回隔离、捕获／复制／序列化／panic／失败／并发及 fuzz；`runtime/owner_invariant_sources_test.go`
-固定完整 owner 查询的独立冷路径首错与当前语义／预算漂移，原查询 archive oracle 和完整事件/CAS/restart 回归继续适用。
+同一次 reconciliation 来源反查复用已选中的 normalized owner catalog 来投影诊断 scope，不再次选择／展开该
+catalog。scope 仍独立核对原 target authorization、operation hash、sealed snapshot/acquisition/owner 和目标包含关系；
+无缓存／PASS 标志，不跨调用保留。catalog 与 observation 先按原规范化 scalar identity 判断适用性，再完整准入
+匹配来源；不展开无关正文，返回值保持 detached。`validation_catalog_source*_test.go` 冻结改前完整算法，
+覆盖原文、空缺、whitespace、错来源、duplicate、真实封存归档及 scope/proof/source 的独立对照。
+confirmed-repair 的候选基线必须严格早于本次 assessment evidence cutoff：原规则要求实际修复 fact 严格晚于
+失败基线且不晚于 cutoff。未来／同截止点的 repair 不能满足该消费者，在展开完整历史前排除；所有可能成功的
+候选仍完整校验预算、operations、确认、review、receipt/fence 和后继普通验证。历史序号／原件不变，也不截断
+历史或重用旧成功。`runtime_confirmed_binding_repair_cutoff*_test.go` 对实际归档逐原 evidence fence、同轮旧完整
+消费者和更早独立 oracle 反证；原普通 validation、assessment、CWI、恢复与三 ACK 均保持。
 
-`runtime-dto-source-ledger-compiler/v1` 将 DTO／source-ledger assessment 和 confirmed-repair 的 obligation-purpose、
-owner-fact catalog 与 operation-lineage working commitment 嵌套校验接入同一私有纯编译器。
-只读复用既有 exact detached raw semantic catalog／work-round 等白名单子产物；不另存完整消费者成功，
-不新增白名单、历史索引种类、128 条额度、凭据出口或跨重启缓存。原 report、binding、当前 Facts、版本／适用性、
-budget／cutoff、顺序／重复、cross-ledger join 和原首错位置全部保留。公开独立入口冷编译，owner 查询／事务
-仍真实读取 Run owner，scope/revision、after-image、跨机迁移及 CAS 不变；SM-2/3/4 仅改变纯校验成本，
-SM-1 与全部 transition、effect、原十分钟 fullflow、预算及 availability 不变，完整路径成本倒退撤回。
-`runtime_source_ledger_compiler_test.go` 对照独立冷 gate 和旧完整 assessment／repair consumer，覆盖同 hash raw
-漂移、nil/empty、原文、alias／返回隔离、duplicate／首错、当前来源与预算、重载及只读公开归档；
-既有真实 Run-owner CAS／restart／stale／terminal-material 回归继续适用，局部通过不证明公开 fullflow/live。
+证据归属纯谓词只投影其实际读取的 scope、evidence revision、CWI schema/coverage、current focus 与
+applicability observations，再使用原规范化算法；不为每个 evidence/CWI 对复制整份 Facts 的无关诊断、catalog
+与其它 focus。该投影不进入 owner admission、CAS、持久化或恢复 authority，也不保留校验结果。
+`internal/proof/evidence_lineage_projection*_test.go` 以改前完整 Facts normalization 为独立 oracle，固定
+当前绑定/等价 lineage、缺失/漂移、所有顶层 Facts 字段、原文、fresh reload 与只读完整归档。
+catalog-revision identity 仅投影原排序键 prerequisite/owner 和原编码的 owner/snapshot/revision；不为这个纯 hash
+复制全部 proof/原文。保留 trim、空 prerequisite 排除、stable 排序及重复项原顺序，完整 catalog source admission
+仍独立验证 SnapshotID 与正文，不因 identity projection 取得任何 readiness/credit。
+`runtime_catalog_revision_projection_test.go` 对照原全量 normalization encoder，固定全部顶层原字段、重复排序键、
+nil/empty、无效原输入以及实际 dispatch/assessment catalog 归档。
+catalog 直接消费唯一 surface validator 同次生成的 detached canonical 值，不在完整校验后再次复制规范化
+同一 surface。public Validate 和内部 compiler 共用一个规则正文；拒绝不返回 partial 产物，集合排序/重复、
+输入评审、readiness 和原错误次序不变。surface 的独立旧算法、全字段变异、嵌套 alias 和 catalog 回归同时适用。
+证据 currentness 的 stale/observed/fresh/revision 四个纯查询共用单次 observation scan；同一调用仅在首个
+适用 source ID/cutoff 上计算一次完整 fact hash，不在每个观察及嵌套查询中重复编码。查询不保留跨调用结果，
+不替代完整 owner observation source admission，也不产生 currentness 或验收 credit。所有适用观察仍参与旧失效
+判定，先发现 fresh 不能跳过更晚遍历到的旧 stale；空/缺项、不同 raw fact、历史 cutoff 和 reconciliation fence
+保持独立。`runtime_evidence_applicability_scan*_test.go` 对照改前四个独立嵌套算法，覆盖原文漂移、重复、
+顺序、nil/empty、missing/invalid dependency、跨 generation、冷重载及完整只读归档。
+预算 admission、remaining 与 view 使用 call-local consumption lookup 消除逐 allocation 重扫；admission
+仍逐项校验来源、hash、重复与状态，未准入 view 保留原顺序 first-match、缺项和 unknown/reserved 的原结果。
+`runtime_budget_lookup*_test.go` 对照原完整算法和首错，固定重复、乱序、missing、same-ID drift、重载与增长成本。
+以上仅影响 SM-2/3/4 纯计算，SM-1、唯一 owner、原权限/预算、真实重读与 CAS、独立验收和三 ACK 不变；
+局部回归与 benchmark 不表示原十分钟完整 fullflow 或 live 已通过。
 
-事务内的历史行为／验收和完整 assessment-history 门禁分别复用 exact full raw source 成功前像，
-两者互不授信；explicit facts／completed／lineage 与来源不相等时，assessment 仍执行原完整路径。
-独立单项 adjudication 的 authority 缺失在原 adjudication／hash 门禁之后显式拒绝，不得 nil 解引用；
-此前已经定义的首错顺序保持不变，成功前像不能遮蔽缺失。
-普通独立 consumer 不启用此复用，失败不缓存。`runtime_historical_source_compiler_test.go` 用独立旧完整
-消费者对照首错、全字段漂移、嵌套 alias、JSON 重载和只读公开归档；raw clone 的全图隔离还必须覆盖
-receipt governance／external dependency 的授权上下文及其 nil／empty 嵌套集合，不通过规范化修复原值。
+正式 CAS 对原 accepted attempt/session、semantic document/feasibility、已完成 work、receipt、evidence
+和 dispatch 原值执行保全检查。新或变化的候选来源组完整接纳；未变化成员消费真实前像的结果，
+当前集合唯一性、scope 与 partition 仍检查。pending、unknown、迟到 owner receipt 仍续原事务。
+accepted 标签先于完整 feasibility 结果时不能提前成为 binding authority；完整来源形成后原值不能协调重写。
 
-DTO 与 aggregate 的完整 lineage 来源使用同一字段投影，包含原 `Reconciliation`；不得遗漏字段来制造
-事务内命中。`runtime_historical_input_review_compiler_test.go` 逐字段核对持久来源投影。原 accepted binding 的
-input-review 纯投影仅在本次 `runtimeHistoricalPreimageSession` 内复用：每次先核验完整 detached raw ledger，
-再比较完整 raw binding；返回值独立复制。ledger 原值变化即清除该 ledger 的投影容器，失败不缓存，
-该容器不进入跨事件 128 条历史白名单，不保存当前验收成功，也不授 credit 或修复权限。
+binding 消费只核对正式投影是否精确保留；新/变化 binding 回到完整源编译。purpose 的输入是 coverage credit、
+focus、repair 和原语义/候选事务，无关 failure 或资源观察不触发旧 manifest 的业务重编。
+Facts 中未变化的 exact 原 owner catalog 只生成纯读取投影；新/变化 catalog 及当前集合重复仍进入完整门禁。
+这些路径不保存成功标志、hash 凭据或跨请求缓存，也不赋予新的 readiness、receipt 或 credit。
+`runtime_committed_history_transition_test.go`、`runtime_candidate_committed_sources_test.go`、
+`runtime_facts_compiler_test.go` 与 `biz/runtime/semantic_binding_committed_transition_test.go` 覆盖新/旧边界和篡改。
 
-私有 `runtimeRawEqual` 对完整 raw 值保持 `reflect.DeepEqual` 语义，包括类型、nil／empty、指针／slice
-同址和 NaN；只缓存不含业务值的反射类型比较计划。普通 typed 树不分配逐节点图访问表；动态 map／interface、
-不透明值及深递归回退标准比较器。它不持有 Workspace、hash 或校验结论，不减少任何字段门禁。
-`runtime_raw_equal_test.go` 对照标准比较器覆盖完整 DTO 字段变更、循环图、并发类型计划及 fuzz。
-上述接线仅改变 SM-2/3/4 纯编译成本，SM-1、完整首错、真实重读、迁移、预算、适用性和 CAS 均不变；
-公开十分钟 fullflow 及实际三 owner ACK 必须单独通过，局部 benchmark 不构成收口证明。
+私有 `runtimeRawEqual` 保持完整原值比较语义（含 nil/empty 与 NaN），不持有 Workspace 或校验结论。
+公共 raw clone 和持久化返回仍隔离原文及嵌套容器；原始诊断不因最小上下文或成本优化而改写。
+
+普通新 semantic generation 的范围由唯一 `semanticManifestIdentity` 编译。已有 SM-2 current focus 的完整成员
+均 ready 时，取其声明 acceptance slice 中的 ready 成员作为本次 request group；未声明 slice 时保留完整 focus。
+slice 只作请求分组，不读取其 priority、ID 或 ordinal 来重选执行顺序。current focus 缺失或部分未 ready 时，
+保留原完整 eligible 投影，不静默截断任务。work/repair 的 exact 单 CWI 规则不变。每个成员的原证明义务和
+依赖保持完整，其他 ready 分支继续留在 canonical ledger/queue；active/bound frontier 不能被无关分支替换。
+一个 sealed frontier 的全部成员均有原 current binding，且 settled+satisfied 或原 historical effect 已完整完成后，
+SM-2 才可沿 `planning_frontier_completed` 私有 retirement 开启下一独立组；退休保全完整旧 snapshot、
+新 eligible IDs 与完成 binding refs，不授 validation、assessment 或 terminal credit。先决依赖解锁仍用原 lineage。
+已冻结 generation/request/dispatch 不重写；cold reload 从原 owner 重建同一门禁，旧 manifest 在新范围拒绝。
+`semantic_frontier_test.go` 覆盖同组/异组、完整原义务、bound fence、完成后继、stale、duplicate 和冷加载。
+
+immutable Definition proof declaration 复用比较 revision、完整 raw item/focus，返回 detached 纯声明。
+当前 catalog acquisition、repair、工作目的、适用性与全部 joins 仍单独执行，不把声明编译当 readiness 或 credit。
+没有 historical completion/acceptance consumer 时，不复制完整历史来源；存在孤立 proof 或 committed assessment
+时仍走完整原 gate。普通 JSON formal hash 使用 call-local encoder 保持原 Marshal bytes/domain；
+原文 feedback hash 只读编码，不为哈希再次复制整张诊断图。所有原 hash、nil/empty、原文顺序和错误行为保留。
+`runtime_bounded_processing_test.go` 对照原算法覆盖原文、字段漂移、输出隔离、缺失消费者负例和编译成本。
+
+Facts 冷门禁接入同一私有 semantic compiler：raw catalog 逐项完整校验与 prerequisite 集合去重后，
+在本次只读 Facts validator 内消费原编译器的 exact normalized catalog，随后 normalized catalog 的原门禁仍在原位置执行。
+该集合不额外要求 owner 唯一（semantic manifest 的独立集合才有这一约束）；raw/normalized 全值变化均须重编。
+Definition seed 使用已有 exact raw 子树门禁；不缓存完整 Facts 结果、当前状态 joins 或预算，也不新增跨事件白名单和容量。
+公开 Facts.Validate 冷调用同一算法，原 raw gate、全部 current joins、首错边界和完整来源保持。
+`runtime_facts_compiler*_test.go` 保留改前完整算法，对照 fixed archive、所有顶层 Facts 字段、同 hash raw 漂移、
+重复 prerequisite、同 owner 多 catalog、nil/empty、原件隔离与冷重载；既有 recovery policy 的多字段 map 首错无序单独标明。
+
+可选 trace 进一步区分 `record_admission`、`aggregate_joins`、`semantic_ledger`、`historical_behavior` 与
+`assessment_adjudications`。离线公开 fullflow 分别记录 Run/Runtime revision、收敛阶段、CWI 和分配/GC，
+超时时先保全完整 failure-poll owner，再保存独立 after-stop owner；每份 bytes/SHA256/revision 索引单独对应原件。
+以上影响 SM-2/3 的请求范围和纯编译、SM-4 的恢复/诊断；SM-1、原十分钟期限、权限/预算、独立验证/assessment
+与 Result→Workspace→Run 三 ACK 不变。诊断和局部回归不构成完整公开流程或 live 的通过证明。
 
 `TestDriveRuntimeCrossCWIHistoricalAcceptanceOwnerCASRecovery` 使用真实 File／Shell／Git／Run／Workspace／Result
 及脚本 provider 固定 create→edit→Git、延期零 credit、普通 all-of 后结算、receipt／assessment／material／delivery
@@ -921,7 +1006,8 @@ ordinary 前驱，state-change-only 不补造来源，明确 `cwi_revalidation_s
   Application 不自动生成跨 owner convergence，MCP typed validation 也不借用 Shell preparation。
 - 不能通过 declared prospective acquisition 补齐的 exact validation requirement，由 capability owner 单独发布
   `ProofRequirementUnavailability`，不能伪装为 preparation。SM-2 在 current prerequisite 结算的既有私有事件/CAS 中，
-  以 `owner_fact_convergence_exhausted` 封存原始原因；先于 semantic request、repair directive 与新 acquisition。
+  对没有原授权内维护来源的事实，以 `owner_fact_convergence_exhausted` 封存原始原因；先于 semantic request、repair directive 与新 acquisition。
+  可维护结构观察仅按下述 input revision 合同进入已有工作；不把 owner 错误码或文本变成 Core 路由。
   binding-free cursor 只按 exact CWI 读取 immutable Definition owner-fact declaration，不回填 focus/binding。
   fresh-load 重验 requirement/catalog/owner/diagnostic；缺失或漂移 cause 拒绝。SM-4 只按既有 Result→Workspace→Run
   交付，无额外 provider/operation、acquisition/recovery budget 或新状态机。
@@ -1633,9 +1719,16 @@ Runtime drive 或 provider，也不改写归档。默认 CI 不读取本地运�
 封存 Profile 可用 `ImplementationWorkPolicy.InputRevisionProtocolRef=validation/input-revision/v1` 声明阶段修订。
 SM-2 的 exact complete input-review conflict 私有事件保留旧 generation，以 `input_review_revision` 回到 required；
 唯一原 CWI、同一 input resource owner、冲突 findings/owner protected targets/实际读取输入三者交集才可进入既有普通工作。
-新 `RuntimeValidationInputRevision` 保留完整原 binding/input/report，随 scope→semantic work→working binding→candidate manifest
+新 `RuntimeValidationInputRevision` 保留完整原 binding/input/report 或 typed owner 结构观察，随 scope→semantic work→working binding→candidate manifest
 →dispatch 封存；fresh load 反查原拒绝 generation 与 request/session，历史消费不能前向引用。旧 terminal purpose 留存，
-待修订报告只允许真实 effect purpose，不允许 unchanged re-review 或借用 post-execution repair。未 opt-in 继续原 conflict 失败。
+待修订来源只允许真实 effect purpose，不允许 unchanged re-review 或借用 post-execution repair。未 opt-in 继续原 conflict/不可用失败。
+
+已有输入的结构缺陷可由 owner 在原 `ProofRequirementUnavailability.Maintenance` 保留 exact binding、完整原文件和同包可维护目标。
+SM-2 在 prerequisite-observed 或 focus-advance 的原 CAS 内，仅对当前尚未结算的 exact CWI、原 input revision 协议与 resource owner
+登记 `OwnerInputRevision` 历史来源；完整 catalog 和原 prerequisite observation 保留，Required snapshot 不伪造 manifest、模型 request 或语义报告。
+有 active dispatch/provider、未知/未完成轮、其它真实不可用义务、无原权限或重复完整物理输入状态时不登记。
+历史按原 CAS 排序；同一 CAS 的非维护 retirement 后可追加一次维护来源。原观察失效后，以原 append-only invalidation observation ID
+反查来源，不能把已失效观察恢复为 current。scope、fresh-load 和 dispatch 均反证 Definition、Workspace/Run、原来源和 bytes。
 
 File opt-in edit feasibility 预览同一 edit，核对原输入 before hash、变化后像；候选/最终 seal/dispatch reload 重核。
 修订不按累计次数停止；`InputRevisionProtocolRef` 保留精确输入写入许可，原 `MaxInputRevisionsPerCWI` 仅作不可变来源记录，不进入当前方法投影。完整物理状态重复保护与 proof/provider/capability budget 保留，真实 accepted receipt 零 CWI/validation credit；
@@ -1660,8 +1753,10 @@ Found 或普通 response 均不授 effect/evidence/完成；驱动必须重读 R
 `SemanticWorkContext` 从原同 CWI 完整 round、sealed dispatch/execution、可信 receipt/version 边和历史原用途理由编译 priorRounds，
 不受通用 16 receipt history suffix 遗漏影响，不另设完成账本。真实内容及 priorRounds 进入 semantic C3 shared work；C4 保留可信 receipt history 及闭合引用，C0-C2 和稳定前缀不变。
 
-内容绑定请求封存 `semantic/shared-work`，用途文档只增加最小 typed `implementationIntent`：原 declarationRef、
-exact contentHash、remainingWork、reason。schema、strict decoder、document hash/clone、compiler 与 owner admission 一致。
+内容绑定请求封存 `semantic/shared-work`。provider `implementationIntent` 仅生成 remainingWork、reason、适用的 requirement reviews/selection
+和前轮 outcome/reason；declarationRef、contentHash、前轮 dispatchId/receiptSetHash 由同一 frozen manifest 唯一派生。
+provider echo 这四个 authority 字段明确拒绝；内部 typed intent、document hash/clone、owner admission 与重载仍保留全部身份。
+字段精简同步 schema、strict decoder、compiler 与当前 provider 编码，不修补原始输出。
 代码只检查身份、来源和有限形状；模型的理由不构成语义充分性、readiness、validation 或 CWI credit。
 原 Goal/DoD、Profile、protected inputs、单次目标上限与普通独立验证均保持；累计轮次只作审计；业务差异继续在 Profile 和项目上下文。
 必要修复仍走既有 revision/repair/fresh validation，不强制切换终验、不把重复抽样直至 PASS 当成稳定性。
@@ -1845,3 +1940,106 @@ SM-2 仍只消费合法报告：真实 missing/conflict 走适用输入修订或
 SM-4 的 Result 错误可保留 receiving-owner typed TerminalDeliveryFailure 阶段和 immutable mismatch 字段路径，
 原始 cause 不丢失；同一交付的写入/返回/ACK 仍按原事务和三 owner 顺序处理。该诊断不新增重试、修改 material、
 复活 Runtime 或 SM-1 终态权限；生产具体 conflict 根因须由现场原件及确定性重放证明，不能以隔离成功替代。
+
+结构维护闭环回归：`biz/runtime_validation_input_revision_mainline_test.go::TestDriveRuntimeStructuralInputRevisionRealOwnersAndRecovery`
+使用真实 File/Shell/Run/Workspace/Result 与 scripted provider，覆盖结构观察→真实输入修改→独立重审→普通 validation/assessment
+→三 ACK，以及来源 retirement/receipt 两个恢复切点、原观察删除和 catalog 篡改拒绝；不等同 live 后继验收。
+
+
+### 输入修订候选的 File/Shell 事实组合
+
+SM-3 原 feasibility 接点读取 File 精确拟写入 bytes/replay proof，再以 Shell receiver-owned typed query
+复用其结构规则。Core 不解析 Go，不直连能力 service/repository。结构结论与完整后像保存在原候选
+feasibility record；成功封存继续按原规则消费预封存事实，失败候选保留原事实。未声明要求的冻结事务不追加 File 后像读取或 Shell query。
+manifest 声明的 `authorized_input_owner_structure` 不合格时沿原一次候选纠正，
+不伪造成运行失败/语义审查，不产生 File effect。final admission 与 aggregate fresh-load 反查同一
+transaction/manifest/operation/原 revision/前后像；丢失、篡改或跨 Workspace 事实拒绝。
+SM-2 的原义务、权限、预算和后继选择不变；SM-4 重驱原候选记录，不重复已完成 provider 请求；SM-1 不变。
+
+
+### 验证方法的冻结声明与维护上下文
+
+新 owner input-review subject 可显式声明 `Recipe`，hash 绑定原方法/期限，catalog 完整性检查要求与该 owner
+原 recipe 逐值相等。SM-3 input revision compiler 只从原 subject 的声明派生原方法，不能从当前默认值或历史
+catalog 推断并追加到未声明的方法中。结构维护来源保留同一原方法及完整原 catalog/observation，fresh-load
+反查不可遗漏、替换或借用其他事务。opaque recipe owner 不要求暴露 Shell command。
+SM-2 原完整 all-of、输入修订许可、工作物理状态保护、普通验证与验收 credit 均不变；SM-4 仍恢复原 aggregate/
+冻结请求，不补写历史原件，SM-1 生命周期与交付三 ACK 不变。
+当前 software-dev 新事务方法总期限为 300000ms；原消费预算、已封存 recipe 与更早父 deadline 不扩大。
+这是方法容量与上下文事实收口，不建立跨 CWI PASS cache，不把共同 build/test/race 当作逐项行为证明。
+
+### Fresh reconciliation 共同事实组合
+
+已完成 managed validation 的 Shell 成员可按原 reconciliation request 有界分批，通过 Shell-owned
+`QueryRuntimeCWIReconciliationBatchCommand` 查询共同执行及各自独立行为。Core 只处理 typed 成员、
+原 accepted receipt/SM-3 seal 来源与完整 fan-out，不解释语言、命令或项目判据；实际适用性由 Shell 决定。
+不适用时 Shell 在任何共享 I/O 前执行各自原方法；查询开始后的错误只返回事实，不自动第二次执行。
+
+`RuntimeValidationExecutionUse` 绑定 request/generation/binding-set、原消费者、原 receipt、scope/recipe，
+保留实际共享阶段原时间与 raw refs。组内所有消费者必须存在，共同阶段逐值相同，behavior 阶段不得共享。
+满足观察仍须通过原每个 attestation、全部 required checks 与完整 behavioral conjunction；
+共同事实、代码编译和 receipt 均不创造验收 credit。
+新 batch 在原接纳 CAS 反查原 completed seal 和 accepted receipt，按原 hash 精确选择；正式历史消费只核对原件保全，
+不能让更新的同绑定操作覆盖旧合法引用，也不能靠重算 observation/batch hash 假造来源。
+原来源查找先检查 workspace/run、committed 与 exact binding 必要适用条件，再核对匹配 dispatch 的完整 authority hash；
+不为无关 dispatch 展开整份权威正文。可命中的来源仍完整核验原 binding、operation、execution/fence、receipt、catalog、
+proof、scope 和 recipe；receipt hash 在本次匹配中只计算一次。倒序查找与历史 exact receipt 选择不变，不保留查找成功缓存。
+clone/hash/raw clone/持久恢复同步保全新用途；旧原件缺省 nil 不被补写、改判或授新 credit。
+
+SM-1 生命周期不变；SM-2 继续裁决 reconciliation retain/reopen/prerequisite，能力执行由 Shell 完成；
+SM-3 原 seal/receipt 是只读来源；SM-4 恢复已持久 aggregate/batch，不从缓存重建 authority。
+原普通 validation、assessment、CWI 和 Result→Workspace→Run 三 ACK 继续独立执行，LLM 输入/输出合同不增加组合字段。
+物理共同阶段只执行一次，但不增加或退回模型/operation 消费；不以关联消费者生成第二 receipt 或预算 credit。
+此接线只共享一次合法新批次内的共同执行，不支持跨请求、跨 Run 或跨 Workspace 历史 PASS 复用。
+
+
+### 输入修订与终态的正式来源消费
+
+输入修订的 accepted review 与 owner observation 在各自接纳入口判定；后续投影不再次接纳整份
+semantic document。一次 owner transition 中统一投影完整原来源，反查新 consumer、精确唯一消费及
+当前 pending/focus；不逐条历史再递归编译全部 Pending。新或实际变化的 generation 仍按原
+Profile/startup 合同接纳，未来报告借用、重复消费及 scope 漂移继续拒绝。原报告与当前事实分开：
+已完成且无失败 receipt 的工作才消费 pending，报告本身不创造 effect 或普通 validation credit。
+
+原 provider request 只有在其 generation 与唯一 request 都与正式前像逐值相同时才消费原裁决。
+缺失、重复、变化或未完成的 request 回到原来源门禁；owner observation 不伪造 provider 请求。
+来源投影只存在于本次调用，不保存 PASS 标记、跨请求缓存或新的 authority。raw 外部输入仍由
+唯一 owner admission 判定，原件、CAS/fence、预算及实际文件版本边不变。
+
+SM-4 terminal delivery 与 snapshot-source 消费正式 owner aggregate，不重新接纳全部历史。
+当前 exact snapshot/source、首次 fresh owner proof、material seal 和 Result→Workspace→Run
+三 ACK 各按原合同执行；恢复重驱同一原材料及交付身份。缺失/变化的实际来源不能由旧结论掩盖。
+
+此收口影响 SM-2 当前输入维护适用性、SM-3 新来源接纳与原 request 来源、SM-4 消费及恢复；
+SM-1 生命周期不变。不改变模型 schema/布局、权限预算、Goal/DoD、独立 assessment 或终态准则。
+
+### Semantic schema 的请求适用范围
+
+SM-3 新请求的 input-review schema 仅由本请求精确 CWI 成员生成：proof batch 使用当前 batch 成员，
+coverage order 不要求 review 输出，完整 schema 使用当前 manifest 成员。owner catalog 保全的其它
+历史 binding 不因此成为本请求输出义务；不能用全 catalog 历史扩张当前请求容量。
+manifest 本身仍完整接纳，当前成员的原 subject、全部 checks、合取义务、诊断源和 local evaluator
+继续执行；原 provider ceiling、权限、预算、Goal/DoD 及验收 credit 不变。
+
+schema、prompt 中的紧凑 schema 与渲染后完整性检查使用同一个当前请求 compiler。
+SM-4 的已冻结输入、same-contract correction 与提交恢复继续消费原 schema，不重新渲染。
+SM-1/SM-2 不由此增加迁移、授权、验证成功缓存或新的权威来源。
+
+
+#### 按当前目标吸纳阶段覆盖项
+
+既有 `driveOneRuntimeTransition` → `advanceRuntimeConvergence` → SM-2/SM-3 事务是唯一执行主链。
+开发收口覆盖项按当前事实在分解、实施、验证、评估、恢复及交付阶段调用所属组件；不把开发覆盖表变成每轮
+全量预检查或第二执行 authority。新任务只处理完整适用范围，未触发的覆盖项保留而不执行。
+普通 validation、owner-fact acquisition、Definition assessment 和 terminal credit 是不同产物，不互相替代。
+
+assessment candidate 的 purpose 消费正式 CWI 行的 exact `CurrentBindingRef`，由原 manifest scope、accepted batch
+request/proposal identity 和完整 document hash 唯一定位来源，再读取该 CWI 原 obligation 的 purpose。
+相同 manifest hash 的不同请求、retired generation、重复来源、缺失/漂移引用及跨 Workspace/Run 都不能混用。
+此处不重编全历史 catalog、binding 和 purpose 索引；完整 raw 接纳及显式离线审计仍由原来源校验负责，
+任意自组 struct/hash 不因消费函数存在而成为正式 owner 状态。返回 owner-fact acquisition 值独立复制。
+
+SM-2/SM-3 的 candidate manifest、complete admission、pre-seal 与 owner-fact settlement 消费同一当前来源，
+独立 assessment、原 CAS、冻结请求和信用规则不变。SM-4 在续完 terminal/wait/submitted-provider/clarification
+原事务后才按当前需要查询 semantic readiness；治理和新操作仍受既有 authority 门禁约束。SM-1 不变。
+新事实只由原 owner 在合法事务重验受影响项并产生新结果；旧结果保留其当时含义，不重写历史或重发 effect。

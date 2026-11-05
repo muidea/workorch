@@ -50,7 +50,7 @@ func TestRuntimeAssessmentSelectedProofPreservesOriginalOwnerDependencies(t *tes
 			classifierFacts.Evidence.Accepted = append(classifierFacts.Evidence.Accepted, future)
 			sources := runtimeLineageAssertionSources(before)
 			sources.Facts = classifierFacts
-			cutoffProof, err := runtimecontract.DeriveRuntimeAssessmentAdjudication(sealedDispatchToRuntimeRecord(*before.ActiveDispatch), classifierFacts, sealedDispatchesToRuntimeRecords(before.CompletedDispatches), before.CoverageProofLineage, sources)
+			cutoffProof, err := runtimeTestDeriveAssessmentAdjudication(sealedDispatchToRuntimeRecord(*before.ActiveDispatch), classifierFacts, sealedDispatchesToRuntimeRecords(before.CompletedDispatches), before.CoverageProofLineage, sources)
 			if err != nil || !reflect.DeepEqual(cutoffProof, *adjudication) {
 				t.Fatalf("future evidence changed historical selected dependencies: %v", err)
 			}
@@ -68,7 +68,7 @@ func TestRuntimeAssessmentSelectedProofPreservesOriginalOwnerDependencies(t *tes
 				}
 				sources := runtimeLineageAssertionSources(before)
 				sources.Facts = facts
-				if _, err := runtimecontract.DeriveRuntimeAssessmentAdjudication(sealedDispatchToRuntimeRecord(*before.ActiveDispatch), facts, sealedDispatchesToRuntimeRecords(before.CompletedDispatches), before.CoverageProofLineage, sources); err == nil {
+				if _, err := runtimeTestDeriveAssessmentAdjudication(sealedDispatchToRuntimeRecord(*before.ActiveDispatch), facts, sealedDispatchesToRuntimeRecords(before.CompletedDispatches), before.CoverageProofLineage, sources); err == nil {
 					t.Fatalf("pure classifier accepted invalid selected dependencies: %s", invalid)
 				}
 			}

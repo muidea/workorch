@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"testing"
 
-	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -17,7 +16,7 @@ func TestRuntimeDriveRepositoryRawPreimageIsolation(t *testing.T) {
 	// 非规范材料仅用于副本隔离，不作为合法 transition 或 proof 提交。
 	original.ProcessedEventIDs = []string{}
 	original.CandidateAttempts = []runtimecontract.RuntimeCandidateAttemptRecord{{State: runtimecontract.RuntimeCandidateAttemptStatePending}}
-	original.ActiveDispatch = &runtime.SealedDispatch{OperationExecutions: []runtimecontract.RuntimeOperationExecutionRecord{{OperationID: "original", State: runtimecontract.OperationExecutionSealed}}}
+	original.ActiveDispatch = &runtimecontract.RuntimeDispatchRecord{OperationExecutions: []runtimecontract.RuntimeOperationExecutionRecord{{OperationID: "original", State: runtimecontract.OperationExecutionSealed}}}
 	original.TerminalMaterialSeal = &runtimecontract.RuntimeTerminalMaterialSeal{Material: runtimecontract.RuntimeTerminalResultMaterial{EvidenceRefs: []string{}, RuntimeCloseout: &runtimecontract.RuntimeResultCloseout{OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{OriginalMessage: "  原始诊断\n  ", TargetRefs: []string{"original"}}}}}
 	repository := &runtimeDriveRepository{aggregate: original.CloneRaw()}
 	loaded, err := repository.Load(ctx, original.Facts.WorkspaceID, original.Facts.RunID)

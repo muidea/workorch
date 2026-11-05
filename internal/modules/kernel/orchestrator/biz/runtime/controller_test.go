@@ -138,7 +138,8 @@ func (r *controllerRepository) Load(_ context.Context, workspaceID common.Worksp
 	if r.aggregate.Facts.WorkspaceID != workspaceID || r.aggregate.Facts.RunID != runID {
 		return RuntimeAggregate{}, common.ErrNotFound
 	}
-	return r.aggregate.CloneRaw(), nil
+	a := r.aggregate.CloneRaw()
+	return a, a.Validate()
 }
 
 func (r *controllerRepository) Save(_ context.Context, aggregate RuntimeAggregate, expectedRevision uint64) error {
@@ -934,6 +935,16 @@ func TestRuntimeControllerInitializeAcceptsAdvancedFocusOnRestart(t *testing.T) 
 	}
 	repository.aggregate.Facts.Focus.ID = "focus-v2-next"
 	repository.aggregate.Decision.Focus.ID = "focus-v2-next"
+	for i := range repository.aggregate.Facts.Coverage {
+		if repository.aggregate.Facts.Coverage[i].FocusID == initialized.Facts.Focus.ID {
+			repository.aggregate.Facts.Coverage[i].FocusID = "focus-v2-next"
+		}
+	}
+
+	repository.aggregate.Decision, err = runtimecontract.SealRuntimeDecision(repository.aggregate.Facts, repository.aggregate.Decision, repository.aggregate.Decision.AuthoritySnapshot.Attempt)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	restarted, err := controller.initialize(context.Background(), facts, definition, nil)
 	if err != nil {
@@ -1061,7 +1072,7 @@ func TestRuntimeControllerRejectsPersistedHistoricalFocusCorruptionBeforeCandida
 	}
 	before := preparedAggregate.CloneRaw()
 	savesBefore := repository.saves
-	if _, err := controller.reconcileAuthorityBeforeCandidate(ctx, facts.WorkspaceID, facts.RunID); err == nil || !strings.Contains(err.Error(), "reconciliation preimage invariant") {
+	if _, err := controller.reconcileAuthorityBeforeCandidate(ctx, facts.WorkspaceID, facts.RunID); err == nil || !strings.Contains(err.Error(), "not bound to an active current-focus prerequisite") {
 		t.Fatalf("持久化损坏前像未在协调入口拒绝: %v", err)
 	}
 	if repository.saves != savesBefore || !reflect.DeepEqual(*repository.aggregate, before) {

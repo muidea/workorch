@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"go/ast"
-	"go/format"
 	"go/parser"
 	"go/token"
 	"os"
@@ -13,26 +12,23 @@ import (
 	"testing"
 )
 
-// The lifecycle exception must never grow into a second Runtime mutation,
-// read, I/O, reducer, callback or authority surface.
-func TestOwnerHistoricalCompilerReleaseHasOnlyPureDiscardBody(t *testing.T) {
+// The owner must not retain a historical re-admission compiler between calls.
+func TestOwnerDoesNotRetainHistoricalReadCompiler(t *testing.T) {
 	for _, file := range parseRuntimeProductionSources(t) {
-		for _, declaration := range file.Decls {
-			fn, ok := declaration.(*ast.FuncDecl)
-			if !ok || fn.Recv == nil || fn.Name.Name != "ReleaseHistoricalCompilation" {
-				continue
+		ast.Inspect(file, func(n ast.Node) bool {
+			if x, ok := n.(*ast.TypeSpec); ok && x.Name.Name == "RuntimeController" {
+				st := x.Type.(*ast.StructType)
+				for _, field := range st.Fields.List {
+					for _, name := range field.Names {
+						if name.Name == "historicalCompiler" {
+							t.Fatal("controller retained historical compiler")
+						}
+					}
+				}
 			}
-			var body strings.Builder
-			if err := format.Node(&body, token.NewFileSet(), fn.Body); err != nil {
-				t.Fatal(err)
-			}
-			if body.String() != "{\n\tif c != nil {\n\t\tc.historicalCompiler.Close()\n\t}\n}" {
-				t.Fatalf("pure lifecycle discard expanded: %s", body.String())
-			}
-			return
-		}
+			return true
+		})
 	}
-	t.Fatal("pure historical compiler discard method missing")
 }
 
 // TestRuntimeMutationOwnerStructureIsUnique freezes the O0 owner boundary.
@@ -112,10 +108,8 @@ func TestRuntimeMutationOwnerStructureIsUnique(t *testing.T) {
 
 	assertRuntimeExportedMethods(t, methods, "RuntimeController", []string{
 		"ApplyInternalEvent",
-		"CompileEvidenceApplicabilityRead",
 		"Load",
 		"QueryOperationReceipt",
-		"ReleaseHistoricalCompilation", // lifecycle-only, statically checked below
 	})
 	assertRuntimeExportedMethods(t, methods, "RuntimeTransitionCoordinator", []string{"Commit"})
 
@@ -513,17 +507,18 @@ func TestO6GovernanceComparisonsUseFocusedEntries(t *testing.T) {
 		"governancecheck.GovernedDispatchMatches":        2,
 		"governancecheck.DependencyMatches":              2,
 		// 原执行/回执查询及只读来源重编都必须反查同一 persisted governance grant。
+		// 完整持久 lineage 门禁现由 canonical RuntimeStateRecord 唯一执行，Runtime 不保留第二份组合。
 		"governancecheck.GrantForExecution":                                   5,
-		"runtimecontract.ValidateRuntimeOperationGovernanceExecutionBindings": 1,
+		"runtimecontract.ValidateRuntimeOperationGovernanceExecutionBindings": 0,
 		"governancecheck.SameGrant":                                           1,
 		"governancecheck.EvaluateOperationSuspension":                         1,
 		"governancecheck.DependencyForFacts":                                  1,
-		"runtimecontract.ValidateRuntimeGovernanceRequestDispatchLineage":     1,
-		"governancecheck.BindingMatchesExecution":                             2,
-		"governancecheck.BindingMatchesReceipt":                               1,
-		"governancecheck.BindingMatchesRequest":                               1,
-		"governancecheck.ResolutionRecordMatchesRequest":                      1,
-		"governancecheck.ResolutionRecordMatchesDispatch":                     1,
+		"runtimecontract.ValidateRuntimeGovernanceRequestDispatchLineage":     0,
+		"governancecheck.BindingMatchesExecution":                             1,
+		"governancecheck.BindingMatchesReceipt":                               0,
+		"governancecheck.BindingMatchesRequest":                               0,
+		"governancecheck.ResolutionRecordMatchesRequest":                      0,
+		"governancecheck.ResolutionRecordMatchesDispatch":                     0,
 	}
 	actual := make(map[string]int, len(expected))
 	readSourceGrantCalls := 0
@@ -786,9 +781,8 @@ func TestO7RuntimeFilesKeepOneFacetPerTransitionFile(t *testing.T) {
 	t.Parallel()
 	want := map[string]map[string]bool{
 		"controller.go": {
-			"RuntimeController.initialize":                   true,
-			"RuntimeController.Load":                         true,
-			"RuntimeController.ReleaseHistoricalCompilation": true,
+			"RuntimeController.initialize": true,
+			"RuntimeController.Load":       true,
 		},
 		"authority_transition.go": {
 			"authorityComponent.reconcileAuthorityBeforeCandidate": true,
@@ -893,18 +887,21 @@ func assertRuntimeExportedMethods(t *testing.T, methods map[string][]string, rec
 	}
 }
 
-// Private continuation helpers may be used only by the complete read gates
-// above them. This is a lexical composition, never a caller's validated flag.
+// Private continuations are confined to complete public or owner-private gates.
+// This is a lexical composition, never a caller's validated flag.
 func TestApplicabilityReadContinuationsStayBehindCompletePublicGates(t *testing.T) {
 	want := map[string]map[string]int{
-		"compileRuntimeOperationReadSource":          {"CompileRuntimeOperationReadSource": 1, "compileRuntimeEvidenceApplicabilityRequest": 1, "compileRuntimeEvidenceApplicabilityRead": 1},
-		"compileRuntimeEvidenceApplicabilityRequest": {"CompileRuntimeEvidenceApplicabilityRequest": 1, "nextRuntimeEvidenceApplicabilityRequest": 1},
-		"nextRuntimeEvidenceApplicabilityRequest":    {"NextRuntimeEvidenceApplicabilityRequest": 1, "compileRuntimeEvidenceApplicabilityRead": 1},
-		"compileRuntimeEvidenceApplicabilityRead":    {"CompileRuntimeEvidenceApplicabilityRead": 1, "CompileEvidenceApplicabilityRead": 1},
+		"compileRuntimeOperationReadSource":          {"CompileRuntimeOperationReadSource": 1, "compileRuntimeEvidenceApplicabilitySource": 1},
+		"compileRuntimeEvidenceApplicabilitySource":  {"compileRuntimeEvidenceApplicabilityRequest": 1, "compileRuntimeEvidenceApplicabilityRead": 1},
+		"compileRuntimeEvidenceApplicabilityRequest": {"recordEvidenceApplicability": 1},
+		"nextRuntimeEvidenceApplicabilityRequest":    {"admitRuntimeDispatch": 1, "validateAssessmentApplicabilitySealTransition": 1, "validateCandidateAttemptBeginAuthority": 1},
+		"compileRuntimeEvidenceApplicabilityRead":    {"EvidenceApplicabilityRead": 1, "nextRuntimeEvidenceApplicabilityRequest": 1},
 	}
 	actual := map[string]map[string]int{}
 	gates := map[string]int{}
-	ownerCompiler, ownerGate, ownerImage := 0, 0, 0
+	ownerGate, ownerImage := 0, 0
+	var observationGate, observationRequest token.Pos
+	observationGates := 0
 	for _, file := range parseRuntimeProductionSources(t) {
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
@@ -921,19 +918,24 @@ func TestApplicabilityReadContinuationsStayBehindCompletePublicGates(t *testing.
 						actual[id.Name] = map[string]int{}
 					}
 					actual[id.Name][fn.Name.Name]++
+					if fn.Name.Name == "recordEvidenceApplicability" && id.Name == "compileRuntimeEvidenceApplicabilityRequest" {
+						observationRequest = call.Pos()
+					}
 				}
-				if fn.Name.Name == "CompileEvidenceApplicabilityRead" {
+				if fn.Name.Name == "recordEvidenceApplicability" {
+					if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "load" {
+						if len(call.Args) == 3 {
+							observationGate, observationGates = call.Pos(), observationGates+1
+						}
+					}
+				}
+				if fn.Name.Name == "AdmitRuntimeOwnerStateRecord" {
 					if id, ok := call.Fun.(*ast.Ident); ok {
 						switch id.Name {
 						case "validate":
 							ownerGate++
 						case "ownerStateSourceImage":
 							ownerImage++
-						}
-					}
-					if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Compile" {
-						if field, ok := sel.X.(*ast.SelectorExpr); ok && field.Sel.Name == "historicalCompiler" {
-							ownerCompiler++
 						}
 					}
 				}
@@ -949,12 +951,48 @@ func TestApplicabilityReadContinuationsStayBehindCompletePublicGates(t *testing.
 	if !reflect.DeepEqual(want, actual) {
 		t.Fatalf("unchecked read continuation callers: %v", actual)
 	}
-	if ownerCompiler != 1 || ownerGate != 1 || ownerImage != 1 {
-		t.Fatal("owner read must enter exactly one complete raw-image historical compiler gate")
+	if ownerGate != 1 || ownerImage != 1 {
+		t.Fatal("standalone raw admission must enter exactly one owner-image gate")
 	}
-	for _, entry := range []string{"CompileRuntimeOperationReadSource", "CompileRuntimeEvidenceApplicabilityRequest", "NextRuntimeEvidenceApplicabilityRequest", "CompileRuntimeEvidenceApplicabilityRead"} {
+	if observationGates != 1 || observationGate >= observationRequest {
+		t.Fatal("observation request continuation must follow its complete owner aggregate gate")
+	}
+	for _, entry := range []string{"CompileRuntimeOperationReadSource"} {
 		if gates[entry] != 1 {
 			t.Fatalf("%s must run its complete aggregate gate exactly once", entry)
+		}
+	}
+}
+
+// Internal handlers consume their owner transaction input. Any newly added
+// complete aggregate gate here would create a second decision for the same
+// image; different after-images remain Commit's responsibility.
+func TestRuntimeHandlersConsumeSingleOwnerAdmission(t *testing.T) {
+	components := map[string]bool{"authorityComponent": true, "planningTransactionComponent": true, "candidateDispatchComponent": true, "driveDeliveryComponent": true}
+	for name, file := range parseRuntimeProductionSources(t) {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			if fn.Name.Name == "CompileRuntimeEvidenceApplicabilityRequest" || fn.Name.Name == "NextRuntimeEvidenceApplicabilityRequest" || fn.Name.Name == "CompileEvidenceApplicabilityRead" || fn.Name.Name == "CompileRuntimeEvidenceApplicabilityRead" || fn.Name.Name == "validateAfterSemanticSourcesInGate" || fn.Name.Name == "validateAggregate" {
+				t.Fatalf("duplicate production admission surface in %s: %s", name, fn.Name.Name)
+			}
+			if fn.Recv == nil || !components[runtimeReceiverType(fn.Recv.List[0].Type)] {
+				continue
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Validate" {
+					if id, ok := sel.X.(*ast.Ident); ok && id.Name == "aggregate" {
+						t.Fatalf("%s repeats complete owner admission", fn.Name.Name)
+					}
+				}
+				return true
+			})
 		}
 	}
 }

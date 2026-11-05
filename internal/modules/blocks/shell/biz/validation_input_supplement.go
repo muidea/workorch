@@ -33,7 +33,7 @@ func shellValidationInputAddition(check runtimecontract.RuntimeValidationCheckAt
 	}
 	if shellProjectObservationProtocol(check.ObservationProtocolRef) {
 		addition.ContentContractRef = shellProjectInputContentContractRef
-		addition.ContentRequirements = shellProjectInputContentRequirements + " 仅创建此 supplemental nativeCheckRef，保留同包全部 original checks，四阶段及 original/supplement 均为 all-of。"
+		addition.ContentRequirements = shellProjectContentRequirements(shellProjectAdapterForObservation(check.ObservationProtocolRef)) + " 仅创建此 supplemental nativeCheckRef，保留同包全部 original checks，四阶段及 original/supplement 均为 all-of。"
 	}
 	addition.ContentRequirements += shellAssertionFeedbackRequirements
 	return addition

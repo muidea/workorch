@@ -73,13 +73,11 @@ func (c *driveDeliveryComponent) sealTerminalMaterial(ctx context.Context, works
 	if len(observations) == 1 {
 		proofs = observations[0]
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if aggregate.TerminalMaterialSeal != nil {
 		if proofs != nil && !reflect.DeepEqual(proofs, aggregate.TerminalMaterialSeal.Material.RuntimeCloseout.TerminalSnapshotProofs) {
 			return RuntimeAggregate{}, common.ErrConflict
@@ -102,14 +100,14 @@ func (c *driveDeliveryComponent) sealTerminalMaterial(ctx context.Context, works
 func terminalMaterialSource(aggregate RuntimeAggregate) runtimecontract.RuntimeStateRecord {
 	var active *runtimecontract.RuntimeDispatchRecord
 	if aggregate.ActiveDispatch != nil {
-		value := sealedDispatchToRuntimeRecord(*aggregate.ActiveDispatch)
+		value := (*aggregate.ActiveDispatch)
 		active = &value
 	}
 	return runtimecontract.RuntimeStateRecord{
 		Definition: aggregate.Definition, Facts: aggregate.Facts, Decision: aggregate.Decision,
 		Termination: aggregate.Termination, StateRevision: aggregate.StateRevision,
 		ResultFeedbackVersion: aggregate.ResultFeedbackVersion,
-		ActiveDispatch:        active, CompletedDispatches: sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches),
+		ActiveDispatch:        active, CompletedDispatches: (aggregate.CompletedDispatches),
 		OperationReceipts: aggregate.OperationReceipts, DeliveryAcknowledgements: aggregate.DeliveryAcknowledgements,
 		CoverageProofLineage: aggregate.CoverageProofLineage,
 		SemanticPlanning:     aggregate.SemanticPlanning, ImplementationWork: aggregate.ImplementationWork,

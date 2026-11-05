@@ -12,7 +12,7 @@ import (
 // recordHistoricalBehaviorCompletion is part of the original receipt/evidence
 // transaction. Only the complete committed dispatch can create this SM-2 fact;
 // no external command or second CAS can turn a partial effect into completion.
-func recordHistoricalBehaviorCompletion(aggregate *RuntimeAggregate, dispatch SealedDispatch) error {
+func recordHistoricalBehaviorCompletion(aggregate *RuntimeAggregate, dispatch runtimecontract.RuntimeDispatchRecord) error {
 	if dispatch.State != DispatchStateCommitted || dispatch.Transaction.State != runtimecontract.ConvergenceStateNeedStateChange {
 		return nil
 	}
@@ -107,12 +107,17 @@ func handoffHistoricalBehaviorFocus(aggregate *RuntimeAggregate) (bool, error) {
 }
 
 func validateHistoricalBehaviorTransition(previous, next RuntimeAggregate) error {
+	if len(previous.Facts.Coverage) != len(next.Facts.Coverage) {
+		return fmt.Errorf("%w: historical transition changed canonical coverage inventory", common.ErrConflict)
+	}
 	old := runtimeCoverageByID(previous.Facts.Coverage)
+	seen := make(map[common.CoverageWorkItemID]bool, len(next.Facts.Coverage))
 	for _, row := range next.Facts.Coverage {
 		before, found := old[row.ID]
-		if !found {
+		if !found || seen[row.ID] {
 			return fmt.Errorf("%w: historical behavior transition changed canonical coverage inventory", common.ErrConflict)
 		}
+		seen[row.ID] = true
 		if len(row.HistoricalAcceptanceProofs) < len(before.HistoricalAcceptanceProofs) ||
 			(len(before.HistoricalAcceptanceProofs) != 0 && !reflect.DeepEqual(row.HistoricalAcceptanceProofs[:len(before.HistoricalAcceptanceProofs)], before.HistoricalAcceptanceProofs)) {
 			return fmt.Errorf("%w: historical acceptance proof history is append-only", common.ErrConflict)
@@ -122,10 +127,18 @@ func validateHistoricalBehaviorTransition(previous, next RuntimeAggregate) error
 				row.HistoricalAcceptanceProofs[len(row.HistoricalAcceptanceProofs)-1].AssessmentDispatchID != previous.ActiveDispatch.ID {
 				return fmt.Errorf("%w: historical acceptance must share original ordinary assessment CAS", common.ErrConflict)
 			}
+			if err := validateHistoricalResultDispatchClosure(previous, next, previous.ActiveDispatch.ID); err != nil {
+				return err
+			}
 		}
 		if before.HistoricalBehavior != nil {
 			if !reflect.DeepEqual(before.HistoricalBehavior, row.HistoricalBehavior) {
 				return fmt.Errorf("%w: historical behavior completion is immutable", common.ErrConflict)
+			}
+			for i, dispatch := range previous.CompletedDispatches {
+				if dispatch.ID == before.HistoricalBehavior.DispatchID && (i >= len(next.CompletedDispatches) || !reflect.DeepEqual(dispatch, next.CompletedDispatches[i])) {
+					return fmt.Errorf("%w: historical behavior source dispatch is immutable", common.ErrConflict)
+				}
 			}
 			continue
 		}
@@ -135,6 +148,32 @@ func validateHistoricalBehaviorTransition(previous, next RuntimeAggregate) error
 		if previous.ActiveDispatch == nil || previous.ActiveDispatch.ID != row.HistoricalBehavior.DispatchID || next.ActiveDispatch != nil {
 			return fmt.Errorf("%w: historical completion must share original complete receipt CAS", common.ErrConflict)
 		}
+		if err := validateHistoricalResultDispatchClosure(previous, next, row.HistoricalBehavior.DispatchID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Only progress fields and the owner's newly produced adjudication may change
+// while closing the actual sealed preimage. No historical graph is recompiled.
+func validateHistoricalResultDispatchClosure(previous, next RuntimeAggregate, id string) error {
+	if previous.ActiveDispatch == nil || previous.ActiveDispatch.ID != id || next.ActiveDispatch != nil ||
+		len(next.CompletedDispatches) != len(previous.CompletedDispatches)+1 ||
+		len(previous.CompletedDispatches) > 0 && !reflect.DeepEqual(previous.CompletedDispatches, next.CompletedDispatches[:len(previous.CompletedDispatches)]) {
+		return fmt.Errorf("%w: historical result requires its original dispatch closure", common.ErrConflict)
+	}
+	closed := cloneSealedDispatchRaw(next.CompletedDispatches[len(previous.CompletedDispatches)])
+	if closed.State != DispatchStateCommitted {
+		return fmt.Errorf("%w: historical result source dispatch is not committed", common.ErrConflict)
+	}
+	closed.State = previous.ActiveDispatch.State
+	closed.OperationExecutions = previous.ActiveDispatch.OperationExecutions
+	closed.CompletedOperationIDs = previous.ActiveDispatch.CompletedOperationIDs
+	closed.AssessmentAdjudication = previous.ActiveDispatch.AssessmentAdjudication
+	closed.AssessmentAdjudicationHash = previous.ActiveDispatch.AssessmentAdjudicationHash
+	if !reflect.DeepEqual(closed, *previous.ActiveDispatch) {
+		return fmt.Errorf("%w: historical result changed original sealed dispatch input", common.ErrConflict)
 	}
 	return nil
 }

@@ -2,21 +2,28 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	resultmodule "github.com/muidea/workorch/internal/modules/blocks/result"
 	resultbiz "github.com/muidea/workorch/internal/modules/blocks/result/biz"
 	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
+	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/definitionadmission"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
 	filerepository "github.com/muidea/workorch/internal/pkg/repository/file"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -63,13 +70,18 @@ func TestWorkspaceExecutionRestartRetainsBarrierAfterTerminalHandoff(t *testing.
 		DefinitionRevision: startup.DefinitionRevision, StartupInputHash: startup.StartupInputHash, State: workspacemodel.WorkspaceActivationEligible,
 	}
 	bootstrap.Definition.StartupInputHash = startup.StartupInputHash
+	inventory, err := definitionadmission.CompileRuntimeSourceObligationInventory(candidate, startup, admission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrap.Definition.SourceObligations = inventory
 	bootstrap = runtimeTestBootstrapWithBindings(bootstrap)
 	command := workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: "ws-v2", RequestID: "restart-during-handoff", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: &bootstrap}
 	if err := command.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	workspace := &workspacemodel.Workspace{
-		ID: "ws-v2", State: common.WorkspaceStateActive, DeliverableDirectory: root, StartupInput: &startup, ActivationAdmission: &admission,
+		ID: "ws-v2", TemplateID: "template-barrier", State: common.WorkspaceStateActive, DeliverableDirectory: root, StartupInput: &startup, ActivationAdmission: &admission,
 		DefinitionAdmissionCandidates: []workspacemodel.DefinitionAdmissionCandidate{candidate},
 		// This is a current creation fixture, not a legacy Workspace. Supply
 		// its creation identity before Create; ordinary updates cannot add one.
@@ -77,6 +89,14 @@ func TestWorkspaceExecutionRestartRetainsBarrierAfterTerminalHandoff(t *testing.
 	}
 	if _, eligible, err := workspace.ValidateActivationAdmissionPersistence(); err != nil || !eligible {
 		t.Fatalf("屏障请求缺少独立 eligible startup 前像: %v", err)
+	}
+	template := &workspacemodel.WorkspaceTemplate{ID: workspace.TemplateID, Name: "handoff-barrier"}
+	if err := definitionconfiguration.ValidateExecutionBootstrap(workspace, template, bootstrap); err != nil {
+		t.Fatalf("屏障请求缺少当前 owner 合同: %v", err)
+	}
+	templates := memory.NewWorkspaceTemplateRepository()
+	if err := templates.Create(ctx, template); err != nil {
+		t.Fatal(err)
 	}
 
 	startOwners := func(hub magicevent.Hub, workspaceRepository *filerepository.WorkspaceRepository, interrupted *failAfterWorkspaceUpdateRepository) func() {
@@ -88,9 +108,9 @@ func TestWorkspaceExecutionRestartRetainsBarrierAfterTerminalHandoff(t *testing.
 			t.Fatal(err)
 		}
 		workspaceOwner := workspacemodule.New()
-		dependencies := workspaceOwnerTestDependencies(hub, workspaceRepository, workspaceRepository, goals, dods, memory.NewWorkspaceTemplateRepository())
+		dependencies := workspaceOwnerTestDependencies(hub, workspaceRepository, workspaceRepository, goals, dods, templates)
 		if interrupted != nil {
-			dependencies = workspaceOwnerTestDependencies(hub, interrupted, workspaceRepository, goals, dods, memory.NewWorkspaceTemplateRepository())
+			dependencies = workspaceOwnerTestDependencies(hub, interrupted, workspaceRepository, goals, dods, templates)
 		}
 		if err := workspaceOwner.Configure(dependencies); err != nil {
 			t.Fatal(err)
@@ -137,34 +157,77 @@ func TestWorkspaceExecutionRestartRetainsBarrierAfterTerminalHandoff(t *testing.
 		return result
 	}
 
-	// 同一完整请求在无 predecessor 的真实 owner 装配上能够首次激活，排除无效 bootstrap 早拒绝假阳性。
-	controlWorkspaces := filerepository.NewWorkspaceRepository(filepath.Join(root, "control-workspaces.json"))
-	if err := controlWorkspaces.Create(ctx, workspace); err != nil {
-		t.Fatal(err)
+	// Seed the historical accepted activation in both owner stores. This is
+	// an already-running Workspace fixture, not a first execution without the
+	// current preparation evidence. All source hashes come from the original
+	// Run bootstrap; normal reserve/settle CAS boundaries retain that history.
+	seedActive := func(repo *filerepository.WorkspaceRepository) {
+		t.Helper()
+		aggregate := runtimeFocusGroundedTerminalAggregate(t)
+		record := runtimeStateRecordFromAggregate(aggregate)
+		run := runtimeRunForTest(common.RunStateActive, aggregate.Definition)
+		run.RuntimeState = &record
+		run = runmodel.CloneRun(run)
+		run.ActivationRequestID = "original-barrier-activation"
+		run.StartupInputHash = run.RuntimeBootstrap.Definition.StartupInputHash
+		prior := workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: workspace.ID, RequestID: run.ActivationRequestID, Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: run.RuntimeBootstrap}
+		runHash, err := runmodel.ExecutionIntentPayloadHash(prior.WorkspaceID, prior.RequestID, *prior.Bootstrap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		receipt := runmodel.WorkspaceExecutionIntentReceipt{Version: runmodel.WorkspaceExecutionIntentReceiptVersion, PayloadHash: runHash, RecordedAt: time.Now().UTC(), Admission: runtimecontract.RuntimeExecutionIntentAdmission{WorkspaceID: prior.WorkspaceID, RunID: run.ID, RequestID: prior.RequestID, Kind: prior.Kind, Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonNewRunActivated}}
+		run.ExecutionIntentReceipts = []runmodel.WorkspaceExecutionIntentReceipt{receipt}
+		if err := runs.Create(ctx, run); err != nil {
+			t.Fatal(err)
+		}
+		projection := runtimeWorkspaceForPersistedRunTest(t, ctx, runs, workspace.ID, run.ID, root, "")
+		w := *workspace
+		w.Revision = 0
+		w.ActiveRunID, w.RunProjectionCursor = projection.ActiveRunID, projection.RunProjectionCursor
+		w.PreparationFence = workspace.PreparationFence.Clone()
+		if err := repo.Create(ctx, &w); err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := json.Marshal(struct {
+			Domain string
+			Intent workspaceevents.WorkspaceExecutionIntentCommand
+		}{"workorch-fresh-intent-payload/v1", prior.Normalized()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		digest := sha256.Sum256(encoded)
+		reservation := workspacemodel.WorkspaceFreshIntentReservation{RequestID: prior.RequestID, Kind: prior.Kind, StartupInputHash: prior.Bootstrap.Definition.StartupInputHash, PayloadHash: hex.EncodeToString(digest[:]), RunPayloadHash: runHash}
+		w.PreparationFence.PreparationEpoch = 1
+		w.PreparationFence.Pending = &reservation
+		if err := repo.CompareAndSwap(ctx, &w, w.Revision); err != nil {
+			t.Fatal(err)
+		}
+		w.PreparationFence.Pending = nil
+		w.PreparationFence.Settled = []workspacemodel.WorkspaceFreshIntentSettlement{{Reservation: reservation, Receipt: receipt}}
+		if err := repo.CompareAndSwap(ctx, &w, w.Revision); err != nil {
+			t.Fatal(err)
+		}
 	}
+	// With the same historical activation and all three ACKs complete, the
+	// current full request must reach real Run-owner successor admission.
+	controlWorkspaces := filerepository.NewWorkspaceRepository(filepath.Join(root, "control-workspaces.json"))
+	seedActive(controlWorkspaces)
 	controlHub := magicevent.NewHub(32)
 	stopControl := startOwners(controlHub, controlWorkspaces, nil)
+	controlDelivery := newRuntimeProjectionTestModule(t, controlHub)
+	if err := controlDelivery.deliverRuntimeTerminal(ctx, runtimeFocusGroundedTerminalAggregate(t)); err != nil {
+		t.Fatal(err)
+	}
 	control := execute(controlHub, command)
-	if control.Outcome != runtimecontract.RuntimeExecutionIntentReconciliationRequested || control.Reason != runtimecontract.RuntimeExecutionIntentReasonNewRunActivated {
-		t.Fatalf("合法首激活正例未命中: %+v", control)
+	if control.Outcome != runtimecontract.RuntimeExecutionIntentReplacementPending || control.Reason != runtimecontract.RuntimeExecutionIntentReasonTerminalPredecessorSuccessorRequested {
+		t.Fatalf("完整 ACK 后的合法后继准入正例未命中: %+v", control)
 	}
 	stopControl()
 
 	// 屏障场景使用另一份 Run 文件，不删除或重写正例的持久材料。
 	runs = filerepository.NewRunRepository(filepath.Join(root, "barrier-runs.json"))
 	aggregate := runtimeFocusGroundedTerminalAggregate(t)
-	record := runtimeStateRecordFromAggregate(aggregate)
-	run := runtimeRunForTest(common.RunStateActive, aggregate.Definition)
-	run.RuntimeState = &record
-	if err := runs.Create(ctx, run); err != nil {
-		t.Fatal(err)
-	}
-	projection := runtimeWorkspaceForPersistedRunTest(t, ctx, runs, "ws-v2", "run-v2", root, "")
-	workspace.ActiveRunID = projection.ActiveRunID
-	workspace.RunProjectionCursor = projection.RunProjectionCursor
-	if err := workspaces.Create(ctx, workspace); err != nil {
-		t.Fatal(err)
-	}
+	seedActive(workspaces)
 	interrupted := &failAfterWorkspaceUpdateRepository{WorkspaceRepository: workspaces}
 	firstHub := magicevent.NewHub(32)
 	stopFirst := startOwners(firstHub, workspaces, interrupted)
@@ -219,7 +282,7 @@ func TestWorkspaceExecutionRestartRetainsBarrierAfterTerminalHandoff(t *testing.
 			}
 		}
 		reservedWorkspace, err := workspaces.Get(ctx, command.WorkspaceID)
-		if err != nil || reservedWorkspace.PreparationFence == nil || reservedWorkspace.PreparationFence.PreparationEpoch != 2 || len(reservedWorkspace.PreparationFence.Settled) != 1 || reservedWorkspace.PreparationFence.Pending == nil || reservedWorkspace.PreparationFence.Pending.RequestID != competing.RequestID || reservedWorkspace.PreparationFence.Pending.Validate() != nil {
+		if err != nil || reservedWorkspace.PreparationFence == nil || reservedWorkspace.PreparationFence.PreparationEpoch != 3 || len(reservedWorkspace.PreparationFence.Settled) != 2 || reservedWorkspace.PreparationFence.Pending == nil || reservedWorkspace.PreparationFence.Pending.RequestID != competing.RequestID || reservedWorkspace.PreparationFence.Pending.Validate() != nil {
 			t.Fatalf("竞争请求原登记丢失或凭错误结算: %+v %v", reservedWorkspace, err)
 		}
 		if attempt == 0 {

@@ -283,6 +283,8 @@ type RuntimeOperationFeasibilityRequest struct {
 // returned by a capability owner. Outcome is the single factual authority;
 // stale, prerequisite and failure values are outcome-specific detail only.
 type RuntimeOperationFeasibilityObservation struct {
+	InputStructure               *RuntimeValidationInputStructureObservation `json:",omitempty"`
+	Postimage                    *RuntimeValidationInputReviewFile           `json:",omitempty"`
 	OperationID                  string
 	AdmissibilitySnapshotID      string
 	CapabilityStateBinding       string

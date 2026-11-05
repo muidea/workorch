@@ -712,7 +712,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		t.Fatal("active governance resume accepted a wrong fence as an ordinary claim")
 	}
 	completedTarget := continued.Aggregate
-	completedTarget.CompletedDispatches = append([]SealedDispatch(nil), continued.Aggregate.CompletedDispatches...)
+	completedTarget.CompletedDispatches = append([]runtimecontract.RuntimeDispatchRecord(nil), continued.Aggregate.CompletedDispatches...)
 	for idx := range completedTarget.CompletedDispatches {
 		if completedTarget.CompletedDispatches[idx].ID == binding.OperationDispatchID {
 			completedTarget.CompletedDispatches[idx].CompletedOperationIDs = append(
@@ -725,7 +725,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		t.Fatal("governance resume accepted a target already listed as completed")
 	}
 	tampered := continued.Aggregate
-	tampered.CompletedDispatches = append([]SealedDispatch(nil), continued.Aggregate.CompletedDispatches...)
+	tampered.CompletedDispatches = append([]runtimecontract.RuntimeDispatchRecord(nil), continued.Aggregate.CompletedDispatches...)
 	for dispatchIndex := range tampered.CompletedDispatches {
 		if tampered.CompletedDispatches[dispatchIndex].ID != binding.OperationDispatchID {
 			continue
@@ -744,7 +744,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		t.Fatal("governance resume accepted a source execution that drifted from its granted binding")
 	}
 	tamperedClass := continued.Aggregate
-	tamperedClass.CompletedDispatches = append([]SealedDispatch(nil), continued.Aggregate.CompletedDispatches...)
+	tamperedClass.CompletedDispatches = append([]runtimecontract.RuntimeDispatchRecord(nil), continued.Aggregate.CompletedDispatches...)
 	for dispatchIndex := range tamperedClass.CompletedDispatches {
 		if tamperedClass.CompletedDispatches[dispatchIndex].ID != binding.OperationDispatchID {
 			continue
@@ -765,7 +765,7 @@ func TestRecordOperationGovernanceRequiredDoesNotUseExecutionRepair(t *testing.T
 		t.Fatal("governance resume accepted a substituted source idempotency class")
 	}
 	tamperedPending := continued.Aggregate
-	tamperedPending.CompletedDispatches = append([]SealedDispatch(nil), continued.Aggregate.CompletedDispatches...)
+	tamperedPending.CompletedDispatches = append([]runtimecontract.RuntimeDispatchRecord(nil), continued.Aggregate.CompletedDispatches...)
 	for dispatchIndex := range tamperedPending.CompletedDispatches {
 		if tamperedPending.CompletedDispatches[dispatchIndex].ID != binding.OperationDispatchID {
 			continue

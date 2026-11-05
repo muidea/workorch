@@ -33,7 +33,7 @@ func TestConfirmedRepairDispatchUsesConfirmationOwnerDescriptor(t *testing.T) {
 		ID: "git-repair", Kind: runtimecontract.StepKindGitWrite,
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-repair"}, TargetRefs: []string{"repository://current"},
 	}.Normalized()
-	dispatch := SealedDispatch{
+	dispatch := runtimecontract.RuntimeDispatchRecord{
 		Candidate: runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{
 			Operations: []runtimecontract.StateChangingOperation{{Operation: operation}},
 		}},

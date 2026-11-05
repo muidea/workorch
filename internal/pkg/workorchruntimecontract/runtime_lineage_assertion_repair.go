@@ -93,7 +93,7 @@ func runtimeRepairHistoryEvidenceRevisionInSession(sources RuntimeLineageAsserti
 	matches = 0
 	for _, sourceDispatch := range sources.Completed {
 		for _, operation := range runtimeCandidateAdmissionOperations(sourceDispatch.Candidate) {
-			fact, receipt, valid := runtimeLineageOperationFactFromLedgersInIndex(sourceDispatch, operation, sources, false, false, false, session.lineageIndex())
+			fact, receipt, valid := runtimeLineageOperationFactFromLedgers(sourceDispatch, operation, sources, false, false, false)
 			if !valid || fact.Kind != EvidenceKindValidation || fact.Revision != closure.BaselineEvidenceRevision || fact.FocusID != repair.FailedFocusID || fact.FailureSignature != repair.FailureSignature || !slices.Contains(fact.CoverageWorkItemIDs, coverageID) {
 				continue
 			}
@@ -127,7 +127,7 @@ func runtimeRepairHistoryEvidenceRevisionInSession(sources RuntimeLineageAsserti
 			return invalid("confirmed repair omitted commitment")
 		}
 		commitment := *dispatch.RepairCommitment
-		if ValidateRuntimeDispatchRepairCommitmentProjection(dispatch.RepairCommitmentHash, dispatch.RepairCommitment) != nil || commitment.Closure.ID != closure.ID || commitment.SourceEvidenceFactID != rejected.ID || commitment.SourceEvidenceFactHash != StableRuntimeEvidenceFactHash(rejected) || commitment.SourceDispatchID != rejected.DispatchID || commitment.SourceAuthoritySnapshotID != rejected.AuthoritySnapshotID || commitment.SourceOperationID != rejectedOperation.ID || commitment.SourceOperationHash != StableRuntimeOperationHash(rejectedOperation) || commitment.SourceReceiptExecutionKey != rejectedReceipt.ExecutionKey || commitment.SourceReceiptFence != rejectedReceipt.Fence || commitment.SourceReceiptHash != session.lineageIndex().receiptHash(rejectedReceipt) || commitment.RepairOwnerModuleID != repair.RepairOwnerModuleID {
+		if ValidateRuntimeDispatchRepairCommitmentProjection(dispatch.RepairCommitmentHash, dispatch.RepairCommitment) != nil || commitment.Closure.ID != closure.ID || commitment.SourceEvidenceFactID != rejected.ID || commitment.SourceEvidenceFactHash != StableRuntimeEvidenceFactHash(rejected) || commitment.SourceDispatchID != rejected.DispatchID || commitment.SourceAuthoritySnapshotID != rejected.AuthoritySnapshotID || commitment.SourceOperationID != rejectedOperation.ID || commitment.SourceOperationHash != StableRuntimeOperationHash(rejectedOperation) || commitment.SourceReceiptExecutionKey != rejectedReceipt.ExecutionKey || commitment.SourceReceiptFence != rejectedReceipt.Fence || commitment.SourceReceiptHash != StableRuntimeOperationReceiptHash(rejectedReceipt) || commitment.RepairOwnerModuleID != repair.RepairOwnerModuleID {
 			return invalid("repair commitment source mismatch")
 		}
 		confirmations := 0
@@ -137,7 +137,7 @@ func runtimeRepairHistoryEvidenceRevisionInSession(sources RuntimeLineageAsserti
 			}
 			confirmation := record.Confirmation
 			observation := confirmation.Observation
-			if session.lineageIndex().confirmation(record) != nil || confirmation.Disposition != RuntimeRepairSurfaceConfirmed || confirmation.OwnerModuleID != repair.RepairOwnerModuleID || !slices.Equal(confirmation.ConfirmedTargetRefs, closure.GroundedTargetRefs) || observation.WorkspaceID != sources.Facts.WorkspaceID || observation.RunID != sources.Facts.RunID || observation.DispatchID != rejected.DispatchID || observation.OperationID != rejected.OperationID || observation.AuthoritySnapshotID != rejected.AuthoritySnapshotID || observation.FailureSignature != rejected.FailureSignature || observation.DiagnosticClass != diagnostic.Class || observation.DiagnosticHash != StableRuntimeValidationFailureObservationDiagnosticHash(diagnostic, observation.ValidationScopeTargetRefs) {
+			if record.Validate() != nil || confirmation.Disposition != RuntimeRepairSurfaceConfirmed || confirmation.OwnerModuleID != repair.RepairOwnerModuleID || !slices.Equal(confirmation.ConfirmedTargetRefs, closure.GroundedTargetRefs) || observation.WorkspaceID != sources.Facts.WorkspaceID || observation.RunID != sources.Facts.RunID || observation.DispatchID != rejected.DispatchID || observation.OperationID != rejected.OperationID || observation.AuthoritySnapshotID != rejected.AuthoritySnapshotID || observation.FailureSignature != rejected.FailureSignature || observation.DiagnosticClass != diagnostic.Class || observation.DiagnosticHash != StableRuntimeValidationFailureObservationDiagnosticHash(diagnostic, observation.ValidationScopeTargetRefs) {
 				return invalid("confirmation differs from source diagnostic")
 			}
 			confirmations++
@@ -150,7 +150,7 @@ func runtimeRepairHistoryEvidenceRevisionInSession(sources RuntimeLineageAsserti
 	finalRevision := ""
 	for _, operation := range runtimeCandidateAdmissionOperations(dispatch.Candidate) {
 		descriptor, known := RuntimeOperationDescriptorForKind(operation.Kind)
-		fact, receipt, valid := runtimeLineageOperationFactFromLedgersInIndex(dispatch, operation, sources, true, false, false, session.lineageIndex())
+		fact, receipt, valid := runtimeLineageOperationFactFromLedgers(dispatch, operation, sources, true, false, false)
 		if !known || MatchCoverageEvidenceBindingReceipt(binding, EvidenceKindStateChange, operation, receipt) != nil || descriptor.OwnerModuleID != repair.RepairOwnerModuleID || !slices.Contains(repair.RepairOperationKinds, operation.Kind) || !valid || !receipt.Changed || !RuntimeEffectIsDurable(receipt.ObservedEffectScope) || fact.Kind != EvidenceKindStateChange || !slices.Equal(fact.BindingRefs, operation.BindingRefs) || !slices.Contains(fact.BindingRefs, binding.ID) || !slices.Equal(fact.CoverageWorkItemIDs, closure.CoverageWorkItemIDs) || !EvidenceRevisionAfter(fact.Revision, rejected.Revision) || EvidenceRevisionAfter(fact.Revision, cutoff) {
 			return invalid("repair lacks complete changed receipt set")
 		}
@@ -249,7 +249,7 @@ func runtimeRepairThenFreshValidationInSession(binding CoverageEvidenceBinding, 
 				var accepted []EvidenceFact
 				complete := true
 				for _, operation := range runtimeCandidateAdmissionOperations(dispatch.Candidate) {
-					fact, receipt, valid := runtimeLineageOperationFactFromLedgersInIndex(dispatch, operation, sources, true, false, false, session.lineageIndex())
+					fact, receipt, valid := runtimeLineageOperationFactFromLedgers(dispatch, operation, sources, true, false, false)
 					if !valid || MatchCoverageEvidenceBindingReceipt(binding, EvidenceKindValidation, operation, receipt) != nil || fact.Kind != EvidenceKindValidation || !slices.Contains(fact.BindingRefs, binding.ID) || !slices.Equal(fact.CoverageWorkItemIDs, []common.CoverageWorkItemID{binding.CoverageWorkItemID}) || !EvidenceRevisionAfter(fact.Revision, repairRevision) || EvidenceRevisionAfter(fact.Revision, cutoff) || fact.Validation == nil || !RuntimeValidationObservationSatisfiesCoverageProof(proof, *fact.Validation) {
 						complete = false
 						break

@@ -8,8 +8,8 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-// RuntimeHistoricalAcceptanceProof is the detached result of replaying one
-// original ordinary assessment. It grants no credit: only an SM-2 private
+// RuntimeHistoricalAcceptanceProof is the detached result of one original
+// ordinary acceptance transaction. It grants no credit: only an SM-2 private
 // transaction may install a settlement after verifying current applicability.
 // Historical behavior and ordinary acceptance retain distinct sources.
 type RuntimeHistoricalAcceptanceProof struct {
@@ -41,10 +41,11 @@ func (p RuntimeHistoricalAcceptanceProof) Clone() RuntimeHistoricalAcceptancePro
 	return p
 }
 
-// CompileRuntimeHistoricalAcceptanceProof independently replays the original
-// Definition endpoints, accepted semantic bindings, complete historical owner
-// effects and the ordinary consumer's immutable assessment cutoff. A producer
-// claim, current row status or recomputed local hash cannot supply this proof.
+// CompileRuntimeHistoricalAcceptanceProof produces a new settlement in the
+// original ordinary assessment transaction. It consumes the committed behavior
+// result and validates this acceptance's Definition endpoints, semantic binding,
+// independent owner proof and immutable cutoff. A producer claim, current row
+// status or recomputed local hash cannot supply this proof.
 func CompileRuntimeHistoricalAcceptanceProof(sources RuntimeLineageAssertionSources, historicalID common.CoverageWorkItemID, assessmentID string) (RuntimeHistoricalAcceptanceProof, error) {
 	return compileRuntimeHistoricalAcceptanceInSession(sources, historicalID, assessmentID, &runtimeHistoricalPreimageSession{})
 }
@@ -67,8 +68,8 @@ func compileRuntimeHistoricalAcceptanceInSession(sources RuntimeLineageAssertion
 	if matches != 1 || history.HistoricalBehavior == nil {
 		return invalid()
 	}
-	behavior, err := compileRuntimeHistoricalBehaviorInSession(sources, historicalID, history.HistoricalBehavior.DispatchID, false, session)
-	if err != nil || !reflect.DeepEqual(behavior, history.HistoricalBehavior) {
+	behavior := history.HistoricalBehavior
+	if err := validateRuntimeHistoricalBehaviorResult(sources.Facts, sources.Completed, history); err != nil {
 		return RuntimeHistoricalAcceptanceProof{}, fmt.Errorf("historical acceptance original behavior completion mismatch: %v", err)
 	}
 	var dispatch RuntimeDispatchRecord
@@ -106,7 +107,7 @@ func compileRuntimeHistoricalAcceptanceInSession(sources RuntimeLineageAssertion
 			return RuntimeHistoricalAcceptanceProof{}, fmt.Errorf("historical acceptance original observation receipt: %w", err)
 		}
 	}
-	if err := validateRuntimeAssessmentAdjudicationInSession(dispatch, assessment, sources.Facts, sources.Completed, sources.ProofLineage, sources, session); err != nil {
+	if err := ValidateRuntimeAssessmentAdjudication(dispatch, assessment, sources.Facts); err != nil {
 		return RuntimeHistoricalAcceptanceProof{}, fmt.Errorf("historical acceptance original ordinary adjudication: %w", err)
 	}
 	binding, found := assessmentBindingForCoverage(dispatch.CoverageBindings, endpoints.Acceptance.ID)
@@ -203,15 +204,9 @@ func compileRuntimeHistoricalAcceptanceInSession(sources RuntimeLineageAssertion
 		AssessmentDispatchID: dispatch.ID, AcceptanceEvidenceRefs: refs}, nil
 }
 
-// Immutable historical settlements are replayed against their original
-// assessment, not today's observations. Active credit additionally requires
-// the exact consumer's current settled binding; terminal gates separately
-// enforce this revision/generation's ordinary current-read observations.
-func validateRuntimeHistoricalAcceptanceProofs(sources RuntimeLineageAssertionSources, row RuntimeCoverageItemFact) error {
-	return validateRuntimeHistoricalAcceptanceProofsInSession(sources, row, &runtimeHistoricalPreimageSession{})
-}
-
-func validateRuntimeHistoricalAcceptanceProofsInSession(sources RuntimeLineageAssertionSources, row RuntimeCoverageItemFact, session *runtimeHistoricalPreimageSession) error {
+// Reads preserve the original settlement. Current credit is checked separately
+// against the ordinary consumer; no historical semantic compilation occurs.
+func validateRuntimeHistoricalAcceptanceResults(facts RuntimeFacts, completed []RuntimeDispatchRecord, row RuntimeCoverageItemFact) error {
 	if len(row.HistoricalAcceptanceProofs) > RuntimeHistoricalAcceptanceProofLimit {
 		return fmt.Errorf("historical acceptance proof history exceeds bound")
 	}
@@ -222,12 +217,11 @@ func validateRuntimeHistoricalAcceptanceProofsInSession(sources RuntimeLineageAs
 			return fmt.Errorf("historical acceptance repeats original assessment")
 		}
 		seen[value.AssessmentDispatchID] = true
-		expected, err := compileRuntimeHistoricalAcceptanceInSession(sources, row.ID, value.AssessmentDispatchID, session)
-		if err != nil || !reflect.DeepEqual(expected, value) {
+		if err := validateRuntimeHistoricalAcceptanceResult(facts, completed, row, value); err != nil {
 			return fmt.Errorf("historical acceptance differs from original all-of assessment: %v", err)
 		}
 		position := -1
-		for index, dispatch := range sources.Completed {
+		for index, dispatch := range completed {
 			if dispatch.ID == value.AssessmentDispatchID {
 				position = index
 			}
@@ -248,7 +242,7 @@ func validateRuntimeHistoricalAcceptanceProofsInSession(sources RuntimeLineageAs
 		return fmt.Errorf("historical terminal credit differs from exact all-of settlement")
 	}
 	matches := 0
-	for _, consumer := range sources.Facts.Coverage {
+	for _, consumer := range facts.Coverage {
 		if consumer.ID != current.Source.AcceptanceCoverageWorkItemID {
 			continue
 		}

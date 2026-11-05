@@ -49,7 +49,7 @@ func TestSealedDispatchToRuntimeRecordPreservesRawAuthorityProjectionShape(t *te
 	recipe := runtimecontract.RuntimeValidationRecipe{
 		ID: " recipe-1 ", Command: " go ", Args: []string{" test ", " ./... "},
 	}
-	dispatch := SealedDispatch{
+	dispatch := runtimecontract.RuntimeDispatchRecord{
 		CoverageBindings:              []runtimecontract.CoverageEvidenceBinding{binding},
 		OperationTargetAuthorizations: []runtimecontract.RuntimeDispatchOperationTargetAuthorization{targetAuthorization},
 		ValidationRecipes:             []runtimecontract.RuntimeValidationRecipe{recipe},
@@ -105,12 +105,12 @@ func TestRuntimeAggregateFreshLoadRejectsRawDispatchProjectionLaundering(t *test
 	for _, test := range []struct {
 		name      string
 		wantError string
-		mutate    func(*SealedDispatch)
+		mutate    func(*runtimecontract.RuntimeDispatchRecord)
 	}{
 		{
 			name:      "coverage binding",
 			wantError: "coverage evidence binding projection is not canonical",
-			mutate: func(dispatch *SealedDispatch) {
+			mutate: func(dispatch *runtimecontract.RuntimeDispatchRecord) {
 				binding := &dispatch.CoverageBindings[0]
 				binding.TargetRefs = append(binding.TargetRefs, binding.TargetRefs[0])
 				binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(*binding)
@@ -120,7 +120,7 @@ func TestRuntimeAggregateFreshLoadRejectsRawDispatchProjectionLaundering(t *test
 		{
 			name:      "target authorization",
 			wantError: "target authorization projection is not canonical",
-			mutate: func(dispatch *SealedDispatch) {
+			mutate: func(dispatch *runtimecontract.RuntimeDispatchRecord) {
 				authorization := &dispatch.OperationTargetAuthorizations[0]
 				authorization.Target.ExactTargetRefs = append(authorization.Target.ExactTargetRefs, authorization.Target.ExactTargetRefs[0])
 			},

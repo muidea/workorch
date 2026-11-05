@@ -102,9 +102,9 @@ func addRuntimeImplementationProgressSchema(schema, intent map[string]any, refs 
 	fields["requirementReviews"] = map[string]any{"type": "array", "minItems": len(refs), "maxItems": len(refs), "items": review, "prefixItems": positions}
 	fields["selectedRequirementRefs"] = map[string]any{"type": "array", "maxItems": len(refs), "uniqueItems": true, "items": map[string]any{"type": "string", "enum": refs}}
 	intent["required"] = append(intent["required"].([]string), "requirementReviews")
-	if p := work.PreviousRound; p != nil {
-		fields["previousRoundReview"] = map[string]any{"type": "object", "additionalProperties": false, "required": []string{"dispatchId", "receiptSetHash", "outcome", "reason"}, "properties": map[string]any{
-			"dispatchId": map[string]any{"const": p.DispatchID}, "receiptSetHash": map[string]any{"const": p.ReceiptSetHash}, "outcome": map[string]any{"enum": []string{"addressed", "partial", "diverged", "inconclusive"}}, "reason": map[string]any{"type": "string", "minLength": 1, "maxLength": 2048},
+	if work.PreviousRound != nil {
+		fields["previousRoundReview"] = map[string]any{"type": "object", "additionalProperties": false, "required": []string{"outcome", "reason"}, "properties": map[string]any{
+			"outcome": map[string]any{"enum": []string{"addressed", "partial", "diverged", "inconclusive"}}, "reason": map[string]any{"type": "string", "minLength": 1, "maxLength": 2048},
 		}}
 		intent["required"] = append(intent["required"].([]string), "previousRoundReview")
 	}

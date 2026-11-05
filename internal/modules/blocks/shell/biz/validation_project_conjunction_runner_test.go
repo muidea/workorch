@@ -159,7 +159,7 @@ func TestProjectConjunctionOwnerRunnerRejectsUnboundedContextBeforePreparation(t
 			t.Fatal("无效 operation deadline 仍进入准备或实际进程执行")
 		}
 	}
-	for _, request := range []RuntimeCommandRequest{{TimeoutMillis: -1}, {TimeoutMillis: 999}, {TimeoutMillis: 120000}, {TimeoutMillis: 1000}} {
+	for _, request := range []RuntimeCommandRequest{{TimeoutMillis: -1}, {TimeoutMillis: 999}, {TimeoutMillis: MaxCommandTimeout.Milliseconds() + 1}, {TimeoutMillis: 1000}} {
 		ctx, cancel := context.WithTimeout(context.Background(), DefaultCommandTimeout)
 		result, fact, err := runShellProjectConjunction(ctx, t.TempDir(), nil, request)
 		cancel()

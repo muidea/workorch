@@ -115,26 +115,35 @@ func (s RuntimeValidationSurface) Clone() RuntimeValidationSurface {
 }
 
 func (s RuntimeValidationSurface) Validate() error {
+	_, err := validateAndNormalizeRuntimeValidationSurface(s)
+	return err
+}
+
+// The catalog consumes this same invocation's detached canonical surface.
+// Validation and normalization have one implementation; this pure result is
+// neither owner readiness nor a retained successful admission.
+func validateAndNormalizeRuntimeValidationSurface(s RuntimeValidationSurface) (RuntimeValidationSurface, error) {
 	raw := s
 	if s.GenerationContext != nil {
 		if len(s.ProofRequirementPreparations) == 0 && len(s.ProofRequirementBindings) == 0 {
-			return fmt.Errorf("generation context requires an exact validation preparation or binding")
+			return RuntimeValidationSurface{}, fmt.Errorf("generation context requires an exact validation preparation or binding")
 		}
 		if err := s.GenerationContext.Validate(s.GenerationContext.ObservedRevision); err != nil {
-			return err
+			return RuntimeValidationSurface{}, err
 		}
 	}
 	if err := validateRuntimeValidationInputTargets(raw); err != nil {
-		return err
+		return RuntimeValidationSurface{}, err
 	}
 	if duplicate := duplicateRuntimeValidationProofCheckRef(raw.CheckRefs); duplicate != "" {
-		return fmt.Errorf("runtime validation surface %q duplicates check %q", strings.TrimSpace(raw.ID), duplicate)
+		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q duplicates check %q", strings.TrimSpace(raw.ID), duplicate)
 	}
 	if err := ValidateRuntimeValidationProofRequirementBindings(raw.ProofRequirementBindings); err != nil {
-		return fmt.Errorf("runtime validation surface %q: %w", strings.TrimSpace(raw.ID), err)
+		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q: %w", strings.TrimSpace(raw.ID), err)
 	}
-	if err := ValidateRuntimeValidationProofPreparations(raw.ProofRequirementPreparations); err != nil {
-		return fmt.Errorf("runtime validation surface %q: %w", strings.TrimSpace(raw.ID), err)
+	preparations, err := validateAndNormalizeRuntimeValidationProofPreparations(raw.ProofRequirementPreparations)
+	if err != nil {
+		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q: %w", strings.TrimSpace(raw.ID), err)
 	}
 	seenRequirementHashes := make(map[string]struct{}, len(raw.ProofRequirementBindings))
 	seenRequirementCoverage := make(map[common.CoverageWorkItemID]struct{}, len(raw.ProofRequirementBindings))
@@ -142,10 +151,10 @@ func (s RuntimeValidationSurface) Validate() error {
 		binding.RequirementHash = strings.TrimSpace(binding.RequirementHash)
 		binding.CoverageWorkItemID = common.CoverageWorkItemID(strings.TrimSpace(string(binding.CoverageWorkItemID)))
 		if _, duplicate := seenRequirementHashes[binding.RequirementHash]; duplicate {
-			return fmt.Errorf("runtime validation surface %q duplicates proof requirement %q", strings.TrimSpace(raw.ID), binding.RequirementHash)
+			return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q duplicates proof requirement %q", strings.TrimSpace(raw.ID), binding.RequirementHash)
 		}
 		if _, duplicate := seenRequirementCoverage[binding.CoverageWorkItemID]; duplicate {
-			return fmt.Errorf("runtime validation surface %q duplicates proof requirement coverage %q", strings.TrimSpace(raw.ID), binding.CoverageWorkItemID)
+			return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q duplicates proof requirement coverage %q", strings.TrimSpace(raw.ID), binding.CoverageWorkItemID)
 		}
 		seenRequirementHashes[binding.RequirementHash] = struct{}{}
 		seenRequirementCoverage[binding.CoverageWorkItemID] = struct{}{}
@@ -155,64 +164,72 @@ func (s RuntimeValidationSurface) Validate() error {
 		preparation.RequirementHash = strings.TrimSpace(preparation.RequirementHash)
 		preparation.CoverageWorkItemID = common.CoverageWorkItemID(strings.TrimSpace(string(preparation.CoverageWorkItemID)))
 		if _, duplicate := seenRequirementHashes[preparation.RequirementHash]; duplicate {
-			return fmt.Errorf("runtime validation surface %q publishes proof requirement %q as both ready and prerequisite", strings.TrimSpace(raw.ID), preparation.RequirementHash)
+			return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q publishes proof requirement %q as both ready and prerequisite", strings.TrimSpace(raw.ID), preparation.RequirementHash)
 		}
 		if _, duplicate := seenRequirementCoverage[preparation.CoverageWorkItemID]; duplicate {
-			return fmt.Errorf("runtime validation surface %q publishes proof requirement coverage %q more than once", strings.TrimSpace(raw.ID), preparation.CoverageWorkItemID)
+			return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q publishes proof requirement coverage %q more than once", strings.TrimSpace(raw.ID), preparation.CoverageWorkItemID)
 		}
 		seenRequirementHashes[preparation.RequirementHash] = struct{}{}
 		seenRequirementCoverage[preparation.CoverageWorkItemID] = struct{}{}
 	}
 	for _, unavailable := range raw.ProofRequirementUnavailabilities {
 		if err := unavailable.Validate(); err != nil {
-			return fmt.Errorf("runtime validation surface %q: %w", raw.ID, err)
+			return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q: %w", raw.ID, err)
 		}
 		unavailable = unavailable.Normalized()
 		requirement := unavailable.Requirement.Normalized()
 		if _, duplicate := seenRequirementHashes[requirement.Hash]; duplicate {
-			return fmt.Errorf("runtime validation surface %q duplicates unavailable requirement %q", raw.ID, requirement.Hash)
+			return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q duplicates unavailable requirement %q", raw.ID, requirement.Hash)
 		}
 		if _, duplicate := seenRequirementCoverage[requirement.CoverageWorkItemID]; duplicate {
-			return fmt.Errorf("runtime validation surface %q duplicates unavailable coverage %q", raw.ID, requirement.CoverageWorkItemID)
+			return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q duplicates unavailable coverage %q", raw.ID, requirement.CoverageWorkItemID)
 		}
 		seenRequirementHashes[requirement.Hash] = struct{}{}
 		seenRequirementCoverage[requirement.CoverageWorkItemID] = struct{}{}
 		if unavailable.ValidationRecipeID != strings.TrimSpace(raw.ID) || unavailable.OriginalDiagnostic.OwnerModuleID != strings.TrimSpace(raw.OwnerModuleID) {
-			return fmt.Errorf("runtime validation surface %q unavailable proof owner or recipe mismatch", raw.ID)
+			return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q unavailable proof owner or recipe mismatch", raw.ID)
 		}
 	}
+	// Consume the preparation compiler's same-call canonical projection. Its
+	// diagnostics were borrowed only during validation; detach exactly once at
+	// this output boundary, as the original whole-surface normalizer did.
+	s.ProofRequirementPreparations = nil
 	s = s.Normalized()
+	for i := range preparations {
+		preparations[i].OriginalDiagnostic = preparations[i].OriginalDiagnostic.CloneOriginal()
+	}
+	s.ProofRequirementPreparations = preparations
 	if s.ID == "" || s.OwnerModuleID == "" || s.OperationKind == "" || s.InputSchemaHash == "" {
-		return fmt.Errorf("runtime validation surface requires identity, owner, operation and input schema")
+		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface requires identity, owner, operation and input schema")
 	}
 	descriptor, found := RuntimeOperationDescriptorForKind(s.OperationKind)
 	if !found || descriptor.OwnerModuleID != s.OwnerModuleID {
-		return fmt.Errorf("runtime validation surface operation %q does not belong to owner %q", s.OperationKind, s.OwnerModuleID)
+		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface operation %q does not belong to owner %q", s.OperationKind, s.OwnerModuleID)
 	}
 	if !ValidRuntimeEffectScope(RuntimeEffectScope(strings.TrimSpace(string(raw.EffectScope)))) ||
 		strings.TrimSpace(string(raw.IdempotencyClass)) == "" ||
 		NormalizeRuntimeOperationIdempotencyClass(raw.IdempotencyClass) != RuntimeOperationIdempotencyClass(strings.TrimSpace(string(raw.IdempotencyClass))) {
-		return fmt.Errorf("runtime validation surface %q has invalid effect or idempotency", s.ID)
+		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q has invalid effect or idempotency", s.ID)
 	}
 	switch s.ProofApplicability {
 	case RuntimeValidationProofDirect, RuntimeValidationProofAuxiliary, RuntimeValidationProofNotDeclared:
 	default:
-		return fmt.Errorf("runtime validation surface %q has invalid proof applicability %q", s.ID, s.ProofApplicability)
+		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q has invalid proof applicability %q", s.ID, s.ProofApplicability)
 	}
 	if s.OwnerModuleID == RuntimeModuleShell && s.Readiness == RuntimeValidationSurfaceReady && s.ProofApplicability == RuntimeValidationProofDirect &&
 		len(s.ProofRequirementBindings) == 0 && len(s.ProofRequirementPreparations) == 0 && len(s.ProofRequirementUnavailabilities) == 0 {
-		return fmt.Errorf("direct Shell validation surface %q requires exact CWI proof records", s.ID)
+		return RuntimeValidationSurface{}, fmt.Errorf("direct Shell validation surface %q requires exact CWI proof records", s.ID)
 	}
 	if (len(s.ProofRequirementBindings) != 0 || len(s.ProofRequirementPreparations) != 0 || len(s.ProofRequirementUnavailabilities) != 0) &&
 		(s.OwnerModuleID != RuntimeModuleShell || s.OperationKind != RuntimeBlockKindManagedValidationSession) {
-		return fmt.Errorf("runtime validation surface %q exact CWI proof records require Shell managed-validation ownership", s.ID)
+		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q exact CWI proof records require Shell managed-validation ownership", s.ID)
 	}
 	boundChecks := make([]string, 0)
 	boundNativeChecks := make(map[string]common.CoverageWorkItemID)
 	for _, binding := range s.ProofRequirementBindings {
 		// 原始逐项完整校验已在上方执行；这里只反证 surface 间身份约束。
 		if binding.ValidationRecipeID != s.ID {
-			return fmt.Errorf("runtime validation surface %q proof requirement recipe mismatch", s.ID)
+			return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q proof requirement recipe mismatch", s.ID)
 		}
 		boundChecks = append(boundChecks, binding.RequiredCheckRefs...)
 		for _, attestation := range binding.CheckAttestations {
@@ -220,26 +237,26 @@ func (s RuntimeValidationSurface) Validate() error {
 			for _, ref := range attestation.NativeCheckRefs() {
 				nativeIdentity := attestation.ObservationProtocolRef + "\x00" + ref
 				if priorCoverage, duplicate := boundNativeChecks[nativeIdentity]; duplicate && priorCoverage != binding.CoverageWorkItemID {
-					return fmt.Errorf("runtime validation surface %q native check %q is shared by coverage %q and %q", s.ID, ref, priorCoverage, binding.CoverageWorkItemID)
+					return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q native check %q is shared by coverage %q and %q", s.ID, ref, priorCoverage, binding.CoverageWorkItemID)
 				}
 				boundNativeChecks[nativeIdentity] = binding.CoverageWorkItemID
 			}
 		}
 	}
 	if len(s.ProofRequirementBindings) != 0 && s.ProofApplicability != RuntimeValidationProofDirect {
-		return fmt.Errorf("runtime validation surface %q has exact proof bindings without direct applicability", s.ID)
+		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q has exact proof bindings without direct applicability", s.ID)
 	}
 	if len(s.ProofRequirementBindings) != 0 && s.Readiness != RuntimeValidationSurfaceReady {
-		return fmt.Errorf("runtime validation surface %q publishes ready proof bindings while not ready", s.ID)
+		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q publishes ready proof bindings while not ready", s.ID)
 	}
 	if len(s.ProofRequirementPreparations) != 0 && s.ProofApplicability != RuntimeValidationProofDirect {
-		return fmt.Errorf("runtime validation surface %q has exact proof preparations without direct applicability", s.ID)
+		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q has exact proof preparations without direct applicability", s.ID)
 	}
 	if len(s.ProofRequirementUnavailabilities) != 0 && s.ProofApplicability != RuntimeValidationProofDirect {
-		return fmt.Errorf("runtime validation surface %q has exact unavailability without direct applicability", s.ID)
+		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q has exact unavailability without direct applicability", s.ID)
 	}
 	if len(s.ProofRequirementBindings) != 0 && !sameStrings(normalizeStrings(boundChecks), s.CheckRefs) {
-		return fmt.Errorf("runtime validation surface %q checks do not match exact proof requirement bindings", s.ID)
+		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q checks do not match exact proof requirement bindings", s.ID)
 	}
 	for _, preparation := range s.ProofRequirementPreparations {
 		// 本次已完整校验原 preparation；不重验未改变的规范化 proof 正文。
@@ -248,75 +265,83 @@ func (s RuntimeValidationSurface) Validate() error {
 			for _, ref := range attestation.NativeCheckRefs() {
 				nativeIdentity := attestation.ObservationProtocolRef + "\x00" + ref
 				if priorCoverage, duplicate := boundNativeChecks[nativeIdentity]; duplicate && priorCoverage != preparation.CoverageWorkItemID {
-					return fmt.Errorf("runtime validation surface %q native check %q is shared by coverage %q and %q", s.ID, ref, priorCoverage, preparation.CoverageWorkItemID)
+					return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q native check %q is shared by coverage %q and %q", s.ID, ref, priorCoverage, preparation.CoverageWorkItemID)
 				}
 				boundNativeChecks[nativeIdentity] = preparation.CoverageWorkItemID
 			}
 		}
-		constraint := preparation.ProspectiveTargetSatisfactionConstraint.Normalized()
+		constraint := preparation.ProspectiveTargetSatisfactionConstraint
 		if preparation.ValidationRecipeID != s.ID || constraint.OwnerModuleID != s.OwnerModuleID ||
 			constraint.ValidationSurfaceID != s.ID || constraint.ValidationRecipeID != s.ID ||
 			constraint.InputSchemaHash != s.InputSchemaHash {
-			return fmt.Errorf("runtime validation surface %q proof preparation identity mismatch", s.ID)
+			return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q proof preparation identity mismatch", s.ID)
 		}
 	}
 	if len(s.ProofRequirementPreparations) != 0 && s.Readiness == RuntimeValidationSurfaceUnavailable {
-		return fmt.Errorf("unavailable runtime validation surface %q cannot publish proof preparations", s.ID)
+		return RuntimeValidationSurface{}, fmt.Errorf("unavailable runtime validation surface %q cannot publish proof preparations", s.ID)
 	}
 	switch s.Readiness {
 	case RuntimeValidationSurfaceReady:
 		if s.InputBindingRef == "" || s.PrerequisiteRef != "" || s.ProspectiveSatisfactionContractRef != "" || s.ProspectiveTargetSatisfactionConstraint != nil || s.ReadinessReason != "" {
-			return fmt.Errorf("ready runtime validation surface %q requires only an input binding", s.ID)
+			return RuntimeValidationSurface{}, fmt.Errorf("ready runtime validation surface %q requires only an input binding", s.ID)
 		}
 	case RuntimeValidationSurfacePrerequisiteRequired:
 		if s.InputBindingRef != "" || s.PrerequisiteRef == "" || s.ReadinessReason == "" {
-			return fmt.Errorf("prerequisite runtime validation surface %q requires only prerequisite lineage", s.ID)
+			return RuntimeValidationSurface{}, fmt.Errorf("prerequisite runtime validation surface %q requires only prerequisite lineage", s.ID)
 		}
 		if (s.ProspectiveSatisfactionContractRef == "") != (s.ProspectiveTargetSatisfactionConstraint == nil) {
-			return fmt.Errorf("prerequisite runtime validation surface %q requires prospective contract and typed all-of constraint together", s.ID)
+			return RuntimeValidationSurface{}, fmt.Errorf("prerequisite runtime validation surface %q requires prospective contract and typed all-of constraint together", s.ID)
 		}
 		if s.ProspectiveTargetSatisfactionConstraint != nil {
 			constraint := s.ProspectiveTargetSatisfactionConstraint.Normalized()
 			if err := constraint.Validate(); err != nil {
-				return err
+				return RuntimeValidationSurface{}, err
 			}
 			if constraint.OwnerModuleID != s.OwnerModuleID || constraint.ProspectiveSatisfactionContractRef != s.ProspectiveSatisfactionContractRef ||
 				constraint.ValidationSurfaceID != s.ID || constraint.ValidationRecipeID != s.ID || constraint.InputSchemaHash != s.InputSchemaHash {
-				return fmt.Errorf("runtime validation surface %q prospective target constraint identity mismatch", s.ID)
+				return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q prospective target constraint identity mismatch", s.ID)
 			}
 		}
 	case RuntimeValidationSurfaceUnavailable:
 		if s.InputBindingRef != "" || s.PrerequisiteRef != "" || s.ProspectiveSatisfactionContractRef != "" || s.ProspectiveTargetSatisfactionConstraint != nil || s.ReadinessReason == "" {
-			return fmt.Errorf("unavailable runtime validation surface %q requires only a factual reason", s.ID)
+			return RuntimeValidationSurface{}, fmt.Errorf("unavailable runtime validation surface %q requires only a factual reason", s.ID)
 		}
 	default:
-		return fmt.Errorf("runtime validation surface %q has unknown readiness %q", s.ID, s.Readiness)
+		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q has unknown readiness %q", s.ID, s.Readiness)
 	}
-	return nil
+	return s, nil
 }
 
 // ValidateRuntimeValidationProofPreparations rejects duplicate or aliased raw
 // per-CWI records before normalization can sort them into an apparently valid
 // catalog.
 func ValidateRuntimeValidationProofPreparations(values []RuntimeValidationProofPreparation) error {
+	_, err := validateAndNormalizeRuntimeValidationProofPreparations(values)
+	return err
+}
+
+func validateAndNormalizeRuntimeValidationProofPreparations(values []RuntimeValidationProofPreparation) ([]RuntimeValidationProofPreparation, error) {
 	seenHash := make(map[string]struct{}, len(values))
 	seenCoverage := make(map[common.CoverageWorkItemID]struct{}, len(values))
+	var canonical []RuntimeValidationProofPreparation
 	for _, raw := range values {
-		if err := raw.Validate(); err != nil {
-			return err
+		value, err := validateAndNormalizeRuntimeValidationProofPreparation(raw)
+		if err != nil {
+			return nil, err
 		}
 		requirementHash := strings.TrimSpace(raw.RequirementHash)
 		coverageID := common.CoverageWorkItemID(strings.TrimSpace(string(raw.CoverageWorkItemID)))
 		if _, duplicate := seenHash[requirementHash]; duplicate {
-			return fmt.Errorf("runtime validation proof preparation %q is duplicated", requirementHash)
+			return nil, fmt.Errorf("runtime validation proof preparation %q is duplicated", requirementHash)
 		}
 		if _, duplicate := seenCoverage[coverageID]; duplicate {
-			return fmt.Errorf("runtime validation proof preparation coverage %q is duplicated", coverageID)
+			return nil, fmt.Errorf("runtime validation proof preparation coverage %q is duplicated", coverageID)
 		}
 		seenHash[requirementHash] = struct{}{}
 		seenCoverage[coverageID] = struct{}{}
+		canonical = append(canonical, value)
 	}
-	return nil
+	return sortRuntimeValidationProofPreparations(canonical), nil
 }
 
 // RuntimeValidationProofRequirementBinding is the capability-owner statement

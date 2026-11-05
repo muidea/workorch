@@ -180,3 +180,43 @@ func BenchmarkRuntimeOwnerCatalogSurfaceReuse(b *testing.B) {
 		})
 	}
 }
+
+func TestRuntimeSurfaceCompilerDetachesAllFieldsAndRechecksNewInput(t *testing.T) {
+	for _, surface := range []RuntimeValidationSurface{runtimeExactProofCloneReadySurfaceFixture("recipe"), runtimeExactProofClonePreparingSurfaceFixture("recipe")} {
+		value, err := validateAndNormalizeRuntimeValidationSurface(surface)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertRuntimeStateRawCloneDetached(t, reflect.ValueOf(surface), reflect.ValueOf(value), "surface compiler")
+		for i := 0; i < reflect.TypeOf(surface).NumField(); i++ {
+			changed := cloneRuntimeValidationSurfaceRaw(surface)
+			field := reflect.ValueOf(&changed).Elem().Field(i)
+			field.Set(reflect.Zero(field.Type()))
+			assertRuntimeValidationSurfaceSinglePass(t, changed)
+			assertRuntimeValidationSurfaceSinglePass(t, surface)
+		}
+	}
+}
+
+func BenchmarkRuntimeSurfaceCompiler(b *testing.B) {
+	surface := runtimeExactProofClonePreparingSurfaceFixture("recipe")
+	expectedID := surface.Normalized().ID
+	for _, duplicate := range []bool{true, false} {
+		b.Run(fmt.Sprintf("normalize_after_validate_%t", duplicate), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				var value RuntimeValidationSurface
+				var err error
+				if duplicate {
+					err = surface.Validate()
+					value = surface.Normalized()
+				} else {
+					value, err = validateAndNormalizeRuntimeValidationSurface(surface)
+				}
+				if err != nil || value.ID != expectedID {
+					b.Fatal("valid surface compiler failed")
+				}
+			}
+		})
+	}
+}

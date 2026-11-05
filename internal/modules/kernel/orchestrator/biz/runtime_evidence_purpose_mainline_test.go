@@ -20,7 +20,7 @@ func runtimeAssertHistoricalEffectActualReadRemainsStale(t *testing.T, ctx conte
 		if !runtimecontract.RuntimeEvidenceIsHistoricalEffect(fact) {
 			continue
 		}
-		request, err := runtime.CompileRuntimeEvidenceApplicabilityRequest(aggregate, fact.ID)
+		request, err := runtimeCompileEvidenceApplicabilityRequestForTest(aggregate, fact.ID)
 		if err != nil || request.PurposeRef != runtimecontract.RuntimeHistoricalEffectProofV1 {
 			t.Fatalf("historical request lost original source purpose: %v", err)
 		}

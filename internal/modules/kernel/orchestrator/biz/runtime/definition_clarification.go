@@ -20,7 +20,7 @@ func (c *authorityComponent) observeRuntimeDefinitionGap(ctx context.Context, wo
 	if err := observation.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -70,9 +70,7 @@ func (c *authorityComponent) observeRuntimeDefinitionGap(ctx context.Context, wo
 	aggregate.DefinitionClarification = &state
 	aggregate.Decision = decision
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -86,7 +84,7 @@ func (c *candidateDispatchComponent) sealRuntimeDefinitionClarificationDispatch(
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -105,9 +103,7 @@ func (c *candidateDispatchComponent) sealRuntimeDefinitionClarificationDispatch(
 	state.Dispatch = &dispatch
 	aggregate.DefinitionClarification = &state
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -122,7 +118,7 @@ func (c *candidateDispatchComponent) bindRuntimeDefinitionClarificationRequest(c
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	request = request.Normalized()
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -144,9 +140,7 @@ func (c *candidateDispatchComponent) bindRuntimeDefinitionClarificationRequest(c
 	state.Request = &request
 	aggregate.DefinitionClarification = &state
 	aggregate.StateRevision++
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}

@@ -255,7 +255,7 @@ func TestImplementationWorkReceiptProcessChild(t *testing.T) {
 		assertImplementationWorkProcessDuplicate(t, module, hub, aggregate, directory)
 	}
 	operations := installImplementationWorkProcessProviderForTargets(t, hub, startOperations, targets)
-	for transition := 0; transition < runtimeDriveTransitionLimit; transition++ {
+	for transition := 0; transition < runtimeDriveTransitionBatchSize; transition++ {
 		outcome, err := module.driveOneRuntimeTransition(ctx, nil, aggregate, orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"}, runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract))
 		if err != nil {
 			t.Fatalf("恢复 transition=%d phase=%s: %v", transition, aggregate.SemanticPlanning.Phase, err)
@@ -359,7 +359,7 @@ func assertImplementationWorkProcessDuplicate(t *testing.T, module *Biz, hub mag
 	if (len(aggregate.CompletedDispatches) != 1 && aggregate.ActiveDispatch == nil) || len(aggregate.OperationReceipts) != 1 {
 		t.Fatal("fresh owner 未读回原 completed dispatch/receipt")
 	}
-	var dispatch runtime.SealedDispatch
+	var dispatch runtimecontract.RuntimeDispatchRecord
 	if aggregate.ActiveDispatch != nil {
 		dispatch = *aggregate.ActiveDispatch
 	} else {

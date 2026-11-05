@@ -229,11 +229,8 @@ func (c *RuntimeController) EnsureSemanticContractSealedForOperationTest(ctx con
 	// provider fixture so historical candidate sessions remain reverse-bound to
 	// their original provider/owner preimage instead of being laundered through
 	// the replacement generation.
-	previousPlanning := aggregate.SemanticPlanning.Clone()
-	ledger.History = make([]runtimecontract.RuntimeSemanticPlanningGeneration, len(previousPlanning.History))
-	for index := range previousPlanning.History {
-		ledger.History[index] = previousPlanning.History[index].Clone()
-	}
+	previousPlanning := aggregate.SemanticPlanning.CloneRaw()
+	ledger.History, ledger.HistoryArchive = previousPlanning.History, previousPlanning.HistoryArchive
 	ledger.CatalogRefreshAttempts = previousPlanning.CatalogRefreshAttempts
 	ledger.FeasibilityGaps = append([]runtimecontract.RuntimeSemanticFeasibilityGap(nil), previousPlanning.FeasibilityGaps...)
 	// Focused fixtures may enter with a handwritten reducer binding. Reproject

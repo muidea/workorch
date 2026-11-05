@@ -100,6 +100,9 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 		check := request.ValidationCheckAttestations[0]
 		if (check.ObservationProtocolRef == shellGoBehaviorObservationProtocolRef || shellEntrypointObservationProtocol(check.ObservationProtocolRef)) && check.SupplementalNativeCheckRef == "" {
 			diagnostic.InputAddition = shellValidationInputAddition(check)
+			if shellProjectObservationProtocol(check.ObservationProtocolRef) {
+				diagnostic.InputAddition.ContentRequirements += shellValidationDeclaredDeadlineRequirement(request.TimeoutMillis)
+			}
 		}
 	}
 	if class == runtimemodel.ValidationDiagnosticBuildFailed {

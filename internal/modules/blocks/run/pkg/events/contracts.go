@@ -29,6 +29,7 @@ func Contracts() []eventcontract.Contract {
 		TopicRunCommandWorkspaceRetirementInventory,
 		TopicRunCommandRuntimeStateRecordReadiness,
 		TopicRunCommandRuntimeStateRecord,
+		TopicRunCommandRuntimeLifecycle,
 		TopicRunCommandGetStep,
 		TopicRunCommandListStepsByRun,
 		TopicRunCommandListStepSummariesByRun,
@@ -53,7 +54,7 @@ func Contracts() []eventcontract.Contract {
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassNotify, eventcontract.StateMachineSM4, eventcontract.ScopePolicyProcess, eventcontract.IdentityPolicyProcessLifecycle, false), TopicRunRuntimeCommandsReady)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassRead, eventcontract.StateMachineSM1, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicRunCommandLifecycleFactInventory)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassRead, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true),
-		TopicRunCommandRuntimeRecoveryInventory, TopicRunCommandRuntimeStateRecordReadiness, TopicRunCommandRuntimeStateRecord,
+		TopicRunCommandRuntimeRecoveryInventory, TopicRunCommandRuntimeStateRecordReadiness, TopicRunCommandRuntimeStateRecord, TopicRunCommandRuntimeLifecycle,
 		TopicRunCommandGetRuntimeCheckpoint, TopicRunCommandListCheckpointsByRun,
 	)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM1, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true),

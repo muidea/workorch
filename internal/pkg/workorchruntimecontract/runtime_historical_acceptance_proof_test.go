@@ -242,12 +242,12 @@ func TestHistoricalAcceptanceSettlementRequiresExactConsumerAndRetainsRevokedHis
 			row.EvidenceRefs = normalizeStrings(append(append([]string(nil), proof.BehaviorEvidenceRefs...), proof.AcceptanceEvidenceRefs...))
 		}
 	}
-	if err := ValidateRuntimeHistoricalBehaviorCompletions(sources); err != nil {
+	if err := ValidateRuntimeHistoricalBehaviorCompletions(sources.Facts, sources.Completed); err != nil {
 		t.Fatal(err)
 	}
 	body, _ := json.Marshal(sources)
 	var reload RuntimeLineageAssertionSources
-	if err := json.Unmarshal(body, &reload); err != nil || ValidateRuntimeHistoricalBehaviorCompletions(reload) != nil {
+	if err := json.Unmarshal(body, &reload); err != nil || ValidateRuntimeHistoricalBehaviorCompletions(reload.Facts, reload.Completed) != nil {
 		t.Fatalf("original settlement did not reload: %v", err)
 	}
 	cloned := (RuntimeStateRecord{Facts: sources.Facts}).Clone()
@@ -257,12 +257,12 @@ func TestHistoricalAcceptanceSettlementRequiresExactConsumerAndRetainsRevokedHis
 	}
 	// Losing ordinary current credit must not retain historical terminal credit.
 	reload.Facts.Coverage[1].State, reload.Facts.Coverage[1].CWIConvergenceState, reload.Facts.Coverage[1].CurrentBindingRef = RuntimeCoverageItemStateOpen, RuntimeCWIConvergenceStateReopened, nil
-	if ValidateRuntimeHistoricalBehaviorCompletions(reload) == nil {
+	if ValidateRuntimeHistoricalBehaviorCompletions(reload.Facts, reload.Completed) == nil {
 		t.Fatal("stale ordinary consumer retained historical terminal credit")
 	}
 	history := &reload.Facts.Coverage[0]
 	history.State, history.CWIConvergenceState, history.LastAssessmentID, history.EvidenceRefs = RuntimeCoverageItemStateOpen, RuntimeCWIConvergenceStateBound, "", nil
-	if err := ValidateRuntimeHistoricalBehaviorCompletions(reload); err != nil {
+	if err := ValidateRuntimeHistoricalBehaviorCompletions(reload.Facts, reload.Completed); err != nil {
 		t.Fatalf("revocation destroyed immutable original proof history: %v", err)
 	}
 	if !reflect.DeepEqual(history.HistoricalAcceptanceProofs, sources.Facts.Coverage[0].HistoricalAcceptanceProofs) || !reflect.DeepEqual(history.HistoricalBehavior, sources.Facts.Coverage[0].HistoricalBehavior) {
@@ -287,7 +287,7 @@ func TestHistoricalAcceptanceSettlementRequiresExactConsumerAndRetainsRevokedHis
 				t.Fatal(err)
 			}
 			mutate(&changed)
-			if ValidateRuntimeHistoricalBehaviorCompletions(changed) == nil {
+			if ValidateRuntimeHistoricalBehaviorCompletions(changed.Facts, changed.Completed) == nil {
 				t.Fatal("coordinated stale/partial settlement restored terminal credit")
 			}
 		})

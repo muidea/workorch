@@ -118,13 +118,35 @@ func TestHistoricalBehaviorCompletionTransitionIsImmutableAndReceiptCASOnly(t *t
 	if validateHistoricalBehaviorTransition(previous, next) == nil {
 		t.Fatal("detached completion escaped original complete receipt CAS")
 	}
-	previous.ActiveDispatch = &SealedDispatch{ID: "dispatch"}
+	previous.ActiveDispatch = &runtimecontract.RuntimeDispatchRecord{ID: "dispatch"}
+	closed := cloneSealedDispatchRaw(*previous.ActiveDispatch)
+	closed.State = DispatchStateCommitted
+	next.CompletedDispatches = append(next.CompletedDispatches, closed)
 	if err := validateHistoricalBehaviorTransition(previous, next); err != nil {
 		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*RuntimeAggregate){
+		"missing source closure": func(a *RuntimeAggregate) { a.CompletedDispatches = nil },
+		"uncommitted source":     func(a *RuntimeAggregate) { a.CompletedDispatches[0].State = DispatchStateInvalidated },
+		"changed sealed input":   func(a *RuntimeAggregate) { a.CompletedDispatches[0].CandidateHash = "replacement" },
+		"removed coverage":       func(a *RuntimeAggregate) { a.Facts.Coverage = a.Facts.Coverage[:1] },
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := next.CloneRaw()
+			mutate(&changed)
+			if validateHistoricalBehaviorTransition(previous, changed) == nil {
+				t.Fatal("invalid original result transaction accepted")
+			}
+		})
 	}
 	previous = next.CloneRaw()
 	if err := validateHistoricalBehaviorTransition(previous, next); err != nil {
 		t.Fatal(err)
+	}
+	changedSource := next.CloneRaw()
+	changedSource.CompletedDispatches[0].CandidateHash = "coordinated-rehash"
+	if validateHistoricalBehaviorTransition(previous, changedSource) == nil {
+		t.Fatal("committed source dispatch was rewritten")
 	}
 	for index := range next.Facts.Coverage {
 		if next.Facts.Coverage[index].HistoricalBehavior != nil {
@@ -227,7 +249,10 @@ func TestHistoricalAcceptanceTransitionIsOriginalAssessmentCASAndAppendOnly(t *t
 	if validateHistoricalBehaviorTransition(previous, next) == nil {
 		t.Fatal("settlement appended without original assessment CAS")
 	}
-	previous.ActiveDispatch = &SealedDispatch{ID: "ordinary-assessment", Candidate: runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{}}}
+	previous.ActiveDispatch = &runtimecontract.RuntimeDispatchRecord{ID: "ordinary-assessment", Candidate: runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{}}}
+	closed := cloneSealedDispatchRaw(*previous.ActiveDispatch)
+	closed.State = DispatchStateCommitted
+	next.CompletedDispatches = append(next.CompletedDispatches, closed)
 	if err := validateHistoricalBehaviorTransition(previous, next); err != nil {
 		t.Fatal(err)
 	}

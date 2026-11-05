@@ -7,16 +7,8 @@ import "fmt"
 // owner transactions. A governance source dispatch and its resumed completed
 // clone may project the same execution identity, so one receipt may satisfy
 // multiple identical projections; an unprojected receipt is never valid.
-func ValidateRuntimeOperationReceiptExecutionLineage(
-	active *RuntimeDispatchRecord,
-	completed []RuntimeDispatchRecord,
-	receipts []RuntimeOperationReceipt,
-) error {
-	return validateRuntimeOperationReceiptExecutionLineageInIndex(active, completed, receipts, nil)
-}
-
-func validateRuntimeOperationReceiptExecutionLineageInIndex(active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord, receipts []RuntimeOperationReceipt, index *runtimeOwnerLineageIndex) error {
-	if err := validateRuntimeOperationReceiptsInIndex(receipts, index); err != nil {
+func ValidateRuntimeOperationReceiptExecutionLineage(active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord, receipts []RuntimeOperationReceipt) error {
+	if err := ValidateRuntimeOperationReceipts(receipts); err != nil {
 		return fmt.Errorf("runtime operation receipt ledger: %w", err)
 	}
 
@@ -66,7 +58,7 @@ func validateRuntimeOperationReceiptExecutionLineageInIndex(active *RuntimeDispa
 			if execution.OwnerReceiptRef != expectedRef {
 				return fmt.Errorf("%s dispatch %q operation %q owner receipt ref mismatch", label, dispatch.ID, execution.OperationID)
 			}
-			if execution.OwnerReceiptHash != index.receiptHash(receipt) {
+			if execution.OwnerReceiptHash != StableRuntimeOperationReceiptHash(receipt) {
 				return fmt.Errorf("%s dispatch %q operation %q owner receipt hash mismatch", label, dispatch.ID, execution.OperationID)
 			}
 			matchedReceipt[identity] = true

@@ -1380,7 +1380,7 @@
         "recipeAdapterRef": "shell/project-multi-failure-validation",
         "recipeInputReviewProtocolRef": "validation/input-consistency",
         "recipeDeclared": true,
-        "recipeTimeoutMillis": 60000,
+        "recipeTimeoutMillis": 300000,
         "zeroWorkMarkers": [
           "no tests to run",
           "0 tests"

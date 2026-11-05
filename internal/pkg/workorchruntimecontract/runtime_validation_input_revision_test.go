@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func inputRevisionFixture(t *testing.T) (*RuntimeValidationInputRevision, RuntimeSemanticPlanningLedger) {
+func inputRevisionFixture(t *testing.T, declareMethod ...bool) (*RuntimeValidationInputRevision, RuntimeSemanticPlanningLedger) {
 	t.Helper()
 	m, d, _, binding := semanticInputReviewFixture(t)
 	for i := range m.OwnerCatalogs {
@@ -17,6 +17,15 @@ func inputRevisionFixture(t *testing.T) (*RuntimeValidationInputRevision, Runtim
 			if s.ID == binding.ValidationRecipeID {
 				s.InputTargetOwnerModuleID = RuntimeModuleFile
 				s.InputTargetRefs = []string{binding.InputReview.Files[0].TargetRef}
+				if len(declareMethod) != 0 && declareMethod[0] {
+					for k := range s.ProofRequirementBindings {
+						b := &s.ProofRequirementBindings[k]
+						method, _ := RuntimeValidationRecipeForID(c.ValidationRecipes, b.ValidationRecipeID)
+						b.InputReview.Recipe = &method
+						b.InputReview.Hash = StableRuntimeValidationInputReviewSubjectHash(*b.InputReview, *b)
+						binding = b.Clone()
+					}
+				}
 			}
 		}
 		c.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(*c)
@@ -24,6 +33,7 @@ func inputRevisionFixture(t *testing.T) (*RuntimeValidationInputRevision, Runtim
 	m.Hash = StableRuntimeSemanticPlanManifestHash(m)
 	d.ManifestHash = m.Hash
 	d.Proposals[1].ValidationInputReview.Checks[0].Conclusion = RuntimeValidationInputConflict
+	d.Proposals[1].ValidationInputReview.SubjectHash = binding.InputReview.Hash
 	d.Proposals[1].ValidationInputReview.Checks[0].Obligations[0].Finding = RuntimeValidationInputConflicting
 	l := RuntimeSemanticPlanningLedger{Phase: RuntimeSemanticPlanningProofBatchDocumentAccepted, Manifest: &m, LogicalRequestID: runtimeSemanticBindingTestRequestID, ActiveBatchID: d.BatchID, BatchDocuments: []RuntimeSemanticPlanDocument{d}}
 	v, err := CompileRuntimeValidationInputRevision(l)
@@ -116,6 +126,74 @@ func TestInputRevisionSourceRestartDuplicateAndWorkspaceIsolation(t *testing.T) 
 	if ValidateRuntimeInputRevisionSource(v, s) == nil {
 		t.Fatal("duplicate source accepted")
 	}
+}
+
+func TestInputRevisionRecipeIsFrozenOriginalMethodNotCurrentDefault(t *testing.T) {
+	v, source := inputRevisionFixture(t, true)
+	if v.Recipe == nil || v.Recipe.ID != v.Binding.ValidationRecipeID {
+		t.Fatal("original owner execution method lost")
+	}
+	want := cloneRuntimeInputRecipe(v.Recipe)
+	history := RuntimeSemanticPlanningLedger{History: []RuntimeSemanticPlanningGeneration{{Reason: RuntimeSemanticPlanningRetirementInputRevision, Snapshot: source}}}
+	raw, _ := json.Marshal(history)
+	var restored RuntimeSemanticPlanningLedger
+	if err := json.Unmarshal(raw, &restored); err != nil {
+		t.Fatal(err)
+	}
+	for name, change := range map[string]func(*RuntimeValidationInputRevision){
+		"omission": func(v *RuntimeValidationInputRevision) { v.Recipe = nil },
+		"deadline": func(v *RuntimeValidationInputRevision) { v.Recipe.TimeoutMillis = 300000 },
+		"identity": func(v *RuntimeValidationInputRevision) { v.Recipe.ID = "other-method" },
+		"command":  func(v *RuntimeValidationInputRevision) { v.Recipe.Command = "other-command" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := v.Clone()
+			change(bad)
+			if ValidateRuntimeInputRevisionSource(bad, restored) == nil {
+				t.Fatal("method omission/substitution passed frozen-source reverse proof")
+			}
+		})
+	}
+	copy := v.Clone()
+	copy.Recipe.Args = append(copy.Recipe.Args, "caller-mutation")
+	if !reflect.DeepEqual(v.Recipe, want) || ValidateRuntimeInputRevisionSource(v, restored) != nil {
+		t.Fatal("clone or current method mutation changed original source")
+	}
+}
+
+func TestUndeclaredInputMethodIsNotInferredIntoFrozenHistory(t *testing.T) {
+	v, source := inputRevisionFixture(t)
+	if v.Recipe != nil || v.Binding.InputReview.Recipe != nil {
+		t.Fatal("an undeclared method was inferred into original frozen input")
+	}
+	history := RuntimeSemanticPlanningLedger{History: []RuntimeSemanticPlanningGeneration{{Reason: RuntimeSemanticPlanningRetirementInputRevision, Snapshot: source}}}
+	raw, _ := json.Marshal(history)
+	var restored RuntimeSemanticPlanningLedger
+	if err := json.Unmarshal(raw, &restored); err != nil || ValidateRuntimeInputRevisionSource(v, restored) != nil {
+		t.Fatal("current compiler changed original transaction without a new declaration", err)
+	}
+}
+
+func TestDeclaredInputReviewMethodRejectsCatalogDeadlineDrift(t *testing.T) {
+	_, source := inputRevisionFixture(t, true)
+	for _, c := range source.Manifest.OwnerCatalogs {
+		for i := range c.ValidationSurfaces {
+			for j := range c.ValidationSurfaces[i].ProofRequirementBindings {
+				b := &c.ValidationSurfaces[i].ProofRequirementBindings[j]
+				if b.InputReview == nil || b.InputReview.Recipe == nil {
+					continue
+				}
+				b.InputReview.Recipe.TimeoutMillis = 300000
+				b.InputReview.Hash = StableRuntimeValidationInputReviewSubjectHash(*b.InputReview, *b)
+				c.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(c)
+				if c.Validate() == nil {
+					t.Fatal("self-hashed review changed the execution method without matching original owner recipe")
+				}
+				return
+			}
+		}
+	}
+	t.Fatal("fixture has no declared method")
 }
 
 func TestInputRevisionProtectionDoesNotGrantUnrelatedTargets(t *testing.T) {

@@ -46,7 +46,7 @@ func referenceAggregateDispatchReuseValidate(a RuntimeAggregate) error {
 	if err := runtimecontract.ValidateRuntimeAssessmentAuthoritySources(a.Facts, active, completed); err != nil {
 		return fmt.Errorf("runtime aggregate assessment authority: %w", err)
 	}
-	if err := runtimecontract.ValidateRuntimeAssessmentAdjudications(a.Facts, completed, a.CoverageProofLineage, runtimeLineageAssertionSources(a)); err != nil {
+	if err := runtimecontract.ValidateRuntimeAssessmentAdjudications(a.Facts, completed); err != nil {
 		return fmt.Errorf("runtime aggregate assessment adjudication: %w", err)
 	}
 	if err := referenceDispatchReuseValidateRuntimeAggregateSM2Authority(a); err != nil {
@@ -353,7 +353,7 @@ func referenceDispatchReuseValidateRuntimeOperationGovernanceBindingFences(a Run
 	}
 	for _, rawBinding := range a.OperationGovernanceBindings {
 		binding := rawBinding.Normalized()
-		var source *SealedDispatch
+		var source *runtimecontract.RuntimeDispatchRecord
 		for idx := range a.CompletedDispatches {
 			if a.CompletedDispatches[idx].ID == binding.OperationDispatchID {
 				value := a.CompletedDispatches[idx]

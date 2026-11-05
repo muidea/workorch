@@ -11,7 +11,16 @@ import (
 const RuntimeValidationInputRevisionProtocolV1 = "validation/input-revision/v1"
 const RuntimeValidationInputRevisionRetirementOutcome = "validation_input_revision_required"
 
-// RuntimeValidationInputRevision retains the original complete rejected review.
+func cloneRuntimeInputRecipe(r *RuntimeValidationRecipe) *RuntimeValidationRecipe {
+	if r == nil {
+		return nil
+	}
+	c := cloneRuntimeValidationRecipeRaw(*r)
+	return &c
+}
+
+// RuntimeValidationInputRevision retains the original complete rejected review
+// or typed owner structural observation, with their exact original input bytes.
 // It opens only those observed input resources for a bounded ordinary work
 // round. It is neither a consistency verdict nor a validation-failure repair.
 // Aggregate admission must additionally reverse-prove the original generation.
@@ -25,7 +34,12 @@ type RuntimeValidationInputRevision struct {
 	OwnerModuleID          string
 	InputTargetRefs        []string
 	Binding                RuntimeValidationProofRequirementBinding
-	Report                 RuntimeValidationInputReview
+	// Recipe is the original owner declaration, including its declared deadline.
+	// It describes the proof being maintained; it grants no execution authority.
+	// Owners with opaque recipe identities need not expose transport metadata.
+	Recipe           *RuntimeValidationRecipe `json:",omitempty"`
+	Report           RuntimeValidationInputReview
+	OwnerObservation *RuntimeValidationInputRevisionObservation `json:",omitempty"`
 }
 
 func (v *RuntimeValidationInputRevision) Clone() *RuntimeValidationInputRevision {
@@ -35,6 +49,7 @@ func (v *RuntimeValidationInputRevision) Clone() *RuntimeValidationInputRevision
 	c := *v
 	c.InputTargetRefs = slices.Clone(v.InputTargetRefs)
 	c.Binding = v.Binding
+	c.Recipe = cloneRuntimeInputRecipe(v.Recipe)
 	c.Binding.RequiredCheckRefs = slices.Clone(v.Binding.RequiredCheckRefs)
 	c.Binding.CheckAttestations = slices.Clone(v.Binding.CheckAttestations)
 	if v.Binding.InputReview != nil {
@@ -42,10 +57,17 @@ func (v *RuntimeValidationInputRevision) Clone() *RuntimeValidationInputRevision
 		c.Binding.InputReview = &b
 	}
 	c.Report = v.Report.Clone()
+	c.OwnerObservation = v.OwnerObservation.Clone()
 	return &c
 }
 
 func (v RuntimeValidationInputRevision) Validate() error {
+	if v.Recipe != nil && (v.Recipe.ValidateDeclaration() != nil || v.Recipe.ID != v.Binding.ValidationRecipeID) {
+		return fmt.Errorf("input revision requires the exact original validation recipe declaration")
+	}
+	if v.OwnerObservation != nil {
+		return v.validateOwnerObservation()
+	}
 	for _, ref := range []string{string(v.WorkspaceID), string(v.RunID), v.DefinitionSeedHash, v.SourceManifestHash, v.SourceLogicalRequestID, v.SourceDocumentHash, v.OwnerModuleID} {
 		if !implementationWorkExactRef(ref) {
 			return fmt.Errorf("input revision requires exact original review identity")
@@ -56,6 +78,9 @@ func (v RuntimeValidationInputRevision) Validate() error {
 	}
 	if v.Binding.InputReview == nil {
 		return fmt.Errorf("input revision requires complete original owner input")
+	}
+	if !reflect.DeepEqual(v.Recipe, v.Binding.InputReview.Recipe) {
+		return fmt.Errorf("input revision method differs from original review subject")
 	}
 	if err := v.Report.ValidateAgainstBinding(v.Binding); err != nil {
 		return err
@@ -68,7 +93,7 @@ func (v RuntimeValidationInputRevision) Validate() error {
 	}
 	for _, target := range v.InputTargetRefs {
 		found := false
-		for _, f := range v.Binding.InputReview.Files {
+		for _, f := range v.InputFiles() {
 			found = found || f.TargetRef == target
 		}
 		if !found {
@@ -87,7 +112,7 @@ func (v *RuntimeValidationInputRevision) MatchesReplayProof(p *RuntimeOperationR
 	if v == nil || v.Validate() != nil || p == nil || p.Validate() != nil || p.OwnerModuleID != v.OwnerModuleID || len(p.TargetRefs) != 1 {
 		return false
 	}
-	for _, f := range v.Binding.InputReview.Files {
+	for _, f := range v.InputFiles() {
 		if slices.Contains(v.InputTargetRefs, f.TargetRef) && f.TargetRef == p.TargetRefs[0] {
 			return p.BeforeHash == f.ContentHash
 		}
@@ -99,6 +124,17 @@ func (v *RuntimeValidationInputRevision) MatchesReplayProof(p *RuntimeOperationR
 // the original admitted document and validation owner's input declaration.
 // Mixed/ambiguous sources stay closed; no guessed resource owner is permitted.
 func CompileRuntimeValidationInputRevision(l RuntimeSemanticPlanningLedger) (*RuntimeValidationInputRevision, error) {
+	v, err := runtimeValidationInputRevision(l)
+	if err != nil {
+		return nil, err
+	}
+	return v, v.Validate()
+}
+
+// Project the original accepted document, not a new semantic verdict. Raw
+// documents enter the semantic-ledger admission; this function is also used to
+// consume the exact immutable generation supplied by an owner transition.
+func runtimeValidationInputRevision(l RuntimeSemanticPlanningLedger) (*RuntimeValidationInputRevision, error) {
 	if l.Phase != RuntimeSemanticPlanningProofBatchDocumentAccepted || l.Manifest == nil {
 		return nil, fmt.Errorf("input revision requires original accepted review batch")
 	}
@@ -115,9 +151,6 @@ func CompileRuntimeValidationInputRevision(l RuntimeSemanticPlanningLedger) (*Ru
 	if doc == nil {
 		return nil, fmt.Errorf("missing original input review")
 	}
-	if err := doc.ValidateAgainstManifest(*l.Manifest); err != nil {
-		return nil, err
-	}
 	var v *RuntimeValidationInputRevision
 	for _, p := range doc.Proposals {
 		if p.ValidationInputReview == nil {
@@ -131,6 +164,7 @@ func CompileRuntimeValidationInputRevision(l RuntimeSemanticPlanningLedger) (*Ru
 			return nil, fmt.Errorf("missing original review binding")
 		}
 		owner := ""
+		var recipe *RuntimeValidationRecipe
 		var targets []string
 		var findings []string
 		for _, check := range p.ValidationInputReview.Checks {
@@ -157,6 +191,13 @@ func CompileRuntimeValidationInputRevision(l RuntimeSemanticPlanningLedger) (*Ru
 							return nil, fmt.Errorf("ambiguous validation input resource owner")
 						}
 						owner = surface.InputTargetOwnerModuleID
+						if b.InputReview.Recipe != nil {
+							originalRecipe, found := RuntimeValidationRecipeForID(c.ValidationRecipes, b.ValidationRecipeID)
+							if !found || !reflect.DeepEqual(*b.InputReview.Recipe, originalRecipe) {
+								return nil, fmt.Errorf("input revision declared method differs from original owner catalog")
+							}
+							recipe = cloneRuntimeInputRecipe(b.InputReview.Recipe)
+						}
 						for _, f := range b.InputReview.Files {
 							if slices.Contains(surface.InputTargetRefs, f.TargetRef) && slices.Contains(findings, f.TargetRef) {
 								targets = append(targets, f.TargetRef)
@@ -167,7 +208,7 @@ func CompileRuntimeValidationInputRevision(l RuntimeSemanticPlanningLedger) (*Ru
 			}
 		}
 
-		v = &RuntimeValidationInputRevision{WorkspaceID: l.Manifest.WorkspaceID, RunID: l.Manifest.RunID, DefinitionSeedHash: l.Manifest.DefinitionSeedHash, SourceManifestHash: l.Manifest.Hash, SourceLogicalRequestID: l.LogicalRequestID, SourceDocumentHash: StableRuntimeSemanticPlanDocumentHash(*doc), OwnerModuleID: owner, InputTargetRefs: normalizeStrings(targets), Binding: b, Report: p.ValidationInputReview.Clone()}
+		v = &RuntimeValidationInputRevision{WorkspaceID: l.Manifest.WorkspaceID, RunID: l.Manifest.RunID, DefinitionSeedHash: l.Manifest.DefinitionSeedHash, SourceManifestHash: l.Manifest.Hash, SourceLogicalRequestID: l.LogicalRequestID, SourceDocumentHash: StableRuntimeSemanticPlanDocumentHash(*doc), OwnerModuleID: owner, InputTargetRefs: normalizeStrings(targets), Binding: b, Recipe: cloneRuntimeInputRecipe(recipe), Report: p.ValidationInputReview.Clone()}
 	}
 	if v == nil {
 		return nil, fmt.Errorf("no actual input review conflict")
@@ -177,7 +218,7 @@ func CompileRuntimeValidationInputRevision(l RuntimeSemanticPlanningLedger) (*Ru
 			return nil, fmt.Errorf("input revision cannot discard another CWI batch")
 		}
 	}
-	return v, v.Validate()
+	return v, nil
 }
 
 func attachRuntimeInputRevision(r RuntimeImplementationWorkScopeRequest, v *RuntimeValidationInputRevision) (RuntimeImplementationWorkScopeRequest, error) {
@@ -186,8 +227,9 @@ func attachRuntimeInputRevision(r RuntimeImplementationWorkScopeRequest, v *Runt
 	return r, r.Validate()
 }
 
-// Reverse proof is performed at every fresh aggregate/DTO load. Compilers may
-// carry this detached product, but cannot create a retired source generation.
+// New input consumers must match exactly one original retired source. Formal
+// immutable sources are protected by the owner transition; querying them does
+// not re-admit every unrelated historical report.
 func ValidateRuntimeInputRevisionSource(v *RuntimeValidationInputRevision, l RuntimeSemanticPlanningLedger) error {
 	if v == nil {
 		return nil
@@ -197,7 +239,14 @@ func ValidateRuntimeInputRevisionSource(v *RuntimeValidationInputRevision, l Run
 		if g.Reason != RuntimeSemanticPlanningRetirementInputRevision {
 			continue
 		}
-		original, err := CompileRuntimeValidationInputRevision(g.Snapshot)
+		if g.OwnerInputRevision != nil {
+			if v.OwnerObservation == nil || !reflect.DeepEqual(g.OwnerInputRevision, v) {
+				continue
+			}
+		} else if v.OwnerObservation != nil || g.Snapshot.Manifest == nil || g.Snapshot.Manifest.Hash != v.SourceManifestHash || g.Snapshot.LogicalRequestID != v.SourceLogicalRequestID {
+			continue
+		}
+		original, err := runtimeValidationInputRevisionGeneration(g)
 		if err == nil && reflect.DeepEqual(v, original) {
 			matches++
 		}
@@ -231,19 +280,59 @@ func validateRuntimeInputRevisionTargets(v *RuntimeValidationInputRevision, p Ru
 	return nil
 }
 
-// PendingRuntimeValidationInputRevision consumes a rejected report exactly once
-// through the existing real completed work round. A new report does not reset
-// any original-CWI work/provider/history budget.
-func PendingRuntimeValidationInputRevision(s RuntimeSemanticPlanningLedger, w RuntimeImplementationWorkLedger, cwi common.CoverageWorkItemID) (*RuntimeValidationInputRevision, error) {
-	var pending *RuntimeValidationInputRevision
+// This local source projection lives only in the current owner call. It holds
+// original complete products, never a validation credential or retained PASS.
+type runtimeInputRevisionSource struct {
+	generation RuntimeSemanticPlanningGeneration
+	revision   *RuntimeValidationInputRevision
+}
+
+func runtimeInputRevisionSources(s RuntimeSemanticPlanningLedger) ([]runtimeInputRevisionSource, error) {
+	var result []runtimeInputRevisionSource
 	for _, g := range s.AllHistory() {
 		if g.Reason != RuntimeSemanticPlanningRetirementInputRevision {
 			continue
 		}
-		v, err := CompileRuntimeValidationInputRevision(g.Snapshot)
+		v, err := runtimeValidationInputRevisionGeneration(g)
 		if err != nil {
 			return nil, err
 		}
+		result = append(result, runtimeInputRevisionSource{generation: g, revision: v})
+	}
+	return result, nil
+}
+
+func validateRuntimeInputRevisionSource(v *RuntimeValidationInputRevision, sources []runtimeInputRevisionSource) error {
+	if v == nil {
+		return nil
+	}
+	matches := 0
+	for _, source := range sources {
+		if reflect.DeepEqual(v, source.revision) {
+			matches++
+		}
+	}
+	if matches != 1 {
+		return fmt.Errorf("input revision has no unique original rejected semantic generation")
+	}
+	return nil
+}
+
+// PendingRuntimeValidationInputRevision consumes formal original reports and
+// current completed work. It is not raw semantic-document admission and grants
+// no effect, validation credit or additional budget.
+func PendingRuntimeValidationInputRevision(s RuntimeSemanticPlanningLedger, w RuntimeImplementationWorkLedger, cwi common.CoverageWorkItemID) (*RuntimeValidationInputRevision, error) {
+	sources, err := runtimeInputRevisionSources(s)
+	if err != nil {
+		return nil, err
+	}
+	return pendingRuntimeValidationInputRevision(sources, w, cwi)
+}
+
+func pendingRuntimeValidationInputRevision(sources []runtimeInputRevisionSource, w RuntimeImplementationWorkLedger, cwi common.CoverageWorkItemID) (*RuntimeValidationInputRevision, error) {
+	var pending *RuntimeValidationInputRevision
+	for _, source := range sources {
+		v := source.revision
 		if v.Binding.CoverageWorkItemID != cwi {
 			continue
 		}
@@ -284,9 +373,17 @@ func RuntimeImplementationWorkTerminalPurposeSelected(w RuntimeImplementationWor
 	return last == RuntimeImplementationWorkPurposeTerminal
 }
 
-func validateRuntimeInputRevisionState(def RuntimeDefinitionContext, facts RuntimeFacts, w RuntimeImplementationWorkLedger, s RuntimeSemanticPlanningLedger) error {
+func validateRuntimeInputRevisionState(def RuntimeDefinitionContext, facts RuntimeFacts, w RuntimeImplementationWorkLedger, s RuntimeSemanticPlanningLedger, session *runtimeSemanticValidationSession) error {
+	sources, err := runtimeInputRevisionSources(s)
+	if err != nil {
+		return err
+	}
+
 	// A history product may only be consumed by a later semantic transaction.
 	for _, consumer := range s.AllHistory() {
+		if session.committedGeneration(consumer) {
+			continue
+		}
 		if consumer.Snapshot.Manifest == nil {
 			continue
 		}
@@ -295,18 +392,18 @@ func validateRuntimeInputRevisionState(def RuntimeDefinitionContext, facts Runti
 				continue
 			}
 			v := o.ImplementationWork.Scope.Request.InputRevision
-			if err := ValidateRuntimeInputRevisionSource(v, s); err != nil {
+			if err := validateRuntimeInputRevisionSource(v, sources); err != nil {
 				return err
 			}
 			for _, source := range s.AllHistory() {
-				if source.Reason == RuntimeSemanticPlanningRetirementInputRevision && source.Snapshot.Manifest != nil && source.Snapshot.Manifest.Hash == v.SourceManifestHash && source.RetiredAtStateRevision >= consumer.RetiredAtStateRevision {
+				if source.Reason == RuntimeSemanticPlanningRetirementInputRevision && ((v.OwnerObservation != nil && reflect.DeepEqual(source.OwnerInputRevision, v)) || (source.Snapshot.Manifest != nil && source.Snapshot.Manifest.Hash == v.SourceManifestHash)) && source.RetiredAtStateRevision >= consumer.RetiredAtStateRevision {
 					return fmt.Errorf("input revision borrowed a future conflict report")
 				}
 			}
 		}
 	}
 	validate := func(r RuntimeImplementationWorkScopeRequest) error {
-		if err := ValidateRuntimeInputRevisionSource(r.InputRevision, s); err != nil {
+		if err := validateRuntimeInputRevisionSource(r.InputRevision, sources); err != nil {
 			return err
 		}
 		if v := r.InputRevision; v != nil && (v.WorkspaceID != facts.WorkspaceID || v.RunID != facts.RunID || v.DefinitionSeedHash != facts.DefinitionSeed.Hash || v.Binding.DefinitionRevision != def.Revision) {
@@ -320,31 +417,41 @@ func validateRuntimeInputRevisionState(def RuntimeDefinitionContext, facts Runti
 		}
 	}
 	for _, r := range w.Rounds {
+		if session.completedWorkRound(r) {
+			continue
+		}
 		if err := validate(r.ScopeRequest); err != nil {
 			return err
 		}
 	}
-	for _, g := range s.AllHistory() {
-		if g.Reason != RuntimeSemanticPlanningRetirementInputRevision {
-			continue
-		}
-		v, err := CompileRuntimeValidationInputRevision(g.Snapshot)
-		if err != nil {
-			return err
-		}
-		declared := false
-		for _, f := range facts.DefinitionFocuses {
-			if len(f.CoverageWorkItemIDs) == 1 && f.CoverageWorkItemIDs[0] == v.Binding.CoverageWorkItemID && f.ImplementationWorkPolicy != nil && f.ImplementationWorkPolicy.InputRevisionProtocolRef == RuntimeValidationInputRevisionProtocolV1 && f.ImplementationWorkPolicy.OwnerModuleID == v.OwnerModuleID {
-				declared = true
+	checked := make(map[common.CoverageWorkItemID]bool)
+	for _, source := range sources {
+		g, v := source.generation, source.revision
+		// Immutable startup/Profile joins were judged with this exact formal
+		// generation. Current pending/focus applicability is checked below.
+		if !session.committedGeneration(g) {
+			if err := v.Validate(); err != nil {
+				return err
+			}
+			declared := false
+			for _, f := range facts.DefinitionFocuses {
+				if len(f.CoverageWorkItemIDs) == 1 && f.CoverageWorkItemIDs[0] == v.Binding.CoverageWorkItemID && f.ImplementationWorkPolicy != nil && f.ImplementationWorkPolicy.InputRevisionProtocolRef == RuntimeValidationInputRevisionProtocolV1 && f.ImplementationWorkPolicy.OwnerModuleID == v.OwnerModuleID {
+					declared = true
+				}
+			}
+			if !declared || v.WorkspaceID != facts.WorkspaceID || v.RunID != facts.RunID || v.DefinitionSeedHash != facts.DefinitionSeed.Hash || v.Binding.DefinitionRevision != def.Revision {
+				return fmt.Errorf("retired input revision lacks original Profile/startup contract")
 			}
 		}
-		if !declared || v.WorkspaceID != facts.WorkspaceID || v.RunID != facts.RunID || v.DefinitionSeedHash != facts.DefinitionSeed.Hash || v.Binding.DefinitionRevision != def.Revision {
-			return fmt.Errorf("retired input revision lacks original Profile/startup contract")
+		if checked[v.Binding.CoverageWorkItemID] {
+			continue
 		}
-		pending, err := PendingRuntimeValidationInputRevision(s, w, v.Binding.CoverageWorkItemID)
+		checked[v.Binding.CoverageWorkItemID] = true
+		pending, err := pendingRuntimeValidationInputRevision(sources, w, v.Binding.CoverageWorkItemID)
 		if err != nil {
 			return err
 		}
+
 		if pending != nil { // It must still be the active CWI until a real effect settles.
 			if !slices.Contains(facts.Focus.CoverageWorkItemIDs, pending.Binding.CoverageWorkItemID) {
 				return fmt.Errorf("pending input revision lost original CWI focus")
@@ -358,14 +465,24 @@ func validateRuntimeInputRevisionState(def RuntimeDefinitionContext, facts Runti
 // the independently persisted SM-3 request. A report alone is not a completed
 // provider transaction; retirement must retain the exact immutable expectation.
 func ValidateRuntimeInputRevisionRequestSources(semantic RuntimeSemanticPlanningLedger, sessions []RuntimeCandidateRequestSession) error {
+	return validateRuntimeInputRevisionRequestSourcesInSession(semantic, sessions, nil)
+}
+
+func validateRuntimeInputRevisionRequestSourcesInSession(semantic RuntimeSemanticPlanningLedger, sessions []RuntimeCandidateRequestSession, session *runtimeSemanticValidationSession) error {
 	for _, g := range semantic.AllHistory() {
 		if g.Reason != RuntimeSemanticPlanningRetirementInputRevision {
 			continue
 		}
-		v, err := CompileRuntimeValidationInputRevision(g.Snapshot)
+		if committedRuntimeInputRevisionRequestSource(g, sessions, session) {
+			continue
+		}
+		v, err := CompileRuntimeValidationInputRevisionGeneration(g)
 		if err != nil {
 			return err
 		}
+		if v.OwnerObservation != nil {
+			continue
+		} // owner observations are not provider transactions
 		var doc *RuntimeSemanticPlanDocument
 		for i := range g.Snapshot.BatchDocuments {
 			d := &g.Snapshot.BatchDocuments[i]
@@ -388,4 +505,36 @@ func ValidateRuntimeInputRevisionRequestSources(semantic RuntimeSemanticPlanning
 		}
 	}
 	return nil
+}
+
+// Both the immutable generation and its independently committed request must
+// be the exact formal preimage. A changed/deleted/duplicate source is admitted
+// by the original rejecting path; generation identity alone grants nothing.
+func committedRuntimeInputRevisionRequestSource(g RuntimeSemanticPlanningGeneration, sessions []RuntimeCandidateRequestSession, session *runtimeSemanticValidationSession) bool {
+	if !session.committedGeneration(g) {
+		return false
+	}
+	if g.OwnerInputRevision != nil {
+		return true
+	}
+	var before, after *RuntimeCandidateRequestSession
+	id := g.Snapshot.LogicalRequestID
+	for i := range session.committedPreimage.CandidateRequestSessions {
+		value := &session.committedPreimage.CandidateRequestSessions[i]
+		if value.LogicalRequestID == id {
+			if before != nil {
+				return false
+			}
+			before = value
+		}
+	}
+	for i := range sessions {
+		if sessions[i].LogicalRequestID == id {
+			if after != nil {
+				return false
+			}
+			after = &sessions[i]
+		}
+	}
+	return before != nil && after != nil && runtimeRawEqual(*before, *after)
 }

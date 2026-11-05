@@ -63,7 +63,7 @@ func TestExecuteActiveDispatchKeepsOwnerCallAndCASCounts(t *testing.T) {
 	}
 	// 原有五次 load 仍围住 preflight、claim、owner receipt 与 evidence 投影；
 	// 三次 transition CAS 各独立重载持久前像，不增加 owner effect 或 CAS 次数。
-	if repository.loads != 8 || repository.saves != 3 {
-		t.Fatalf("dispatch repository calls: loads=%d saves=%d, want 8/3", repository.loads, repository.saves)
+	if repository.loads != 6 || repository.saves != 3 {
+		t.Fatalf("dispatch repository calls: loads=%d saves=%d, want 6/3", repository.loads, repository.saves)
 	}
 }

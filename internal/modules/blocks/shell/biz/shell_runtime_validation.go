@@ -204,6 +204,7 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 					unavailabilities = append(unavailabilities, runtimemodel.RuntimeValidationProofUnavailability{
 						Requirement: requirement, ValidationRecipeID: recipe.ID,
 						OriginalDiagnostic: shellNativeCheckReadinessDiagnostic(inspection, requirement, binding.Manifest, catalogObservedRevision, ""),
+						Maintenance:        shellValidationInputMaintenance(workspaceDirectory, binding.Manifest.TargetRefs, inspection, requirement, recipe, attestations),
 					})
 					continue
 				}
@@ -225,6 +226,9 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 					var code string
 					ownerBinding.InputReview, code = shellInputReview(workspaceDirectory, binding.Manifest.TargetRefs, ownerBinding)
 					if code == "" && recipe.InputReviewProtocolRef != "" {
+						method := recipe
+						method.Args = append([]string(nil), recipe.Args...)
+						ownerBinding.InputReview.Recipe = &method
 						ownerBinding.InputReview.ProtocolRef = recipe.InputReviewProtocolRef
 						if recipe.InputReviewProtocolRef == runtimemodel.RuntimeValidationInputReviewProtocol {
 							ownerBinding.InputReview.LineageAssertions = append([]runtimemodel.RuntimeLineageAssertion(nil), requirement.LineageAssertions...)
@@ -468,7 +472,7 @@ func shellValidationProofPreparationFromInspection(inspection shellNativeCheckIn
 	}
 	if shellProjectAdapter(recipe.AdapterRef) && targetRef != "" {
 		preparation.ContentContractRef = shellProjectInputContentContractRef
-		preparation.ContentRequirements = shellProjectInputContentRequirements + shellAssertionFeedbackRequirements
+		preparation.ContentRequirements = shellProjectContentRequirements(recipe.AdapterRef) + shellValidationDeclaredDeadlineRequirement(recipe.TimeoutMillis) + shellAssertionFeedbackRequirements
 	}
 	if preparation.Validate() != nil {
 		return runtimemodel.RuntimeValidationProofPreparation{}, false, false

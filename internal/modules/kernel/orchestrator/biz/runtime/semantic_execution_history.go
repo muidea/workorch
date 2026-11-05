@@ -11,11 +11,11 @@ import (
 // SemanticExecutionHistory projects the bounded suffix of the existing receipt
 // ledger, including successful work from CWIs outside the current proof batch.
 // Bound CWIs describe historical operation bindings, never accepted coverage.
+// The aggregate comes from the owner's committed read/transition boundary. This
+// projection checks its requested scope and exact receipt sources without
+// re-admitting unrelated historical business results.
 func SemanticExecutionHistory(a RuntimeAggregate, c runtimecontract.RuntimeSemanticPlanRequestContext, m runtimecontract.RuntimeSemanticPlanManifest) (runtimecontract.RuntimeSemanticExecutionHistory, error) {
 	invalid := runtimecontract.RuntimeSemanticExecutionHistory{}
-	if err := a.Validate(); err != nil {
-		return invalid, err
-	}
 	if c.WorkspaceID != a.Facts.WorkspaceID || c.RunID != a.Facts.RunID || c.Definition.Revision != a.Definition.Revision || c.Definition.StartupInputHash != a.Definition.StartupInputHash ||
 		c.DefinitionSeed.Hash != a.Facts.DefinitionSeed.Hash || a.SemanticPlanning.Manifest == nil || m.Hash != a.SemanticPlanning.Manifest.Hash ||
 		c.CoverageProgress.SourceStateRevision > a.StateRevision || c.CoverageProgress.EvidenceRevision != a.Facts.EvidenceRevision {
@@ -32,12 +32,12 @@ func SemanticExecutionHistory(a RuntimeAggregate, c runtimecontract.RuntimeSeman
 		fence uint64
 	}
 	type source struct {
-		dispatch  SealedDispatch
+		dispatch  runtimecontract.RuntimeDispatchRecord
 		operation runtimecontract.RuntimeOperation
 		execution runtimecontract.RuntimeOperationExecutionRecord
 	}
 	sources := make(map[receiptIdentity]source)
-	dispatches := append([]SealedDispatch(nil), a.CompletedDispatches...)
+	dispatches := append([]runtimecontract.RuntimeDispatchRecord(nil), a.CompletedDispatches...)
 	if a.ActiveDispatch != nil {
 		dispatches = append(dispatches, *a.ActiveDispatch)
 	}

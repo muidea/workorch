@@ -23,7 +23,7 @@ func TestLineageOperationSessionSourceProjectionCoversGateFootprint(t *testing.T
 	}
 	var body *ast.BlockStmt
 	for _, declaration := range file.Decls {
-		if fn, ok := declaration.(*ast.FuncDecl); ok && fn.Name.Name == "runtimeValidateLineageOperationsWithCompilers" {
+		if fn, ok := declaration.(*ast.FuncDecl); ok && fn.Name.Name == "runtimeValidateLineageOperationsInSemanticSession" {
 			body = fn.Body
 		}
 	}

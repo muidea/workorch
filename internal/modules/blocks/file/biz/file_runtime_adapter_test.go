@@ -2069,6 +2069,10 @@ func TestRuntimeAdapterPatchApplyReplayProofCoversAllDurableVariants(t *testing.
 			if !ok {
 				t.Fatal("patch request conversion failed")
 			}
+			preview, err := adapter.PreviewPatch(request)
+			if err != nil || preview.postimage != "after\n" || sha256Hex([]byte(preview.postimage)) != proof.AfterHash {
+				t.Fatal("preview lost exact proposed bytes", err)
+			}
 			request.ReplayProof = proof
 			first, err := adapter.ApplyPatch(request)
 			if err != nil || first.BeforeHash != proof.BeforeHash || first.AfterHash != proof.AfterHash {

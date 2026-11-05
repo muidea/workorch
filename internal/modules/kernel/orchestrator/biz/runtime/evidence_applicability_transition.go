@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/proof"
 	orchestratorcommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -81,18 +82,15 @@ func validateEvidenceApplicabilityObservationTransition(previous, next RuntimeAg
 	return nil
 }
 
-// CompileRuntimeEvidenceApplicabilityRequest reverse-proves the exact immutable
-// fact and owner read source. It does not select an operation or grant credit.
-func CompileRuntimeEvidenceApplicabilityRequest(aggregate RuntimeAggregate, evidenceID common.EvidenceRecordID) (runtimecontract.RuntimeEvidenceApplicabilityRequest, error) {
-	if err := aggregate.Validate(); err != nil {
-		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, err
-	}
-	return compileRuntimeEvidenceApplicabilityRequest(aggregate, evidenceID)
+// Only the admitted owner or its private writer compiles exact source joins.
+func compileRuntimeEvidenceApplicabilityRequest(aggregate RuntimeAggregate, evidenceID common.EvidenceRecordID) (runtimecontract.RuntimeEvidenceApplicabilityRequest, error) {
+	request, _, err := compileRuntimeEvidenceApplicabilitySource(aggregate, evidenceID)
+	return request, err
 }
 
-// No validation credential escapes this call chain. Public entry points run
-// the complete aggregate gate once before these unchanged exact source joins.
-func compileRuntimeEvidenceApplicabilityRequest(aggregate RuntimeAggregate, evidenceID common.EvidenceRecordID) (runtimecontract.RuntimeEvidenceApplicabilityRequest, error) {
+// Request identity and read projection share the same exact source compilation.
+// This value belongs to this call only; the observation writer re-reads the owner.
+func compileRuntimeEvidenceApplicabilitySource(aggregate RuntimeAggregate, evidenceID common.EvidenceRecordID) (runtimecontract.RuntimeEvidenceApplicabilityRequest, RuntimeOperationReadSource, error) {
 	var fact runtimecontract.EvidenceFact
 	matches := 0
 	for _, value := range aggregate.Facts.Evidence.Accepted {
@@ -101,23 +99,23 @@ func compileRuntimeEvidenceApplicabilityRequest(aggregate RuntimeAggregate, evid
 		}
 	}
 	if matches != 1 || fact.ApplicabilityDependencies == nil {
-		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, fmt.Errorf("%w: applicability requires unique versioned accepted source", common.ErrConflict)
+		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, RuntimeOperationReadSource{}, fmt.Errorf("%w: applicability requires unique versioned accepted source", common.ErrConflict)
 	}
 	var receiptHash string
 	for _, receipt := range aggregate.OperationReceipts {
 		if fact.SourceRef == "runtime-receipt/"+receipt.ExecutionKey && receipt.OperationID == fact.OperationID {
 			if receiptHash != "" {
-				return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, common.ErrConflict
+				return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, RuntimeOperationReadSource{}, common.ErrConflict
 			}
 			receiptHash = runtimecontract.StableRuntimeOperationReceiptHash(receipt)
 		}
 	}
 	source, err := compileRuntimeOperationReadSource(aggregate, fact.DispatchID, fact.OperationID, receiptHash)
 	if err != nil {
-		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, err
+		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, RuntimeOperationReadSource{}, err
 	}
 	if !reflect.DeepEqual(source.ApplicabilitySource, fact.ApplicabilityDependencies) || !reflect.DeepEqual(&source.OriginalDependencies, fact.OwnerRevisionSet) {
-		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, fmt.Errorf("%w: applicability source payload mismatch", common.ErrConflict)
+		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, RuntimeOperationReadSource{}, fmt.Errorf("%w: applicability source payload mismatch", common.ErrConflict)
 	}
 	request := (runtimecontract.RuntimeEvidenceApplicabilityRequest{
 		ProtocolRef:           runtimecontract.RuntimeEvidenceApplicabilityObservationV1,
@@ -127,27 +125,19 @@ func compileRuntimeEvidenceApplicabilityRequest(aggregate RuntimeAggregate, evid
 		ReconciliationRequestHash: aggregate.Reconciliation.RequestHash,
 		PurposeRef:                fact.ApplicabilityDependencies.PurposeRef,
 	}).WithID()
-	return request, request.ValidateRaw()
-}
-
-// NextRuntimeEvidenceApplicabilityRequest projects at most one read-only
-// obligation for evidence attributable to a current binding. SM-4 performs the
-// owner query; the private writer independently repeats source/fence admission.
-// A new evidence revision requires fresh observations before further credit.
-func NextRuntimeEvidenceApplicabilityRequest(aggregate RuntimeAggregate) (runtimecontract.RuntimeEvidenceApplicabilityRequest, bool, error) {
-	if err := aggregate.Validate(); err != nil {
-		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, false, err
+	if err := request.ValidateRaw(); err != nil {
+		return request, RuntimeOperationReadSource{}, err
 	}
-	return nextRuntimeEvidenceApplicabilityRequest(aggregate)
+	return request, source, nil
 }
 
 // Only complete cold/owner-local gates may enter this pure continuation.
-func nextRuntimeEvidenceApplicabilityRequest(aggregate RuntimeAggregate) (runtimecontract.RuntimeEvidenceApplicabilityRequest, bool, error) {
+func compileRuntimeEvidenceApplicabilityRead(aggregate RuntimeAggregate) (runtimecontract.RuntimeEvidenceApplicabilityRequest, RuntimeOperationReadSource, bool, error) {
 	if aggregate.ActiveDispatch != nil || aggregate.Termination != nil || aggregate.TerminalMaterialSeal != nil || isTerminalConvergenceState(aggregate.Decision.State) {
-		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, false, nil
+		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, RuntimeOperationReadSource{}, false, nil
 	}
 	if runtimeApplicabilityHasUnsettledProvider(aggregate) {
-		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, false, nil
+		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, RuntimeOperationReadSource{}, false, nil
 	}
 	for _, fact := range aggregate.Facts.Evidence.Accepted {
 		if fact.ApplicabilityDependencies == nil || runtimecontract.RuntimeEvidenceIsHistoricalEffect(fact) || runtimecontract.RuntimeEvidenceHasStaleApplicability(fact, aggregate.Facts.EvidenceApplicabilityObservations, aggregate.Facts.EvidenceRevision) {
@@ -157,77 +147,36 @@ func nextRuntimeEvidenceApplicabilityRequest(aggregate RuntimeAggregate) (runtim
 			continue
 		}
 		observed := false
+		sourceHash := ""
 		for _, observation := range aggregate.Facts.EvidenceApplicabilityObservations {
-			if observation.Request.SourceEvidenceID == fact.ID && observation.Request.SourceEvidenceHash == runtimecontract.StableRuntimeEvidenceFactHash(fact) && observation.Request.EvidenceRevision == aggregate.Facts.EvidenceRevision && observation.Request.ReconciliationRequestHash == aggregate.Reconciliation.RequestHash {
+			if observation.Request.SourceEvidenceID != fact.ID || observation.Request.EvidenceRevision != aggregate.Facts.EvidenceRevision || observation.Request.ReconciliationRequestHash != aggregate.Reconciliation.RequestHash {
+				continue
+			}
+			if sourceHash == "" {
+				sourceHash = runtimecontract.StableRuntimeEvidenceFactHash(fact)
+			}
+			if observation.Request.SourceEvidenceHash == sourceHash {
 				observed = true
+				break
 			}
 		}
 		if observed {
 			continue
 		}
-		request, err := compileRuntimeEvidenceApplicabilityRequest(aggregate, fact.ID)
-		return request, err == nil, err
+		request, source, err := compileRuntimeEvidenceApplicabilitySource(aggregate, fact.ID)
+		return request, source, err == nil, err
 	}
-	return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, false, nil
+	return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, RuntimeOperationReadSource{}, false, nil
 }
 
-// CompileRuntimeEvidenceApplicabilityRead keeps request and owner source in one
-// complete read compilation. These detached values are ordinary query data;
-// the owner and private observation writer still independently check provenance.
-// It retains nothing and grants no credit or execution authority.
-func CompileRuntimeEvidenceApplicabilityRead(aggregate RuntimeAggregate) (runtimecontract.RuntimeEvidenceApplicabilityRequest, RuntimeOperationReadSource, bool, error) {
-	if err := aggregate.Validate(); err != nil {
-		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, RuntimeOperationReadSource{}, false, err
-	}
-	return compileRuntimeEvidenceApplicabilityRead(aggregate)
-}
-
-// CompileEvidenceApplicabilityRead is an Orchestrator-local read compiler. It
-// executes the complete aggregate gate on every supplied raw image, sharing
-// only the same bounded exact-raw historical pure products as Load/Commit.
-// This does not read an owner or cache a plan/current invariant success. The
-// caller still queries the actual resource owner; the observation event reloads
-// and independently admits its current source, revision and CAS fences.
-func (c *RuntimeController) CompileEvidenceApplicabilityRead(aggregate RuntimeAggregate) (request runtimecontract.RuntimeEvidenceApplicabilityRequest, source RuntimeOperationReadSource, required bool, err error) {
-	if c == nil {
-		return request, source, false, common.ErrInvalidArgument
-	}
-	err = c.historicalCompiler.Compile(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, func(validate func(runtimecontract.RuntimeOwnerStateSourceImage) error) error {
-		if err := validate(ownerStateSourceImage(nil, aggregate)); err != nil {
-			return err
-		}
-		var compileErr error
-		request, source, required, compileErr = compileRuntimeEvidenceApplicabilityRead(aggregate)
-		return compileErr
-	})
-	return
-}
-
-func compileRuntimeEvidenceApplicabilityRead(aggregate RuntimeAggregate) (runtimecontract.RuntimeEvidenceApplicabilityRequest, RuntimeOperationReadSource, bool, error) {
-	request, required, err := nextRuntimeEvidenceApplicabilityRequest(aggregate)
-	if err != nil || !required {
-		return request, RuntimeOperationReadSource{}, false, err
-	}
-	source, err := compileRuntimeOperationReadSource(aggregate, request.DispatchID, request.OperationID, request.SourceReceiptHash)
-	if err != nil {
-		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, RuntimeOperationReadSource{}, false, err
-	}
-	return request, source, true, nil
+// Only complete cold/owner-local gates may consume this request-only result.
+func nextRuntimeEvidenceApplicabilityRequest(aggregate RuntimeAggregate) (runtimecontract.RuntimeEvidenceApplicabilityRequest, bool, error) {
+	request, _, required, err := compileRuntimeEvidenceApplicabilityRead(aggregate)
+	return request, required, err
 }
 
 func runtimeApplicabilityEvidenceAttributable(facts runtimecontract.RuntimeFacts, fact runtimecontract.EvidenceFact, lineage []runtimecontract.RuntimeCoverageProofLineage) bool {
-	focuses := append([]runtimecontract.CoverageFocus{facts.Focus}, facts.RemainingFocuses...)
-	focuses = append(focuses, facts.CompletedFocuses...)
-	for _, focus := range focuses {
-		probe := facts
-		probe.Focus = focus
-		for _, coverageID := range focus.CoverageWorkItemIDs {
-			if runtimeEvidenceAppliesToCoverageWorkItemWithLineage(probe, fact, coverageID, lineage) {
-				return true
-			}
-		}
-	}
-	return false
+	return proof.EvidenceAppliesToAnyFocusWithLineage(facts, fact, lineage)
 }
 
 // A current-focus proof cannot close the Run while another current binding's
@@ -331,13 +280,11 @@ func validateRuntimeApplicabilityPrerequisiteProjection(aggregate RuntimeAggrega
 // the exact source CWI's existing credit. It cannot manufacture another receipt,
 // erase effect/unknown/budget responsibility or reopen a delivered terminal.
 func (c *authorityComponent) recordEvidenceApplicability(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, observation runtimecontract.RuntimeEvidenceApplicabilityObservation) (RuntimeAggregate, error) {
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
+	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := c.validateAggregate(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
+
 	for _, existing := range aggregate.Facts.EvidenceApplicabilityObservations {
 		if existing.Request.RequestID == observation.Request.RequestID {
 			if !reflect.DeepEqual(existing, observation) {
@@ -351,7 +298,9 @@ func (c *authorityComponent) recordEvidenceApplicability(ctx context.Context, wo
 		observation.Request.IssuedAtStateRevision != aggregate.StateRevision || observation.Request.EvidenceRevision != aggregate.Facts.EvidenceRevision {
 		return RuntimeAggregate{}, fmt.Errorf("%w: applicability observation has stale authority window", common.ErrConflict)
 	}
-	expected, err := CompileRuntimeEvidenceApplicabilityRequest(aggregate, observation.Request.SourceEvidenceID)
+	// The complete owner gate above admitted this unchanged image. Reuse its
+	// private continuation; independent callers still enter the public gate.
+	expected, err := compileRuntimeEvidenceApplicabilityRequest(aggregate, observation.Request.SourceEvidenceID)
 	if err != nil || !reflect.DeepEqual(expected, observation.Request) {
 		return RuntimeAggregate{}, fmt.Errorf("%w: applicability request does not match original source: %v", common.ErrConflict, err)
 	}

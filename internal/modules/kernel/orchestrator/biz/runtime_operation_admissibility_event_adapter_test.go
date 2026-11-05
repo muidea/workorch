@@ -27,6 +27,23 @@ func mustRuntimeOperationAuthorizationIdentity(t *testing.T, kind string) runtim
 	}.Normalized()
 }
 
+func TestInputStructureObservationDoesNotExtendFrozenUndeclaredTransaction(t *testing.T) {
+	command := runtimecontract.RuntimeOperationFeasibilityRequest{
+		Operation:              runtimecontract.RuntimeOperation{Kind: runtimecontract.StepKindFileEdit},
+		OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, runtimecontract.StepKindFileEdit),
+	}
+	// An input revision alone is not a declaration of this candidate constraint.
+	command.OperationAuthorization.InputRevision = &runtimecontract.RuntimeValidationInputRevision{}
+	response := runtimecontract.RuntimeOperationFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}
+	if _, err := inspectRuntimeInputRevisionPostimage(context.Background(), nil, command, response); err != nil {
+		t.Fatal("undeclared transaction gained a Shell probe requirement", err)
+	}
+	response.Postimage = &runtimecontract.RuntimeValidationInputReviewFile{}
+	if _, err := normalizeRuntimeOperationFeasibilityResponse(command, response); err == nil {
+		t.Fatal("undeclared postimage accepted")
+	}
+}
+
 func TestAcquireRuntimeOperationAdmissibilityPrerequisiteRejectsInvalidScopeAndOwnerResult(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(4)

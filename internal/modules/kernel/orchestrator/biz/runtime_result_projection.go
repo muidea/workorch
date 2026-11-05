@@ -19,7 +19,7 @@ import (
 
 // deliverRuntimeTerminal 是唯一 SM-4 终态交付入口，先持久化不可变材料，再按 Result→Workspace→Run 投递。
 func (m *Biz) deliverRuntimeTerminal(ctx context.Context, aggregate runtime.RuntimeAggregate) (deliveryErr error) {
-	boundary := "aggregate_validation"
+	boundary := "terminal_input"
 	defer func() {
 		if deliveryErr == nil {
 			return
@@ -30,9 +30,9 @@ func (m *Biz) deliverRuntimeTerminal(ctx context.Context, aggregate runtime.Runt
 	if m == nil || m.runtimeController == nil || (aggregate.Decision.Terminal == nil && aggregate.Termination == nil) {
 		return common.ErrInvalidArgument
 	}
-	if err := aggregate.Validate(); err != nil {
-		return fmt.Errorf("persisted Runtime terminal aggregate is invalid: %w", err)
-	}
+	// Input is the formal owner read/transition result. New terminal material
+	// still enters the private seal event and its original source/CAS gates;
+	// delivery must not adjudicate the complete historical aggregate again.
 	boundary = "terminal_snapshot_observation"
 	proofs, err := m.observeRuntimeTerminalSnapshotProofs(ctx, aggregate)
 	if err != nil {

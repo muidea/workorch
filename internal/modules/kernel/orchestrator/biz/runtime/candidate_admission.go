@@ -216,7 +216,7 @@ func candidateAdmissionInvalidSignature(candidate workorchruntimecontract.Runtim
 // is Orchestrator authority, not a shared contract-package helper.
 func ActiveRejectedOperationShapes(aggregate RuntimeAggregate) []workorchruntimecontract.RuntimeRejectedOperationShape {
 	facts := aggregate.Facts.Normalized()
-	dispatchByID := make(map[string]SealedDispatch, len(aggregate.CompletedDispatches))
+	dispatchByID := make(map[string]workorchruntimecontract.RuntimeDispatchRecord, len(aggregate.CompletedDispatches))
 	for _, dispatch := range aggregate.CompletedDispatches {
 		dispatchByID[strings.TrimSpace(dispatch.ID)] = dispatch
 	}
@@ -267,7 +267,7 @@ func ActiveRejectedOperationShapes(aggregate RuntimeAggregate) []workorchruntime
 // The persisted fact must name that same focus independently so a coordinated
 // current-focus rewrite cannot reactivate an earlier rejected shape. This is
 // candidate-context attribution only and grants no proof.
-func rejectedEvidenceAppliesToCurrentFocus(facts workorchruntimecontract.RuntimeFacts, evidence workorchruntimecontract.EvidenceFact, dispatch SealedDispatch) bool {
+func rejectedEvidenceAppliesToCurrentFocus(facts workorchruntimecontract.RuntimeFacts, evidence workorchruntimecontract.EvidenceFact, dispatch workorchruntimecontract.RuntimeDispatchRecord) bool {
 	dispatchFocusID := strings.TrimSpace(dispatch.Transaction.FocusID)
 	return dispatchFocusID != "" &&
 		dispatchFocusID == strings.TrimSpace(evidence.FocusID) &&

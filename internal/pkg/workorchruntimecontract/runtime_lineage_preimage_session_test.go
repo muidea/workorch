@@ -46,7 +46,7 @@ func compareLineagePreimageSession(t *testing.T, s RuntimeLineageAssertionSource
 			}
 		}
 	}
-	got := ValidateRuntimeAssessmentAdjudications(s.Facts, s.Completed, s.ProofLineage, s)
+	got := auditCommittedAssessmentAdjudications(s.Facts, s.Completed, s.ProofLineage, s)
 	want := referenceLineagePreimageValidateRuntimeAssessmentAdjudications(s.Facts, s.Completed, s.ProofLineage, s)
 	if cwiFocusBindingsError(got) != cwiFocusBindingsError(want) {
 		t.Fatal("complete assessment history first error changed")
@@ -165,7 +165,7 @@ func BenchmarkLineagePreimageSessionPublicArchiveAssessmentHistory(b *testing.B)
 					if original {
 						err = referenceLineagePreimageValidateRuntimeAssessmentAdjudications(s.Facts, s.Completed, s.ProofLineage, s)
 					} else {
-						err = ValidateRuntimeAssessmentAdjudications(s.Facts, s.Completed, s.ProofLineage, s)
+						err = auditCommittedAssessmentAdjudications(s.Facts, s.Completed, s.ProofLineage, s)
 					}
 					if err != nil {
 						b.Fatal(err)

@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -1124,10 +1125,10 @@ func validateAndNormalizeRuntimeOperationAdmissibility(a RuntimeOperationAdmissi
 		if raw.GenerationContext != nil && raw.GenerationContext.ObservedRevision != a.ObservedRevision {
 			return RuntimeOperationAdmissibility{}, fmt.Errorf("validation generation context drifted from owner catalog revision")
 		}
-		if err := raw.Validate(); err != nil {
+		value, err := validateAndNormalizeRuntimeValidationSurface(raw)
+		if err != nil {
 			return RuntimeOperationAdmissibility{}, err
 		}
-		value := raw.Normalized()
 		if value.ID == "" {
 			return RuntimeOperationAdmissibility{}, fmt.Errorf("runtime operation admissibility has a validation surface without identity")
 		}
@@ -1146,6 +1147,9 @@ func validateAndNormalizeRuntimeOperationAdmissibility(a RuntimeOperationAdmissi
 			}
 			if binding.InputReview == nil {
 				continue
+			}
+			if binding.InputReview.Recipe != nil && !reflect.DeepEqual(*binding.InputReview.Recipe, recipe) {
+				return RuntimeOperationAdmissibility{}, fmt.Errorf("runtime owner input review method differs from its exact catalog recipe")
 			}
 			for _, file := range binding.InputReview.Files {
 				if prior, found := reviewInputVersions[file.TargetRef]; found && prior != file.ContentHash {
@@ -1845,6 +1849,10 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 }
 
 func (f RuntimeFacts) Validate() error {
+	return f.validateInSemanticSession(newRuntimeSemanticValidationSession())
+}
+
+func (f RuntimeFacts) validateInSemanticSession(session *runtimeSemanticValidationSession) error {
 	raw := f
 	// Facts normalization must not repair a coordinated persisted rewrite of
 	// activation evidence authority. Check this nested raw collection before
@@ -1869,7 +1877,8 @@ func (f RuntimeFacts) Validate() error {
 			return fmt.Errorf("runtime capability-state snapshot %q operation sequence: %w", strings.TrimSpace(snapshot.SnapshotID), err)
 		}
 	}
-	if err := ValidateRuntimeOperationAdmissibilities(raw.Resources.OperationAdmissibilities); err != nil {
+	catalogs, err := compileRuntimeFactsCatalogsInSession(raw.Resources.OperationAdmissibilities, session)
+	if err != nil {
 		return fmt.Errorf("runtime operation admissibility: %w", err)
 	}
 	for _, fact := range append(append([]EvidenceFact(nil), raw.Evidence.Accepted...), raw.Evidence.Rejected...) {
@@ -1879,7 +1888,12 @@ func (f RuntimeFacts) Validate() error {
 			}
 		}
 	}
+	// The complete raw catalog gate above already produced the exact normal
+	// form. Borrow it read-only within this validator instead of normalizing
+	// all input files and proof graphs again. No such borrow leaves this call.
+	f.Resources.OperationAdmissibilities = nil
 	f = f.Normalized()
+	f.Resources.OperationAdmissibilities = catalogs
 	if f.WorkspaceID == "" || f.RunID == "" {
 		return fmt.Errorf("runtime facts require workspace and run scope")
 	}
@@ -1895,7 +1909,7 @@ func (f RuntimeFacts) Validate() error {
 		}
 	}
 	if f.DefinitionSeed.SchemaVersion != "" {
-		if err := f.DefinitionSeed.Validate(); err != nil {
+		if err := validateRuntimeSemanticSeedInSession(f.DefinitionSeed, session); err != nil {
 			return fmt.Errorf("runtime facts definition seed: %w", err)
 		}
 		if err := ValidateRuntimeSourceObligationApplicability(f.DefinitionSeed.SourceObligations, f.Activation.ExecutionContract.ProfileContracts); err != nil {
@@ -2030,11 +2044,6 @@ func (f RuntimeFacts) Validate() error {
 			}
 		default:
 			return fmt.Errorf("unknown capability-state disposition %q", snapshot.Disposition)
-		}
-	}
-	for _, admissibility := range f.Resources.OperationAdmissibilities {
-		if err := admissibility.Validate(); err != nil {
-			return fmt.Errorf("runtime operation admissibility: %w", err)
 		}
 	}
 	for _, observation := range f.Resources.PrerequisiteObservations {
@@ -2320,21 +2329,8 @@ func NormalizeRuntimeOperationAdmissibilities(values []RuntimeOperationAdmissibi
 // ValidateRuntimeOperationAdmissibilities rejects duplicate authority before
 // canonical ordering. A normalizer must never choose which owner catalog wins.
 func ValidateRuntimeOperationAdmissibilities(values []RuntimeOperationAdmissibility) error {
-	seenPrerequisites := make(map[string]struct{}, len(values))
-	for _, raw := range values {
-		if err := raw.Validate(); err != nil {
-			return err
-		}
-		// The full catalog gate above already validated every raw member.
-		// This collection check reads only Normalized's scalar prerequisite ID,
-		// not another copy of all recipes, proof bindings and input bytes.
-		prerequisiteID := strings.TrimSpace(raw.PrerequisiteID)
-		if _, duplicate := seenPrerequisites[prerequisiteID]; duplicate {
-			return fmt.Errorf("runtime operation admissibility duplicates prerequisite %q", prerequisiteID)
-		}
-		seenPrerequisites[prerequisiteID] = struct{}{}
-	}
-	return nil
+	_, err := compileRuntimeFactsCatalogsInSession(values, nil)
+	return err
 }
 
 func NormalizeRuntimeCapabilityStateSnapshots(values []RuntimeCapabilityStateSnapshot) []RuntimeCapabilityStateSnapshot {
@@ -2633,6 +2629,15 @@ func SealRuntimeDecision(facts RuntimeFacts, decision RuntimeDecision, attempt i
 	if err := facts.Validate(); err != nil {
 		return RuntimeDecision{}, err
 	}
+	return CompileRuntimeDecisionSeal(facts, decision, attempt)
+}
+
+// CompileRuntimeDecisionSeal derives the decision's exact identity from its
+// supplied owner facts. It does not admit those facts, persist authority, grant
+// evidence credit or authorize an operation. The owner transaction validates
+// the complete resulting postimage at CAS; independent raw-input callers use
+// SealRuntimeDecision. There is no validation credential or retained result.
+func CompileRuntimeDecisionSeal(facts RuntimeFacts, decision RuntimeDecision, attempt int) (RuntimeDecision, error) {
 	if err := decision.RequiredOutput.Validate(); err != nil {
 		return RuntimeDecision{}, err
 	}
@@ -2834,12 +2839,32 @@ func StableRuntimeAuthorityFocusHash(focus CoverageFocus) string {
 // public lets historical assessment adjudication prove owner-fact state
 // without consulting mutable current resources.
 func StableRuntimeOperationAdmissibilityCatalogRevisionHash(values []RuntimeOperationAdmissibility) string {
-	values = NormalizeRuntimeOperationAdmissibilities(values)
+	// This identity consumes four fields only. Catalog admission independently
+	// checks the complete raw body and SnapshotID; hashing a revision must not
+	// normalize/copy all proof inputs and diagnostics for each consumer.
+	type identity struct {
+		prerequisite, owner, snapshot, revision string
+	}
+	identities := make([]identity, 0, len(values))
+	for _, value := range values {
+		prerequisite := strings.TrimSpace(value.PrerequisiteID)
+		if prerequisite != "" {
+			identities = append(identities, identity{prerequisite, strings.TrimSpace(value.OwnerModuleID), strings.TrimSpace(value.SnapshotID), strings.TrimSpace(value.ObservedRevision)})
+		}
+	}
+	// Preserve the original stable ordering, including duplicate sort keys.
+	// The public hash does not admit or silently deduplicate those inputs.
+	sort.SliceStable(identities, func(i, j int) bool {
+		if identities[i].prerequisite != identities[j].prerequisite {
+			return identities[i].prerequisite < identities[j].prerequisite
+		}
+		return identities[i].owner < identities[j].owner
+	})
 	h := newRuntimeHashWriter()
-	for _, inventory := range values {
-		writeHashString(h, inventory.OwnerModuleID)
-		writeHashString(h, inventory.SnapshotID)
-		writeHashString(h, inventory.ObservedRevision)
+	for _, value := range identities {
+		writeHashString(h, value.owner)
+		writeHashString(h, value.snapshot)
+		writeHashString(h, value.revision)
 	}
 	return "catalog-" + hex.EncodeToString(h.Sum(nil))[:20]
 }

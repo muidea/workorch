@@ -11,9 +11,9 @@ import (
 func TestRuntimeAggregateCloneRawPreservesShapeAndDetachesPreimage(t *testing.T) {
 	aggregate := stateChangeAggregate(t)
 	aggregate.ProcessedEventIDs = []string{}
-	aggregate.CompletedDispatches = []SealedDispatch{}
+	aggregate.CompletedDispatches = []runtimecontract.RuntimeDispatchRecord{}
 	aggregate.CandidateAttempts = []runtimecontract.RuntimeCandidateAttemptRecord{{State: runtimecontract.RuntimeCandidateAttemptStatePending}}
-	aggregate.ActiveDispatch = &SealedDispatch{
+	aggregate.ActiveDispatch = &runtimecontract.RuntimeDispatchRecord{
 		CompletedOperationIDs: []string{},
 		OperationExecutions:   []runtimecontract.RuntimeOperationExecutionRecord{{OperationID: "original", State: runtimecontract.OperationExecutionSealed}},
 	}

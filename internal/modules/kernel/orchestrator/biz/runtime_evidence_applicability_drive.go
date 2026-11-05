@@ -13,7 +13,7 @@ import (
 func (m *Biz) driveRuntimeEvidenceApplicability(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, bool, error) {
 	region := startRuntimeTraceRegion(ctx, "workorch.runtime.applicability")
 	defer region.End()
-	request, source, required, err := m.runtimeController.CompileEvidenceApplicabilityRead(aggregate)
+	request, source, required, err := aggregate.EvidenceApplicabilityRead()
 	if err != nil || !required {
 		return aggregate, false, err
 	}

@@ -84,6 +84,16 @@ func runtimeExecutionLineageAssertionsInSession(binding CoverageEvidenceBinding,
 	if len(binding.LineageAssertions) == 0 && !runtimeProfilesDeclareLineageAssertions(sources.Facts.Activation.ExecutionContract.ProfileContracts) {
 		return true
 	}
+	var compiler *runtimeHistoricalSourceCompiler
+	if session != nil {
+		compiler = session.sourceCompiler
+	}
+	return compiler.executionSatisfied(binding, sources, evidenceRevision, func() bool {
+		return runtimeExecutionLineageAssertionsComplete(binding, sources, evidenceRevision, session)
+	})
+}
+
+func runtimeExecutionLineageAssertionsComplete(binding CoverageEvidenceBinding, sources RuntimeLineageAssertionSources, evidenceRevision string, session *runtimeHistoricalPreimageSession) bool {
 	expected, err := runtimeExpectedLineageAssertions(binding, sources)
 	if err != nil {
 		return false
@@ -235,7 +245,7 @@ func runtimeOwnerOperationReceiptInSession(coverageID common.CoverageWorkItemID,
 			if variantID != rule.OperationVariantID {
 				continue
 			}
-			fact, receipt, valid := runtimeLineageOperationFactFromLedgersInIndex(dispatch, operation, sources, true, false, false, session.lineageIndex())
+			fact, receipt, valid := runtimeLineageOperationFactFromLedgers(dispatch, operation, sources, true, false, false)
 			if !valid || EvidenceRevisionAfter(fact.Revision, revision) || receipt.ObservedEffectScope != rule.RequiredEffectScope || !slices.Contains(fact.CoverageWorkItemIDs, coverageID) {
 				continue
 			}
@@ -251,25 +261,17 @@ func runtimeOwnerOperationReceiptInSession(coverageID common.CoverageWorkItemID,
 
 // runtimeValidateLineageOperations 复用原 SM-3 封存、准入及 owner 回执边界，不递归 aggregate。
 func runtimeValidateLineageOperations(sources RuntimeLineageAssertionSources) error {
-	return runtimeValidateLineageOperationsInIndex(sources, nil)
-}
-
-func runtimeValidateLineageOperationsInIndex(sources RuntimeLineageAssertionSources, index *runtimeOwnerLineageIndex) error {
-	return runtimeValidateLineageOperationsWithCompilers(sources, index, nil)
+	return runtimeValidateLineageOperationsInSemanticSession(sources, nil)
 }
 
 func runtimeValidateLineageOperationsInSemanticSession(sources RuntimeLineageAssertionSources, semantic *runtimeSemanticValidationSession) error {
-	return runtimeValidateLineageOperationsWithCompilers(sources, runtimeOwnerLineageIndexFor(semantic), semantic)
-}
-
-func runtimeValidateLineageOperationsWithCompilers(sources RuntimeLineageAssertionSources, index *runtimeOwnerLineageIndex, semantic *runtimeSemanticValidationSession) error {
-	if err := validateRuntimeDispatchHistoryShapeInIndex(sources.Facts.WorkspaceID, sources.Facts.RunID, sources.Active, sources.Completed, index); err != nil {
+	if err := ValidateRuntimeDispatchHistoryShape(sources.Facts.WorkspaceID, sources.Facts.RunID, sources.Active, sources.Completed); err != nil {
 		return err
 	}
-	if err := ValidateRuntimeCandidateAttemptRecords(sources.Attempts); err != nil {
+	if err := validateRuntimeCandidateAttemptRecordsInSession(sources.Attempts, semantic); err != nil {
 		return err
 	}
-	if err := validateRuntimeAcceptedCandidateManifestLineageInSession(sources.Active, sources.Completed, sources.Attempts, sources.Sessions, semantic); err != nil {
+	if err := validateRuntimeCandidateManifestSourcesInSession(sources.Active, sources.Completed, sources.Attempts, sources.Sessions, semantic); err != nil {
 		return err
 	}
 	if err := ValidateRuntimeDispatchAdmissionLineage(sources.Active, sources.Completed, sources.Attempts, sources.Governance); err != nil {
@@ -281,7 +283,7 @@ func runtimeValidateLineageOperationsWithCompilers(sources RuntimeLineageAsserti
 	if err := ValidateRuntimeOperationGovernanceGrantLineage(sources.Governance, sources.Resolutions, sources.Facts.Evidence.Accepted, sources.Facts.Evidence.Rejected); err != nil {
 		return err
 	}
-	return validateRuntimeOperationReceiptExecutionLineageInIndex(sources.Active, sources.Completed, sources.Receipts, index)
+	return ValidateRuntimeOperationReceiptExecutionLineage(sources.Active, sources.Completed, sources.Receipts)
 }
 
 // runtimeLineageOperationFact 反查唯一 receipt/evidence/processed fence 与完整原文投影。
@@ -293,10 +295,6 @@ func runtimeLineageOperationFact(dispatch RuntimeDispatchRecord, operation Runti
 // whose historical behavior fact is explicitly uncredited in its original ledger.
 // Ordinary accepted/rejected proof matchers retain their original semantics.
 func runtimeLineageOperationFactFromLedgers(dispatch RuntimeDispatchRecord, operation RuntimeOperation, sources RuntimeLineageAssertionSources, accepted, uncreditedRepair, diagnosticRejection bool) (EvidenceFact, RuntimeOperationReceipt, bool) {
-	return runtimeLineageOperationFactFromLedgersInIndex(dispatch, operation, sources, accepted, uncreditedRepair, diagnosticRejection, nil)
-}
-
-func runtimeLineageOperationFactFromLedgersInIndex(dispatch RuntimeDispatchRecord, operation RuntimeOperation, sources RuntimeLineageAssertionSources, accepted, uncreditedRepair, diagnosticRejection bool, index *runtimeOwnerLineageIndex) (EvidenceFact, RuntimeOperationReceipt, bool) {
 	execution, found := runtimeDispatchExecutionForOperation(dispatch, operation.ID)
 	if !found || execution.State != OperationExecutionEvidenceCommitted || execution.OperationHash != StableRuntimeOperationHash(operation) {
 		return EvidenceFact{}, RuntimeOperationReceipt{}, false
@@ -311,7 +309,7 @@ func runtimeLineageOperationFactFromLedgersInIndex(dispatch RuntimeDispatchRecor
 	// Rejected validation may truthfully report unknown effect. It is only a
 	// historical diagnostic origin, never an accepted effect or replay proof.
 	diagnosticUnknown := diagnosticRejection && !accepted && !uncreditedRepair && receipt.Outcome == RuntimeOperationOutcomeRejected && receipt.ObservedEffectScope == RuntimeEffectUnknown && !RuntimeEffectIsDurable(execution.ExpectedEffectScope) && !receipt.Changed
-	if matches != 1 || index.receipt(receipt) != nil || receipt.OperationID != operation.ID || receipt.PrerequisiteStale != nil || receipt.ObservedEffectScope != execution.ExpectedEffectScope && !diagnosticUnknown || index.receiptHash(receipt) != execution.OwnerReceiptHash || execution.OwnerReceiptRef != "runtime-receipt/"+receipt.ExecutionKey || !slices.Equal(receipt.TargetRefs, operation.TargetRefs) {
+	if matches != 1 || receipt.Validate() != nil || receipt.OperationID != operation.ID || receipt.PrerequisiteStale != nil || receipt.ObservedEffectScope != execution.ExpectedEffectScope && !diagnosticUnknown || StableRuntimeOperationReceiptHash(receipt) != execution.OwnerReceiptHash || execution.OwnerReceiptRef != "runtime-receipt/"+receipt.ExecutionKey || !slices.Equal(receipt.TargetRefs, operation.TargetRefs) {
 		return EvidenceFact{}, RuntimeOperationReceipt{}, false
 	}
 	if accepted && (receipt.Outcome != RuntimeOperationOutcomeAccepted || (RuntimeEffectIsDurable(receipt.ObservedEffectScope) && (!receipt.Changed || receipt.BeforeHash == receipt.AfterHash || receipt.AfterHash == ""))) {

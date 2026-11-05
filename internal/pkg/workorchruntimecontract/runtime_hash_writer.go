@@ -6,51 +6,78 @@ import (
 	"hash"
 )
 
-// 缓冲仅属于一次 hash 编码；不持有业务对象，不跨调用复用校验结果。
-// 超出短字段边界仍完整写入原始 bytes，不截断或改写正文。
+// Scratch belongs to one encoding only. Small length-prefixed fields share a
+// digest write; every original byte is still written in the original order.
+// No source object, digest or validation result is reused across hash calls.
 type runtimeHashWriter struct {
-	hash.Hash
+	digest     hash.Hash
 	buffer     [128]byte
+	used       int
 	longBuffer *[4096]byte
 }
 
-func newRuntimeHashWriter() *runtimeHashWriter {
-	return &runtimeHashWriter{Hash: sha256.New()}
+func newRuntimeHashWriter() *runtimeHashWriter { return &runtimeHashWriter{digest: sha256.New()} }
+
+func (w *runtimeHashWriter) flush() {
+	if w.used != 0 {
+		_, _ = w.digest.Write(w.buffer[:w.used])
+		w.used = 0
+	}
 }
 
+func (w *runtimeHashWriter) Write(value []byte) (int, error) {
+	n := len(value)
+	if w.used != 0 {
+		copied := copy(w.buffer[w.used:], value)
+		w.used += copied
+		value = value[copied:]
+		if w.used == len(w.buffer) {
+			w.flush()
+		}
+	}
+	if len(value) >= len(w.buffer) {
+		_, _ = w.digest.Write(value)
+	} else {
+		w.used += copy(w.buffer[w.used:], value)
+	}
+	return n, nil
+}
+
+// Flushing does not consume the digest. Repeated Sum and subsequent Write
+// retain hash.Hash semantics, including a caller-supplied destination prefix.
+func (w *runtimeHashWriter) Sum(dst []byte) []byte { w.flush(); return w.digest.Sum(dst) }
+func (w *runtimeHashWriter) Reset()                { w.used = 0; w.digest.Reset() }
+func (w *runtimeHashWriter) Size() int             { return w.digest.Size() }
+func (w *runtimeHashWriter) BlockSize() int        { return w.digest.BlockSize() }
+
 func (w *runtimeHashWriter) writeString(value string) {
+	w.writeCount(uint64(len(value)))
 	if len(value) >= 8192 {
-		// Complete length-prefixed bytes, streamed through call-local scratch.
-		// Keep the ordinary short/medium encoding path unchanged; no raw value
-		// or validation product is cached or shared across hash calls.
+		w.flush()
 		if w.longBuffer == nil {
 			w.longBuffer = new([4096]byte)
 		}
-		binary.BigEndian.PutUint64(w.longBuffer[:8], uint64(len(value)))
-		first := copy(w.longBuffer[8:], value)
-		_, _ = w.Write(w.longBuffer[:8+first])
-		value = value[first:]
 		for len(value) != 0 {
 			n := copy(w.longBuffer[:], value)
-			_, _ = w.Write(w.longBuffer[:n])
+			_, _ = w.digest.Write(w.longBuffer[:n])
 			value = value[n:]
 		}
 		return
 	}
-	if len(value) > len(w.buffer)-8 {
-		encoded := make([]byte, 8+len(value))
-		binary.BigEndian.PutUint64(encoded[:8], uint64(len(value)))
-		copy(encoded[8:], value)
-		_, _ = w.Write(encoded)
-		return
+	for len(value) != 0 {
+		n := copy(w.buffer[w.used:], value)
+		w.used += n
+		value = value[n:]
+		if w.used == len(w.buffer) {
+			w.flush()
+		}
 	}
-	encoded := w.buffer[:8+len(value)]
-	binary.BigEndian.PutUint64(encoded[:8], uint64(len(value)))
-	copy(encoded[8:], value)
-	_, _ = w.Write(encoded)
 }
 
 func (w *runtimeHashWriter) writeCount(count uint64) {
-	binary.BigEndian.PutUint64(w.buffer[:8], count)
-	_, _ = w.Write(w.buffer[:8])
+	if len(w.buffer)-w.used < 8 {
+		w.flush()
+	}
+	binary.BigEndian.PutUint64(w.buffer[w.used:w.used+8], count)
+	w.used += 8
 }

@@ -61,7 +61,7 @@ func TestRuntimeLineageOwnerReceiptAssessmentANDAndArchive(t *testing.T) {
 			if len(settled.Facts.Assessments) != 1 || settled.Facts.Assessments[0].Disposition != want || settled.Facts.Assessments[0].ClaimedDisposition != runtimecontract.AssessmentDispositionSatisfied {
 				t.Fatalf("guard 与 ordinary proof 未在原 assessment CAS 合取: want=%s", want)
 			}
-			var archived *SealedDispatch
+			var archived *runtimecontract.RuntimeDispatchRecord
 			for index := range settled.CompletedDispatches {
 				if settled.CompletedDispatches[index].ID == originalDispatch.ID {
 					archived = &settled.CompletedDispatches[index]

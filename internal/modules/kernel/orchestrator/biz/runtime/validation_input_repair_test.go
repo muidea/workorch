@@ -26,7 +26,7 @@ func TestInputRepairFeasibilityCannotLoseOrWidenOwnerPostimage(t *testing.T) {
 			case "other_target":
 				value.TargetRefs = []string{"other.test"}
 			}
-			err := validateCandidateFeasibilityObservationBinding(nil, operation, record, manifest)
+			err := validateCandidateFeasibilityObservationBinding(nil, operation, record, manifest, runtimecontract.AuthorityTransaction{})
 			if (err == nil) != (scenario == "exact") {
 				t.Fatalf("SM-3 input proof gate: %v", err)
 			}
