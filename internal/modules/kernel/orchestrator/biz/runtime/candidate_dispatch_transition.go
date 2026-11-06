@@ -573,7 +573,7 @@ func validateCandidateFeasibilityObservationBinding(catalogs []runtimecontract.R
 		return err
 	}
 	for _, authorization := range manifest.Operations {
-		if authorization.Kind == operation.Kind && authorization.InputRevision != nil && record.Observation != nil && record.Observation.Outcome == runtimecontract.RuntimeOwnerFeasibilityFeasible && !authorization.InputRevision.MatchesReplayProof(record.ReplayProof) {
+		if authorization.Kind == operation.Kind && authorization.InputRevision.TargetsInput(operation.TargetRefs) && record.Observation != nil && record.Observation.Outcome == runtimecontract.RuntimeOwnerFeasibilityFeasible && !authorization.InputRevision.MatchesReplayProof(record.ReplayProof) {
 			return fmt.Errorf("%w: input revision feasibility lost exact reviewed preimage", common.ErrConflict)
 		}
 		if authorization.Kind == operation.Kind && authorization.InputRepair != nil && record.Observation != nil &&

@@ -24,6 +24,19 @@ func TestInputStructureExactSourceReplayAndAdmission(t *testing.T) {
 	if err := ValidateRuntimeInputStructureRecord(manifest, operation, record, txn); err != nil {
 		t.Fatal(err)
 	}
+	delivery := operation.Clone()
+	delivery.TargetRefs = []string{"delivery-dependency"}
+	ordinary := record
+	ordinary.InputStructure, ordinary.ReplayProof = nil, nil
+	if _, required, err := RuntimeInputStructureConstraintForOperation(delivery, manifest.Operations[0]); err != nil || required {
+		t.Fatal("ordinary delivery edit was treated as validation-input code", err)
+	}
+	if err := ValidateRuntimeInputStructureRecord(manifest, delivery, ordinary, txn); err != nil {
+		t.Fatal("ordinary feasibility could not retain input-revision causality", err)
+	}
+	if ValidateRuntimeInputStructureRecord(manifest, delivery, record, txn) == nil {
+		t.Fatal("input structure evidence was borrowed for a delivery dependency")
+	}
 	frozen := manifest.Clone()
 	frozen.Operations[0].CandidateConstraints = nil
 	original := record

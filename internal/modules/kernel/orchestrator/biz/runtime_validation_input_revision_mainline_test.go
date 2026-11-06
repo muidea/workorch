@@ -174,6 +174,9 @@ func assertRuntimeInputRevisionMainline(t *testing.T, a runtime.RuntimeAggregate
 		return
 	}
 	wantRounds := 1
+	if mode == "input_revision_dependency" {
+		wantRounds = 3
+	}
 	if mode == "input_revision_long" {
 		wantRounds = 12
 		if a.SemanticPlanning.HistoryArchive == nil || len(a.SemanticPlanning.HistoryArchive.Segments) == 0 {

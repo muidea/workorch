@@ -265,7 +265,11 @@ lost-receipt recovery 若确认 sealed 后像，只保留本次实际读取的 `
 
 ### 输入修订拟写入事实
 
-仅当冻结 manifest 声明结构要求时，现有 input-revision feasibility 在精确 replay proof 外返回完整拟写入后像；复用 File 自身同一 patch
+仅当冻结 manifest 声明结构要求且具体 operation 触及原 InputTargetRefs 时，现有 input-revision feasibility 在精确 replay proof 外返回完整拟写入后像；复用 File 自身同一 patch
 执行算法的 preview，不解释语言结构、不新增业务写入。二次 preview 必须匹配原 before/after hash，
 Orchestrator 通过 Shell typed query 解释结构。实际 effect 仍受原 CAS、权限、封存 replay proof 与 receipt
 恢复门禁约束；写前结构通过不授 readiness、语义或执行 credit。
+
+同一工作来源中的普通交付依赖按原 File existing/prospective 权限及 feasibility 创建或修正，不要求其前像是原
+validation input，也不为它输出 Shell input-structure 事实。完整 exclusions 继续保护其它输入；该区别按封存
+目标身份计算，不解释文件名、正文或业务语言。恢复沿原 executionKey/fence/receipt，不重新执行 effect。

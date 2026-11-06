@@ -47,7 +47,7 @@ func validateRuntimeImplementationWorkDispatchCommitmentInSession(d RuntimeDispa
 			return fmt.Errorf("implementation dispatch target/kind differs from original semantic proposal")
 		}
 		seen[operation.TargetRefs[0]] = true
-		if v := round.ScopeRequest.InputRevision; v != nil {
+		if v := round.ScopeRequest.InputRevision; v.TargetsInput(operation.TargetRefs) {
 			matches := 0
 			for _, f := range d.OperationExecutions {
 				if f.OperationID == operation.ID && v.MatchesReplayProof(f.ReplayProof) {

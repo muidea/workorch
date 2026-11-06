@@ -21,8 +21,10 @@ func cloneRuntimeInputRecipe(r *RuntimeValidationRecipe) *RuntimeValidationRecip
 
 // RuntimeValidationInputRevision retains the original complete rejected review
 // or typed owner structural observation, with their exact original input bytes.
-// It opens only those observed input resources for a bounded ordinary work
-// round. It is neither a consistency verdict nor a validation-failure repair.
+// It additionally opens only those observed protected inputs within an ordinary
+// work round. Delivery dependencies retain the original implementation policy;
+// this source must not confine all work to the rejected input itself.
+// It is neither a consistency verdict nor a validation-failure repair.
 // Aggregate admission must additionally reverse-prove the original generation.
 type RuntimeValidationInputRevision struct {
 	WorkspaceID            common.WorkspaceID
@@ -104,6 +106,21 @@ func (v RuntimeValidationInputRevision) Validate() error {
 }
 
 func (v RuntimeValidationInputRevision) TargetRefs() []string { return slices.Clone(v.InputTargetRefs) }
+
+// TargetsInput selects the extra protected-input duties for a concrete
+// operation. Other delivery targets still require ordinary owner authorization,
+// feasibility and receipts; an input-revision source grants none of those.
+func (v *RuntimeValidationInputRevision) TargetsInput(targets []string) bool {
+	if v == nil {
+		return false
+	}
+	for _, target := range targets {
+		if slices.Contains(v.InputTargetRefs, target) {
+			return true
+		}
+	}
+	return false
+}
 
 // MatchesReplayProof requires a changed postimage of the exact reviewed bytes.
 // Semantic consistency of that new postimage is checked by a new independent
@@ -269,14 +286,15 @@ func validateRuntimeInputRevisionTargets(v *RuntimeValidationInputRevision, p Ru
 	if v == nil {
 		return nil
 	}
-	if p.OwnerModuleID != v.OwnerModuleID || p.Target.Policy == RuntimeOperationTargetPolicyProspectiveOwnerTarget {
-		return fmt.Errorf("input revision requires the original existing input owner")
+	if p.OwnerModuleID != v.OwnerModuleID {
+		return fmt.Errorf("input revision work requires the original resource owner")
 	}
-	for _, target := range RuntimeSemanticProposalTargetRefs(p) {
-		if !slices.Contains(v.TargetRefs(), target) {
-			return fmt.Errorf("input revision cannot mutate unrelated targets")
-		}
+	if p.Target.Policy == RuntimeOperationTargetPolicyProspectiveOwnerTarget && v.TargetsInput(RuntimeSemanticProposalTargetRefs(p)) {
+		return fmt.Errorf("input revision cannot recreate an existing reviewed input")
 	}
+	// The caller checks the complete ordinary policy/scope, prospective owner
+	// constraints and all remaining protected-input exclusions. Dependencies may
+	// be created or corrected there without impersonating an input modification.
 	return nil
 }
 

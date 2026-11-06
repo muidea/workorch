@@ -595,7 +595,13 @@ File 的现有 patch preview 返回精确后像 bytes/hash 和原 replay proof�
 观察绑定 Workspace/Run、authority transaction、candidate manifest、原 revision、operation 与 File 前后像。
 缺检查、重复、非法签名、runner interception 等结构问题沿原有一次候选纠正，原文不修补。
 此接点只覆盖已有授权的 input-revision File edit/patch，不宣称普通业务源码或首次创建输入都已做写前语言校验。
+具体 operation 未触及原 InputTargetRefs 时不调用该结构 query；普通交付依赖仍由 File 正常 feasibility/权限负责。
 通过仍须执行 File 原 CAS/权限门禁、fresh readiness、新独立 review 和普通 validation；零验收 credit。
+
+project input-review scope 保留可执行方法事实：可在同一 deadline/cleanup 下调用实际 delivery，或编译并运行继承
+owner GOFLAGS/GOCOVERDIR 的新程序。编辑 scope 不能被推断成进程禁止。语义评审判断输入是否真实检查原义务，
+不要求当前实现已通过其断言；实际缺交付/行为失败交普通验证。缺失断言、未评审 harness 依赖和无条件占位失败
+仍不能判 consistent，不能用本说明删除判据或授 credit。
 
 project adapter 遵守原 recipe/operation 及更早父 context 的单一总期限；准备、build/test/race、当前 CWI
 行为、原文发布和 cleanup 都不能重置它。去除 adapter 私有 60s 上限不增加任何既有 Run 期限/预算。

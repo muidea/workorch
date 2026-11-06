@@ -127,6 +127,9 @@ func RuntimeInputStructureConstraintForOperation(operation RuntimeOperation, aut
 	if result.Ref != "" && authorization.InputRevision == nil {
 		return result, false, fmt.Errorf("input structure constraint lacks original revision")
 	}
+	if !authorization.InputRevision.TargetsInput(operation.TargetRefs) {
+		return RuntimeOperationCandidateConstraint{}, false, nil
+	}
 	return result, result.Ref != "", nil
 }
 
@@ -148,6 +151,9 @@ func ValidateRuntimeInputStructureRecord(m RuntimeCandidateContractManifest, ope
 	if !required {
 		if record.InputStructure != nil {
 			return fmt.Errorf("unrelated candidate carries input structure fact")
+		}
+		if record.Observation != nil && record.Observation.CandidateConstraintViolation != nil && record.Observation.CandidateConstraintViolation.RequiredShape == RuntimeOperationCandidateRequiredShapeInputStructure {
+			return fmt.Errorf("unrelated candidate carries input structure rejection")
 		}
 		return nil
 	}

@@ -213,7 +213,7 @@ func SealDispatchWithManifestAndPreSealAuthority(
 				return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("input revision requires an ordinary state-change candidate")
 			}
 			for _, op := range candidate.StateChange.Operations {
-				if op.Operation.Kind != authorization.Kind {
+				if op.Operation.Kind != authorization.Kind || !v.TargetsInput(op.Operation.TargetRefs) {
 					continue
 				}
 				matches := 0

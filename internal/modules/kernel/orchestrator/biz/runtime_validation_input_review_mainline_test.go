@@ -187,6 +187,9 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 	bootstrap := validationInputAdditionMainlineBootstrap()
 	if strings.HasPrefix(mode, "input_revision") {
 		configureRuntimeInputRevisionMainline(&bootstrap)
+		if mode == "input_revision_dependency" {
+			configureRuntimeInputDependencyMainline(&bootstrap)
+		}
 		if mode == "input_revision_long" {
 			bootstrap.DefinitionFocuses[1].ImplementationWorkPolicy.MaxInputRevisionsPerCWI = 4
 		} // Original source metadata, not a current configuration option.
@@ -352,6 +355,11 @@ func %s(t *testing.T) {
 			}
 		}
 	}
+	if mode == "input_revision_dependency" {
+		target := inputTargets["cwi-2"]
+		initialFiles[target] = strings.Replace(initialFiles[target], `import ("testing";`, `import ("os"; "testing";`, 1)
+		initialFiles[target] = strings.Replace(initialFiles[target], "\n}\n", "\n note,err:=os.ReadFile(\"../../../"+inputRevisionDeliveryDependency+"\"); if err!=nil || strings.TrimSpace(string(note))!=\"4\" { t.Fatal(\"missing or incorrect delivery note\") }\n}\n", 1)
+	}
 	for ref, content := range initialFiles {
 		path := filepath.Join(directory, ref)
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -480,6 +488,9 @@ func %s(t *testing.T) {
 			document := validationInputAdditionMainlineSemanticDocument(command)
 			if strings.HasPrefix(mode, "input_revision") {
 				runtimeInputRevisionMainlineSemanticDocument(&document, command, inputTargets["cwi-2"])
+				if mode == "input_revision_dependency" {
+					runtimeInputDependencySemanticDocument(&document, command)
+				}
 			}
 			if options.TerminalSnapshot {
 				runtimeReviewedGitSnapshotSemanticDocument(&document, command)
@@ -566,6 +577,15 @@ func %s(t *testing.T) {
 					// Scripted independent reviewer consumes the exact owner corpus.
 					// Native names alone are not evidence of compatible assertions.
 					body, supplied := initialFiles[source.InputTargetRef]
+					if strings.HasPrefix(mode, "input_revision") && supplied {
+						current, readErr := os.ReadFile(filepath.Join(directory, source.InputTargetRef))
+						if readErr != nil {
+							t.Error(readErr)
+							result.Set(nil, cd.NewError(cd.Unexpected, readErr.Error()))
+							return
+						}
+						body = string(current)
+					}
 					matched := false
 					for _, input := range binding.InputReview.Files {
 						if input.TargetRef == source.InputTargetRef && input.Content == body {
@@ -638,6 +658,11 @@ func %s(t *testing.T) {
 			}
 			if strings.HasPrefix(mode, "input_revision") && command.CandidateManifest.ImplementationWorkingBinding != nil {
 				candidate = runtimeInputRevisionMainlineCandidate(command, inputTargets["cwi-2"], mode)
+				if mode == "input_revision_dependency" {
+					if dependency, ok := runtimeInputDependencyCandidate(command); ok {
+						candidate = dependency
+					}
+				}
 				if options.InvalidRevisionCandidate {
 					if command.CandidateAttempt == 0 {
 						invalid := "func TestMain(m *testing.M) {}\n"
@@ -1074,8 +1099,11 @@ func %s(t *testing.T) {
 		t.Logf("terminal original diagnostic: %s", diag)
 	}
 	submissionUnknown := cut == "after_assessment_submission"
-	success := (mode == "consistent" || mode == "clarify" || (mode == "input_revision" || mode == "input_revision_omission" || mode == "input_revision_long" || mode == "input_revision_structure") || projectBehaviorRepair) && !submissionUnknown
+	success := (mode == "consistent" || mode == "clarify" || (mode == "input_revision" || mode == "input_revision_dependency" || mode == "input_revision_omission" || mode == "input_revision_long" || mode == "input_revision_structure") || projectBehaviorRepair) && !submissionUnknown
 	if (completed.Decision.State == runtimecontract.ConvergenceStateComplete) != success {
+		if completed.Facts.Failure != nil && completed.Facts.Failure.OriginalDiagnostic != nil {
+			t.Logf("original failure diagnostic: %+v", *completed.Facts.Failure.OriginalDiagnostic)
+		}
 		for _, receipt := range completed.OperationReceipts {
 			if receipt.Outcome == runtimecontract.RuntimeOperationOutcomeRejected {
 				t.Logf("rejected owner receipt: feedback=%+v validation=%+v", receipt.Feedback, receipt.Evidence.Validation)
@@ -1199,6 +1227,9 @@ func %s(t *testing.T) {
 			classifiedReviews-- // Malformed fixture is not an admitted review.
 		}
 		assertRuntimeInputRevisionMainline(t, completed, classifiedReviews, mode)
+		if mode == "input_revision_dependency" {
+			assertRuntimeInputDependencyMainline(t, completed, directory)
+		}
 		if options.InvalidRevisionCandidate {
 			rejected := 0
 			for _, attempt := range completed.CandidateAttempts {

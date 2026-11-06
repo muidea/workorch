@@ -418,6 +418,9 @@ declarationRef、当前 contentHash、前轮 dispatchId/receiptSetHash 从一个
 内部文档及 admission 仍完整校验这些身份。schema/parser/编码使用同一当前 wire，旧 echo 不作为兼容输入。
 
 input revision 按来源二选一投影：完整原语义报告/被审输入，或原 owner 结构观察/完整文件/诊断；结构来源不伪装 review。
+它只额外开放原 InputTargetRefs；普通 delivery 依赖仍可在 sealed policy/scope 内创建或修正，不能把整轮当成
+input-only 编辑任务。原 owner subject 的 ScopeRequirements/Recipe 同时约束后续合法观察方法和 deadline；当前编辑
+targets 不决定将来进程观察权限。purpose、proof batch 与 operations 表达同一规则，原前像/结构要求只适用被修订输入。
 原完整 catalog、其它 CWI authority 与不适用的 request/report 字段不发给模型；owner 仍保留并反查完整来源。
 与本请求当前内容完全相等的文件复用已有 C3 局部引用，逐值展开后通过同一完整性门禁；不跨请求借用 PASS、正文或缓存权威。
 

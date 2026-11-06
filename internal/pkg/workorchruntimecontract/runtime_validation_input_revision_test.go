@@ -211,9 +211,9 @@ func TestInputRevisionProtectionDoesNotGrantUnrelatedTargets(t *testing.T) {
 	if err := validateRuntimeInputRevisionTargets(v, p); err != nil {
 		t.Fatal(err)
 	}
-	p.Target.OwnerScopeTargetRefs = []string{"other-input"}
-	if validateRuntimeInputRevisionTargets(v, p) == nil {
-		t.Fatal("unrelated input writable")
+	p.Target.OwnerScopeTargetRefs = []string{"delivery-dependency"}
+	if err := validateRuntimeInputRevisionTargets(v, p); err != nil {
+		t.Fatal("input permission confined ordinary delivery work", err)
 	}
 	p.Target = RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyProspectiveOwnerTarget, ProspectiveTargetRefs: v.TargetRefs()}
 	if validateRuntimeInputRevisionTargets(v, p) == nil {
@@ -227,6 +227,44 @@ func TestInputRevisionProtectionDoesNotGrantUnrelatedTargets(t *testing.T) {
 	legacy.InputRevisionProtocolRef = "unknown"
 	if legacy.Validate() == nil {
 		t.Fatal("unknown protocol accepted")
+	}
+}
+
+func TestInputRevisionDependenciesRetainOrdinaryPolicyAndProtection(t *testing.T) {
+	v, _ := inputRevisionFixture(t)
+	policy := RuntimeImplementationWorkPolicy{OwnerModuleID: v.OwnerModuleID, MaxTargetsPerRound: 3,
+		AllowedOperations:                    []RuntimeOperationVariantRef{{Kind: StepKindFileEdit}, {Kind: StepKindFileWrite}},
+		AllowedTargetPolicies:                []RuntimeOperationTargetPolicy{RuntimeOperationTargetPolicyExistingOwnerScope, RuntimeOperationTargetPolicyProspectiveOwnerTarget},
+		ProspectiveTargetAllOfConstraintRefs: []string{"owner-creation-constraint"}}
+	work := &RuntimeSemanticImplementationWork{Scope: RuntimeImplementationWorkScopeObservation{Request: RuntimeImplementationWorkScopeRequest{CoverageWorkItemID: v.Binding.CoverageWorkItemID, Policy: policy, InputRevision: v}, Selection: RuntimeTargetSelection{TargetRefs: []string{"delivery-dependency", "other-input"}}}, ExcludedTargetRefs: []string{"other-input"}}
+	proposal := RuntimeSemanticProofProposal{CoverageWorkItemID: v.Binding.CoverageWorkItemID, OwnerModuleID: v.OwnerModuleID, OperationKind: StepKindFileWrite,
+		RequiredEvidenceKinds: []string{EvidenceKindStateChange}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+		Target: RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyProspectiveOwnerTarget, ProspectiveTargetRefs: []string{"missing-delivery"}, ProspectiveConstraintRefs: policy.ProspectiveTargetAllOfConstraintRefs}}
+	check := func(p RuntimeSemanticProofProposal) error {
+		return validateRuntimeSemanticImplementationWorkProofSetAgainstValidatedWork(RuntimeSemanticCWIProofSet{CoverageWorkItemID: v.Binding.CoverageWorkItemID, Proposals: []RuntimeSemanticProofProposal{p}}, work)
+	}
+	if err := check(proposal); err != nil {
+		t.Fatal("missing delivery could not return to ordinary creation", err)
+	}
+	for _, target := range []string{"delivery-dependency", "other-input", "outside-owner-scope"} {
+		p := proposal.Clone()
+		p.OperationKind = StepKindFileEdit
+		p.Target = RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerScopeTargetRefs: []string{target}}
+		err := check(p)
+		if (err == nil) != (target == "delivery-dependency") {
+			t.Fatalf("ordinary dependency scope/protection changed for %s: %v", target, err)
+		}
+	}
+	for _, mutate := range []func(*RuntimeSemanticProofProposal){
+		func(p *RuntimeSemanticProofProposal) { p.Target.ProspectiveConstraintRefs = nil },
+		func(p *RuntimeSemanticProofProposal) { p.Target.ProspectiveTargetRefs = v.TargetRefs() },
+		func(p *RuntimeSemanticProofProposal) { p.OwnerModuleID = RuntimeModuleGit },
+	} {
+		p := proposal.Clone()
+		mutate(&p)
+		if check(p) == nil {
+			t.Fatal("input revision bypassed ordinary owner/creation or reviewed-input constraints")
+		}
 	}
 }
 

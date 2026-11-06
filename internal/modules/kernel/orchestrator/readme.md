@@ -1718,7 +1718,9 @@ Runtime drive 或 provider，也不改写归档。默认 CI 不读取本地运�
 
 封存 Profile 可用 `ImplementationWorkPolicy.InputRevisionProtocolRef=validation/input-revision/v1` 声明阶段修订。
 SM-2 的 exact complete input-review conflict 私有事件保留旧 generation，以 `input_review_revision` 回到 required；
-唯一原 CWI、同一 input resource owner、冲突 findings/owner protected targets/实际读取输入三者交集才可进入既有普通工作。
+唯一原 CWI、同一 resource owner 继续使用原普通实施 policy/scope；冲突 findings/owner protected targets/实际读取输入
+三者交集只决定额外开放哪些受保护输入，不把整轮限制为只能修改验证输入。缺失交付依赖可按原 prospective
+owner 分支创建，已有交付依赖可在原 existing scope 修正；原 findings 和仍未满足的义务继续保留。
 新 `RuntimeValidationInputRevision` 保留完整原 binding/input/report 或 typed owner 结构观察，随 scope→semantic work→working binding→candidate manifest
 →dispatch 封存；fresh load 反查原拒绝 generation 与 request/session，历史消费不能前向引用。旧 terminal purpose 留存，
 待修订来源只允许真实 effect purpose，不允许 unchanged re-review 或借用 post-execution repair。未 opt-in 继续原 conflict/不可用失败。
@@ -1730,7 +1732,11 @@ SM-2 在 prerequisite-observed 或 focus-advance 的原 CAS 内，仅对当前�
 历史按原 CAS 排序；同一 CAS 的非维护 retirement 后可追加一次维护来源。原观察失效后，以原 append-only invalidation observation ID
 反查来源，不能把已失效观察恢复为 current。scope、fresh-load 和 dispatch 均反证 Definition、Workspace/Run、原来源和 bytes。
 
-File opt-in edit feasibility 预览同一 edit，核对原输入 before hash、变化后像；候选/最终 seal/dispatch reload 重核。
+只有具体 operation 触及原 InputTargetRefs 时，File opt-in edit feasibility 才预览同一 edit、核对原输入 before hash、
+变化后像及 Shell 结构观察；候选/最终 seal/dispatch reload 使用同一逐目标适用性。其它交付目标保持原 owner
+权限、prospective/existing feasibility、真实版本边与 receipt，不套用验证输入结构规则、不借用输入 replay proof。
+其它受保护输入仍在完整 exclusions 内。修复 effect 只消费这次旧报告的修复来源；新资源事实必须产生新的独立
+review/普通 validation/assessment，旧报告不改写、不补 credit、不按原判据重复裁决未受影响历史事实。
 修订不按累计次数停止；`InputRevisionProtocolRef` 保留精确输入写入许可，原 `MaxInputRevisionsPerCWI` 仅作不可变来源记录，不进入当前方法投影。完整物理状态重复保护与 proof/provider/capability budget 保留，真实 accepted receipt 零 CWI/validation credit；
 资源失效后取得真实当前输入，再独立审查、执行全部原 validation 和终态交付。未知、stale、预算不足或混合/歧义来源不放行。
 真实 capability 预算耗尽可在 dispatch 封存后、claim 前停止：SM-4 按原错误交给 SM-2，原 dispatch invalidated、原轮次保持未完成。fresh-load 必须独立核对 capability remaining=0、原执行记录仍 sealed 且无 claim/receipt；有 claim 或未知结果不得借此关闭。不得伪造失败回执、完成 hash 或 CWI credit。
@@ -1981,6 +1987,14 @@ SM-2 原完整 all-of、输入修订许可、工作物理状态保护、普通�
 冻结请求，不补写历史原件，SM-1 生命周期与交付三 ACK 不变。
 当前 software-dev 新事务方法总期限为 300000ms；原消费预算、已封存 recipe 与更早父 deadline 不扩大。
 这是方法容量与上下文事实收口，不建立跨 CWI PASS cache，不把共同 build/test/race 当作逐项行为证明。
+
+当前 Shell project input-review scope 同时声明合法的实际 delivery/新 Go-built 程序观察、原 instrumentation 和共同
+deadline/cleanup；purpose 与 operations 从完整原 subject 消费该事实。编辑 targets 不表示执行方法限制。
+真实交付断言可执行但目前失败与验证输入缺断言/无条件占位失败分开；前者由普通 validation 产生真实结果，后者
+仍需 criterion-preserving 修订。模型不能以交付文件缺失直接推导不可恢复或另造 Definition ambiguity。
+验证：`TestDriveRuntimeInputRevisionDeliveryDependencyAndRecovery` 用真实 File/Shell/Run/Workspace/Result owner，
+仅脚本化 provider，覆盖缺失依赖创建→同依赖修正→原 input 修订→fresh review/validation/assessment/三 ACK，
+并在原报告 retirement 和依赖 receipt 后恢复，调用数与不中断执行一致；不代表已部署 AI Proxy 终验。
 
 ### Fresh reconciliation 共同事实组合
 
