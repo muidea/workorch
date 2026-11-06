@@ -2084,13 +2084,7 @@ func (item *workspacePersistenceValue) UnmarshalJSON(data []byte) error {
 	decoded.PreparationMCPRegistryEvidence = wire.PreparationMCPRegistryEvidence
 	decoded.PreparationResourceInitializations = wire.PreparationResourceInitializations
 	decoded.PreparationSkillHubEffects = wire.PreparationSkillHubEffects
-	if err := workspace.ValidatePreparationEvidencePersistence(&decoded); err != nil {
-		return err
-	}
 	if err := preparationcompiler.ValidatePreparedPersistence(&decoded); err != nil {
-		return err
-	}
-	if err := decoded.PreparationFence.Validate(decoded.ID); err != nil {
 		return err
 	}
 	if err := decodePersistencePayload(wire.ContextHints, &decoded.ContextHints); err != nil {

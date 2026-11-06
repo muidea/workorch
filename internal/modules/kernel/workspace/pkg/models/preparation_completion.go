@@ -1,6 +1,9 @@
 package workspace
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"reflect"
 	"time"
@@ -18,6 +21,18 @@ type WorkspacePreparationCompletion struct {
 	BootstrapHash                                 string
 	CompletedAt, ExpiresAt                        time.Time
 	CommittedWorkspaceRevision                    uint64
+}
+
+// Hash binds the original committed result, including its BootstrapHash. It
+// checks stored content identity; it never recompiles or grants readiness.
+func (c WorkspacePreparationCompletion) Hash() string {
+	c.CompletionID = ""
+	raw, err := json.Marshal(c)
+	if err != nil {
+		return ""
+	}
+	digest := sha256.Sum256(raw)
+	return "preparation-completion-sha256:" + hex.EncodeToString(digest[:])
 }
 
 func (c WorkspacePreparationCompletion) ValidateFor(a WorkspacePreparationAttempt) error {

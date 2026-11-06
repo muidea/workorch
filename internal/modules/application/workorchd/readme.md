@@ -232,14 +232,17 @@ Workspace-owned `QueryWorkspacePreparationStateCommand`；HTTP 不接 EventHub �
 编译 execution contract、Workspace evidence policies 及按原配置/locale 优先级确定的对话语言。
 该 helper 无 context、Hub、loader 或环境读取；缺原材料、来源漂移或无效策略均拒绝，
 不借新配置、默认模型或占位资源构造 activation。其输出只是策略部分。
-`activationports.CompileOriginalPreparedBootstrap` 在显式 check/recover 回复中消费同一原操作的
+显式 check/recover 对已有正式 completion 直接投影原 BootstrapHash、snapshot/manifest，核对完整结果身份，
+不按新部署默认值重编历史结论。没有 completion 的 blocked 操作才通过
+`activationports.CompileOriginalPreparedBootstrap` 消费同一原操作的
 完整私有归档，组合原 Soul、Skill context、Memory 原模式、MCP 选择、Provider 声明和执行策略，
 再经 `CompilePreparedBootstrap` 完整结构编译。Workspace concrete result 的 `CompilationSource`
 只传无 map 的具体 detached DTO 原材料，显式转换后独立完整重验，禁止 JSON 输出；
 不额外查询当前 Workspace，不从普通读模型恢复私有材料或以 metadata 代替原始诊断 bytes。
 缺来源、非空 semantic Memory 缺证明或原模板策略无效均明确拒绝；不把缺失转为空选择。
 HTTP 只返回有限失败码或绑定原 snapshot/manifest 的 bootstrap hash，不输出原材料/诊断/完整 bootstrap。
-GET 不执行该编译；恢复和重启后的显式 recover 从完整原材料重编，不以历史 hash 授信。
+GET 不执行该编译；重启后的显式 recover 同样消费已有正式 completion。无 completion 的结构编译
+仍不授信，不能凭历史 hash 或自报 PASS 新增 completion、readiness 或启动权限。
 这不是准备检查的正向结算、currentness、M3 或 Start/Restart 的回执消费入口。
 准备 check/recover 不启动执行。首次显式执行由 Workspace 私有 reservation CAS 独立消费最新精确 completion，
 反查完整原材料、当前正式规范与 Bootstrap、原有效期及实际 File 重读；Application 的 Bootstrap compiler 只读，

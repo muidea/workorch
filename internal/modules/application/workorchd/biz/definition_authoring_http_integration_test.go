@@ -275,7 +275,10 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		if largeCount > 0 {
 			maxFocuses = 128
 		}
-		values["acceptanceSlicePolicy"] = map[string]any{"schemaVersion": "workorch.acceptance_slice_policy", "maxWorkItems": 4, "maxFocuses": maxFocuses, "maxCandidateContextItems": 4, "completionPolicy": "all_required_items_accepted", "resultPolicy": "slice_result_allowed"}
+		// This fixture enters the JSON-facing configuration path. Use its
+		// numeric representation before sealing, so a real cold reload tests
+		// the same original template rather than a Go-only int declaration.
+		values["acceptanceSlicePolicy"] = map[string]any{"schemaVersion": "workorch.acceptance_slice_policy", "maxWorkItems": float64(4), "maxFocuses": float64(maxFocuses), "maxCandidateContextItems": float64(4), "completionPolicy": "all_required_items_accepted", "resultPolicy": "slice_result_allowed"}
 		declaration := values["profileContracts"].(map[string]any)["generic"].(map[string]any)["evidenceRequirements"].([]any)[0].(map[string]any)
 		fact := map[string]any{"ownerModuleId": runtimecontract.RuntimeModuleShell, "factKind": string(runtimecontract.RuntimeOwnerFactSelectableValidationSurface), "operationKind": runtimecontract.RuntimeBlockKindManagedValidationSession}
 		declaration["requiredOwnerFacts"] = []any{fact}
@@ -1768,6 +1771,15 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 				}
 				if startuppreparation.ValidatePreparedDefinitionPersistence(bad) == nil || reopened.Workspaces.CompareAndSwap(ctx, bad, bad.Revision) == nil {
 					t.Fatal("forged current compilation accepted", field)
+				}
+			}
+			if scenario == "step04_workflow_empty_selection" {
+				beforeCalls, beforeCache := physicalCalls.Load(), preparationCacheReads.Load()
+				t.Run("committed_bootstrap_survives_default_change", func(t *testing.T) {
+					testCommittedPreparationAcrossBudgetDefaults(t, storage, original, baseURL, preparationPath, intent)
+				})
+				if physicalCalls.Load() != beforeCalls || preparationCacheReads.Load() != beforeCache {
+					t.Fatal("committed replay repeated provider preparation")
 				}
 			}
 			assertNoRuns()

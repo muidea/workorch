@@ -1,10 +1,51 @@
 package workspace
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
 )
+
+func TestPreparationCompletionIdentityPreservesCommittedContent(t *testing.T) {
+	at := time.Date(2026, 11, 6, 0, 0, 0, 1234, time.UTC)
+	c := WorkspacePreparationCompletion{Version: PreparationCompletionVersion, RequestID: "request", PayloadHash: "payload", CreationEpoch: "epoch", BootstrapHash: "bootstrap", CompletedAt: at, ExpiresAt: at.Add(30 * time.Second), CommittedWorkspaceRevision: 3}
+	c.CompletionID = c.Hash()
+	raw, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reloaded WorkspacePreparationCompletion
+	if err := json.Unmarshal(raw, &reloaded); err != nil || reloaded.Hash() != c.CompletionID {
+		t.Fatal("identity changed on reload", err)
+	}
+	for _, field := range []string{"request", "payload", "bootstrap", "binding", "epoch", "revision", "completed", "expires"} {
+		t.Run(field, func(t *testing.T) {
+			bad := c
+			switch field {
+			case "request":
+				bad.RequestID += "other"
+			case "payload":
+				bad.PayloadHash += "other"
+			case "bootstrap":
+				bad.BootstrapHash += "other"
+			case "binding":
+				bad.Binding.StartupInputHash = "other"
+			case "epoch":
+				bad.CreationEpoch += "other"
+			case "revision":
+				bad.CommittedWorkspaceRevision++
+			case "completed":
+				bad.CompletedAt = bad.CompletedAt.Add(time.Nanosecond)
+			case "expires":
+				bad.ExpiresAt = bad.ExpiresAt.Add(time.Nanosecond)
+			}
+			if bad.Hash() == c.CompletionID {
+				t.Fatal("changed committed content retained identity")
+			}
+		})
+	}
+}
 
 // The transition gate is tested separately from full archive compilation: a
 // valid completion shape cannot bypass the original accepted CAS preimage.

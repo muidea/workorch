@@ -95,7 +95,10 @@ GET、普通重放和已完成恢复均无外部效果。Clone/reopen 保留原�
 在同一次结算 CAS 中，所有 required 真正 passed、all-of 完整重算、原封存与 owner/File 最终反查通过、
 完整 PreparedBootstrap 从原归档独立编译、no-Run final fence 与真实 CAS 前像一致，才追加 completion。
 其绑定完整原 request/payload、creation/preparation epoch、binding、bootstrap hash、提交 revision 与时点。
-Repository 在每次读写中从完整原材料复编译；hash、计数或自报 PASS 均不能替代门禁。unknown、中断恢复、
+新 completion 仅由原 Workspace 私有结算入口从完整材料编译。Repository 读取/普通后续写入核对原 completion
+的完整内容身份、attempt/binding/revision 与消费谱系，不重新编译历史 Bootstrap 或重判历史 readiness；
+不得用当前部署的预算默认值重算旧 BootstrapHash。原 Definition 来源认证与证据完整性门禁继续保留，
+hash、计数或自报 PASS 均不能替代首次结算的完整门禁。unknown、中断恢复、
 旧 blocked、缺材料或不完整编译均不能补造。恢复/查询不重发 MCP 或 SkillHub status。
 
 公开 `operationState=completed` 来自最新 attempt 对应的 completion，原 observation 保留；
@@ -112,8 +115,8 @@ Start/Restart 的回执消费及执行授权属于独立合同，此处不启动
 观察；GET 不重取资源或续期。File epoch 查询保留原 request context，失败不能借新 context 补成功。
 
 `workorch-preparation-call-local-compilation/v1` 仅在一次同步纯编译调用内复用同一完整原值编译的 source、manifest、
-Definition 与 Bootstrap。独立公开 compiler／repository 每次仍完整校验；原 Definition 校验优先，全部证据门禁与
-completion／消费反查继续执行。产物仅为私有局部变量，不导出已验证标志，不跨调用、事件、Workspace 或重启保留。
+Definition 与 Bootstrap。独立公开 compiler 在新编译事务中完整校验；repository 认证历史原件和正式结果，
+不以 Bootstrap 重编译替代历史结果消费。原 Definition 来源认证、证据完整性与 completion／消费关联继续执行。产物仅为私有局部变量，不导出已验证标志，不跨调用、事件、Workspace 或重启保留。
 同次 seal 来源核验直接消费完整 admission gate 派生的原始有序 DoD/ref 私有产物，不再次解码相同 authoring
 ledger；正式 DoD 顺序仍逐项核验。证据总门禁先完整核验 seal，再重建 File/Soul/Memory 检查；这些重建保持
 seal 检查及 binding_changed／original_check_interrupted 不变，因此不重复同一 seal 来源 gate。独立公开
@@ -130,7 +133,9 @@ mtime/ctime 变化，其 path/device/inode/mode/UID/GID/访问能力及诊断仍
 
 首次 reservation 将 completion ID、原 revision、消费时间及完整独立 File 观察，与 pending/epoch 和缺失的默认
 provider selection 一次 CAS 保存；失败零局部写入。受限 File 历史不进入普通 DTO/HTTP，repository 重载反查
-原 completion、完整 Bootstrap、Run payload 与消费观察谱系。新 blocked/unknown、缺来源、漂移或过期不能回退旧成功。
+原 completion 的内容身份、消费时点和独立 File 观察谱系；Run payload 只在新 reservation 中绑定实际 Bootstrap，
+后续由 Run owner 核对原 Bootstrap/receipt，Workspace fence 核对相同 Run receipt 的身份，读取不重建该 payload。
+新 blocked/unknown、缺来源、漂移或过期不能回退旧成功。
 首次执行观察前只运行必要的窗口拒绝，不授予权限；私有 reducer 仍完整反查。重型编译结束后重新取真实时钟，
 file/memory repository 在新增消费的完整迁移和后像验证后、提交前再次核对原窗口；历史重放／结算／重载不按新时间
 撤销原合法消费。`preparation phase completed` 日志只包含 scope、request、revision、phase、时间和 context 状态，

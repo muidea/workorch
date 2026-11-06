@@ -166,8 +166,7 @@ func CompileFirstExecutionPreparation(w *workspace.Workspace, goal *workspace.Go
 	if w.StartupPreparation.Validate(w.ID) != nil {
 		return fail("history")
 	}
-	products, err := validatePreparedPersistence(w)
-	if err != nil {
+	if err := ValidatePreparedPersistence(w); err != nil {
 		return fail("history")
 	}
 	a, completion, err := firstExecutionPreparationWindow(w, now, fileEpoch)
@@ -178,8 +177,10 @@ func CompileFirstExecutionPreparation(w *workspace.Workspace, goal *workspace.Go
 	if err != nil || current.Candidate.CandidateID != a.Binding.CandidateID || current.Candidate.CandidateRevision != a.Binding.CandidateRevision || current.Candidate.CandidateHash != a.Binding.CandidateHash || current.StartupInput.DefinitionRevision != a.Binding.DefinitionRevision || current.StartupInput.StartupInputHash != a.Binding.StartupInputHash || current.AuthoringRef != a.Binding.AuthoringRef || current.AuthoringConfigurationHash != a.Binding.AuthoringConfigurationHash {
 		return fail("seal")
 	}
-	original, exists := products[a.RequestID]
-	if !exists || original.FailureCode != "" || original.Compilation == nil || original.Compilation.BootstrapHash != completion.BootstrapHash || runtimecontract.ValidateRuntimeBootstrapRaw(bootstrap) != nil || !reflect.DeepEqual(original.Compilation.Bootstrap, bootstrap) {
+	// This is a new consumption transaction, not historical loading: compile
+	// only its selected current attempt. Older completions are never replayed.
+	original, err := compileOriginalPreparedBootstrap(w, a)
+	if err != nil || original.FailureCode != "" || original.Compilation == nil || original.Compilation.BootstrapHash != completion.BootstrapHash || runtimecontract.ValidateRuntimeBootstrapRaw(bootstrap) != nil || !reflect.DeepEqual(original.Compilation.Bootstrap, bootstrap) {
 		return fail("bootstrap")
 	}
 	compiled := *original.Compilation

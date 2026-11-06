@@ -229,6 +229,25 @@ func (b *Biz) CheckStartupPreparation(ctx context.Context, workspaceID common.Wo
 		if a.RequestID != command.RequestID || a.ExpectedWorkspaceRevision != command.ExpectedWorkspaceRevision {
 			continue
 		}
+		// A completed operation already has a formal owner result. Explicit
+		// check/recovery projects that exact result as GET does; recompiling it
+		// with this deployment's defaults would invent a different history.
+		for _, c := range w.StartupPreparation.Completions {
+			if c.RequestID != a.RequestID {
+				continue
+			}
+			if c.ValidateFor(a) != nil || c.CompletionID != c.Hash() {
+				return workorchmanagementcontract.PreparationOperationView{}, common.ErrConflict
+			}
+			operation.Compilation = &workorchmanagementcontract.PreparationBootstrapCompilationView{
+				Version:      activationports.OriginalPreparedBootstrapVersion,
+				SnapshotHash: c.Binding.SnapshotHash, ManifestHash: c.Binding.ManifestHash,
+				BootstrapHash: c.BootstrapHash,
+			}
+		}
+		if operation.Compilation != nil {
+			continue
+		}
 		compiled, compileErr := activationports.CompileOriginalPreparedBootstrap(w, a)
 		if compileErr != nil {
 			return workorchmanagementcontract.PreparationOperationView{}, compileErr
