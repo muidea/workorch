@@ -2051,7 +2051,13 @@ SM-2/SM-3 的 candidate manifest、complete admission、pre-seal 与 owner-fact 
 按 owner 已选择的完整当前目标正文收集全部适用 accepted changed durable effects，保留原 sealed operation 完整参数及 hash，包含辅助 effect，
 不使用 recent-N 或本 CWI priorRounds 代替证明集合，不重新执行 effect 或历史业务判定。
 purpose/proof、输入生成/维护及独立 assessment 按需使用该 typed 请求事实；普通 order 和无关阶段不携带。
-现有目标的首个前像及合法中途变化的前像取原 sealed ImplementationWorkCommitment，缺失/损坏明确拒绝。
+现有目标的首个前像及合法中途变化的前像按原操作来源消费：实施轮取原 sealed ImplementationWorkCommitment；
+没有实施轮的辅助操作沿原 dispatch → 唯一 accepted attempt → 原 logical request/session → 原 manifest 的
+MutationInputCatalogs 读取原 owner 正文（generation corpus 或 input-review subject）。精确 transaction、
+candidate/manifest/request 身份必须一致；不得从 mutable current catalog、任意历史相同 hash 或当前文件倒推前像。
+既有治理续接沿正式 grant 的 resume/source dispatch 链回到原接纳事务，保持 candidate/manifest 与 Workspace/Run
+一致；只消费已提交的交接，缺来源、重复或循环明确拒绝，不重新决策治理或执行操作。
+仅投影所选目标及 receipt.BeforeHash；缺失/损坏/歧义明确拒绝，不重新接纳完整历史 candidate 或其业务判断。
 当前观察可不同于历史 after-image；它是新事实，不改写旧结果或追补旧 credit。
 
 完整性只覆盖确切的当前目标集合；不将它宣称为整个 Workspace 或已删除资源的完整历史。

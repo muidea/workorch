@@ -92,19 +92,131 @@ func ChangeReviewContext(a RuntimeAggregate, files []rc.RuntimeValidationInputRe
 		ref := r.TargetRefs[0]
 		v := rc.RuntimeChangeReviewOperation{Operation: op.Clone(), OperationHash: s.execution.OperationHash, ExecutionKey: r.ExecutionKey, Fence: r.Fence, DispatchID: s.dispatch.ID, OperationID: r.OperationID, OwnerModuleID: descriptor.OwnerModuleID, ReceiptRef: s.execution.OwnerReceiptRef, ReceiptHash: s.execution.OwnerReceiptHash, TargetRef: ref, BeforeHash: r.BeforeHash, AfterHash: r.AfterHash}
 		if last[ref] != r.BeforeHash && r.BeforeHash != "" {
-			round := s.dispatch.ImplementationWorkCommitment
-			if round != nil && round.ScopeObservation != nil && round.ScopeObservation.Content != nil {
-				for _, f := range round.ScopeObservation.Content.Snapshots {
-					if f.TargetRef == ref && f.ContentHash == r.BeforeHash {
-						v.Baseline = &rc.RuntimeValidationInputReviewFile{TargetRef: ref, ContentHash: f.ContentHash, Content: f.Content}
-					}
-				}
+			var err error
+			v.Baseline, err = changeReviewSealedPreimage(a, s.dispatch, ref, r.BeforeHash)
+			if err != nil {
+				return nil, err
 			}
 		}
 		last[ref] = r.AfterHash
 		c.Changes = append(c.Changes, v)
 	}
 	return c, c.Validate(a.Facts.WorkspaceID, a.Facts.RunID, a.Definition.Revision)
+}
+
+// Auxiliary dispatches have no implementation round. Their exact before-bytes
+// remain on the original pre-seal candidate request, reached through the
+// accepted attempt, never a current catalog or an unrelated matching hash.
+// These are committed source joins, not a second candidate/business admission.
+func changeReviewSealedPreimage(a RuntimeAggregate, d rc.RuntimeDispatchRecord, ref, hash string) (*rc.RuntimeValidationInputReviewFile, error) {
+	var result *rc.RuntimeValidationInputReviewFile
+	add := func(f rc.RuntimeValidationInputReviewFile) error {
+		if f.TargetRef != ref || f.ContentHash != hash {
+			return nil
+		}
+		if result != nil && *result != f {
+			return fmt.Errorf("change review has ambiguous sealed preimage")
+		}
+		value := f
+		result = &value
+		return nil
+	}
+	if round := d.ImplementationWorkCommitment; round != nil {
+		if round.ScopeObservation != nil && round.ScopeObservation.Content != nil {
+			for _, f := range round.ScopeObservation.Content.Snapshots {
+				if err := add(rc.RuntimeValidationInputReviewFile{TargetRef: f.TargetRef, ContentHash: f.ContentHash, Content: f.Content}); err != nil {
+					return nil, err
+				}
+			}
+		}
+		return result, nil
+	}
+	// A governance continuation retains the original candidate authority but
+	// has its own dispatch transaction. Follow only its formally committed
+	// handoff; an equal manifest hash alone cannot select another request.
+	seen := map[string]bool{}
+	for {
+		if seen[d.ID] {
+			return nil, fmt.Errorf("change review cyclic candidate admission source")
+		}
+		seen[d.ID] = true
+		sourceID := ""
+		for _, binding := range a.OperationGovernanceBindings {
+			if binding.State != rc.RuntimeOperationGovernanceBindingGranted || binding.Grant == nil || binding.Grant.ResumeDispatchID != d.ID {
+				continue
+			}
+			if sourceID != "" || binding.OperationDispatchID == "" {
+				return nil, fmt.Errorf("change review ambiguous governance admission source")
+			}
+			sourceID = binding.OperationDispatchID
+		}
+		if sourceID == "" {
+			break
+		}
+		var source *rc.RuntimeDispatchRecord
+		for i := range a.CompletedDispatches {
+			x := &a.CompletedDispatches[i]
+			if x.ID != sourceID {
+				continue
+			}
+			if source != nil || x.WorkspaceID != d.WorkspaceID || x.RunID != d.RunID || x.State != rc.RuntimeDispatchStateCommitted || x.CandidateHash != d.CandidateHash || x.CandidateManifestHash != d.CandidateManifestHash {
+				return nil, fmt.Errorf("change review governance source differs from original candidate")
+			}
+			source = x
+		}
+		if source == nil {
+			return nil, fmt.Errorf("change review missing governance admission source")
+		}
+		d = *source
+	}
+	var attempt *rc.RuntimeCandidateAttemptRecord
+	for i := range a.CandidateAttempts {
+		x := &a.CandidateAttempts[i]
+		if x.DispatchID != d.ID {
+			continue
+		}
+		if attempt != nil || x.State != rc.RuntimeCandidateAttemptStateAccepted || x.Transaction != d.Transaction || x.CandidateHash != d.CandidateHash || x.ManifestHash != d.CandidateManifestHash || x.LogicalRequestID == "" {
+			return nil, fmt.Errorf("change review requires original accepted candidate source")
+		}
+		attempt = x
+	}
+	if attempt == nil || d.CandidateManifestHash == "" {
+		return nil, fmt.Errorf("change review missing original accepted candidate source")
+	}
+	var manifest *rc.RuntimeCandidateContractManifest
+	for _, session := range a.CandidateRequestSessions {
+		if session.LogicalRequestID != attempt.LogicalRequestID {
+			continue
+		}
+		if manifest != nil || session.DocumentKind != rc.RuntimeProviderDocumentOperations || session.Transaction != d.Transaction || session.StablePrefixHash != attempt.StablePrefixHash || session.ManifestHash != d.CandidateManifestHash || session.CandidateManifest == nil || session.CandidateManifest.Hash != d.CandidateManifestHash {
+			return nil, fmt.Errorf("change review requires exact pre-seal candidate request")
+		}
+		manifest = session.CandidateManifest
+	}
+	if manifest == nil {
+		return nil, fmt.Errorf("change review missing pre-seal candidate request")
+	}
+	for _, catalog := range manifest.MutationInputCatalogs {
+		for _, surface := range catalog.ValidationSurfaces {
+			if surface.GenerationContext != nil {
+				for _, f := range surface.GenerationContext.Files {
+					if err := add(f); err != nil {
+						return nil, err
+					}
+				}
+			}
+			for _, binding := range surface.ProofRequirementBindings {
+				if binding.InputReview != nil {
+					for _, f := range binding.InputReview.Files {
+						if err := add(f); err != nil {
+							return nil, err
+						}
+					}
+				}
+			}
+		}
+	}
+	return result, nil
 }
 
 func SemanticChangeReviewContext(a RuntimeAggregate, c rc.RuntimeSemanticPlanRequestContext, m rc.RuntimeSemanticPlanManifest) (*rc.RuntimeChangeReviewContext, error) {

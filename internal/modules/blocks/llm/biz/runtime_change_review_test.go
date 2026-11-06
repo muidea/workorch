@@ -53,6 +53,11 @@ func TestChangeReviewRenderedIntegrityAndFrozenRecovery(t *testing.T) {
 	for _, s := range r.SemanticContext.WorkContext.Content.Snapshots {
 		c.Current = append(c.Current, rc.RuntimeValidationInputReviewFile{TargetRef: s.TargetRef, ContentHash: s.ContentHash, Content: s.Content})
 	}
+	preimage := rc.RuntimeValidationInputReviewFile{TargetRef: c.Current[0].TargetRef, Content: "exact auxiliary preimage\r\n"}
+	preimage.ContentHash = rc.RuntimeValidationInputContentHash(preimage.Content)
+	body := c.Current[0].Content
+	op := rc.RuntimeOperation{ID: "auxiliary", Kind: rc.StepKindFileWrite, TargetRefs: []string{preimage.TargetRef}, Parameters: []rc.OperationParameter{{Name: "content", String: &body}}}
+	c.Changes = []rc.RuntimeChangeReviewOperation{{Operation: op, OperationHash: rc.StableRuntimeOperationHash(op), ExecutionKey: "original-key", Fence: 1, DispatchID: "original-dispatch", OperationID: op.ID, OwnerModuleID: rc.RuntimeModuleFile, ReceiptRef: "runtime-receipt/original-key", ReceiptHash: "original-receipt-hash", TargetRef: preimage.TargetRef, BeforeHash: preimage.ContentHash, AfterHash: c.Current[0].ContentHash, Baseline: &preimage}}
 	r.SemanticContext.ChangeReview = c
 	p, err := runtimeProviderRequest(r)
 	if err != nil {
@@ -70,6 +75,9 @@ func TestChangeReviewRenderedIntegrityAndFrozenRecovery(t *testing.T) {
 	}
 	if err := expandChangeReviewFiles(expanded.ChangeReview, expanded.ChangeReviewFileRefs, changeReviewBodySources(r.SemanticContext.WorkContext.Content, "C3.workContext.content", nil, "")); err != nil {
 		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(expanded.ChangeReview, c) {
+		t.Fatal("rendered projection lost original auxiliary preimage or operation")
 	}
 	expanded.ChangeReviewFileRefs = nil
 	expandedJSON, _ := json.Marshal(expanded)
@@ -114,6 +122,7 @@ func TestChangeReviewRenderedIntegrityAndFrozenRecovery(t *testing.T) {
 	r.FrozenInput, r.FrozenInputRef = frozen, ref
 	original, _ := json.Marshal(sectionMessages(p, false))
 	r.SemanticContext.ChangeReview.Current[0].Content = "new current fact must wait for a new request"
+	r.SemanticContext.ChangeReview.Changes[0].Baseline.Content = "new preimage must wait for a new request"
 	replay, err := runtimeProviderRequestForSubmission(r)
 	if err != nil {
 		t.Fatal(err)
