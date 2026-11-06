@@ -810,6 +810,7 @@ func providerContextBudgetAudit(budget *llmmodels.ProviderContextBudget) llmaudi
 		SourceRefs:         boundedLLMAuditStrings(budget.SourceRefs),
 	}
 	ret.CacheObservation.WireSchemaHash = budget.WireSchemaHash
+	ret.CacheObservation.WireCachePrefixes = append([]llmaudit.CachePrefixObservation(nil), budget.WireCachePrefixes...)
 	ret.CacheObservation.WireCachePrefixHash = budget.WireCachePrefixHash
 	ret.CacheObservation.WireCacheMode = budget.WireCacheMode
 	ret.CacheObservation.WireCacheBreakpoints = budget.WireCacheBreakpoints

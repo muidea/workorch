@@ -158,7 +158,7 @@ func runtimeProviderContextSectionMetrics(s models.PromptSection, prompt *models
 		var p runtimeSemanticTailProjection
 		if json.Unmarshal([]byte(s.Content), &p) == nil {
 			add("executionHistory", "owner.semantic.executionHistory", "work_and_proof_causal_receipts_ordering_excluded", p.ExecutionHistory.Hash != "", p.ExecutionHistory)
-			m.LocalReferences = len(p.ChangeReviewFileRefs)
+			m.LocalReferences = len(p.ChangeReviewFileRefs) + len(p.ChangeReviewValueRefs)
 			var authority runtimeSemanticAuthorityProjection
 			for _, section := range prompt.Sections {
 				if section.ID != "C3.semantic-authority" {
@@ -171,7 +171,8 @@ func runtimeProviderContextSectionMetrics(s models.PromptSection, prompt *models
 				if authority.WorkContext != nil {
 					content = authority.WorkContext.Content
 				}
-				if expandChangeReviewFiles(p.ChangeReview, p.ChangeReviewFileRefs, changeReviewBodySources(content, "C3.workContext.content", authority.Manifest.ValidationGenerationContexts, "C3.manifest.validationGenerationContexts")) == nil {
+				if expandChangeReviewFiles(p.ChangeReview, p.ChangeReviewFileRefs, changeReviewBodySources(content, "C3.workContext.content", authority.Manifest.ValidationGenerationContexts, "C3.manifest.validationGenerationContexts")) == nil && expandChangeReviewValues(p.ChangeReview, p.ChangeReviewValueRefs) == nil {
+					p.ChangeReviewValueRefs = nil
 					p.ChangeReviewFileRefs = nil
 					raw, _ := json.Marshal(p)
 					m.ExpandedBytes = len(raw)
@@ -182,7 +183,7 @@ func runtimeProviderContextSectionMetrics(s models.PromptSection, prompt *models
 	case "C4.execution-tail":
 		var tail runtimeCandidateExecutionTailProjection
 		if json.Unmarshal([]byte(s.Content), &tail) == nil {
-			m.LocalReferences = len(tail.WorkFileRefs) + len(tail.ChangeReviewFileRefs)
+			m.LocalReferences = len(tail.WorkFileRefs) + len(tail.ChangeReviewFileRefs) + len(tail.ChangeReviewValueRefs)
 			var authority struct {
 				Context runtimeCandidateAuthorityProjection `json:"context"`
 			}
@@ -191,7 +192,8 @@ func runtimeProviderContextSectionMetrics(s models.PromptSection, prompt *models
 					json.Unmarshal([]byte(section.Content), &authority)
 				}
 			}
-			if expandRuntimeCandidateWorkFiles(&tail, prompt) == nil && expandChangeReviewFiles(tail.ChangeReview, tail.ChangeReviewFileRefs, changeReviewBodySources(nil, "", authority.Context.ValidationGenerationContexts, "C3.context.validationGenerationContexts")) == nil {
+			if expandRuntimeCandidateWorkFiles(&tail, prompt) == nil && expandChangeReviewFiles(tail.ChangeReview, tail.ChangeReviewFileRefs, changeReviewBodySources(nil, "", authority.Context.ValidationGenerationContexts, "C3.context.validationGenerationContexts")) == nil && expandChangeReviewValues(tail.ChangeReview, tail.ChangeReviewValueRefs) == nil {
+				tail.ChangeReviewValueRefs = nil
 				tail.ChangeReviewFileRefs = nil
 				tail.WorkFileRefs, tail.ReferenceRule = nil, ""
 				raw, _ := json.Marshal(tail)

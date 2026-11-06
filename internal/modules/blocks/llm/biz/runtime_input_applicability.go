@@ -81,13 +81,3 @@ func runtimeCandidateRelevantAssessments(c rc.RuntimeCandidateContext) []rc.Runt
 	}
 	return result
 }
-
-// Ordering needs progress and actual remaining budget, but cannot inspect work
-// receipts without a purpose/work task. The owner always validates the full
-// history; receipt-sequence aliases remain available whenever work is visible.
-func runtimeSemanticVisibleHistory(c rc.RuntimeSemanticPlanRequestContext, m rc.RuntimeSemanticPlanManifest) rc.RuntimeSemanticExecutionHistory {
-	if c.PlanStep == rc.RuntimeSemanticPlanStepCoverageOrder && !rc.RuntimeSemanticPurposeChoice(m, c.PlanStep) {
-		return rc.RuntimeSemanticExecutionHistory{}
-	}
-	return c.ExecutionHistory
-}

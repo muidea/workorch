@@ -1172,7 +1172,7 @@ SM-2 的验收状态或 fresh proof。请求前检查 owner facts 完整性，�
 provider session/allocation。LLM 仅负责 typed 校验与 C4 完整渲染；SM-4 重启重新读取同一 owner，不存第二份账本，
 SM-1、原准则、dispatch/repair/预算权限不变。
 
-同一请求的 `ExecutionHistory` 只从本 owner 验证过的 aggregate/receipt ledger 投影最近 16 条已提交回执，含总量、
+适用 purpose/proof 请求的 `ExecutionHistory` 只从本 owner 验证过的 aggregate/receipt ledger 投影最近 16 条已提交回执，含总量、
 省略数、提交序号、原 binding CWI、owner/kind、receipt fence/hash、target/effect/changed 与 typed validation 事实。
 全量来源先检查，再选择有界尾部；不能忽略窗口外坏记录。已完成且不在当前 batch 的原 CWI 仍可作为历史工作观察，
 但 bound CWI 和 owner accepted 不产生当前 credit，也不能替代 exact repair origin。无回执的在途/unknown execution
@@ -2081,3 +2081,8 @@ candidate/manifest/request 身份必须一致；不得从 mutable current catalo
 
 SM-3 在合法新请求边界携带/冻结事实，SM-4 继续恢复原请求；SM-2 的普通验证、独立 assessment、
 credit/reopen 与终态裁决不由该投影替代，SM-1 不变。完整性/来源拒绝不消费 provider 调用或授予验收 credit。
+
+
+### Semantic request history applicability
+
+普通 coverage order 不适用 receipt history：`SemanticExecutionHistory` 在确认本次scope/manifest/progress身份后返回精确零值，不扫描和组装整个receipt/dispatch ledger再让LLM隐藏。共同typed contract拒绝非零history混入；purpose choice和proof仍保留完整适用receipt来源校验与原有限suffix，完整priorRounds及changeReview版本链不受该suffix裁剪。主Loop仍只调用现有owner编译入口，不新增调度/缓存或历史业务重判。此变化只作用于新SM-3请求；SM-1/SM-2及SM-4原冻结恢复和交付合同不变。

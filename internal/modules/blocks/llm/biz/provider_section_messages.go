@@ -206,9 +206,13 @@ func semanticContentPrefixEnd(content string) int {
 	if end == 0 {
 		return 0
 	}
-	_, innerEnd := jsonFieldRange(content[start:end], "content")
+	innerStart, innerEnd := jsonFieldRange(content[start:end], "content")
 	if innerEnd == 0 {
 		return 0
 	}
-	return start + innerEnd
+	_, bodiesEnd := jsonFieldRange(content[start+innerStart:start+innerEnd], "Snapshots")
+	if bodiesEnd == 0 {
+		return 0
+	}
+	return start + innerStart + bodiesEnd
 }

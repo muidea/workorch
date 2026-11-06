@@ -84,7 +84,7 @@ func TestOrdinaryOrderOmitsHistoryButRejectsItsInjection(t *testing.T) {
 		if err := json.Unmarshal([]byte(s.Content), &tail); err != nil {
 			t.Fatal(err)
 		}
-		tail.ExecutionHistory = r.SemanticContext.ExecutionHistory
+		tail.ExecutionHistory = rc.RuntimeSemanticExecutionHistory{Hash: "unrelated-injected-history"}
 		raw, _ := json.Marshal(tail)
 		p.PromptContext.Sections[i].Content = string(raw)
 	}

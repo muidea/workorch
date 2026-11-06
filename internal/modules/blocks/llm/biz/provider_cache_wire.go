@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 
 	models "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 )
@@ -16,6 +17,7 @@ func observeResponsesCacheWire(budget *models.ProviderContextBudget, wire respon
 		return
 	}
 	budget.WireSchemaHash, budget.WireCachePrefixHash, budget.WireCacheMode, budget.WireCacheBreakpoints = "", "", "", 0
+	budget.WireCachePrefixes = nil
 	if wire.PromptCacheOptions == nil {
 		return
 	}
@@ -23,15 +25,6 @@ func observeResponsesCacheWire(budget *models.ProviderContextBudget, wire respon
 	var messages []responsesInputMessage
 	if json.Unmarshal(wire.Input, &messages) != nil {
 		return
-	}
-	lastMessage, lastBlock := -1, -1
-	for i, message := range messages {
-		for j, block := range message.Content {
-			if block.PromptCacheBreakpoint != nil {
-				budget.WireCacheBreakpoints++
-				lastMessage, lastBlock = i, j
-			}
-		}
 	}
 	hash := func(value any) string {
 		raw, err := json.Marshal(value)
@@ -44,17 +37,28 @@ func observeResponsesCacheWire(budget *models.ProviderContextBudget, wire respon
 	if wire.Text != nil && wire.Text.Format != nil {
 		budget.WireSchemaHash = hash(wire.Text.Format)
 	}
-	if lastMessage < 0 {
-		return
+	cachePrefix := func(prefix []responsesInputMessage) any {
+		return struct {
+			Model     string
+			Reasoning *responsesReasoning
+			Text      *responsesTextConfig
+			Key       string
+			Options   *responsesCacheOptions
+			Messages  []responsesInputMessage
+		}{wire.Model, wire.Reasoning, wire.Text, wire.PromptCacheKey, wire.PromptCacheOptions, prefix}
 	}
-	prefix := append([]responsesInputMessage(nil), messages[:lastMessage+1]...)
-	prefix[lastMessage].Content = prefix[lastMessage].Content[:lastBlock+1]
-	budget.WireCachePrefixHash = hash(struct {
-		Model     string
-		Reasoning *responsesReasoning
-		Text      *responsesTextConfig
-		Key       string
-		Options   *responsesCacheOptions
-		Messages  []responsesInputMessage
-	}{wire.Model, wire.Reasoning, wire.Text, wire.PromptCacheKey, wire.PromptCacheOptions, prefix})
+	for i, message := range messages {
+		for j, block := range message.Content {
+			if block.PromptCacheBreakpoint == nil {
+				continue
+			}
+			p := append([]responsesInputMessage(nil), messages[:i+1]...)
+			p[i].Content = p[i].Content[:j+1]
+			raw, _ := json.Marshal(cachePrefix(p))
+			sum := sha256.Sum256(raw)
+			budget.WireCachePrefixHash = "sha256:" + hex.EncodeToString(sum[:])
+			budget.WireCacheBreakpoints++
+			budget.WireCachePrefixes = append(budget.WireCachePrefixes, llmaudit.CachePrefixObservation{MessageIndex: i, BlockIndex: j, WireBytes: len(raw), Hash: budget.WireCachePrefixHash})
+		}
+	}
 }

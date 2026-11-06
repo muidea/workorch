@@ -134,6 +134,7 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 		}
 	}
 	executionTail := buildRuntimeCandidateExecutionTailProjection(candidateContext, request.CandidateAttempt, request.CandidateCorrectionObservation, manifest, request.CandidateCorrection)
+	executionTail.ChangeReviewValueRefs = compactChangeReviewValues(executionTail.ChangeReview)
 	executionTail.ChangeReviewFileRefs = compactChangeReviewFiles(executionTail.ChangeReview, changeReviewBodySources(nil, "", runtimeCandidateApplicableGenerationContexts(candidateContext, manifest), "C3.context.validationGenerationContexts"))
 	compactRuntimeCandidateWorkFiles(&executionTail, runtimeCandidateApplicableGenerationContexts(candidateContext, manifest))
 	executionTailJSON, err := json.Marshal(executionTail)
@@ -349,7 +350,7 @@ func validateRuntimeCandidateContextIntegrity(
 	}
 	{
 		var tail runtimeCandidateExecutionTailProjection
-		if json.Unmarshal([]byte(contents["C4"]), &tail) != nil || expandChangeReviewFiles(tail.ChangeReview, tail.ChangeReviewFileRefs, changeReviewBodySources(nil, "", expectedContexts, "C3.context.validationGenerationContexts")) != nil ||
+		if json.Unmarshal([]byte(contents["C4"]), &tail) != nil || expandChangeReviewFiles(tail.ChangeReview, tail.ChangeReviewFileRefs, changeReviewBodySources(nil, "", expectedContexts, "C3.context.validationGenerationContexts")) != nil || expandChangeReviewValues(tail.ChangeReview, tail.ChangeReviewValueRefs) != nil ||
 			!reflect.DeepEqual(tail.ChangeReview, context.ChangeReview) || tail.ChangeReviewResponsibility != runtimeChangeReviewInstruction(context.ChangeReview) ||
 			!reflect.DeepEqual(tail.AcceptedEvidence, runtimeProviderSafeEvidence(runtimeCandidateRelevantEvidence(context, context.Evidence.Accepted))) ||
 			!reflect.DeepEqual(tail.RejectedEvidence, runtimeProviderSafeEvidence(runtimeCandidateRelevantEvidence(context, context.Evidence.Rejected))) ||

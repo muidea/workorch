@@ -79,6 +79,7 @@ func (m *Biz) GenerateCandidate(ctx context.Context, request llmmodels.RuntimeCa
 	// Only actual wire observations are copied back, on success and error paths.
 	// Neither a wire fingerprint nor a hint proves submission or a native hit.
 	if actual := providerRequest.ContextBudget; actual != nil && budgetSnapshot != nil {
+		budgetSnapshot.WireCachePrefixes = append([]llmaudit.CachePrefixObservation(nil), actual.WireCachePrefixes...)
 		budgetSnapshot.WireSchemaHash = actual.WireSchemaHash
 		budgetSnapshot.WireCachePrefixHash = actual.WireCachePrefixHash
 		budgetSnapshot.WireCacheMode = actual.WireCacheMode
@@ -418,6 +419,7 @@ func cloneProviderContextBudget(budget *llmmodels.ProviderContextBudget) *llmmod
 		return nil
 	}
 	cloned := *budget
+	cloned.WireCachePrefixes = append([]llmaudit.CachePrefixObservation(nil), budget.WireCachePrefixes...)
 	if budget.CachePlan != nil {
 		plan := *budget.CachePlan
 		plan.SectionHashes = append([]llmmodels.ProviderCacheSectionHash(nil), budget.CachePlan.SectionHashes...)

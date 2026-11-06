@@ -99,6 +99,7 @@ type NormalizationManifest struct {
 }
 
 type ProviderContextBudget struct {
+	WireCachePrefixes []llmaudit.CachePrefixObservation `json:"wireCachePrefixes,omitempty"`
 	// Adapter observations of the outgoing request, never remote cache facts.
 	WireSchemaHash       string `json:"wireSchemaHash,omitempty"`
 	WireCachePrefixHash  string `json:"wireCachePrefixHash,omitempty"`

@@ -63,6 +63,9 @@ func TestResponsesWireCacheAuditObservesActualAdapterAndFrozenInput(t *testing.T
 			if calls != 1 || observation.WireSchemaHash == "" || observation.WireCachePrefixHash == "" || observation.WireCacheMode != "explicit" || observation.WireCacheBreakpoints < 2 {
 				t.Fatalf("actual wire audit absent: %+v", observation)
 			}
+			if len(observation.WireCachePrefixes) != observation.WireCacheBreakpoints || observation.WireCachePrefixes[len(observation.WireCachePrefixes)-1].Hash != observation.WireCachePrefixHash {
+				t.Fatal("transport audit lost exact per-breakpoint inventory")
+			}
 			payload := observation.Payload()
 			if prefix, _ := payload.String("wireCachePrefixHash"); prefix != observation.WireCachePrefixHash {
 				t.Fatal("owner projection lost wire fingerprint")

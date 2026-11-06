@@ -76,6 +76,7 @@ type runtimeCandidateAuthorityProjection struct {
 // evidence and retry context. It never changes C0-C2 and never carries raw
 // provider payloads.
 type runtimeCandidateExecutionTailProjection struct {
+	ChangeReviewValueRefs      []runtimeChangeReviewValueRef                          `json:"changeReviewValueRefs,omitempty"`
 	ChangeReviewFileRefs       []runtimeChangeReviewFileRef                           `json:"changeReviewFileRefs,omitempty"`
 	ChangeReviewResponsibility string                                                 `json:"changeReviewResponsibility,omitempty"`
 	ChangeReview               *runtimecontract.RuntimeChangeReviewContext            `json:"changeReview,omitempty"`
@@ -727,5 +728,5 @@ func runtimeChangeReviewInstruction(c *runtimecontract.RuntimeChangeReviewContex
 	if c == nil {
 		return ""
 	}
-	return runtimeChangeReviewReferenceRule + runtimeDefinitionAssessmentResponsibility + " changeReview contains the complete original committed mutation chain for its exact current target set, including auxiliary effects outside priorRounds/recent receipt tails. Original sealed operations (including their complete parameters), current bytes and owner-observed existing preimages are supplied; absent initial beforeHash denotes creation. Current observations may differ from historical after-images; evaluate the new facts without rewriting old results. This covers only the exact selected current target set, not deleted or out-of-scope resources; preserve any wider original proof gap. These are owner facts, not necessity/minimality conclusions. In definition assessment independently evaluate original obligations against these facts; reference real accepted evidence and preserve unresolved gaps. Never turn corpus presence, a receipt or input-consistency review into acceptance credit."
+	return runtimeChangeReviewReferenceRule + changeReviewValueReferenceRule + runtimeDefinitionAssessmentResponsibility + " changeReview contains the complete original committed mutation chain for its exact current target set, including auxiliary effects outside priorRounds/recent receipt tails. Original sealed operations (including their complete parameters), current bytes and owner-observed existing preimages are supplied; absent initial beforeHash denotes creation. Current observations may differ from historical after-images; evaluate the new facts without rewriting old results. This covers only the exact selected current target set, not deleted or out-of-scope resources; preserve any wider original proof gap. These are owner facts, not necessity/minimality conclusions. In definition assessment independently evaluate original obligations against these facts; reference real accepted evidence and preserve unresolved gaps. Never turn corpus presence, a receipt or input-consistency review into acceptance credit."
 }

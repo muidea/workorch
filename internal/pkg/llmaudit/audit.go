@@ -1,6 +1,9 @@
 package llmaudit
 
-import "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+import (
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"reflect"
+)
 
 // ProviderUsage is the canonical, secret-free token usage value shared by LLM
 // provider adapters, typed EventHub results and Runtime request audit. It is an
@@ -91,7 +94,7 @@ func (v ContextBudget) Empty() bool {
 		v.ContextGateAction == "" && v.ContextGateReason == "" && v.BudgetFailureClass == "" &&
 		len(v.IncludedSections) == 0 && len(v.NormalizedSections) == 0 && len(v.CompressedSections) == 0 &&
 		len(v.OmittedSections) == 0 && len(v.RedactedPaths) == 0 && len(v.ProtectedFields) == 0 &&
-		len(v.IntegrityWarnings) == 0 && len(v.SourceRefs) == 0 && len(v.SectionHashes) == 0 && v.CacheObservation == (CacheObservation{})
+		len(v.IntegrityWarnings) == 0 && len(v.SourceRefs) == 0 && len(v.SectionHashes) == 0 && reflect.DeepEqual(v.CacheObservation, CacheObservation{})
 }
 
 func (v ContextBudget) Payload() workorcheventpayload.Payload {
@@ -211,6 +214,7 @@ type PromptStage string
 // CacheObservation describes the actual owner rendering, never cache support
 // inferred from a model name or endpoint. Empty metadata remains unavailable.
 type CacheObservation struct {
+	WireCachePrefixes    []CachePrefixObservation
 	WireSchemaHash       string
 	WireCachePrefixHash  string
 	WireCacheMode        string
@@ -225,12 +229,31 @@ type CacheObservation struct {
 	RequestedHints       string
 }
 
+// Exact adapter-local prefixes, including the non-message cache scope. These
+// observations say nothing about remote forwarding, namespace or cache hits.
+type CachePrefixObservation struct {
+	MessageIndex int    `json:"messageIndex"`
+	BlockIndex   int    `json:"blockIndex"`
+	WireBytes    int    `json:"wireBytes"`
+	Hash         string `json:"hash"`
+}
+
 func (v CacheObservation) Payload() workorcheventpayload.Payload {
 	state := v.MetadataState
 	if state == "" {
 		state = "unavailable"
 	}
+	var prefixes []workorcheventpayload.Value
+	for _, p := range v.WireCachePrefixes {
+		prefixes = append(prefixes, workorcheventpayload.Value{Kind: workorcheventpayload.ValueObject, Object: workorcheventpayload.New(
+			workorcheventpayload.IntField("messageIndex", int64(p.MessageIndex)),
+			workorcheventpayload.IntField("blockIndex", int64(p.BlockIndex)),
+			workorcheventpayload.IntField("wireBytes", int64(p.WireBytes)),
+			workorcheventpayload.StringField("hash", p.Hash),
+		).Fields})
+	}
 	return workorcheventpayload.New(
+		workorcheventpayload.Field{Name: "wireCachePrefixes", Value: workorcheventpayload.Value{Kind: workorcheventpayload.ValueArray, Array: prefixes}},
 		workorcheventpayload.StringField("wireSchemaHash", v.WireSchemaHash),
 		workorcheventpayload.StringField("wireCachePrefixHash", v.WireCachePrefixHash),
 		workorcheventpayload.StringField("wireCacheMode", v.WireCacheMode),

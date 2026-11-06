@@ -27,6 +27,9 @@ func SemanticExecutionHistory(a RuntimeAggregate, c runtimecontract.RuntimeSeman
 	if err := c.CoverageProgress.Validate(c, m); err != nil {
 		return invalid, err
 	}
+	if !runtimecontract.RuntimeSemanticExecutionHistoryApplicable(c, m) {
+		return invalid, nil
+	}
 	type receiptIdentity struct {
 		key   string
 		fence uint64

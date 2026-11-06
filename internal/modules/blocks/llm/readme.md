@@ -245,7 +245,7 @@ STEP02 的 derive/proposal/review 显式选择 `PromptContext.MessageLayout=sect
   稳定 key 绑定 Workspace、实际 provider/model、schema/格式、reasoning 与共享前缀；不包含时间、物理请求身份、
   review kind、endpoint 或凭据。不同 Workspace 即使模板/文本相同也隔离；同 Workspace 内容变化重新生成 key。
 - 新布局声明 `prompt_cache_key`、`prompt_cache_options.mode=explicit`，在最后一个连续共享 section 的
-  input_text 上设置显式断点。Runtime 新请求另按完整 content、workContext、C3 authority 设置可用边界，
+  input_text 上设置显式断点。Runtime 新请求另按完整 snapshot bodies、workContext、C3 authority 设置可用边界，
   连同稳定前缀最多四个；不更改 TTL，不补齐最小 token 数、不重试 unsupported 请求。
   这些是 Responses 缓存请求参数，不是上游支持、已写入或已命中的证明。网关可能剥离参数；实际路线和转发效果
   必须另行核对，不能仅凭本地 wire 或公共前缀相等宣称真实命中。
@@ -333,7 +333,7 @@ The sole current `semantic/shared-work` encoding is sealed by the Orchestrator; 
 sealed Profile. Complete current work content and prior rounds move to volatile user C3 `workContext`, before planStep,
 schema and generation identity. C4 uses the closed local `workContextRef="C3.workContext"` and retains complete budgets,
 coverage progress, execution history, feedback and correction context. This location is not a stable authority tier.
-Current content appears once; source arrays and raw bodies remain complete. Content precedes its volatile manifest revision.
+Current content appears once; source arrays and raw bodies remain complete. `content.Snapshots` carries ordered TargetRef/Content bodies; `content.SnapshotObservations` carries every original metadata value at the same index/target with empty Content. The decoder restores exact TargetSnapshot values, rejecting missing, mixed or foreign observations. The first C3 boundary ends after all snapshot bodies, before observation metadata and manifest revision. Metadata is not discarded or silently refreshed.
 
 Prior-round targets use an inline complete `value`, or `receiptSequence` referencing the same dispatch in C4 execution history,
 only after exact field equality (operation, ordered targets, receipt identity/hash, before/after hashes and changed) is proved.
@@ -378,7 +378,7 @@ C3 中 input revision 与当前快照、generation context 中相同来源文件
 不再按可变内容重渲染。correction 仅换原合同允许的 C4/C5，复用原 C0–C3/schema/消息块/key。预检无物理调用身份；
 真实提交及 native usage 仍按原 logical/physical identity 关联。
 
-新 semantic C3 在完整 content、workContext 及完整 authority 末尾按适用情况分段，operations 在完整 C3 末尾请求断点；
+新 semantic C3 在完整 snapshot bodies、workContext 及完整 authority 末尾按适用情况分段，operations 在完整 C3 末尾请求断点；
 拼接文本逐字节保持原角色。C4 可用 workFileRefs 精确引用本请求 C3 的同 target/hash/bytes corpus 文件，
 render gate 先闭合展开，再分别对原 corpus 与 frozen work source 逐值反证；不同前像不共享。
 C0–C2 前缀隔离不变；requested hint 与 effective unknown 分开，不能据客户端断点声称网关已生效。section 统计记录
@@ -407,7 +407,7 @@ coverage order 与无该责任的 batch 不附加此分支。C0–C2、原义务
 
 Responses adapter 在完整/流式请求构造后记录 `wireSchemaHash`、`wireCachePrefixHash`、`wireCacheMode` 与
 `wireCacheBreakpoints`，通过既有 usage audit 传递。schema 指纹包括实际 `text.format`；prefix 指纹包含实际
-model、reasoning、text.format、cache key/options 及最后一个请求断点以前的角色/正文/断点。
+model、reasoning、text.format、cache key/options 及请求断点以前的角色/正文/断点。`wireCachePrefixes` 对每个实际断点记录 messageIndex/blockIndex、包含上述配置的序列化 wireBytes 和 hash；旧有整体指纹等于最后断点指纹。预算 snapshot、错误/成功结果与owner usage均保留完整列表并复制slice，observations不回写冻结输入或授予远端命中。
 无断点时 prefix 指纹不可用；这些是本地出站证据，不是远端转发、路由、命中或执行权威。
 `effectiveHints` 仍为 unknown，native cache-read 的 known/unknown 独立保留；没有增加探测调用或改变远端协议。
 
@@ -445,3 +445,12 @@ C4 `changeReview` 消费 Orchestrator 编译的 request-local 当前正文及原
 目标/hash/原文的正文；渲染后完整展开逐值检查，缺源、错域、篡改或丢引用在 provider 前拒绝。
 动态事实不进入 C0-C2；actual/expanded bytes 和引用数进入现有审计，不充当 token 或缓存收益。
 恢复继续使用原冻结请求，不读取新正文来改写旧输入。
+
+
+### 阶段历史与同请求操作值复用
+
+普通 coverage order 的 receipt history 由 Orchestrator typed compiler 明确判为不适用，LLM直接消费零值而非先全量传入再隐藏。purpose choice 和 proof 请求保留当前合同要求的完整因果历史。缺适用历史及不适用字段混入均按现有门禁拒绝，不用最近若干轮替代作用范围。
+
+`changeReviewValueRefs` 是 C4 内部闭合引用：只将同目标完全相同且足够大的 String 参数引用 current 正文、baseline 正文或较早未压缩参数。不识别参数名/语言/文件名，不省略任何 operation、参数位、baseline、版本边或原意图。先展开文件引用，再按 change/parameter 顺序展开值引用，逐值比较原 typed 输入及 operationHash；越界、duplicate、倒序、循环、混合值、错目标或丢引用均在provider前拒绝。已冻结Messages/CacheKey、same-contract correction及恢复继续消费原字节，旧布局的离线解码只用于审计，不进入生产迁移/兼容路径。
+
+固定原件重放与mock transport只证明本地保真和字段映射，不证明网关已转发或远端C3缓存有效；native known/unknown/zero继续分别记录，不从断点hash推断命中。无新增cache/session/owner或执行权限。

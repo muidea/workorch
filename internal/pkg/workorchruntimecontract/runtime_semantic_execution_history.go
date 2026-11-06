@@ -5,9 +5,16 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
+
+// Ordinary ordering consumes coverage progress and budget, not receipt history.
+// Purpose choice and proof tasks retain their complete causal input contract.
+func RuntimeSemanticExecutionHistoryApplicable(c RuntimeSemanticPlanRequestContext, m RuntimeSemanticPlanManifest) bool {
+	return c.PlanStep != RuntimeSemanticPlanStepCoverageOrder || RuntimeSemanticPurposeChoice(m, c.PlanStep)
+}
 
 const (
 	RuntimeSemanticExecutionHistoryLimit    = 16
@@ -79,6 +86,12 @@ func StableRuntimeSemanticExecutionHistoryHash(h RuntimeSemanticExecutionHistory
 // BuildRuntimeSemanticExecutionHistory binds an already owner-projected bounded
 // suffix. The shared value layer does not read receipts or select transitions.
 func BuildRuntimeSemanticExecutionHistory(c RuntimeSemanticPlanRequestContext, m RuntimeSemanticPlanManifest, total int, receipts []RuntimeSemanticReceiptObservation) (RuntimeSemanticExecutionHistory, error) {
+	if !RuntimeSemanticExecutionHistoryApplicable(c, m) {
+		if total != 0 || len(receipts) != 0 {
+			return RuntimeSemanticExecutionHistory{}, fmt.Errorf("receipt history is not applicable to ordinary ordering")
+		}
+		return RuntimeSemanticExecutionHistory{}, nil
+	}
 	h := RuntimeSemanticExecutionHistory{
 		WorkspaceID: c.WorkspaceID, RunID: c.RunID, DefinitionRevision: c.Definition.Revision,
 		StartupInputHash: c.Definition.StartupInputHash, ManifestHash: m.Hash,
@@ -90,6 +103,12 @@ func BuildRuntimeSemanticExecutionHistory(c RuntimeSemanticPlanRequestContext, m
 }
 
 func (h RuntimeSemanticExecutionHistory) Validate(c RuntimeSemanticPlanRequestContext, m RuntimeSemanticPlanManifest) error {
+	if !RuntimeSemanticExecutionHistoryApplicable(c, m) {
+		if !reflect.DeepEqual(h, RuntimeSemanticExecutionHistory{}) {
+			return fmt.Errorf("ordinary ordering must not carry receipt history")
+		}
+		return nil
+	}
 	if h.WorkspaceID == "" || h.RunID == "" || h.DefinitionRevision == "" || h.StartupInputHash == "" || h.ManifestHash == "" ||
 		h.WorkspaceID != c.WorkspaceID || h.RunID != c.RunID || h.DefinitionRevision != c.Definition.Revision ||
 		h.StartupInputHash != c.Definition.StartupInputHash || h.ManifestHash != m.Hash || h.SourceStateRevision == 0 ||

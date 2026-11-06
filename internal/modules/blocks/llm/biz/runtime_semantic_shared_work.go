@@ -9,7 +9,7 @@ import (
 )
 
 const semanticWorkContextRef = "C3.workContext"
-const semanticSharedWorkInstruction = " For contextEncoding=semantic/shared-work, workContext is the complete C3 work context (C4.workContextRef points here). Each prior-round target contains either its full value or receiptSequence referencing the same dispatch in C4.executionHistory.receipts; expand that receipt to operationId, targetRefs, receiptRef/hash, beforeHash, afterHash and changed. No history, original requirement or current resource content is omitted by these exact local references."
+const semanticSharedWorkInstruction = " For contextEncoding=semantic/shared-work, workContext is the complete C3 work context; content.Snapshots contains exact TargetRef/Content bodies, joined by index and matching TargetRef with content.SnapshotObservations for every original snapshot metadata field (C4.workContextRef points here). Each prior-round target contains either its full value or receiptSequence referencing the same dispatch in C4.executionHistory.receipts; expand that receipt to operationId, targetRefs, receiptRef/hash, beforeHash, afterHash and changed. No history, original requirement or current resource content is omitted by these exact local references."
 
 // This wire-only view is lossless. A receiptSequence is a local reference to
 // C4.executionHistory.receipts, never an owner receipt or authority substitute.

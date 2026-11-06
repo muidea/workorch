@@ -71,7 +71,7 @@ func buildRuntimeSemanticPrompt(request llmmodels.RuntimeCandidateRequest, prepa
 		ChangeReview:        prepared.context.ChangeReview.Clone(),
 		WorkContext:         runtimeSemanticVisibleWorkContext(prepared.context, prepared.manifest),
 		CoverageProgress:    prepared.context.CoverageProgress,
-		ExecutionHistory:    runtimeSemanticVisibleHistory(prepared.context, prepared.manifest),
+		ExecutionHistory:    prepared.context.ExecutionHistory,
 		ExecutionBudget:     prepared.context.ExecutionBudget,
 		ExecutionFeedback:   prepared.context.ExecutionFeedback,
 		Attempt:             request.CandidateAttempt,
@@ -87,6 +87,7 @@ func buildRuntimeSemanticPrompt(request llmmodels.RuntimeCandidateRequest, prepa
 	if authority.WorkContext != nil {
 		workContent = authority.WorkContext.Content
 	}
+	tail.ChangeReviewValueRefs = compactChangeReviewValues(tail.ChangeReview)
 	tail.ChangeReviewFileRefs = compactChangeReviewFiles(tail.ChangeReview, changeReviewBodySources(workContent, "C3.workContext.content", authority.Manifest.ValidationGenerationContexts, "C3.manifest.validationGenerationContexts"))
 	tailJSON, err := json.Marshal(tail)
 	if err != nil {

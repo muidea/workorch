@@ -73,7 +73,7 @@ func validateRuntimeSemanticRenderedIntegrity(schema string, context runtimecont
 	if authority.WorkContext != nil {
 		workContent = authority.WorkContext.Content
 	}
-	if expandChangeReviewFiles(tail.ChangeReview, tail.ChangeReviewFileRefs, changeReviewBodySources(workContent, "C3.workContext.content", authority.Manifest.ValidationGenerationContexts, "C3.manifest.validationGenerationContexts")) != nil {
+	if expandChangeReviewFiles(tail.ChangeReview, tail.ChangeReviewFileRefs, changeReviewBodySources(workContent, "C3.workContext.content", authority.Manifest.ValidationGenerationContexts, "C3.manifest.validationGenerationContexts")) != nil || expandChangeReviewValues(tail.ChangeReview, tail.ChangeReviewValueRefs) != nil {
 		missing = append(missing, "P4.change_review_reference")
 	}
 	for _, field := range []struct {
@@ -82,7 +82,7 @@ func validateRuntimeSemanticRenderedIntegrity(schema string, context runtimecont
 	}{
 		{"P2.semantic_coverage_progress", reflect.DeepEqual(tail.CoverageProgress, context.CoverageProgress)},
 		{"P1.semantic_execution_feedback", reflect.DeepEqual(tail.ExecutionFeedback, context.ExecutionFeedback)},
-		{"P3.semantic_execution_history", reflect.DeepEqual(tail.ExecutionHistory, runtimeSemanticVisibleHistory(context, manifest))},
+		{"P3.semantic_execution_history", reflect.DeepEqual(tail.ExecutionHistory, context.ExecutionHistory)},
 		{"P3.semantic_execution_budget", reflect.DeepEqual(tail.ExecutionBudget, context.ExecutionBudget)},
 		{"P4.change_review", reflect.DeepEqual(tail.ChangeReview, context.ChangeReview)},
 		{"P4.semantic_work_context", reflect.DeepEqual(tail.WorkContext, expectedWorkContext)},

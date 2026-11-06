@@ -62,7 +62,7 @@ func testSemanticExecutionHistoryReceipt(t *testing.T, outcome runtimecontract.R
 		t.Fatal("fixture missing sealed semantic manifest")
 	}
 	m := a.SemanticPlanning.Manifest.Clone()
-	c := runtimecontract.RuntimeSemanticPlanRequestContext{WorkspaceID: a.Facts.WorkspaceID, RunID: a.Facts.RunID, Definition: a.Definition, DefinitionSeed: a.Facts.DefinitionSeed, PlanStep: runtimecontract.RuntimeSemanticPlanStepCoverageOrder}
+	c := runtimecontract.RuntimeSemanticPlanRequestContext{WorkspaceID: a.Facts.WorkspaceID, RunID: a.Facts.RunID, Definition: a.Definition, DefinitionSeed: a.Facts.DefinitionSeed, PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch}
 	c.CoverageProgress, err = runtimecontract.BuildRuntimeSemanticCoverageProgress(c, m, a.Facts, a.StateRevision)
 	if err != nil {
 		t.Fatal(err)
@@ -70,6 +70,18 @@ func testSemanticExecutionHistoryReceipt(t *testing.T, outcome runtimecontract.R
 	encoded, err := json.Marshal(a)
 	if err != nil {
 		t.Fatal(err)
+	}
+	ordering := c
+	ordering.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+	ordering.CoverageProgress, err = runtimecontract.BuildRuntimeSemanticCoverageProgress(ordering, m, a.Facts, a.StateRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !runtimecontract.RuntimeSemanticPurposeChoice(m, ordering.PlanStep) {
+		h, e := SemanticExecutionHistory(a, ordering, m)
+		if e != nil || !reflect.DeepEqual(h, runtimecontract.RuntimeSemanticExecutionHistory{}) {
+			t.Fatal("ordinary ordering rebuilt receipt history", e)
+		}
 	}
 	baseline, err := SemanticExecutionHistory(a, c, m)
 	if err != nil {

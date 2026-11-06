@@ -53,10 +53,10 @@ func TestChangeReviewRenderedIntegrityAndFrozenRecovery(t *testing.T) {
 	for _, s := range r.SemanticContext.WorkContext.Content.Snapshots {
 		c.Current = append(c.Current, rc.RuntimeValidationInputReviewFile{TargetRef: s.TargetRef, ContentHash: s.ContentHash, Content: s.Content})
 	}
-	preimage := rc.RuntimeValidationInputReviewFile{TargetRef: c.Current[0].TargetRef, Content: "exact auxiliary preimage\r\n"}
+	preimage := rc.RuntimeValidationInputReviewFile{TargetRef: c.Current[0].TargetRef, Content: strings.Repeat("exact auxiliary preimage\r\n", 100)}
 	preimage.ContentHash = rc.RuntimeValidationInputContentHash(preimage.Content)
 	body := c.Current[0].Content
-	op := rc.RuntimeOperation{ID: "auxiliary", Kind: rc.StepKindFileWrite, TargetRefs: []string{preimage.TargetRef}, Parameters: []rc.OperationParameter{{Name: "content", String: &body}}}
+	op := rc.RuntimeOperation{ID: "auxiliary", Kind: rc.StepKindFileEdit, TargetRefs: []string{preimage.TargetRef}, Parameters: []rc.OperationParameter{{Name: "oldText", String: &preimage.Content}, {Name: "newText", String: &body}}}
 	c.Changes = []rc.RuntimeChangeReviewOperation{{Operation: op, OperationHash: rc.StableRuntimeOperationHash(op), ExecutionKey: "original-key", Fence: 1, DispatchID: "original-dispatch", OperationID: op.ID, OwnerModuleID: rc.RuntimeModuleFile, ReceiptRef: "runtime-receipt/original-key", ReceiptHash: "original-receipt-hash", TargetRef: preimage.TargetRef, BeforeHash: preimage.ContentHash, AfterHash: c.Current[0].ContentHash, Baseline: &preimage}}
 	r.SemanticContext.ChangeReview = c
 	p, err := runtimeProviderRequest(r)
@@ -76,19 +76,24 @@ func TestChangeReviewRenderedIntegrityAndFrozenRecovery(t *testing.T) {
 	if err := expandChangeReviewFiles(expanded.ChangeReview, expanded.ChangeReviewFileRefs, changeReviewBodySources(r.SemanticContext.WorkContext.Content, "C3.workContext.content", nil, "")); err != nil {
 		t.Fatal(err)
 	}
+	if err := expandChangeReviewValues(expanded.ChangeReview, expanded.ChangeReviewValueRefs); err != nil {
+		t.Fatal(err)
+	}
 	if !reflect.DeepEqual(expanded.ChangeReview, c) {
 		t.Fatal("rendered projection lost original auxiliary preimage or operation")
 	}
+	refCount := len(expanded.ChangeReviewFileRefs) + len(expanded.ChangeReviewValueRefs)
 	expanded.ChangeReviewFileRefs = nil
+	expanded.ChangeReviewValueRefs = nil
 	expandedJSON, _ := json.Marshal(expanded)
-	if metrics.LocalReferences != len(c.Current) || metrics.BodyBytes != len(p.PromptContext.Sections[4].Content) || metrics.ExpandedBytes != len(expandedJSON) {
+	if metrics.LocalReferences != refCount || metrics.BodyBytes != len(p.PromptContext.Sections[4].Content) || metrics.ExpandedBytes != len(expandedJSON) {
 		t.Fatal("actual/expanded accounting is not exact", metrics)
 	}
 	var tail runtimeSemanticTailProjection
-	if json.Unmarshal([]byte(p.PromptContext.Sections[4].Content), &tail) != nil || len(tail.ChangeReviewFileRefs) != len(c.Current) {
+	if json.Unmarshal([]byte(p.PromptContext.Sections[4].Content), &tail) != nil || len(tail.ChangeReviewFileRefs) != len(c.Current) || len(tail.ChangeReviewValueRefs) == 0 {
 		t.Fatal("body duplicated instead of exactly referenced")
 	}
-	for _, mutate := range []string{"omitted", "foreign", "changed", "lost-ref", "instruction"} {
+	for _, mutate := range []string{"omitted", "foreign", "changed", "lost-ref", "lost-value-ref", "foreign-value-ref", "mixed-value", "instruction"} {
 		candidate := p
 		prompt := *p.PromptContext
 		prompt.Sections = append(prompt.Sections[:0:0], p.PromptContext.Sections...)
@@ -104,6 +109,12 @@ func TestChangeReviewRenderedIntegrityAndFrozenRecovery(t *testing.T) {
 			v.ChangeReview.Current[0].ContentHash = "another-version"
 		case "lost-ref":
 			v.ChangeReviewFileRefs = nil
+		case "lost-value-ref":
+			v.ChangeReviewValueRefs = nil
+		case "foreign-value-ref":
+			v.ChangeReviewValueRefs[0].SourceIndex = len(v.ChangeReview.Changes)
+		case "mixed-value":
+			v.ChangeReview.Changes[0].Operation.Parameters[0].String = &body
 		case "instruction":
 			prompt.Sections[3].Content = strings.Replace(prompt.Sections[3].Content, "changeReview contains", "changeReview does not contain", 1)
 		}

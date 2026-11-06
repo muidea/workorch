@@ -106,6 +106,9 @@ func checkGenerateCandidateWireAudit(t *testing.T, scenario string) {
 		}
 	}
 	observation := providerContextBudgetAudit(budget).CacheObservation
+	if !reflect.DeepEqual(observation.WireCachePrefixes, want.WireCachePrefixes) || len(observation.WireCachePrefixes) < 2 {
+		t.Fatal("owner notification lost breakpoint inventory")
+	}
 	if observation.WireCachePrefixHash != want.WireCachePrefixHash {
 		t.Fatal("wire observation lost before owner event projection")
 	}

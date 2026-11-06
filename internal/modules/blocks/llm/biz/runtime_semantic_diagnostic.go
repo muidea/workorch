@@ -7,18 +7,19 @@ import (
 )
 
 type runtimeSemanticTailProjection struct {
-	ChangeReviewFileRefs []runtimeChangeReviewFileRef                          `json:"changeReviewFileRefs,omitempty"`
-	ChangeReview         *runtimecontract.RuntimeChangeReviewContext           `json:"changeReview,omitempty"`
-	WorkContextRef       string                                                `json:"workContextRef,omitempty"`
-	WorkContext          *runtimecontract.RuntimeSemanticWorkContext           `json:"workContext,omitempty"`
-	CoverageProgress     runtimecontract.RuntimeSemanticCoverageProgress       `json:"coverageProgress"`
-	ExecutionHistory     runtimecontract.RuntimeSemanticExecutionHistory       `json:"executionHistory,omitzero"`
-	ExecutionBudget      runtimecontract.RuntimeSemanticExecutionBudget        `json:"executionBudget"`
-	ExecutionFeedback    []runtimecontract.RuntimeSemanticExecutionFeedback    `json:"executionFeedback,omitempty"`
-	Attempt              int                                                   `json:"attempt"`
-	PreviousRejection    *runtimecontract.RuntimeSemanticCorrectionObservation `json:"previousRejection,omitempty"`
-	CorrectionDirective  *runtimecontract.RuntimeSemanticCorrectionDirective   `json:"correctionDirective,omitempty"`
-	ExistingTarget       *runtimeSemanticExistingTargetProjection              `json:"existingTarget,omitempty"`
+	ChangeReviewValueRefs []runtimeChangeReviewValueRef                         `json:"changeReviewValueRefs,omitempty"`
+	ChangeReviewFileRefs  []runtimeChangeReviewFileRef                          `json:"changeReviewFileRefs,omitempty"`
+	ChangeReview          *runtimecontract.RuntimeChangeReviewContext           `json:"changeReview,omitempty"`
+	WorkContextRef        string                                                `json:"workContextRef,omitempty"`
+	WorkContext           *runtimecontract.RuntimeSemanticWorkContext           `json:"workContext,omitempty"`
+	CoverageProgress      runtimecontract.RuntimeSemanticCoverageProgress       `json:"coverageProgress"`
+	ExecutionHistory      runtimecontract.RuntimeSemanticExecutionHistory       `json:"executionHistory,omitzero"`
+	ExecutionBudget       runtimecontract.RuntimeSemanticExecutionBudget        `json:"executionBudget"`
+	ExecutionFeedback     []runtimecontract.RuntimeSemanticExecutionFeedback    `json:"executionFeedback,omitempty"`
+	Attempt               int                                                   `json:"attempt"`
+	PreviousRejection     *runtimecontract.RuntimeSemanticCorrectionObservation `json:"previousRejection,omitempty"`
+	CorrectionDirective   *runtimecontract.RuntimeSemanticCorrectionDirective   `json:"correctionDirective,omitempty"`
+	ExistingTarget        *runtimeSemanticExistingTargetProjection              `json:"existingTarget,omitempty"`
 }
 
 // runtimeSemanticExistingTargetProjection keeps the latest owner catalog and
