@@ -114,6 +114,9 @@ func runtimeMetricComponentNames(section string) map[string]bool {
 // business keys/text nor claims that included observations passed acceptance.
 func runtimeProviderContextSectionMetrics(s models.PromptSection, prompt *models.PromptContext) models.ProviderCacheSectionHash {
 	m := runtimeProviderSectionMetrics(s)
+	if prompt == nil {
+		return m
+	}
 	add := func(path, source, reason string, present bool, value any) {
 		raw, _ := json.Marshal(value)
 		state, size := "included", len(raw)
@@ -155,12 +158,41 @@ func runtimeProviderContextSectionMetrics(s models.PromptSection, prompt *models
 		var p runtimeSemanticTailProjection
 		if json.Unmarshal([]byte(s.Content), &p) == nil {
 			add("executionHistory", "owner.semantic.executionHistory", "work_and_proof_causal_receipts_ordering_excluded", p.ExecutionHistory.Hash != "", p.ExecutionHistory)
+			m.LocalReferences = len(p.ChangeReviewFileRefs)
+			var authority runtimeSemanticAuthorityProjection
+			for _, section := range prompt.Sections {
+				if section.ID != "C3.semantic-authority" {
+					continue
+				}
+				if json.Unmarshal([]byte(section.Content), &authority) != nil {
+					break
+				}
+				var content *rc.RuntimeImplementationWorkContent
+				if authority.WorkContext != nil {
+					content = authority.WorkContext.Content
+				}
+				if expandChangeReviewFiles(p.ChangeReview, p.ChangeReviewFileRefs, changeReviewBodySources(content, "C3.workContext.content", authority.Manifest.ValidationGenerationContexts, "C3.manifest.validationGenerationContexts")) == nil {
+					p.ChangeReviewFileRefs = nil
+					raw, _ := json.Marshal(p)
+					m.ExpandedBytes = len(raw)
+				}
+			}
+			add("changeReview", "owner.committedDispatches_and_scoped_observation", "exact_current_target_mutation_corpus", p.ChangeReview != nil, p.ChangeReview)
 		}
 	case "C4.execution-tail":
 		var tail runtimeCandidateExecutionTailProjection
 		if json.Unmarshal([]byte(s.Content), &tail) == nil {
-			m.LocalReferences = len(tail.WorkFileRefs)
-			if expandRuntimeCandidateWorkFiles(&tail, prompt) == nil {
+			m.LocalReferences = len(tail.WorkFileRefs) + len(tail.ChangeReviewFileRefs)
+			var authority struct {
+				Context runtimeCandidateAuthorityProjection `json:"context"`
+			}
+			for _, section := range prompt.Sections {
+				if section.ID == "C3.runtime-authority" {
+					json.Unmarshal([]byte(section.Content), &authority)
+				}
+			}
+			if expandRuntimeCandidateWorkFiles(&tail, prompt) == nil && expandChangeReviewFiles(tail.ChangeReview, tail.ChangeReviewFileRefs, changeReviewBodySources(nil, "", authority.Context.ValidationGenerationContexts, "C3.context.validationGenerationContexts")) == nil {
+				tail.ChangeReviewFileRefs = nil
 				tail.WorkFileRefs, tail.ReferenceRule = nil, ""
 				raw, _ := json.Marshal(tail)
 				m.ExpandedBytes = len(raw)

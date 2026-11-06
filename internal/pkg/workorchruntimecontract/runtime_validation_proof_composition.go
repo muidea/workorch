@@ -6,6 +6,18 @@ import (
 	"strings"
 )
 
+const RuntimeDefinitionAssessmentConsumer = "definition_assessment"
+
+// Normal semantic proof binding requires independent Definition assessment.
+// This additional consumer only assigns evaluative responsibility within it.
+// It never replaces the mandatory input or lineage consumers and never grants credit at input review.
+func RuntimeValidationAllowedProofConsumerRefs(subject RuntimeValidationInputReviewSubject) []string {
+	refs := RuntimeValidationProofConsumerRefs(subject)
+	refs = append(refs, RuntimeDefinitionAssessmentConsumer)
+	slices.Sort(refs)
+	return refs
+}
+
 // These are review responsibilities, not receipt facts or acceptance credit.
 func RuntimeValidationProofConsumerRefs(subject RuntimeValidationInputReviewSubject) []string {
 	refs := []string{RuntimeValidationInputConsumer}
@@ -25,7 +37,7 @@ func validateRuntimeValidationCompositionSubject(subject RuntimeValidationInputR
 		if !boundedValidationExecutionRef(assertion.Rule.Ref, 512) {
 			return fmt.Errorf("composition requires bounded provider-safe consumer references")
 		}
-		if assertion.Rule.Ref == RuntimeValidationInputConsumer {
+		if assertion.Rule.Ref == RuntimeValidationInputConsumer || assertion.Rule.Ref == RuntimeDefinitionAssessmentConsumer {
 			return fmt.Errorf("lineage rule aliases reserved validation input consumer")
 		}
 	}
@@ -43,20 +55,20 @@ func validateRuntimeValidationCompositionCheck(check RuntimeValidationInputCheck
 			return nil
 		}
 	}
-	allowed := RuntimeValidationProofConsumerRefs(subject)
+	allowed := RuntimeValidationAllowedProofConsumerRefs(subject)
 	used := make(map[string]bool, len(allowed))
 	for index, obligation := range check.Obligations {
 		refs := obligation.ProofConsumerRefs
 		path := fmt.Sprintf(".obligations[%d].proofConsumerRefs", index)
 		if len(refs) == 0 || len(refs) > len(allowed) {
-			return runtimeInputViolation(path, "invalid_consumer_count", "nonempty bounded subset of declared requiredProofConsumerRefs", "composite obligation requires nonempty bounded proof consumers")
+			return runtimeInputViolation(path, "invalid_consumer_count", "nonempty bounded subset of declared allowedProofConsumerRefs", "composite obligation requires nonempty bounded proof consumers")
 		}
 		// Consumers are a set, as declared by the provider schema. Preserve the
 		// report's exact order for provenance/hash checks; do not sort or repair it.
 		seen := make(map[string]bool, len(refs))
 		for _, ref := range refs {
 			if ref == "" || ref != strings.TrimSpace(ref) || !slices.Contains(allowed, ref) {
-				return runtimeInputViolation(path, "undeclared_proof_consumer", "exact declared requiredProofConsumerRefs only", "composite obligation references an undeclared proof consumer")
+				return runtimeInputViolation(path, "undeclared_proof_consumer", "exact declared allowedProofConsumerRefs only", "composite obligation references an undeclared proof consumer")
 			}
 			if seen[ref] {
 				return runtimeInputViolation(path, "duplicate_proof_consumer", "unique proofConsumerRefs in any order", "composite obligation repeats a proof consumer")
@@ -65,7 +77,7 @@ func validateRuntimeValidationCompositionCheck(check RuntimeValidationInputCheck
 			used[ref] = true
 		}
 	}
-	for _, ref := range allowed {
+	for _, ref := range RuntimeValidationProofConsumerRefs(subject) {
 		if !used[ref] {
 			return runtimeInputViolation(".obligations", "missing_proof_consumer", "complete declared requiredProofConsumerRefs across this check's obligations, including "+ref, fmt.Sprintf("composite check omits required proof consumer %q", ref))
 		}

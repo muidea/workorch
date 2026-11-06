@@ -154,7 +154,7 @@ miss/fresh/TTL/LKG、未完 refresh、配置轮换、完整性/隔离、生命�
   32 KiB。schema 与本地 decoder 同源，缺项、未知字段或相互矛盾的结论仍是文档准入错误，不是事实 ticket。
   当前 schema/instruction、输入和信息均在 C3，同一 activation 的 C0～C2 不因评审变动。
   组合评审完整投影同 CWI 的 `LineageAssertions`，逐义务 `proofConsumerRefs` 只允许
-  `validation_input` 和该 subject 原 rule refs。模型须解释 ordinary assertions 与 typed consumer 的合取覆盖，
+  `validation_input`、该 subject 原 rule refs 和可选 `definition_assessment`。必需集合仍是 validation_input 加全部原 rule refs；独立 assessment 只承担必要性、最小性等语义责任，不能替代行为断言或 lineage。模型须解释 ordinary assertions 与 typed consumer 的合取覆盖，
   不能以规则名、README 自述、未来 ACK 或一致结论替代实际证明。
   `biz/runtime_proof_composition_test.go` 固定 C3 完整声明/schema/instruction、删改拒绝及输入变化时
   C0～C2/StablePrefixHash 不变。来源与边界遵守
@@ -431,3 +431,17 @@ input revision 按来源二选一投影：完整原语义报告/被审输入，�
 随后分别消费物理 submitted、native usage 和 response-mode。不能用 adapter 的本地重编译 cache plan 覆盖原 stable prefix。
 成功、output-limit、empty completed 和 HTTP 失败均保留已观察指纹；配置漂移等调用前拒绝不伪造 wire/submission。
 真实未携带 `text.format` 时 wireSchemaHash 保持空，这与指纹回传丢失不同；本地出站指纹不证明远端命中。
+
+
+### 当前变更事实与独立语义责任
+
+`allowedProofConsumerRefs` 明确完整许可集合；`requiredProofConsumerRefs` 继续约束全部必需消费者。
+当前正常 semantic binding 已强制独立 Definition assessment，不新增义务身份字段或修改已确认 Definition。
+生成、修订、独立输入审查和 assessment 使用同一职责说明：native input 证明实际行为，原 lineage owner
+消费自己的 receipt/终态 join；assessment 从原判据及完整适用变更事实判断必要性/最小性。输入映射不授 credit。
+
+C4 `changeReview` 消费 Orchestrator 编译的 request-local 当前正文及原变更链，包含 recent history 之外的辅助 effect。
+不重建 owner authority，也不把正文或回执存在当验收结论。`changeReviewFileRefs` 只可引用本冻结请求中相同
+目标/hash/原文的正文；渲染后完整展开逐值检查，缺源、错域、篡改或丢引用在 provider 前拒绝。
+动态事实不进入 C0-C2；actual/expanded bytes 和引用数进入现有审计，不充当 token 或缓存收益。
+恢复继续使用原冻结请求，不读取新正文来改写旧输入。

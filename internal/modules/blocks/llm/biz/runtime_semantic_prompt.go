@@ -57,7 +57,7 @@ func buildRuntimeSemanticPrompt(request llmmodels.RuntimeCandidateRequest, prepa
 	}
 	authority.ContextEncoding = runtimecontract.RuntimeSemanticContextEncoding
 	authority.WorkContext = compactSemanticWorkContext(runtimeSemanticVisibleWorkContext(prepared.context, prepared.manifest), prepared.context.ExecutionHistory)
-	authority.OutputInstruction = runtimeSemanticSharedWorkOutputInstruction(prepared.context, prepared.manifest)
+	authority.OutputInstruction = runtimeSemanticSharedWorkOutputInstruction(prepared.context, prepared.manifest) + runtimeChangeReviewInstruction(prepared.context.ChangeReview)
 	authorityJSON, err := json.Marshal(authority)
 	if err != nil {
 		return runtimeSemanticPrompt{}, err
@@ -68,6 +68,7 @@ func buildRuntimeSemanticPrompt(request llmmodels.RuntimeCandidateRequest, prepa
 	}
 
 	tail := runtimeSemanticTailProjection{
+		ChangeReview:        prepared.context.ChangeReview.Clone(),
 		WorkContext:         runtimeSemanticVisibleWorkContext(prepared.context, prepared.manifest),
 		CoverageProgress:    prepared.context.CoverageProgress,
 		ExecutionHistory:    runtimeSemanticVisibleHistory(prepared.context, prepared.manifest),
@@ -82,6 +83,11 @@ func buildRuntimeSemanticPrompt(request llmmodels.RuntimeCandidateRequest, prepa
 		tail.WorkContext = nil
 		tail.WorkContextRef = semanticWorkContextRef
 	}
+	var workContent *runtimecontract.RuntimeImplementationWorkContent
+	if authority.WorkContext != nil {
+		workContent = authority.WorkContext.Content
+	}
+	tail.ChangeReviewFileRefs = compactChangeReviewFiles(tail.ChangeReview, changeReviewBodySources(workContent, "C3.workContext.content", authority.Manifest.ValidationGenerationContexts, "C3.manifest.validationGenerationContexts"))
 	tailJSON, err := json.Marshal(tail)
 	if err != nil {
 		return runtimeSemanticPrompt{}, err

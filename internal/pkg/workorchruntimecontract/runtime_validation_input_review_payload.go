@@ -63,7 +63,7 @@ func validateRuntimeValidationInputReviewPayload(path string, raw json.RawMessag
 				}
 				if raw, exists := obligation["proofConsumerRefs"]; exists {
 					var refs []string
-					if err := json.Unmarshal(raw, &refs); err != nil || len(refs) == 0 || len(refs) > MaxRuntimeLineageAssertions+1 {
+					if err := json.Unmarshal(raw, &refs); err != nil || len(refs) == 0 || len(refs) > MaxRuntimeLineageAssertions+2 {
 						return &RuntimeCandidatePayloadDiagnostic{Path: path + ".proofConsumerRefs", Actual: "empty_or_unbounded_mapping", Required: []string{"complete bounded consumer array"}}
 					}
 				}
@@ -129,11 +129,13 @@ func addRuntimeSemanticInputReviewSchema(proposal map[string]any, manifest Runti
 					},
 				}
 
-				if len(binding.InputReview.LineageAssertions) != 0 {
+				{
 
 					item := checkSchema["properties"].(map[string]any)["obligations"].(map[string]any)["items"].(map[string]any)
-					item["required"] = append(item["required"].([]string), "proofConsumerRefs")
-					consumerRefs := RuntimeValidationProofConsumerRefs(*binding.InputReview)
+					if len(binding.InputReview.LineageAssertions) != 0 {
+						item["required"] = append(item["required"].([]string), "proofConsumerRefs")
+					}
+					consumerRefs := RuntimeValidationAllowedProofConsumerRefs(*binding.InputReview)
 					item["properties"].(map[string]any)["proofConsumerRefs"] = stringEnumArraySchemaWithMaximum(consumerRefs, len(consumerRefs), 1)
 
 				}

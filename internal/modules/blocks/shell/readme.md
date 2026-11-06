@@ -634,3 +634,12 @@ scope 包含当前完整副本文件集合，新增/删除/替换相邻输入也
 它们不是 operation receipt 的输出，不借原 receipt read topic 获得读取权限。
 持久 batch 后的 duplicate drive 读原 aggregate；在 batch CAS 前中断仍遵守原 fresh-query 语义，
 不承诺查询物理执行 at-most-once，也不另造恢复账本。
+
+
+### 验证输入的证明职责
+
+当前项目验证输入合同区分可执行行为断言、独立语义 assessment 与封存 lineage 消费者。
+每个原 native check 和来源义务的行为部分仍完整执行；必要性/最小性可显式映射 `definition_assessment`，
+由独立评估消费原判据与 Orchestrator 当前 scoped 变更事实，不让 native test 伪造 owner baseline/receipt 或自证最小性。
+无条件 evidence-gap 报错、未观测行为、缺项和冲突仍阻断；input review/readiness/file effect 不授 credit。
+根 module build/test/race、exact checks、行为观测、单次总 deadline 和原 terminal receipt/三 ACK 不变。

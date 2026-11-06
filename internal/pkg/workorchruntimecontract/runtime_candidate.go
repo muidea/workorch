@@ -15,6 +15,7 @@ import (
 )
 
 type RuntimeCandidateContext struct {
+	ChangeReview       *RuntimeChangeReviewContext
 	WorkspaceID        common.WorkspaceID
 	RunID              common.RunID
 	DefinitionRevision string
@@ -124,10 +125,14 @@ func (c RuntimeCandidateContext) Normalized() RuntimeCandidateContext {
 	c.Resources = facts.Resources
 	c.Activation = facts.Activation
 	c.ImplementationWorkContent = c.ImplementationWorkContent.Clone()
+	c.ChangeReview = c.ChangeReview.Clone()
 	return c
 }
 
 func (c RuntimeCandidateContext) Validate(decision RuntimeDecision) error {
+	if err := c.ChangeReview.Validate(c.WorkspaceID, c.RunID, c.DefinitionRevision); err != nil {
+		return err
+	}
 	// Activation evidence policies are immutable cross-owner authority. Check
 	// their raw projection before Normalized can canonicalize nested sets.
 	if err := ValidateRuntimeEvidencePolicies(c.Activation.EvidencePolicies); err != nil {

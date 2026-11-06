@@ -393,3 +393,27 @@ func TestValidationProofCompositionManifestRejectsRehashedRequirementReplacement
 		}
 	}
 }
+
+func TestDefinitionAssessmentConsumerRetainsAllOrdinaryAndLineageDuties(t *testing.T) {
+	_, binding, report := compositionFixture(t)
+	report.Checks[0].Obligations[0].ProofConsumerRefs = append(report.Checks[0].Obligations[0].ProofConsumerRefs, RuntimeDefinitionAssessmentConsumer)
+	if err := report.ValidateAgainstBinding(binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := report.ValidateCoverageCriteria(RuntimeCoverageItem{TargetText: report.Checks[0].Obligations[0].CriterionText}); err != nil {
+		t.Fatal(err)
+	}
+	for _, refs := range [][]string{{RuntimeDefinitionAssessmentConsumer}, {RuntimeDefinitionAssessmentConsumer, RuntimeValidationInputConsumer}, {RuntimeDefinitionAssessmentConsumer, "delivery", "rounds"}, {"undeclared", RuntimeDefinitionAssessmentConsumer, RuntimeValidationInputConsumer, "delivery", "rounds"}} {
+		bad := report.Clone()
+		bad.Checks[0].Obligations[0].ProofConsumerRefs = refs
+		if bad.ValidateAgainstBinding(binding) == nil {
+			t.Fatal("assessment waived a required consumer or allowed unknown ref", refs)
+		}
+	}
+	// Optional responsibility mapping grants no credit; ordinary-only mapping
+	// remains legal and the original criterion text stays complete.
+	report.Checks[0].Obligations[0].ProofConsumerRefs = RuntimeValidationProofConsumerRefs(*binding.InputReview)
+	if err := report.ValidateAgainstBinding(binding); err != nil {
+		t.Fatal(err)
+	}
+}

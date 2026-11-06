@@ -76,18 +76,21 @@ type runtimeCandidateAuthorityProjection struct {
 // evidence and retry context. It never changes C0-C2 and never carries raw
 // provider payloads.
 type runtimeCandidateExecutionTailProjection struct {
-	WorkFileRefs              []runtimeCandidateWorkFileRef                          `json:"workFileRefs,omitempty"`
-	ReferenceRule             string                                                 `json:"referenceRule,omitempty"`
-	ImplementationWorkContent *runtimecontract.RuntimeCandidateWorkContent           `json:"implementationWorkContent,omitempty"`
-	Attempt                   int                                                    `json:"candidateAttempt"`
-	Retry                     *runtimeCandidateRetryProjection                       `json:"retry,omitempty"`
-	Failure                   *runtimeCandidateProviderSafeFailureProjection         `json:"failure,omitempty"`
-	CurrentValidationFailure  *runtimeCandidateValidationFailureProjection           `json:"currentValidationFailure,omitempty"`
-	AcceptedEvidence          []runtimeCandidateProviderSafeEvidenceProjection       `json:"latestAcceptedEvidence,omitempty"`
-	RejectedEvidence          []runtimeCandidateProviderSafeEvidenceProjection       `json:"latestRejectedEvidence,omitempty"`
-	Assessments               []runtimeCandidateProviderSafeAssessmentProjection     `json:"recentAssessments,omitempty"`
-	RejectedOperationShapes   []runtimeCandidateProviderSafeOperationShapeProjection `json:"rejectedOperationShapes,omitempty"`
-	NoProgressOperationShapes []runtimeCandidateProviderSafeOperationShapeProjection `json:"noProgressOperationShapes,omitempty"`
+	ChangeReviewFileRefs       []runtimeChangeReviewFileRef                           `json:"changeReviewFileRefs,omitempty"`
+	ChangeReviewResponsibility string                                                 `json:"changeReviewResponsibility,omitempty"`
+	ChangeReview               *runtimecontract.RuntimeChangeReviewContext            `json:"changeReview,omitempty"`
+	WorkFileRefs               []runtimeCandidateWorkFileRef                          `json:"workFileRefs,omitempty"`
+	ReferenceRule              string                                                 `json:"referenceRule,omitempty"`
+	ImplementationWorkContent  *runtimecontract.RuntimeCandidateWorkContent           `json:"implementationWorkContent,omitempty"`
+	Attempt                    int                                                    `json:"candidateAttempt"`
+	Retry                      *runtimeCandidateRetryProjection                       `json:"retry,omitempty"`
+	Failure                    *runtimeCandidateProviderSafeFailureProjection         `json:"failure,omitempty"`
+	CurrentValidationFailure   *runtimeCandidateValidationFailureProjection           `json:"currentValidationFailure,omitempty"`
+	AcceptedEvidence           []runtimeCandidateProviderSafeEvidenceProjection       `json:"latestAcceptedEvidence,omitempty"`
+	RejectedEvidence           []runtimeCandidateProviderSafeEvidenceProjection       `json:"latestRejectedEvidence,omitempty"`
+	Assessments                []runtimeCandidateProviderSafeAssessmentProjection     `json:"recentAssessments,omitempty"`
+	RejectedOperationShapes    []runtimeCandidateProviderSafeOperationShapeProjection `json:"rejectedOperationShapes,omitempty"`
+	NoProgressOperationShapes  []runtimeCandidateProviderSafeOperationShapeProjection `json:"noProgressOperationShapes,omitempty"`
 }
 
 // Do not marshal the persisted directive: CurrentFailure and rejected operation
@@ -540,16 +543,18 @@ func buildRuntimeCandidateExecutionTailProjection(
 	}
 	content, _ := runtimecontract.ProjectRuntimeCandidateWorkContent(context, manifest)
 	return runtimeCandidateExecutionTailProjection{
-		ImplementationWorkContent: content,
-		Attempt:                   attempt,
-		Retry:                     runtimeCandidateRetryForManifest(attempt, previousFailure, manifest, correction),
-		Failure:                   runtimeProviderSafeFailure(failure),
-		CurrentValidationFailure:  runtimeCurrentValidationFailure(context),
-		AcceptedEvidence:          runtimeProviderSafeEvidence(runtimeCandidateRelevantEvidence(context, context.Evidence.Accepted)),
-		RejectedEvidence:          runtimeProviderSafeEvidence(runtimeCandidateRelevantEvidence(context, context.Evidence.Rejected)),
-		Assessments:               runtimeProviderSafeAssessments(runtimeCandidateRelevantAssessments(context)),
-		RejectedOperationShapes:   runtimeProviderSafeOperationShapes(context.RejectedOperationShapes),
-		NoProgressOperationShapes: runtimeProviderSafeOperationShapes(context.NoProgressOperationShapes),
+		ImplementationWorkContent:  content,
+		ChangeReview:               context.ChangeReview.Clone(),
+		ChangeReviewResponsibility: runtimeChangeReviewInstruction(context.ChangeReview),
+		Attempt:                    attempt,
+		Retry:                      runtimeCandidateRetryForManifest(attempt, previousFailure, manifest, correction),
+		Failure:                    runtimeProviderSafeFailure(failure),
+		CurrentValidationFailure:   runtimeCurrentValidationFailure(context),
+		AcceptedEvidence:           runtimeProviderSafeEvidence(runtimeCandidateRelevantEvidence(context, context.Evidence.Accepted)),
+		RejectedEvidence:           runtimeProviderSafeEvidence(runtimeCandidateRelevantEvidence(context, context.Evidence.Rejected)),
+		Assessments:                runtimeProviderSafeAssessments(runtimeCandidateRelevantAssessments(context)),
+		RejectedOperationShapes:    runtimeProviderSafeOperationShapes(context.RejectedOperationShapes),
+		NoProgressOperationShapes:  runtimeProviderSafeOperationShapes(context.NoProgressOperationShapes),
 	}
 }
 
@@ -716,4 +721,11 @@ func runtimeCandidateSoul(activation runtimecontract.RuntimeActivationContext, s
 	}
 	value := *activation.DefaultSoul
 	return &value
+}
+
+func runtimeChangeReviewInstruction(c *runtimecontract.RuntimeChangeReviewContext) string {
+	if c == nil {
+		return ""
+	}
+	return runtimeChangeReviewReferenceRule + runtimeDefinitionAssessmentResponsibility + " changeReview contains the complete original committed mutation chain for its exact current target set, including auxiliary effects outside priorRounds/recent receipt tails. Original sealed operations (including their complete parameters), current bytes and owner-observed existing preimages are supplied; absent initial beforeHash denotes creation. Current observations may differ from historical after-images; evaluate the new facts without rewriting old results. This covers only the exact selected current target set, not deleted or out-of-scope resources; preserve any wider original proof gap. These are owner facts, not necessity/minimality conclusions. In definition assessment independently evaluate original obligations against these facts; reference real accepted evidence and preserve unresolved gaps. Never turn corpus presence, a receipt or input-consistency review into acceptance credit."
 }

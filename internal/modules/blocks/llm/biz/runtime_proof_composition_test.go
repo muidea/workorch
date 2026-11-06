@@ -49,10 +49,13 @@ func TestRuntimeProofCompositionV3IsExactProtectedC3Only(t *testing.T) {
 			t.Fatalf("consumer-set instruction disagrees with unordered unique schema: %s", rule)
 		}
 	}
-	if len(reviews[0].ProofResponsibilities) != 4 || reviews[0].ProofResponsibilities[0].ConsumerRef != "validation_input" {
+	if len(reviews[0].ProofResponsibilities) != 5 || reviews[0].ProofResponsibilities[0].ConsumerRef != "validation_input" {
 		t.Fatal("code-derived consumer responsibilities missing")
 	}
-	for _, role := range reviews[0].ProofResponsibilities[1:] {
+	if role := reviews[0].ProofResponsibilities[4]; role.ConsumerRef != runtimecontract.RuntimeDefinitionAssessmentConsumer || role.ConsumptionPoint != "definition_assessment" || !strings.Contains(role.ReviewResponsibility, "cannot waive ordinary validation") {
+		t.Fatal("independent assessment duty missing")
+	}
+	for _, role := range reviews[0].ProofResponsibilities[1:4] {
 		if role.ConsumptionPoint != "post_terminal_delivery" || !strings.Contains(role.ReviewResponsibility, "do not require a future receipt") {
 			t.Fatal("future facts requested as review prerequisites")
 		}

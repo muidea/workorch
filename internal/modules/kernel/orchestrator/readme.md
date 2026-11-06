@@ -2043,3 +2043,21 @@ SM-2/SM-3 的 candidate manifest、complete admission、pre-seal 与 owner-fact 
 独立 assessment、原 CAS、冻结请求和信用规则不变。SM-4 在续完 terminal/wait/submitted-provider/clarification
 原事务后才按当前需要查询 semantic readiness；治理和新操作仍受既有 authority 门禁约束。SM-1 不变。
 新事实只由原 owner 在合法事务重验受影响项并产生新结果；旧结果保留其当时含义，不重写历史或重发 effect。
+
+
+### 新请求的 scoped 变更事实投影
+
+`runtime.ChangeReviewContext` 消费正式 aggregate 的唯一 dispatch/execution/fence/receipt 链，
+按 owner 已选择的完整当前目标正文收集全部适用 accepted changed durable effects，保留原 sealed operation 完整参数及 hash，包含辅助 effect，
+不使用 recent-N 或本 CWI priorRounds 代替证明集合，不重新执行 effect 或历史业务判定。
+purpose/proof、输入生成/维护及独立 assessment 按需使用该 typed 请求事实；普通 order 和无关阶段不携带。
+现有目标的首个前像及合法中途变化的前像取原 sealed ImplementationWorkCommitment，缺失/损坏明确拒绝。
+当前观察可不同于历史 after-image；它是新事实，不改写旧结果或追补旧 credit。
+
+完整性只覆盖确切的当前目标集合；不将它宣称为整个 Workspace 或已删除资源的完整历史。
+当前 receipt 只有单目标 content 版本边时可编译；多目标 aggregate hash 或无法定位原前像时以具体
+`semantic_change_review_source_invalid`/`candidate_change_review_source_invalid` 在 provider 前拒绝，禁止伪造 baseline。
+完整适用事实仍不可判定时保留原 inconclusive 终态；本改动不增加通用重试、后继 Run 或新 authority。
+
+SM-3 在合法新请求边界携带/冻结事实，SM-4 继续恢复原请求；SM-2 的普通验证、独立 assessment、
+credit/reopen 与终态裁决不由该投影替代，SM-1 不变。完整性/来源拒绝不消费 provider 调用或授予验收 credit。

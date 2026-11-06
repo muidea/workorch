@@ -69,6 +69,13 @@ func validateRuntimeSemanticRenderedIntegrity(schema string, context runtimecont
 		}
 	}
 
+	var workContent *runtimecontract.RuntimeImplementationWorkContent
+	if authority.WorkContext != nil {
+		workContent = authority.WorkContext.Content
+	}
+	if expandChangeReviewFiles(tail.ChangeReview, tail.ChangeReviewFileRefs, changeReviewBodySources(workContent, "C3.workContext.content", authority.Manifest.ValidationGenerationContexts, "C3.manifest.validationGenerationContexts")) != nil {
+		missing = append(missing, "P4.change_review_reference")
+	}
 	for _, field := range []struct {
 		name  string
 		equal bool
@@ -77,6 +84,7 @@ func validateRuntimeSemanticRenderedIntegrity(schema string, context runtimecont
 		{"P1.semantic_execution_feedback", reflect.DeepEqual(tail.ExecutionFeedback, context.ExecutionFeedback)},
 		{"P3.semantic_execution_history", reflect.DeepEqual(tail.ExecutionHistory, runtimeSemanticVisibleHistory(context, manifest))},
 		{"P3.semantic_execution_budget", reflect.DeepEqual(tail.ExecutionBudget, context.ExecutionBudget)},
+		{"P4.change_review", reflect.DeepEqual(tail.ChangeReview, context.ChangeReview)},
 		{"P4.semantic_work_context", reflect.DeepEqual(tail.WorkContext, expectedWorkContext)},
 	} {
 		if tailErr != nil || !field.equal {
@@ -101,6 +109,9 @@ func validateRuntimeSemanticRenderedIntegrity(schema string, context runtimecont
 		}
 		break
 	}
+	if authorityErr == nil && authority.OutputInstruction != runtimeSemanticSharedWorkOutputInstruction(context, manifest)+runtimeChangeReviewInstruction(context.ChangeReview) {
+		missing = append(missing, "P0.semantic_output_instruction")
+	}
 	if context.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
 		projection, err := runtimeSemanticManifestForProvider(manifest, context.PlanStep, context.BatchCoverageWorkItemIDs)
 		if err != nil {
@@ -110,10 +121,6 @@ func validateRuntimeSemanticRenderedIntegrity(schema string, context runtimecont
 		if json.Unmarshal([]byte(contents["C3"]), &actual) != nil {
 			missing = append(missing, "P0.semantic_authority")
 		} else {
-			expectedInstruction := runtimeSemanticSharedWorkOutputInstruction(context, manifest)
-			if actual.OutputInstruction != expectedInstruction {
-				missing = append(missing, "P0.semantic_output_instruction")
-			}
 			if !reflect.DeepEqual(actual.Manifest.ValidationGenerationContexts, projection.ValidationGenerationContexts) {
 				missing = append(missing, "P4.validation_generation_context")
 			}

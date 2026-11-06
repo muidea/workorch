@@ -279,6 +279,11 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_work_context_invalid", workErr.Error(), nil)
 	}
 	semanticContext.WorkContext = workContext
+	changeReview, changeErr := runtime.SemanticChangeReviewContext(aggregate, semanticContext, manifest)
+	if changeErr != nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_change_review_source_invalid", changeErr.Error(), nil)
+	}
+	semanticContext.ChangeReview = changeReview
 	requestIdentityHash, identityErr := runtime.SemanticRequestIdentityHash(ledger)
 	if identityErr != nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_request_identity_invalid", identityErr.Error(), nil)

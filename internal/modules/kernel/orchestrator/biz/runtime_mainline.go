@@ -77,6 +77,11 @@ func (m *Biz) requestAndSealRuntimeCandidate(
 		return m.runtimeRecordFailure(ctx, aggregate, runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_context_integrity", Signature: "runtime-context-integrity", Message: contentErr.Error()})
 	}
 	candidateContext.ImplementationWorkContent = content
+	changeReview, changeErr := runtime.CandidateChangeReviewContext(aggregate, candidateContext)
+	if changeErr != nil {
+		return m.runtimeRecordFailure(ctx, aggregate, runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "candidate_change_review_source_invalid", Signature: "candidate-change-review-source-invalid", Message: changeErr.Error()})
+	}
+	candidateContext.ChangeReview = changeReview
 	if candidateAttempt == 1 {
 		if err := runtime.ValidatePersistedCandidateCorrection(aggregate, manifest); err != nil {
 			return m.runtimeRecordFailure(ctx, aggregate, runtimecontract.FailureFact{

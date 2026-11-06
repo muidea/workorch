@@ -645,6 +645,7 @@ func runtimeSemanticCatalogVariantIDs(catalog RuntimeOperationAdmissibility, kin
 // ExecutionHistory separately observes bounded Run-local committed work; it
 // never expands the current manifest or grants acceptance credit.
 type RuntimeSemanticPlanRequestContext struct {
+	ChangeReview             *RuntimeChangeReviewContext
 	WorkspaceID              common.WorkspaceID
 	RunID                    common.RunID
 	Definition               RuntimeDefinitionContext
@@ -673,6 +674,7 @@ func (c RuntimeSemanticPlanRequestContext) Normalized() RuntimeSemanticPlanReque
 	c.ExecutionHistory = c.ExecutionHistory.Clone()
 	c.ExecutionBudget = c.ExecutionBudget.Clone()
 	c.WorkContext = c.WorkContext.Clone()
+	c.ChangeReview = c.ChangeReview.Clone()
 	for i := range c.ExecutionFeedback {
 		c.ExecutionFeedback[i] = c.ExecutionFeedback[i].Clone()
 	}
@@ -755,6 +757,9 @@ func (c RuntimeSemanticPlanRequestContext) Validate(manifest RuntimeSemanticPlan
 		return err
 	}
 	if err := c.ExecutionBudget.Validate(c, manifest); err != nil {
+		return err
+	}
+	if err := c.ChangeReview.Validate(c.WorkspaceID, c.RunID, c.Definition.Revision); err != nil {
 		return err
 	}
 	if err := c.WorkContext.Validate(manifest); err != nil {
