@@ -75,7 +75,7 @@ func (c RuntimeExpectedDocumentContract) Clone() RuntimeExpectedDocumentContract
 
 func (c RuntimeExpectedDocumentContract) Validate() error {
 	c = c.Normalized()
-	if c.SchemaVersion != RuntimeExpectedDocumentSchemaCurrent || c.Hash == "" || c.ManifestHash == "" || c.LogicalRequestID == "" || c.StablePrefixHash == "" || c.CorrectionAttempt < 0 || c.CorrectionAttempt > 1 || c.MaxOutputTokens <= 0 || c.MaxOutputTokens > 131072 || c.MaxRecoveryAttempts <= 0 || c.MaxRecoveryAttempts > RuntimeRecoveryBudgetLimit {
+	if c.SchemaVersion != RuntimeExpectedDocumentSchemaCurrent || c.Hash == "" || c.ManifestHash == "" || c.LogicalRequestID == "" || c.StablePrefixHash == "" || c.CorrectionAttempt < 0 || c.CorrectionAttempt > 1 || c.MaxOutputTokens <= 0 || c.MaxRecoveryAttempts <= 0 || c.MaxRecoveryAttempts > RuntimeRecoveryBudgetLimit {
 		return common.ErrInvalidArgument
 	}
 	switch c.DocumentKind {

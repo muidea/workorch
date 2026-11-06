@@ -28,6 +28,48 @@ func frozenProviderFixture(t *testing.T) (models.RuntimeCandidateRequest, models
 	}
 	return r, p
 }
+
+func TestFrozenProviderInputAndRuntimeReservationUseSameModelCapacity(t *testing.T) {
+	r, _ := frozenProviderFixture(t)
+	c := r.SemanticContext.ProviderCeiling
+	c.ContextWindowTokens, c.ProviderMaxOutputTokens, c.EffectiveMaxOutputTokens = 700000, 180000, 180000
+	c.MaxInputTokens, c.MaxBytes = 390000, 1560000
+	r.ExpectedDocument.MaxOutputTokens = 180000
+	r.ExpectedDocument.Hash = rc.StableRuntimeExpectedDocumentHash(*r.ExpectedDocument)
+	p, err := runtimeProviderRequest(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, ref, err := freezeRuntimeProviderInput(r, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.FrozenInput, r.FrozenInputRef = raw, ref
+	restored, err := runtimeProviderRequestForSubmission(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger, _ := rc.NewRuntimeExecutionBudgetLedger(rc.DefaultRuntimeExecutionBudgetPolicy())
+	specs, err := rc.RuntimeProviderBudgetAllocationSpecs(ledger, c, r.ExpectedDocument.MaxOutputTokens, r.DocumentKind, 0, 1, r.RequestIdentity.LogicalRequestID, "physical")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, spec := range specs {
+		switch spec.Dimension {
+		case rc.RuntimeBudgetDimensionProviderInputToken:
+			if spec.ReservedAmount != int64(restored.ContextBudget.ContextWindowTokens) {
+				t.Fatal("frozen input and reservation capacity differ")
+			}
+		case rc.RuntimeBudgetDimensionProviderOutputToken:
+			if spec.ReservedAmount != int64(restored.MaxOutputTokens) || restored.MaxOutputTokens != 180000 {
+				t.Fatal("output retained a fixed 131072 ceiling")
+			}
+		}
+	}
+	if restored.ContextBudget.CachePlan.RenderedStablePrefixHash != p.ContextBudget.CachePlan.RenderedStablePrefixHash {
+		t.Fatal("budget changed stable prefix")
+	}
+}
 func TestFrozenProviderInputRestoresExactMessagesWithoutRerender(t *testing.T) {
 	r, p := frozenProviderFixture(t)
 	raw, ref, err := freezeRuntimeProviderInput(r, p)

@@ -1913,6 +1913,20 @@ SM-3 在物理提交前通过 LLM owner 预检冻结完整 ProviderRequest、原
 submitted-without-outcome，未知物理结果仍按 unknown 结算，不因输入原件缺失重发。允许的 correction 保留原 C0–C3、
 schema、角色消息块和路由 key，仅投影该合同允许的新 C4/C5。fresh 请求才消费当前布局。
 
+provider token reservation 在唯一 SM-3 submission CAS 中由同一封存 `ProviderCeiling` 与
+`ExpectedDocument.MaxOutputTokens` 编译；semantic、operations、correction 和完整文档恢复共用此入口。
+没有 exact tokenizer 时，input reservation 覆盖 provider 声明的整个 `ContextWindowTokens`；
+不能把字节估算、`MaxInputTokens` 的装配目标或 `context - maxOutput` 当作实际 native input 上界。
+output reservation 等于原封存、实际提交的 `max_output_tokens`。新 activation 的默认 token policy
+保留 Run 总额，不再把固定 131072 当成所有模型的单次容量；已有 policy/allocations 不重新编译或扩额。
+原封存 MaxIncrement 或 Run 余额不足时，在零 physical call 下返回 typed `execution_budget_exhausted`，
+携带 dimension、required、remaining 与适用的 maxIncrement。精确 usage 仍按原物理身份原子结算一次；
+超出声明容量的 owner fact 不截断、不 top-up，错误保留 logical/physical、dimension、actual 与 reserved。
+SM-4 消费原冻结 ceiling/ExpectedDocument 和原账本，SM-2 保留预算失败分类；SM-1 与三 ACK 不变。
+此预留不是 exact token 计数或通用内容切片器；完整适用输入仍由原 owner 编译、精确复用和容量门禁处理。
+回归：`biz/runtime/provider_token_reservation_test.go`、`biz/runtime_semantic_preflight_test.go`、
+`../../blocks/llm/biz/runtime_provider_input_test.go` 与 typed budget contract tests。
+
 C1/C3 的本地引用仅共享同请求内逐值相等的正文或原意图；提交前展开核对完整 owner 输入。普通 order 不携带工作正文
 或要求 implementationIntent；purpose/proof、独立输入审查与终验仍保留所需完整语料。实际 bytes、展开 bytes、引用数及
 阶段组件来源沿原 audit 投影，既不是 token 估计，也不是第二套预算。共享快照断点仅为 requested hint；远端生效、

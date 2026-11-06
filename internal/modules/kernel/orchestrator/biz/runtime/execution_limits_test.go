@@ -102,7 +102,7 @@ func TestExecutionLimitsProviderReservationCASAndRestart(t *testing.T) {
 			// balance. Both document paths use this same pure allocation compiler.
 			for _, kind := range []runtimecontract.RuntimeProviderDocumentKind{runtimecontract.RuntimeProviderDocumentOperations, runtimecontract.RuntimeProviderDocumentSemanticPlan} {
 				for _, sequence := range []int{1, 2} {
-					specs, err := runtimecontract.RuntimeProviderBudgetAllocationSpecs(submitted.ExecutionBudget, kind, 0, sequence, "new-logical", "new-physical")
+					specs, err := runtimecontract.RuntimeProviderBudgetAllocationSpecs(submitted.ExecutionBudget, submitted.Facts.Resources.ProviderCeiling, session.ExpectedDocument.MaxOutputTokens, kind, 0, sequence, "new-logical", "new-physical")
 					if err != nil {
 						t.Fatal(err)
 					}

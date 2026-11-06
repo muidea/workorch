@@ -36,6 +36,57 @@ func newRuntimeSemanticPreflightModule(t *testing.T, hub magicevent.Hub, repo ru
 	return module
 }
 
+func TestRuntimeSemanticTokenBudgetRefusesBeforeProviderAndClassifiesExactly(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	repo, aggregate := runtimeSemanticPreflightFixture(t)
+	for i := range aggregate.ExecutionBudget.Policy.Dimensions {
+		p := &aggregate.ExecutionBudget.Policy.Dimensions[i]
+		if p.Dimension == runtimecontract.RuntimeBudgetDimensionProviderInputToken {
+			p.MaxIncrement = 4096
+		}
+	}
+	aggregate.ExecutionBudget.Policy.PolicyHash = runtimecontract.StableRuntimeExecutionBudgetPolicyHash(aggregate.ExecutionBudget.Policy)
+	aggregate.Facts.ExecutionBudgetPolicy = aggregate.ExecutionBudget.Policy.Clone()
+	repo.aggregate = aggregate
+	preflights, providers := 0, 0
+	observer := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	observer.Subscribe(llmevents.TopicPreflightRuntimeCandidate, func(e magicevent.Event, result magicevent.Result) {
+		preflights++
+		c := e.Data().(llmevents.PreflightRuntimeCandidateCommand)
+		result.Set(withRuntimePreflightSnapshotForTest(c, llmevents.PreflightRuntimeCandidateResult{DocumentKind: c.DocumentKind, Feedback: runtimePreflightFeedbackForTest(t, c, "")}), nil)
+	})
+	observer.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providers++ })
+	m := newRuntimeSemanticPreflightModule(t, hub, repo)
+	started, err := m.driveRuntimeSemanticPlanning(ctx, aggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = m.driveRuntimeSemanticPlanning(ctx, started)
+	var exhausted *runtimecontract.RuntimeBudgetExhaustedError
+	if !errors.As(err, &exhausted) || exhausted.Required != 8192 || exhausted.MaxIncrement != 4096 {
+		t.Fatalf("wrong refusal: %v", err)
+	}
+	failure := classifyRuntimeDriveFailure(err)
+	if failure.Class != runtimecontract.FailureClassExecutionBudgetExhausted || failure.Code != "execution_budget_exhausted" {
+		t.Fatalf("wrong classification: %+v", failure)
+	}
+	if preflights != 1 || providers != 0 || !reflect.DeepEqual(repo.aggregate.ExecutionBudget, aggregate.ExecutionBudget) {
+		t.Fatal("budget refusal performed physical work")
+	}
+	if len(repo.aggregate.CandidateRequestSessions) != 1 || repo.aggregate.CandidateRequestSessions[0].ProviderSubmitted {
+		t.Fatal("budget refusal marked provider submitted")
+	}
+	// Recreated drive consumes the same frozen request; no new preflight,
+	// reservation, physical call or policy is manufactured on recovery.
+	restarted := newRuntimeSemanticPreflightModule(t, hub, repo)
+	_, err = restarted.driveRuntimeSemanticPlanning(ctx, repo.aggregate)
+	if !errors.As(err, &exhausted) || preflights != 1 || providers != 0 || !reflect.DeepEqual(repo.aggregate.ExecutionBudget, aggregate.ExecutionBudget) {
+		t.Fatalf("recovery changed refused transaction: %v", err)
+	}
+}
+
 func TestRuntimeSemanticLatePreflightCannotReopenTerminatedIntent(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)

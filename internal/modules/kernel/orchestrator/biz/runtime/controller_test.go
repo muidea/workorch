@@ -1999,6 +1999,7 @@ func controllerFacts() runtimecontract.RuntimeFacts {
 		Slices:       []runtimecontract.RuntimeAcceptanceSlice{{ID: "slice-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}}},
 		Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{"file/write"}},
 	}
+	facts.Resources.ProviderCeiling = runtimeSubmissionTestCeiling(facts)
 	facts.ConvergencePolicy = runtimecontract.DefaultRuntimeConvergencePolicy()
 	facts.RecoveryPolicy = runtimecontract.DefaultRuntimeRecoveryPolicy()
 	facts.ExecutionBudgetPolicy = runtimecontract.DefaultRuntimeExecutionBudgetPolicy()

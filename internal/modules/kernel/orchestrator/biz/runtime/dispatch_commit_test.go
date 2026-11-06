@@ -1298,7 +1298,7 @@ func dispatchDefinition() runtimecontract.RuntimeDefinitionContext {
 }
 
 func baseDispatchFacts() runtimecontract.RuntimeFacts {
-	return runtimecontract.RuntimeFacts{
+	facts := runtimecontract.RuntimeFacts{
 		Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "runtime-evidence-00000000000000000000",
 		Focus: runtimecontract.CoverageFocus{
@@ -1308,6 +1308,8 @@ func baseDispatchFacts() runtimecontract.RuntimeFacts {
 		Coverage:     []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateOpen}},
 		Capabilities: runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{"patch/apply"}, ValidationKinds: []string{"validation/managed_session"}},
 	}
+	facts.Resources.ProviderCeiling = runtimeSubmissionTestCeiling(facts)
+	return facts
 }
 
 func stateChangeCandidate() runtimecontract.RuntimeCandidate {

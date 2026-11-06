@@ -168,6 +168,8 @@ func reserveCandidateRequestExecutionBudget(aggregate *RuntimeAggregate, session
 	}
 	specs, err := runtimecontract.RuntimeProviderBudgetAllocationSpecs(
 		aggregate.ExecutionBudget,
+		aggregate.Facts.Resources.ProviderCeiling,
+		session.ExpectedDocument.MaxOutputTokens,
 		session.DocumentKind,
 		session.ExpectedDocument.CorrectionAttempt,
 		sequence,
@@ -242,7 +244,7 @@ func applyCandidateRequestBudgetSettlement(aggregate *RuntimeAggregate, settleme
 			ConfirmedAmount: confirmed, UnknownAmount: unknown, OwnerResultRef: fact.OwnerFactRef, OwnerResultHash: fact.OwnerFactHash,
 		})
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("runtime provider settlement logical=%s physical=%s dimension=%s confirmed=%d unknown=%d reserved=%d: %w", fact.LogicalRequestID, fact.PhysicalCallID, allocation.Dimension, confirmed, unknown, allocation.ReservedAmount, err)
 		}
 		changed = changed || joined
 	}

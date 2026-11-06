@@ -183,6 +183,10 @@ func RuntimeExecutionBudgetPolicyForRuntimePolicies(convergence RuntimeConvergen
 	convergence = convergence.Normalized()
 	recovery = recovery.Normalized()
 	const providerCalls int64 = 4096
+	// Token totals remain Run limits. A new policy does not pretend that
+	// 131072 is every model's physical-call capacity: the sealed LLM ceiling
+	// and expected document determine each reservation below. Existing policies
+	// are persisted values and are never recompiled by submission or recovery.
 	policy := RuntimeExecutionBudgetPolicy{
 		SchemaVersion:      RuntimeExecutionBudgetSchemaCurrent,
 		PolicyRevision:     RuntimeExecutionBudgetPolicyV1,
@@ -190,8 +194,8 @@ func RuntimeExecutionBudgetPolicyForRuntimePolicies(convergence RuntimeConvergen
 		RestartDisposition: RuntimeBudgetRestartFreshFromSuccessorPolicy,
 		Dimensions: []RuntimeBudgetDimensionPolicy{
 			{Dimension: RuntimeBudgetDimensionProviderCall, Unit: "call", Limit: providerCalls, MaxIncrement: 1, ExhaustionDisposition: RuntimeBudgetExhaustionTerminal},
-			{Dimension: RuntimeBudgetDimensionProviderInputToken, Unit: "token", Limit: providerCalls * 131072, MaxIncrement: 131072, ExhaustionDisposition: RuntimeBudgetExhaustionTerminal},
-			{Dimension: RuntimeBudgetDimensionProviderOutputToken, Unit: "token", Limit: providerCalls * 131072, MaxIncrement: 131072, ExhaustionDisposition: RuntimeBudgetExhaustionTerminal},
+			{Dimension: RuntimeBudgetDimensionProviderInputToken, Unit: "token", Limit: providerCalls * 131072, MaxIncrement: providerCalls * 131072, ExhaustionDisposition: RuntimeBudgetExhaustionTerminal},
+			{Dimension: RuntimeBudgetDimensionProviderOutputToken, Unit: "token", Limit: providerCalls * 131072, MaxIncrement: providerCalls * 131072, ExhaustionDisposition: RuntimeBudgetExhaustionTerminal},
 			{Dimension: RuntimeBudgetDimensionWholeDocumentRecovery, Unit: "attempt", Limit: 512, MaxIncrement: 1, ExhaustionDisposition: RuntimeBudgetExhaustionTerminal},
 			{Dimension: RuntimeBudgetDimensionCandidateCorrection, Unit: "attempt", Limit: 128, MaxIncrement: 1, ExhaustionDisposition: RuntimeBudgetExhaustionTerminal},
 			{Dimension: RuntimeBudgetDimensionSemanticGeneration, Unit: "generation", Limit: 2048, MaxIncrement: 1, ExhaustionDisposition: RuntimeBudgetExhaustionTerminal},
@@ -697,11 +701,16 @@ type RuntimeBudgetExhaustedError struct {
 	Dimension RuntimeBudgetDimension
 	Required  int64
 	Remaining int64
+	// MaxIncrement is set when a sealed per-call limit, rather than the Run balance, rejects an allocation.
+	MaxIncrement int64
 }
 
 func (e *RuntimeBudgetExhaustedError) Error() string {
 	if e == nil {
 		return "runtime execution budget exhausted"
+	}
+	if e.MaxIncrement > 0 {
+		return fmt.Sprintf("runtime execution budget %s per-call limit exceeded: required=%d maxIncrement=%d remaining=%d", e.Dimension, e.Required, e.MaxIncrement, e.Remaining)
 	}
 	return fmt.Sprintf("runtime execution budget %s exhausted: required=%d remaining=%d", e.Dimension, e.Required, e.Remaining)
 }
@@ -721,7 +730,7 @@ func ReserveRuntimeBudgetAllocations(ledger RuntimeExecutionBudgetLedger, specs 
 		spec.LogicalConsumptionID = strings.TrimSpace(spec.LogicalConsumptionID)
 		spec.ScopeRef = strings.TrimSpace(spec.ScopeRef)
 		dimension, found := RuntimeBudgetDimensionPolicyFor(ledger.Policy, spec.Dimension)
-		if !found || runtimeBudgetDimensionUsesSourceLedger(spec.Dimension) || spec.LogicalConsumptionID == "" || spec.ScopeRef == "" || spec.ReservedAmount <= 0 || spec.ReservedAmount > dimension.MaxIncrement {
+		if !found || runtimeBudgetDimensionUsesSourceLedger(spec.Dimension) || spec.LogicalConsumptionID == "" || spec.ScopeRef == "" || spec.ReservedAmount <= 0 {
 			return RuntimeExecutionBudgetLedger{}, nil, false, common.ErrInvalidArgument
 		}
 		allocation := RuntimeBudgetAllocation{
@@ -744,6 +753,9 @@ func ReserveRuntimeBudgetAllocations(ledger RuntimeExecutionBudgetLedger, specs 
 		remaining, err := RuntimeBudgetRemaining(ledger, spec.Dimension)
 		if err != nil {
 			return RuntimeExecutionBudgetLedger{}, nil, false, err
+		}
+		if spec.ReservedAmount > dimension.MaxIncrement {
+			return RuntimeExecutionBudgetLedger{}, nil, false, &RuntimeBudgetExhaustedError{Dimension: spec.Dimension, Required: spec.ReservedAmount, Remaining: remaining, MaxIncrement: dimension.MaxIncrement}
 		}
 		if remaining < spec.ReservedAmount {
 			return RuntimeExecutionBudgetLedger{}, nil, false, &RuntimeBudgetExhaustedError{Dimension: spec.Dimension, Required: spec.ReservedAmount, Remaining: remaining}
@@ -1184,9 +1196,25 @@ func RuntimeBudgetRemaining(ledger RuntimeExecutionBudgetLedger, dimension Runti
 	return dimensionPolicy.Limit - unavailable, nil
 }
 
-func RuntimeProviderBudgetAllocationSpecs(ledger RuntimeExecutionBudgetLedger, documentKind RuntimeProviderDocumentKind, correctionAttempt, sequence int, logicalRequestID, physicalCallID string) ([]RuntimeBudgetAllocationSpec, error) {
+// RuntimeProviderBudgetAllocationSpecs compiles one physical call's reservation
+// from the same sealed ceiling used by the LLM owner. Input byte/token ratios
+// are sizing estimates, not native-usage bounds. Without an exact provider
+// tokenizer, reserve the whole declared context window for input; do not subtract
+// the requested output maximum (the actual output may be smaller). Output is
+// bounded by the exact max_output_tokens sent for this document. Unknown usage
+// retains these reservations. No content or native consumption is truncated.
+func RuntimeProviderBudgetAllocationSpecs(ledger RuntimeExecutionBudgetLedger, ceiling *ProviderCeiling, maxOutputTokens int, documentKind RuntimeProviderDocumentKind, correctionAttempt, sequence int, logicalRequestID, physicalCallID string) ([]RuntimeBudgetAllocationSpec, error) {
 	if correctionAttempt < 0 || correctionAttempt > 1 || sequence <= 0 || strings.TrimSpace(logicalRequestID) == "" || strings.TrimSpace(physicalCallID) == "" {
 		return nil, common.ErrInvalidArgument
+	}
+	if ceiling == nil {
+		return nil, fmt.Errorf("runtime provider budget requires a sealed provider ceiling")
+	}
+	if err := ceiling.Validate(); err != nil {
+		return nil, err
+	}
+	if maxOutputTokens <= 0 || maxOutputTokens != ceiling.EffectiveMaxOutputTokens || maxOutputTokens > ceiling.ProviderMaxOutputTokens {
+		return nil, fmt.Errorf("runtime provider budget output differs from sealed provider ceiling")
 	}
 	dimensions := []RuntimeBudgetDimension{RuntimeBudgetDimensionProviderCall, RuntimeBudgetDimensionProviderInputToken, RuntimeBudgetDimensionProviderOutputToken, RuntimeBudgetDimensionReasoningEffort}
 	switch documentKind {
@@ -1213,13 +1241,16 @@ func RuntimeProviderBudgetAllocationSpecs(ledger RuntimeExecutionBudgetLedger, d
 	}
 	ret := make([]RuntimeBudgetAllocationSpec, 0, len(dimensions))
 	for _, dimension := range dimensions {
-		policy, found := RuntimeBudgetDimensionPolicyFor(ledger.Policy, dimension)
+		_, found := RuntimeBudgetDimensionPolicyFor(ledger.Policy, dimension)
 		if !found {
 			return nil, fmt.Errorf("runtime provider budget dimension %q is absent", dimension)
 		}
 		amount := int64(1)
-		if dimension == RuntimeBudgetDimensionProviderInputToken || dimension == RuntimeBudgetDimensionProviderOutputToken {
-			amount = policy.MaxIncrement
+		switch dimension {
+		case RuntimeBudgetDimensionProviderInputToken:
+			amount = int64(ceiling.ContextWindowTokens)
+		case RuntimeBudgetDimensionProviderOutputToken:
+			amount = int64(maxOutputTokens)
 		}
 		ret = append(ret, RuntimeBudgetAllocationSpec{Dimension: dimension, LogicalConsumptionID: logicalRequestID, ScopeRef: physicalCallID, ReservedAmount: amount})
 	}

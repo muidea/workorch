@@ -229,7 +229,7 @@ func TestBudgetBufferedHashKeepsCompleteLedgerAndReload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	specs, err := RuntimeProviderBudgetAllocationSpecs(ledger, RuntimeProviderDocumentOperations, 0, 1, "logical", "physical")
+	specs, err := RuntimeProviderBudgetAllocationSpecs(ledger, providerBudgetTestCeiling(), 128000, RuntimeProviderDocumentOperations, 0, 1, "logical", "physical")
 	if err != nil {
 		t.Fatal(err)
 	}

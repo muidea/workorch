@@ -7,12 +7,103 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
+func providerBudgetTestCeiling() *ProviderCeiling {
+	return &ProviderCeiling{
+		Selection:           ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "fixed-model"}},
+		ContextWindowTokens: 500000, ProviderMaxOutputTokens: 128000, EffectiveMaxOutputTokens: 128000,
+		MaxInputTokens: 279000, MaxBytes: 1116000, CapabilityRevision: "fixed-cap", ConfigurationRevision: "fixed-config",
+	}
+}
+
+func TestProviderBudgetUsesCapabilityBoundsWithoutChangingRunTotal(t *testing.T) {
+	policy := DefaultRuntimeExecutionBudgetPolicy()
+	ledger, err := NewRuntimeExecutionBudgetLedger(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []RuntimeProviderDocumentKind{RuntimeProviderDocumentOperations, RuntimeProviderDocumentSemanticPlan} {
+		for _, sequence := range []int{1, 2} {
+			specs, err := RuntimeProviderBudgetAllocationSpecs(ledger, providerBudgetTestCeiling(), 128000, kind, 1, sequence, "logical", "physical")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, spec := range specs {
+				switch spec.Dimension {
+				case RuntimeBudgetDimensionProviderInputToken:
+					if spec.ReservedAmount != 500000 {
+						t.Fatalf("input reservation=%d", spec.ReservedAmount)
+					}
+				case RuntimeBudgetDimensionProviderOutputToken:
+					if spec.ReservedAmount != 128000 {
+						t.Fatalf("output reservation=%d", spec.ReservedAmount)
+					}
+				}
+			}
+			if _, _, _, err := ReserveRuntimeBudgetAllocations(ledger, specs); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, dimension := range []RuntimeBudgetDimension{RuntimeBudgetDimensionProviderInputToken, RuntimeBudgetDimensionProviderOutputToken} {
+		p, _ := RuntimeBudgetDimensionPolicyFor(policy, dimension)
+		if p.Limit != 4096*131072 {
+			t.Fatal("changed total token budget")
+		}
+	}
+}
+
+func TestProviderBudgetRejectsMissingCapacityAndPreservesSealedLimits(t *testing.T) {
+	ledger, _ := NewRuntimeExecutionBudgetLedger(DefaultRuntimeExecutionBudgetPolicy())
+	for _, c := range []*ProviderCeiling{nil, {}, {ContextWindowTokens: 500000}} {
+		if _, err := RuntimeProviderBudgetAllocationSpecs(ledger, c, 128000, RuntimeProviderDocumentOperations, 0, 1, "logical", "physical"); err == nil {
+			t.Fatal("missing capacity accepted")
+		}
+	}
+	for _, output := range []int{0, -1, 8192, 128001} {
+		if _, err := RuntimeProviderBudgetAllocationSpecs(ledger, providerBudgetTestCeiling(), output, RuntimeProviderDocumentOperations, 0, 1, "logical", "physical"); err == nil {
+			t.Fatal("invalid output accepted")
+		}
+	}
+	for _, dimension := range []RuntimeBudgetDimension{RuntimeBudgetDimensionProviderInputToken, RuntimeBudgetDimensionProviderOutputToken} {
+		for _, limitedBalance := range []bool{false, true} {
+			policy := DefaultRuntimeExecutionBudgetPolicy()
+			for i := range policy.Dimensions {
+				p := &policy.Dimensions[i]
+				if p.Dimension != dimension {
+					continue
+				}
+				p.MaxIncrement = 100000
+				if limitedBalance {
+					p.Limit = 100000
+				}
+			}
+			policy.PolicyHash = StableRuntimeExecutionBudgetPolicyHash(policy)
+			before, err := NewRuntimeExecutionBudgetLedger(policy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			specs, err := RuntimeProviderBudgetAllocationSpecs(before, providerBudgetTestCeiling(), 128000, RuntimeProviderDocumentOperations, 0, 1, "logical", "physical")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _, _, err = ReserveRuntimeBudgetAllocations(before, specs)
+			var exhausted *RuntimeBudgetExhaustedError
+			if !errors.As(err, &exhausted) || exhausted.Dimension != dimension || exhausted.MaxIncrement != 100000 {
+				t.Fatalf("wrong pre-call refusal: %v", err)
+			}
+			if len(before.Allocations) != 0 || before.Policy.PolicyHash != policy.PolicyHash {
+				t.Fatal("rejection changed sealed budget")
+			}
+		}
+	}
+}
+
 func TestRuntimeProviderBudgetAllocationSpecsReserveJoinAndProject(t *testing.T) {
 	ledger, err := NewRuntimeExecutionBudgetLedger(DefaultRuntimeExecutionBudgetPolicy())
 	if err != nil {
 		t.Fatal(err)
 	}
-	specs, err := RuntimeProviderBudgetAllocationSpecs(ledger, RuntimeProviderDocumentOperations, 0, 1, "logical-1", "physical-1")
+	specs, err := RuntimeProviderBudgetAllocationSpecs(ledger, providerBudgetTestCeiling(), 128000, RuntimeProviderDocumentOperations, 0, 1, "logical-1", "physical-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +197,7 @@ func TestRuntimeProviderBudgetAllocationSpecsDoNotRepeatLogicalAttemptDimensions
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			specs, err := RuntimeProviderBudgetAllocationSpecs(ledger, testCase.kind, testCase.attempt, testCase.sequence, "logical-1", "physical-1")
+			specs, err := RuntimeProviderBudgetAllocationSpecs(ledger, providerBudgetTestCeiling(), 128000, testCase.kind, testCase.attempt, testCase.sequence, "logical-1", "physical-1")
 			if err != nil {
 				t.Fatal(err)
 			}
