@@ -142,7 +142,7 @@ func parseGoTestJSONFacts(stdout, stderr string) shellGoTestJSONFacts {
 	caseOutcomes := make(map[string]string)
 	var diagnosticOutput strings.Builder
 	scanner := bufio.NewScanner(strings.NewReader(strings.Join([]string{stdout, stderr}, "\n")))
-	scanner.Buffer(make([]byte, 4096), 2*MaxCommandOutputBytes+1024)
+	scanner.Buffer(make([]byte, 4096), shellProjectRawOutputMaxBytes+1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		var event shellGoTestJSONEvent

@@ -33,7 +33,7 @@ func TestRuntimeValidationOutputReaderPreservesBytesAndRejectsIdentityDrift(t *t
 	digest := sha256.Sum256(raw)
 	hash := hex.EncodeToString(digest[:])
 	output := orchestratorevents.QueryRuntimeValidationOutputResult{
-		SourceReceiptHash: command.SourceReceiptHash, StageID: command.StageID, Stream: command.Stream, SavedSHA256: hash, Raw: raw,
+		SourceReceiptHash: command.SourceReceiptHash, StageID: command.StageID, Stream: command.Stream, SavedSHA256: hash, ChunkSHA256: hash, Raw: raw,
 		Identity: runtimecontract.RuntimeValidationOutputIdentity{Bytes: int64(len(raw)), SavedBytes: int64(len(raw)), SHA256: hash, Complete: true, Storage: &runtimecontract.RuntimeValidationOutputStorage{Reference: "owner-only-reference"}},
 	}
 	observer := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
@@ -93,5 +93,61 @@ func TestRuntimeValidationOutputReaderPreservesBytesAndRejectsIdentityDrift(t *t
 	output.Identity.OmittedReason = "output_capacity_exceeded"
 	if value, err := reader.ReadRuntimeRaw(ctx, ref); err != nil || value.OutputIdentity.Complete || value.OutputIdentity.Bytes != int64(len(raw)+1) || value.OutputIdentity.OmittedReason == "" {
 		t.Fatalf("partial saved bytes mislabeled: %+v err=%v", value, err)
+	}
+}
+
+func TestRuntimeValidationOutputReaderAssemblesChunksAndRejectsMidstreamDrift(t *testing.T) {
+	for _, mode := range []string{"complete", "identity", "saved-hash", "short-page", "wrong-offset", "tampered-page"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			hub := magicevent.NewHub(16)
+			defer hub.Terminate(ctx)
+			command := orchestratorevents.QueryRuntimeValidationOutputCommand{WorkspaceID: "ws", RunID: "run", DispatchID: "dispatch", OperationID: "op", Fence: 1, SourceReceiptHash: "original-receipt", StageID: "project-test", Stream: "stdout"}
+			command.ExecutionKey = runtimecontract.StableRuntimeOperationExecutionKey(command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID)
+			ref, err := command.ContentRef()
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw := []byte(strings.Repeat("native\x00\xff\r\n", 20000) + "late failure")
+			hash := func(b []byte) string { sum := sha256.Sum256(b); return hex.EncodeToString(sum[:]) }
+			identity := runtimecontract.RuntimeValidationOutputIdentity{Bytes: int64(len(raw)), SavedBytes: int64(len(raw)), SHA256: hash(raw), Complete: true, Storage: &runtimecontract.RuntimeValidationOutputStorage{Reference: "owner-ref"}}
+			observer := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
+			defer observer.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeValidationOutput)
+			calls := 0
+			if subscribeErr := observer.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeValidationOutput, func(ev magicevent.Event, result magicevent.Result) {
+				query := ev.Data().(orchestratorevents.QueryRuntimeValidationOutputCommand)
+				calls++
+				page := append([]byte(nil), raw[query.Offset:min(int64(len(raw)), query.Offset+runtimecontract.RuntimeValidationOutputChunkMaxBytes)]...)
+				value := orchestratorevents.QueryRuntimeValidationOutputResult{SourceReceiptHash: query.SourceReceiptHash, StageID: query.StageID, Stream: query.Stream, Offset: query.Offset, Identity: identity.Clone(), SavedSHA256: hash(raw), ChunkSHA256: hash(page), Raw: page}
+				if calls == 2 {
+					switch mode {
+					case "identity":
+						value.Identity.Storage.Reference = "other"
+					case "saved-hash":
+						value.SavedSHA256 = hash([]byte("other"))
+					case "short-page":
+						value.Raw = page[:len(page)-1]
+						value.ChunkSHA256 = hash(value.Raw)
+					case "wrong-offset":
+						value.Offset++
+					case "tampered-page":
+						value.Raw[0] ^= 1
+						value.ChunkSHA256 = hash(value.Raw)
+					}
+				}
+				result.Set(value, nil)
+			}); subscribeErr != nil {
+				t.Fatal(subscribeErr)
+			}
+
+			value, err := NewReader(hub).ReadRuntimeRaw(ctx, ref)
+			if mode == "complete" {
+				if err != nil || !reflect.DeepEqual(value.Content, raw) || value.ContentSHA256 != hash(raw) || calls < 3 {
+					t.Fatalf("chunk assembly: calls=%d err=%v", calls, err)
+				}
+			} else if err == nil || len(value.Content) != 0 {
+				t.Fatal("drift returned partial/invalid output")
+			}
+		})
 	}
 }

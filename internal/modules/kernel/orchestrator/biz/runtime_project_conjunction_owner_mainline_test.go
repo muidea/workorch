@@ -314,8 +314,22 @@ func assertProjectConjunctionPersistedOwnerOutputs(t *testing.T, ctx context.Con
 				if err != nil || !ok || value.ValidateFor(command) != nil || !reflect.DeepEqual(value.Identity, identity) {
 					t.Fatalf("actual raw identity mismatch: %v", err)
 				}
-				digest := sha256.Sum256(value.Raw)
-				if int64(len(value.Raw)) != identity.Bytes || hex.EncodeToString(digest[:]) != identity.SHA256 {
+				raw := append([]byte(nil), value.Raw...)
+				for int64(len(raw)) < identity.SavedBytes {
+					command.Offset = int64(len(raw))
+					response := hub.Send(magicevent.NewEventWithContext(shellevents.TopicQueryRuntimeValidationRawOutput, ModuleID, runtimecontract.RuntimeModuleShell, magicevent.NewHeader(), ctx, command))
+					if response == nil {
+						t.Fatal("missing raw chunk")
+					}
+					data, err := response.Get()
+					next, ok := data.(shellevents.QueryRuntimeValidationRawOutputResult)
+					if err != nil || !ok || next.ValidateFor(command) != nil || !reflect.DeepEqual(next.Identity, identity) || next.SavedSHA256 != value.SavedSHA256 {
+						t.Fatal("chunk drift", err)
+					}
+					raw = append(raw, next.Raw...)
+				}
+				digest := sha256.Sum256(raw)
+				if int64(len(raw)) != identity.Bytes || hex.EncodeToString(digest[:]) != identity.SHA256 {
 					t.Fatal("actual stage output bytes/hash were not preserved")
 				}
 				command.Fence++

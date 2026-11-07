@@ -2,9 +2,12 @@ package content
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"io"
+	"reflect"
 	"strings"
 	"unicode/utf8"
 
@@ -28,7 +31,7 @@ func (r *Reader) readRuntimeValidationOutput(ctx context.Context, parsed Runtime
 	var command orchestratorevents.QueryRuntimeValidationOutputCommand
 	decoder := json.NewDecoder(strings.NewReader(parsed.ItemID))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&command) != nil || decoder.Decode(new(any)) != io.EOF || command.Validate() != nil ||
+	if decoder.Decode(&command) != nil || decoder.Decode(new(any)) != io.EOF || command.Validate() != nil || command.Offset != 0 ||
 		command.WorkspaceID != parsed.WorkspaceID || command.RunID != parsed.RunID || parsed.FileName != command.Stream+".bin" {
 		return RuntimeRawContent{}, common.ErrInvalidArgument
 	}
@@ -41,8 +44,25 @@ func (r *Reader) readRuntimeValidationOutput(ctx context.Context, parsed Runtime
 		return RuntimeRawContent{}, err
 	}
 	identity := value.Identity.Clone()
+	savedSHA256 := value.SavedSHA256
+	raw := append([]byte(nil), value.Raw...)
+	for int64(len(raw)) < identity.SavedBytes {
+		command.Offset = int64(len(raw))
+		next, err := ownerreadports.ReadRuntimeValidationOutput(ctx, r.eventHub, command)
+		if err != nil {
+			return RuntimeRawContent{}, err
+		}
+		if !reflect.DeepEqual(next.Identity, identity) || next.SavedSHA256 != savedSHA256 {
+			return RuntimeRawContent{}, common.ErrConflict
+		}
+		raw = append(raw, next.Raw...)
+	}
+	digest := sha256.Sum256(raw)
+	if hex.EncodeToString(digest[:]) != savedSHA256 {
+		return RuntimeRawContent{}, common.ErrConflict
+	}
 	return RuntimeRawContent{
 		Ref: parsed.Ref, FileName: parsed.FileName, ContentType: "application/octet-stream",
-		Content: append([]byte(nil), value.Raw...), ContentSHA256: value.SavedSHA256, OutputIdentity: &identity,
+		Content: raw, ContentSHA256: savedSHA256, OutputIdentity: &identity,
 	}, nil
 }

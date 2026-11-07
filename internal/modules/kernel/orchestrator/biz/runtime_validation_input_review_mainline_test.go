@@ -76,6 +76,7 @@ type validationInputReviewMainlineOptions struct {
 	InvalidRevisionCandidate           bool
 	DependencyScopeErrorOnce           bool
 	ExecutionUncertaintyOnce           string
+	LargeProjectOutput                 bool
 }
 
 func TestDriveRuntimeInputReviewDoesNotWaitForExecutionTiming(t *testing.T) {
@@ -354,6 +355,10 @@ func %s(t *testing.T) {
 }
 
 `, native, parent)
+		if options.LargeProjectOutput {
+			initialFiles[inputTarget] = strings.Replace(initialFiles[inputTarget], " bin:=", ` for range 600 {t.Log(strings.Repeat("x",4096))}
+ bin:=`, 1)
+		}
 		if projectBehaviorRepair {
 			initialFiles[inputTarget] = strings.Replace(initialFiles[inputTarget], "wrong delivered behavior", "WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3", 1)
 		}

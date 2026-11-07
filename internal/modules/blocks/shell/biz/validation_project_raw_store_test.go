@@ -98,6 +98,150 @@ func TestProjectRawStorePreservesExactBytesAcrossReopen(t *testing.T) {
 	}
 }
 
+func TestProjectRawStoreLargeOutputChunkRecoveryAndIsolation(t *testing.T) {
+	ctx := context.Background()
+	directory := t.TempDir()
+	scope := shellProjectRawScope{WorkspaceID: "ws", RunID: "run", ExecutionKey: "large-execution", StageID: "project-test", Stream: "stdout"}
+	store, err := openShellProjectRawStore(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A late failure beyond the historical display limit must survive unchanged.
+	body := bytes.Repeat([]byte("native event\x00\xff\r\n"), 180000)
+	body = append(body, []byte("FAIL late-assertion expected=4 actual=3\n")...)
+	buffer := newShellProjectRawBuffer()
+	_, _ = buffer.Write(body)
+	want := buffer.fact()
+	ref, err := store.Store(ctx, scope, want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if duplicate, err := store.Store(ctx, scope, want); err != nil || duplicate != ref {
+		t.Fatalf("duplicate: %s %v", duplicate, err)
+	}
+	_ = store.Close()
+	store, err = openShellProjectRawStore(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	got, err := store.Read(ctx, scope, ref)
+	if err != nil || !reflect.DeepEqual(got, want) || !got.Complete {
+		t.Fatalf("large raw reopen: %v", err)
+	}
+	for _, offset := range []int64{0, 65530, 65536, int64(len(body) - 7), int64(len(body))} {
+		record, page, err := store.ReadChunk(ctx, scope, ref, offset)
+		end := min(int64(len(body)), offset+65536)
+		if err != nil || !bytes.Equal(page, body[offset:end]) || record.SavedSHA256 != want.SHA256 || len(record.Chunks) == 0 {
+			t.Fatalf("offset %d: %v", offset, err)
+		}
+	}
+	for _, offset := range []int64{-1, int64(len(body) + 1)} {
+		if _, _, err := store.ReadChunk(ctx, scope, ref, offset); err == nil {
+			t.Fatal("invalid offset accepted")
+		}
+	}
+	wrong := scope
+	wrong.RunID = "other"
+	if _, _, err := store.ReadChunk(ctx, wrong, ref, 0); err == nil {
+		t.Fatal("cross-run chunk accepted")
+	}
+	record, _, err := store.ReadChunk(ctx, scope, ref, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf := filepath.Join(directory, shellProjectRawScopeDirectory(scope))
+	last := filepath.Join(leaf, record.Chunks[len(record.Chunks)-1]+".bin")
+	if err := os.Remove(last); err != nil {
+		t.Fatal(err)
+	}
+	// Reading page zero must not load unrelated chunk files or reconstruct all raw.
+	if _, _, err := store.ReadChunk(ctx, scope, ref, 0); err != nil {
+		t.Fatalf("unrelated chunk loaded: %v", err)
+	}
+	if _, err := store.Read(ctx, scope, ref); err == nil {
+		t.Fatal("missing final chunk accepted")
+	}
+	if _, _, err := store.ReadChunk(ctx, scope, ref, int64(len(body)-1)); err == nil {
+		t.Fatal("missing selected chunk accepted")
+	}
+	first := filepath.Join(leaf, record.Chunks[0]+".bin")
+	if err := os.WriteFile(first, []byte("tampered"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.ReadChunk(ctx, scope, ref, 0); err == nil {
+		t.Fatal("tampered chunk accepted")
+	}
+	if _, err := store.Store(ctx, scope, want); err == nil {
+		t.Fatal("publication replaced tampered chunk")
+	}
+}
+
+func TestProjectRawStoreChunkPublicationFailureAndUnsafeChunk(t *testing.T) {
+	ctx := context.Background()
+	scope := shellProjectRawScope{WorkspaceID: "ws", RunID: "run", ExecutionKey: "execution", StageID: "test", Stream: "stdout"}
+	for _, scenario := range []string{"metadata-publication", "symlink", "permissions"} {
+		t.Run(scenario, func(t *testing.T) {
+			directory := t.TempDir()
+			store, err := openShellProjectRawStore(directory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			buffer := newShellProjectRawBuffer()
+			_, _ = buffer.Write(bytes.Repeat([]byte("native event\n"), 20000))
+			raw := buffer.fact()
+			if scenario == "metadata-publication" {
+				store.linkFile = func(root *os.Root, old, new string) error {
+					if strings.HasSuffix(new, ".json") {
+						return errors.New("metadata publication failed")
+					}
+					return root.Link(old, new)
+				}
+				if ref, err := store.Store(ctx, scope, raw); err == nil || ref != "" {
+					t.Fatal("partial chunk publication acknowledged")
+				}
+				store.linkFile = func(root *os.Root, old, new string) error { return root.Link(old, new) }
+			}
+			ref, err := store.Store(ctx, scope, raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := store.Read(ctx, scope, ref); err != nil || !reflect.DeepEqual(got, raw) {
+				t.Fatal("publication recovery changed original bytes", err)
+			}
+			if scenario == "metadata-publication" {
+				return
+			}
+			record, _, err := store.ReadChunk(ctx, scope, ref, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(directory, shellProjectRawScopeDirectory(scope), record.Chunks[0]+".bin")
+			if scenario == "symlink" {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				outside := filepath.Join(t.TempDir(), "unrelated")
+				if err := os.WriteFile(outside, raw.Raw[:65536], 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, path); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.Chmod(path, 0644); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := store.ReadChunk(ctx, scope, ref, 0); err == nil {
+				t.Fatal("unsafe chunk read accepted")
+			}
+			if _, err := store.Store(ctx, scope, raw); err == nil {
+				t.Fatal("unsafe chunk publication accepted")
+			}
+		})
+	}
+}
+
 func TestProjectRawStoreRetainsExplicitIncompleteOutputAndRejectsInvalidFacts(t *testing.T) {
 	ctx := context.Background()
 	store, err := openShellProjectRawStore(t.TempDir())
@@ -107,14 +251,14 @@ func TestProjectRawStoreRetainsExplicitIncompleteOutputAndRejectsInvalidFacts(t 
 	defer store.Close()
 	scope := shellProjectRawScope{WorkspaceID: "ws", RunID: "run", ExecutionKey: "execution", StageID: "stage", Stream: "stderr"}
 	buffer := newShellProjectRawBuffer()
-	_, _ = buffer.Write(bytes.Repeat([]byte{'x'}, MaxCommandOutputBytes+1))
+	_, _ = buffer.Write(bytes.Repeat([]byte{'x'}, shellProjectRawOutputMaxBytes+1))
 	raw := buffer.fact()
 	ref, err := store.Store(ctx, scope, raw)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.Read(ctx, scope, ref)
-	if err != nil || !reflect.DeepEqual(got, raw) || got.Complete || got.OmittedReason == "" || got.SavedBytes != MaxCommandOutputBytes || got.Bytes != MaxCommandOutputBytes+1 {
+	if err != nil || !reflect.DeepEqual(got, raw) || got.Complete || got.OmittedReason == "" || got.SavedBytes != shellProjectRawOutputMaxBytes || got.Bytes != shellProjectRawOutputMaxBytes+1 {
 		t.Fatal("超界前缀被洗成完整原文或遗漏原因丢失")
 	}
 	for _, scenario := range []string{"saved", "bytes", "hash", "complete", "reason", "overbound"} {

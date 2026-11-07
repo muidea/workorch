@@ -425,7 +425,9 @@ func TestEvaluateCandidateAdmissionUsesSemanticContractNotOperationIdentityOrPar
 
 func TestEvaluateCandidateAdmissionRejectsAcceptedNoProgressShape(t *testing.T) {
 	aggregate := validationAggregate(t)
-	candidate := validationCandidate()
+	// A persisted execution carries its sealed binding, as does the successor
+	// candidate. An unbound provider proposal is not an executed replay fact.
+	candidate := runtimeTestBindCandidateToCurrentFocus(t, aggregate, validationCandidate())
 	operation := candidate.Validation.Operations[0].Operation
 	aggregate.Facts.Repair = runtimecontract.RuntimeRepairLedger{
 		FocusID: aggregate.Facts.Focus.ID,

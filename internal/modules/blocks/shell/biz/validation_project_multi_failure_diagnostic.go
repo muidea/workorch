@@ -39,7 +39,7 @@ func shellProjectMultiFailedCases(stage shellProjectStageFact, sources []runtime
 	failedPackages, casePackages := map[string]bool{}, map[string]bool{}
 	seen := map[string]bool{}
 	scanner := bufio.NewScanner(bytes.NewReader(stage.Stdout.Raw))
-	scanner.Buffer(make([]byte, 4096), MaxCommandOutputBytes+1)
+	scanner.Buffer(make([]byte, 4096), shellProjectRawOutputMaxBytes+1)
 	for scanner.Scan() {
 		if len(bytes.TrimSpace(scanner.Bytes())) == 0 {
 			continue
@@ -164,7 +164,7 @@ func runShellProjectMultiFailureDiagnostic(ctx context.Context, directory string
 		spec := shellProjectStageSpec{ID: "project-diagnostic-" + strings.TrimPrefix(source.SourceRef, "shell-project-source-"), Scope: "diagnostic-source:" + source.SourceRef, Args: args, JSON: true}
 		specs = append(specs, spec)
 		stageEnv := shellProcessBehaviorEnvironment(shellBehaviorEnvironment(env), processPath, args)
-		stage, _ := runShellProjectStage(ctx, directory, stageEnv, spec)
+		stage, _ := runShellProjectStageWithBudget(ctx, directory, stageEnv, spec, request.projectRawBudget)
 		stages = append(stages, stage)
 		got, complete := shellProjectMultiFailedCases(stage, sources)
 		if !complete || len(got) != 1 || !slices.Equal(got[source.SourceRef], cases) || stage.SourceBefore != original.SourceAfter || ctx.Err() != nil {

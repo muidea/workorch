@@ -938,3 +938,39 @@ func TestCandidateCorrectionFrontierSealsOnlyContractDeclaredClosedParameter(t *
 		t.Fatal("typed closed-parameter alternative did not cross its sealed witness")
 	}
 }
+
+func TestCandidateCorrectionFrontierRejectsEquivalentManagedTargets(t *testing.T) {
+	aggregate := validationAggregate(t)
+	original := runtimeTestBindCandidateToCurrentFocus(t, aggregate, validationCandidate())
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(aggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	original = runtimeTestMustDeriveCandidateForManifest(t, manifest, original)
+	omitted := original
+	omitted.Validation = &runtimecontract.ValidationCandidate{Operations: append([]runtimecontract.ValidationOperation(nil), original.Validation.Operations...)}
+	omitted.Validation.Operations[0].Operation = original.Validation.Operations[0].Operation.Clone()
+	omitted.Validation.Operations[0].Operation.TargetRefs = nil
+	omitted = runtimeTestMustDeriveCandidateForManifest(t, manifest, omitted)
+	if err := runtimecontract.ValidateRuntimeCandidateAgainstManifest(manifest, omitted); err != nil {
+		t.Fatal(err)
+	}
+	blocked := []runtimecontract.RuntimeRejectedOperationShape{{Operation: original.Validation.Operations[0].Operation}}
+	failure := candidateadmission.Evaluate(candidateadmission.EvaluationInput{Manifest: manifest, Decision: aggregate.Decision, Facts: aggregate.Facts, Candidate: omitted, RejectedOperationShapes: blocked})
+	if failure == nil || failure.Code != candidateAdmissionCodeReplaysRejectedShape {
+		t.Fatalf("optional targets bypassed owner admission: %+v", failure)
+	}
+	_, correction, err := sealCandidateRejectionWithFrontier(failure, manifest, candidateCorrectionFrontier{candidate: &omitted, rejectedOperationShapes: blocked})
+	if err != nil || correction == nil || correction.Disposition != runtimecontract.RuntimeCandidateCorrectionRejectedFinal || correction.Witness != nil {
+		t.Fatalf("equivalent targets offered as new execution: %+v %v", correction, err)
+	}
+	outside := original
+	outside.Validation = &runtimecontract.ValidationCandidate{Operations: append([]runtimecontract.ValidationOperation(nil), original.Validation.Operations...)}
+	outside.Validation.Operations[0].Operation = original.Validation.Operations[0].Operation.Clone()
+	outside.Validation.Operations[0].Operation.TargetRefs = []string{"outside-authority.go"}
+	outside = runtimeTestMustDeriveCandidateForManifest(t, manifest, outside)
+	failure = candidateadmission.Evaluate(candidateadmission.EvaluationInput{Manifest: manifest, Decision: aggregate.Decision, Facts: aggregate.Facts, Candidate: outside, RejectedOperationShapes: blocked})
+	if failure == nil || failure.Code != candidateadmission.CodeInvalid {
+		t.Fatalf("replay masked target authority failure: %+v", failure)
+	}
+}

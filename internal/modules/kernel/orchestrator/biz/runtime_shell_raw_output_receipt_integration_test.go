@@ -243,7 +243,7 @@ func TestRuntimeShellRawOutputQueryPairsPersistedReceiptAuthority(t *testing.T) 
 		}
 		return shellevents.QueryRuntimeValidationRawOutputResult{
 			SourceReceiptHash: c.SourceReceiptHash, StageID: c.StageID, Stream: c.Stream,
-			Identity: value.OutputIdentity.Clone(), SavedSHA256: value.ContentSHA256, Raw: value.Content,
+			Identity: value.OutputIdentity.Clone(), SavedSHA256: value.ContentSHA256, ChunkSHA256: value.ContentSHA256, Raw: value.Content,
 		}, nil
 	}
 	before, err := controller.Load(ctx, request.WorkspaceID, request.RunID)

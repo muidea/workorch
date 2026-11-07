@@ -96,7 +96,7 @@ func (m *Biz) handleRuntimeValidationRawOutput(event magicevent.Event, result ma
 		setCapabilityError(result, err)
 		return
 	}
-	raw, readErr := store.Read(event.Context(), shellProjectRawScope{WorkspaceID: command.WorkspaceID, RunID: command.RunID, ExecutionKey: receipt.ExecutionKey, StageID: command.StageID, Stream: command.Stream}, identity.Storage.Reference)
+	record, chunk, readErr := store.ReadChunk(event.Context(), shellProjectRawScope{WorkspaceID: command.WorkspaceID, RunID: command.RunID, ExecutionKey: receipt.ExecutionKey, StageID: command.StageID, Stream: command.Stream}, identity.Storage.Reference, command.Offset)
 	closeErr := store.Close()
 	if readErr != nil {
 		setCapabilityError(result, readErr)
@@ -108,12 +108,12 @@ func (m *Biz) handleRuntimeValidationRawOutput(event magicevent.Event, result ma
 	}
 	expected := identity.Clone()
 	expected.Storage = nil
-	if shellProjectOutputIdentity(raw) != expected {
+	if shellProjectOutputIdentity(record.Output) != expected {
 		setCapabilityError(result, fmt.Errorf("%w: saved raw output does not match original receipt", common.ErrConflict))
 		return
 	}
-	digest := sha256.Sum256(raw.Raw)
-	output := shellevents.QueryRuntimeValidationRawOutputResult{SourceReceiptHash: command.SourceReceiptHash, StageID: command.StageID, Stream: command.Stream, Identity: *identity, SavedSHA256: hex.EncodeToString(digest[:]), Raw: raw.Raw}
+	chunkDigest := sha256.Sum256(chunk)
+	output := shellevents.QueryRuntimeValidationRawOutputResult{SourceReceiptHash: command.SourceReceiptHash, StageID: command.StageID, Stream: command.Stream, Identity: *identity, SavedSHA256: record.SavedSHA256, Offset: command.Offset, ChunkSHA256: hex.EncodeToString(chunkDigest[:]), Raw: chunk}
 	if err := output.ValidateFor(command); err != nil {
 		setCapabilityError(result, err)
 		return

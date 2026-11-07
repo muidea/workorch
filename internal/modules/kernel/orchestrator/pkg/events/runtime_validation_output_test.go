@@ -15,7 +15,7 @@ func TestRuntimeValidationOutputResultRejectsAlteredOrUnboundedOwnerFacts(t *tes
 	digest := sha256.Sum256(raw)
 	hash := hex.EncodeToString(digest[:])
 	value := QueryRuntimeValidationOutputResult{
-		SourceReceiptHash: command.SourceReceiptHash, StageID: command.StageID, Stream: command.Stream, Raw: raw, SavedSHA256: hash,
+		SourceReceiptHash: command.SourceReceiptHash, StageID: command.StageID, Stream: command.Stream, Raw: raw, SavedSHA256: hash, ChunkSHA256: hash,
 		Identity: runtimecontract.RuntimeValidationOutputIdentity{Bytes: 4, SavedBytes: 4, SHA256: hash, Complete: true, Storage: &runtimecontract.RuntimeValidationOutputStorage{Reference: "owner-reference"}},
 	}
 	if err := value.ValidateFor(command); err != nil {

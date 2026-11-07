@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -71,12 +72,12 @@ func TestProjectConjunctionRawBytesPreservedAndCapacityExplicit(t *testing.T) {
 	if !bytes.Equal(fact.Raw, raw) || !fact.Complete || fact.Bytes != int64(len(raw)) || fact.SHA256 != hex.EncodeToString(digest[:]) || !shellProjectRawFactValid(fact) {
 		t.Fatal("原 bytes 或身份被清洗/摘要替代")
 	}
-	large := bytes.Repeat([]byte("z"), MaxCommandOutputBytes+17)
+	large := bytes.Repeat([]byte("z"), shellProjectRawOutputMaxBytes+17)
 	buffer = newShellProjectRawBuffer()
 	_, _ = buffer.Write(large)
 	fact = buffer.fact()
 	digest = sha256.Sum256(large)
-	if fact.Complete || fact.Bytes != int64(len(large)) || fact.SavedBytes != MaxCommandOutputBytes || fact.OmittedReason == "" || fact.SHA256 != hex.EncodeToString(digest[:]) || shellProjectRawFactValid(fact) {
+	if fact.Complete || fact.Bytes != int64(len(large)) || fact.SavedBytes != shellProjectRawOutputMaxBytes || fact.OmittedReason == "" || fact.SHA256 != hex.EncodeToString(digest[:]) || shellProjectRawFactValid(fact) {
 		t.Fatal("超界输出被误标完整")
 	}
 }
@@ -206,5 +207,44 @@ func TestProjectConjunctionSourceSetIncludesNeighborsAndFixtures(t *testing.T) {
 			t.Fatalf("遗漏 source/member：%s %v", ref, err)
 		}
 		before = after
+	}
+}
+
+func TestProjectConjunctionRawQuotaSharedAcrossStreamsAndStages(t *testing.T) {
+	budget := &shellProjectRawBudget{remaining: 90000}
+	buffers := make([]*shellProjectRawBuffer, 6)
+	var wg sync.WaitGroup
+	for index := range buffers {
+		buffers[index] = newShellProjectRawBuffer()
+		buffers[index].budget = budget
+		wg.Go(func() { _, _ = buffers[index].Write(bytes.Repeat([]byte{'x'}, 30000)) })
+	}
+	wg.Wait()
+	saved := int64(0)
+	digest := sha256.Sum256(bytes.Repeat([]byte{'x'}, 30000))
+	for _, buffer := range buffers {
+		fact := buffer.fact()
+		saved += fact.SavedBytes
+		if fact.Bytes != 30000 || fact.SHA256 != hex.EncodeToString(digest[:]) {
+			t.Fatal("quota erased received bytes/hash")
+		}
+		if !fact.Complete && fact.OmittedReason != "shell_execution_raw_output_capacity_exceeded" {
+			t.Fatal("shared quota omission missing")
+		}
+	}
+	if saved != 90000 || budget.remaining != 0 {
+		t.Fatal("execution quota not enforced")
+	}
+	nextStage := newShellProjectRawBuffer()
+	nextStage.budget = budget
+	_, _ = nextStage.Write([]byte("late stage"))
+	if fact := nextStage.fact(); fact.Complete || fact.SavedBytes != 0 || fact.Bytes != 10 {
+		t.Fatal("stage reset execution quota")
+	}
+	isolated := newShellProjectRawBuffer()
+	isolated.budget = &shellProjectRawBudget{remaining: 90000}
+	_, _ = isolated.Write([]byte("other execution"))
+	if !isolated.fact().Complete {
+		t.Fatal("execution quotas leaked")
 	}
 }

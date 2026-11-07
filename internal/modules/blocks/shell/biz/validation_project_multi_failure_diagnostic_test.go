@@ -71,7 +71,7 @@ func TestProjectMultiFailureSourcePublicationIsExactAndProtectsOriginalTests(t *
 }
 
 func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
-	for _, scenario := range []string{"exact", "disjoint", "unobserved", "partial-unobserved", "skip", "drift", "missing-source", "changed-assertion", "additive-input-test", "legacy"} {
+	for _, scenario := range []string{"large-output", "exact", "disjoint", "unobserved", "partial-unobserved", "skip", "drift", "missing-source", "changed-assertion", "additive-input-test", "legacy"} {
 		t.Run(scenario, func(t *testing.T) {
 			root, internal := t.TempDir(), t.TempDir()
 			recipe := isolatedInputRecipe()
@@ -84,6 +84,10 @@ func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
 			}
 			target := shellValidationNativeCheckTargetRef(requirement, checks...)
 			files := map[string]string{"go.mod": "module fixture\ngo 1.26\n", "delivery/value.go": "package delivery\nfunc Value() int{return 3}\n", target: fmt.Sprintf("package checks\nimport(\"testing\"; delivery \"fixture/delivery\")\nfunc %s(t *testing.T){if delivery.Value()!=4{t.Fatal(\"WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3\")}}\n", checks[0].NativeCheckRef), "delivery/value_test.go": "package delivery\nimport \"testing\"\nfunc TestProduction(t *testing.T){if Value()!=4{t.Fatal(\"WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3\")}}\n"}
+			if scenario == "large-output" {
+				files["delivery/value_test.go"] = strings.Replace(files["delivery/value_test.go"], `import "testing"`, `import("testing";"strings")`, 1)
+				files["delivery/value_test.go"] = strings.Replace(files["delivery/value_test.go"], "if Value()!=4", `for range 600 {t.Log(strings.Repeat("x",4096))};if Value()!=4`, 1)
+			}
 			if scenario == "additive-input-test" {
 				files[target] += "func TestAdditive(t *testing.T){if delivery.Value()!=4{t.Fatal(\"WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3\")}}\n"
 				if inspection := inspectShellNativeValidationChecks(root, nil, checks); inspection.Code == "" {
@@ -149,7 +153,7 @@ func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
 			if err == nil || result.Conjunction == nil || result.Conjunction.Complete || result.Result.Evidence.Quality == common.EvidenceQualityValid || result.Conjunction.Validate() != nil {
 				t.Fatalf("failed project credited or lost: err=%v conjunction=%+v", err, result.Conjunction)
 			}
-			wantDiagnostic := scenario == "exact" || scenario == "disjoint" || scenario == "additive-input-test"
+			wantDiagnostic := scenario == "large-output" || scenario == "exact" || scenario == "disjoint" || scenario == "additive-input-test"
 			if (result.Result.ValidationFailureDiagnostic != nil) != wantDiagnostic {
 				t.Fatalf("%s wrong attribution: diagnostic=%+v stages=%+v", scenario, result.Result.ValidationFailureDiagnostic, result.Conjunction.Stages)
 			}
@@ -194,6 +198,21 @@ func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
 					if stage.DiagnosticSourceRef == "" || !reflect.DeepEqual(stage.BehaviorTargetRefs, wantSourceTargets) || stage.Stdout.Storage == nil || stage.Stdout.Storage.Reference == "" {
 						t.Fatal("source-specific real behavior/raw fact missing")
 					}
+				}
+			}
+			if scenario == "large-output" {
+				stage := result.Conjunction.Stages[1]
+				if !stage.Stdout.Complete || stage.Stdout.SavedBytes < 2000000 || stage.Stdout.Storage == nil {
+					t.Fatal("late failure raw incomplete")
+				}
+				store, err := openShellProjectRawStore(internal)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer store.Close()
+				raw, err := store.Read(context.Background(), shellProjectRawScope{WorkspaceID: "ws", RunID: "run", ExecutionKey: "multi-failure/" + scenario, StageID: stage.Identity.ID, Stream: "stdout"}, stage.Stdout.Storage.Reference)
+				if err != nil || !strings.Contains(string(raw.Raw[65536:]), "value_mismatch expected=4 actual=3") {
+					t.Fatal("late assertion lost", err)
 				}
 			}
 			if result.Conjunction.Stages[1].Identity.ID != "project-test" || !result.Conjunction.Stages[1].KnownFailure {

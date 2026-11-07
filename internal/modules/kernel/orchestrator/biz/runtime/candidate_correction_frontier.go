@@ -39,7 +39,7 @@ func (f candidateCorrectionFrontier) blockedOperationShapes() map[string]struct{
 	ret := make(map[string]struct{}, len(f.rejectedOperationShapes)+len(f.noProgressShapes))
 	for _, values := range [][]runtimecontract.RuntimeRejectedOperationShape{f.rejectedOperationShapes, f.noProgressShapes} {
 		for _, value := range runtimecontract.NormalizeRuntimeRejectedOperationShapes(values) {
-			ret[value.Hash] = struct{}{}
+			ret[candidateadmission.OperationReplayShape(value.Operation)] = struct{}{}
 		}
 	}
 	return ret
@@ -616,7 +616,7 @@ func candidateOperationMutationWitness(manifest runtimecontract.RuntimeCandidate
 	if err != nil || runtimecontract.ValidateRuntimeCandidateAgainstManifest(manifest, updated) != nil {
 		return nil
 	}
-	operationShape := runtimecontract.StableRuntimeOperationShape(mutated)
+	operationShape := candidateadmission.OperationReplayShape(mutated)
 	if _, found := blocked[operationShape]; found {
 		return nil
 	}

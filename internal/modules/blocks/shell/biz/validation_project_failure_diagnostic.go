@@ -32,7 +32,7 @@ func shellProjectExactFailedCases(stage shellProjectStageFact, request RuntimeCo
 	var failed []string
 	failedPackages, casePackages := map[string]bool{}, map[string]bool{}
 	scanner := bufio.NewScanner(bytes.NewReader(stage.Stdout.Raw))
-	scanner.Buffer(make([]byte, 4096), MaxCommandOutputBytes+1)
+	scanner.Buffer(make([]byte, 4096), shellProjectRawOutputMaxBytes+1)
 	for scanner.Scan() {
 		if len(bytes.TrimSpace(scanner.Bytes())) == 0 {
 			continue
@@ -79,7 +79,7 @@ func runShellProjectFailureDiagnostic(ctx context.Context, directory string, env
 		return shellProjectStageFact{}, nil
 	}
 	spec.ID = shellProjectFailureDiagnosticStageID
-	stage, _ := runShellProjectStage(ctx, directory, env, spec)
+	stage, _ := runShellProjectStageWithBudget(ctx, directory, env, spec, request.projectRawBudget)
 	got, complete := shellProjectExactFailedCases(stage, request)
 	if !complete || !slices.Equal(want, got) || stage.SourceBefore != original.SourceAfter || ctx.Err() != nil {
 		return stage, nil

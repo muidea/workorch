@@ -33,7 +33,7 @@ func (m *Biz) handleRuntimeValidationOutput(event magicevent.Event, result magic
 	value, err := m.queryRuntimeValidationRawOutput(ctx, shellevents.QueryRuntimeValidationRawOutputCommand{
 		WorkspaceID: command.WorkspaceID, RunID: command.RunID, DispatchID: command.DispatchID,
 		OperationID: command.OperationID, ExecutionKey: command.ExecutionKey, Fence: command.Fence,
-		SourceReceiptHash: command.SourceReceiptHash, StageID: command.StageID, Stream: command.Stream,
+		SourceReceiptHash: command.SourceReceiptHash, StageID: command.StageID, Stream: command.Stream, Offset: command.Offset,
 	})
 	if err != nil {
 		result.Set(nil, runtimeOperationMagicFailure(err))
@@ -41,7 +41,7 @@ func (m *Biz) handleRuntimeValidationOutput(event magicevent.Event, result magic
 	}
 	output := orchestratorevents.QueryRuntimeValidationOutputResult{
 		SourceReceiptHash: value.SourceReceiptHash, StageID: value.StageID, Stream: value.Stream,
-		Identity: value.Identity.Clone(), SavedSHA256: value.SavedSHA256, Raw: append([]byte(nil), value.Raw...),
+		Identity: value.Identity.Clone(), SavedSHA256: value.SavedSHA256, Offset: value.Offset, ChunkSHA256: value.ChunkSHA256, Raw: append([]byte(nil), value.Raw...),
 	}
 	if err := output.ValidateFor(command); err != nil {
 		result.Set(nil, runtimeOperationMagicFailure(err))

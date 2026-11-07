@@ -1,9 +1,7 @@
 package events
 
 import (
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -21,6 +19,7 @@ const RuntimeValidationOutputReadSource = "application/workorchd/appservice"
 // QueryRuntimeValidationOutputCommand selects a recorded diagnostic stream.
 // It carries no directory or storage reference and grants no execution credit.
 type QueryRuntimeValidationOutputCommand struct {
+	Offset            int64              `json:"offset,omitempty"`
 	WorkspaceID       common.WorkspaceID `json:"workspaceId"`
 	RunID             common.RunID       `json:"runId"`
 	DispatchID        string             `json:"dispatchId"`
@@ -51,7 +50,7 @@ func (c QueryRuntimeValidationOutputCommand) Validate() error {
 			return common.ErrInvalidArgument
 		}
 	}
-	if c.Fence == 0 || (c.Stream != "stdout" && c.Stream != "stderr") {
+	if c.Offset < 0 || c.Offset > runtimecontract.RuntimeValidationOutputSavedMaxBytes || c.Fence == 0 || (c.Stream != "stdout" && c.Stream != "stderr") {
 		return common.ErrInvalidArgument
 	}
 	origin, err := runtimecontract.RuntimeOperationExecutionKeyOrigin(c.WorkspaceID, c.RunID, c.ExecutionKey, c.OperationID)
@@ -62,6 +61,8 @@ func (c QueryRuntimeValidationOutputCommand) Validate() error {
 }
 
 type QueryRuntimeValidationOutputResult struct {
+	Offset            int64
+	ChunkSHA256       string
 	SourceReceiptHash string
 	StageID           string
 	Stream            string
@@ -71,14 +72,11 @@ type QueryRuntimeValidationOutputResult struct {
 }
 
 func (r QueryRuntimeValidationOutputResult) ValidateFor(c QueryRuntimeValidationOutputCommand) error {
-	if c.Validate() != nil || r.SourceReceiptHash != c.SourceReceiptHash || r.StageID != c.StageID || r.Stream != c.Stream ||
-		r.Identity.Validate() != nil || r.Identity.Storage == nil || r.Identity.Storage.Reference == "" ||
-		len(r.Raw) > 64*1024 || r.Identity.SavedBytes != int64(len(r.Raw)) {
-		return fmt.Errorf("%w: runtime validation output identity or bounds mismatch", common.ErrConflict)
+	if c.Validate() != nil || r.SourceReceiptHash != c.SourceReceiptHash || r.StageID != c.StageID || r.Stream != c.Stream {
+		return fmt.Errorf("%w: validation output source mismatch", common.ErrConflict)
 	}
-	digest := sha256.Sum256(r.Raw)
-	if r.SavedSHA256 != hex.EncodeToString(digest[:]) || (r.Identity.Bytes == r.Identity.SavedBytes && r.Identity.SHA256 != r.SavedSHA256) {
-		return fmt.Errorf("%w: runtime validation output bytes mismatch", common.ErrConflict)
+	if err := runtimecontract.ValidateRuntimeValidationOutputChunk(r.Identity, r.SavedSHA256, r.Offset, r.ChunkSHA256, r.Raw, c.Offset); err != nil {
+		return fmt.Errorf("%w: %v", common.ErrConflict, err)
 	}
 	return nil
 }

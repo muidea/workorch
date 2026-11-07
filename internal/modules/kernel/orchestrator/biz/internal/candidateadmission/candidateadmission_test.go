@@ -310,3 +310,49 @@ func evaluatorFixture(t *testing.T) (runtimecontract.RuntimeFacts, runtimecontra
 	}
 	return facts, decision, manifest, candidate
 }
+
+func TestManagedValidationReplayUsesSealedScopeNotOptionalTargets(t *testing.T) {
+	recipe := "all-of-project"
+	first := runtimecontract.RuntimeOperation{ID: "first", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, BindingRefs: []string{"binding-1"}, TargetRefs: []string{"checks/input_test.go"}, Parameters: []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipe}}}
+	before := first.Clone()
+	omitted := first.Clone()
+	omitted.ID = "second"
+	omitted.TargetRefs = nil
+	if runtimecontract.StableRuntimeOperationShape(first) == runtimecontract.StableRuntimeOperationShape(omitted) {
+		t.Fatal("immutable structural identities changed")
+	}
+	for _, blocked := range []runtimecontract.RuntimeOperation{first, omitted} {
+		for _, current := range []runtimecontract.RuntimeOperation{first, omitted} {
+			candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: current}}}}
+			shapes := []runtimecontract.RuntimeRejectedOperationShape{{Operation: blocked}}
+			if _, ok := RejectedShapeReplay(candidate, shapes); !ok {
+				t.Fatal("optional target spelling bypassed rejected execution")
+			}
+			if _, ok := NoProgressReplay(candidate, shapes); !ok {
+				t.Fatal("optional target spelling bypassed no-progress fence")
+			}
+		}
+	}
+	for _, change := range []string{"binding", "recipe"} {
+		other := first.Clone()
+		if change == "binding" {
+			other.BindingRefs = []string{"binding-2"}
+		} else {
+			value := "other-recipe"
+			other.Parameters[0].String = &value
+		}
+		if OperationReplayShape(first) == OperationReplayShape(other) {
+			t.Fatalf("different %s execution collapsed", change)
+		}
+	}
+	normal := first.Clone()
+	normal.Kind = runtimecontract.StepKindFileWrite
+	other := normal.Clone()
+	other.TargetRefs = []string{"other.go"}
+	if OperationReplayShape(normal) == OperationReplayShape(other) {
+		t.Fatal("normal target semantics lost")
+	}
+	if !reflect.DeepEqual(first, before) {
+		t.Fatal("comparison rewrote original operation")
+	}
+}

@@ -34,6 +34,7 @@ type RuntimeCommandRequest struct {
 	validationProofBinding      runtimecontract.RuntimeValidationProofRequirementBinding
 	// 本次复制到执行 scratch 的原始字节事实，不从 catalog 或 TargetRefs 重建。
 	validationCopiedInputs []shellValidationCopiedInput
+	projectRawBudget       *shellProjectRawBudget
 }
 
 type RuntimeCommandResult struct {

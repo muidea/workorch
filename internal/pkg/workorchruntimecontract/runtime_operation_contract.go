@@ -425,7 +425,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 			},
 			ValueRules:          []RuntimeOperationValueRule{runtimeNonEmptyValueRule(RuntimeBlockKindManagedValidationSession, "", "recipeId")},
 			ForbiddenParameters: []string{"input", "output", "payload", "command", "args", "timeoutMillis", "stateChanging", "targetRef", "targetRefs", "verificationScope", "boundedReason", "validationScratchDir", "validationScratchAutoCleanup"},
-			Rules:               []string{"recipeId must select an activation-sealed owner-confirmed validation recipe"},
+			Rules:               []string{"recipeId must select an activation-sealed owner-confirmed validation recipe", "bindingRefs and recipeId select the sealed validation scope; optional targetRefs do not narrow execution or authorize a retry"},
 		}, true
 	case StepKindGitRead, StepKindGitWrite:
 		contract := RuntimeOperationContract{

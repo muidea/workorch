@@ -79,3 +79,17 @@ func assertMultiFailureConfirmedRepairFacts(t *testing.T, state runtimecontract.
 		t.Fatalf("真实 repair dispatch 数量=%d，要求恰好一次", repairs)
 	}
 }
+
+// The real producer/owners must retain a late assertion, confirm its repair,
+// obtain fresh all-of validation and assessment, and deliver all three ACKs.
+func TestDriveRuntimeProjectLargeOutputConfirmedRepair(t *testing.T) {
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, LargeProjectOutput: true}
+	baseline := runValidationInputReviewMainline(t, "project_behavior_failure", "", options)
+	for _, cut := range []string{"after_project_receipt", "after_repair_receipt"} {
+		t.Run(cut, func(t *testing.T) {
+			if calls := runValidationInputReviewMainline(t, "project_behavior_failure", cut, options); calls != baseline {
+				t.Fatal("recovery repeated provider consumption")
+			}
+		})
+	}
+}

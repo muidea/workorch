@@ -34,7 +34,7 @@ func TestValidationRawOutputContractExactBytesBoundsAndIsolation(t *testing.T) {
 	for _, raw := range [][]byte{nil, {}, []byte("原始\r\n\x00\xff TOKEN=fixture原样"), make([]byte, RuntimeValidationRawOutputMaxBytes)} {
 		digest := sha256.Sum256(raw)
 		identity := runtimecontract.RuntimeValidationOutputIdentity{Bytes: int64(len(raw)), SavedBytes: int64(len(raw)), SHA256: hex.EncodeToString(digest[:]), Complete: true, Storage: &runtimecontract.RuntimeValidationOutputStorage{Reference: "owner/ref"}}
-		response := QueryRuntimeValidationRawOutputResult{SourceReceiptHash: command.SourceReceiptHash, StageID: command.StageID, Stream: command.Stream, Identity: identity, SavedSHA256: identity.SHA256, Raw: raw}
+		response := QueryRuntimeValidationRawOutputResult{SourceReceiptHash: command.SourceReceiptHash, StageID: command.StageID, Stream: command.Stream, Identity: identity, SavedSHA256: identity.SHA256, ChunkSHA256: identity.SHA256, Raw: raw}
 		if response.ValidateFor(command) != nil {
 			t.Fatal("合法原 bytes 被拒绝")
 		}

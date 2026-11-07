@@ -2147,3 +2147,20 @@ credit/reopen 与终态裁决不由该投影替代，SM-1 不变。完整性/来
 ### Semantic request history applicability
 
 普通 coverage order 不适用 receipt history：`SemanticExecutionHistory` 在确认本次scope/manifest/progress身份后返回精确零值，不扫描和组装整个receipt/dispatch ledger再让LLM隐藏。共同typed contract拒绝非零history混入；purpose choice和proof仍保留完整适用receipt来源校验与原有限suffix，完整priorRounds及changeReview版本链不受该suffix裁剪。主Loop仍只调用现有owner编译入口，不新增调度/缓存或历史业务重判。此变化只作用于新SM-3请求；SM-1/SM-2及SM-4原冻结恢复和交付合同不变。
+
+### 验证执行语义与不可用诊断收敛
+
+SM-3 候选接纳及有限 correction frontier 共用 owner-private `candidateadmission.OperationReplayShape`。
+managed validation 的执行由封存 binding 和 recipe 选定；可选 `targetRefs` 不缩小 owner 完整 scope，
+因此有／无该字段不能成为同输入重跑或合法 correction witness。其他操作保留原结构 target 语义。
+原 operation ID、结构 hash、dispatch、executionKey/fence 与历史拒绝原件不改写；
+manifest/target/权限门禁仍在重放检查前执行。合法新 binding、recipe 或真实修复边界按现有合同履责。
+
+SM-2 在原 rejected validation receipt→fact CAS 中消费准确 `ExecutionConjunction`。
+原生输出 incomplete 或 `Storage` 有明确 omission 时，当前 failure 为
+`validation_diagnostic_output_unavailable`，记录 stage/stream、原 exit、knownFailure、接收/保存 bytes、
+omission 及原 failure code；原 receipt、EvidenceFact、诊断和历史结论不变。
+该确定失败直接终止，不猜 repair target、不打开普通修复生成、不消耗新的候选或操作预算，也不授 credit。
+完整但不能归因的失败继续走其原有确定性规则，不混同为原文缺失。
+`validation_diagnostic_output_test.go` 覆盖原回执消费、重载、duplicate、预算保留与完整诊断负例。
+SM-1 生命周期与三 ACK 顺序不变；SM-4 只恢复原 aggregate/receipt，不从分块存储重建 authority。

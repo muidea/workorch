@@ -4,6 +4,8 @@
 package candidateadmission
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -65,7 +67,7 @@ func RejectedShapeReplay(candidate runtimecontract.RuntimeCandidate, shapes []ru
 	}
 	blocked := make(map[string]struct{}, len(shapes))
 	for _, shape := range shapes {
-		blocked[shape.Hash] = struct{}{}
+		blocked[OperationReplayShape(shape.Operation)] = struct{}{}
 	}
 	operations := Operations(candidate)
 	if len(operations) == 0 {
@@ -73,7 +75,7 @@ func RejectedShapeReplay(candidate runtimecontract.RuntimeCandidate, shapes []ru
 	}
 	replayCount := 0
 	for _, operation := range operations {
-		if _, found := blocked[runtimecontract.StableRuntimeOperationShape(operation)]; found {
+		if _, found := blocked[OperationReplayShape(operation)]; found {
 			replayCount++
 		}
 	}
@@ -97,10 +99,10 @@ func NoProgressReplay(candidate runtimecontract.RuntimeCandidate, shapes []runti
 	}
 	blocked := make(map[string]struct{}, len(shapes))
 	for _, shape := range shapes {
-		blocked[shape.Hash] = struct{}{}
+		blocked[OperationReplayShape(shape.Operation)] = struct{}{}
 	}
 	for _, operation := range Operations(candidate) {
-		if _, found := blocked[runtimecontract.StableRuntimeOperationShape(operation)]; found {
+		if _, found := blocked[OperationReplayShape(operation)]; found {
 			return Finding{Code: CodeNoProgressShape, Signature: SignatureNoProgressShape, Reason: "runtime candidate replays an accepted operation shape that did not resolve the active gap; change kind, targets, or structural parameters before retry"}, true
 		}
 	}
@@ -121,4 +123,23 @@ func CandidateSemanticReplay(candidate runtimecontract.RuntimeCandidate, failedP
 		}
 	}
 	return Finding{}, false
+}
+
+// OperationReplayShape compares execution semantics, independently of the
+// immutable operation/dispatch identity. Managed validation executes the exact
+// sealed binding and recipe: optional entry target spelling does not narrow the
+// owner's full execution scope. Admission checks target authorization first.
+// Other operation kinds retain their structural target semantics.
+func OperationReplayShape(operation runtimecontract.RuntimeOperation) string {
+	operation = operation.Normalized()
+	if operation.Kind != runtimecontract.RuntimeBlockKindManagedValidationSession {
+		return runtimecontract.StableRuntimeOperationShape(operation)
+	}
+	operation.TargetRefs = nil
+	h := sha256.New()
+	fmt.Fprintln(h, runtimecontract.StableRuntimeOperationShape(operation))
+	for _, binding := range operation.BindingRefs {
+		fmt.Fprintf(h, "%d:%s\n", len(binding), binding)
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }

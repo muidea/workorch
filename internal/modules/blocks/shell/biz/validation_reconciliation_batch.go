@@ -201,7 +201,9 @@ func (a *RuntimeAdapter) executeShellProjectBatch(ctx context.Context, c shellev
 		}
 	}()
 	shared := &shellProjectSharedStages{}
+	rawBudget := &shellProjectRawBudget{remaining: shellProjectExecutionRawMaxBytes}
 	for i, r := range requests {
+		r.projectRawBudget = rawBudget
 		r.ValidationScratchDirectory = first.ValidationScratchDirectory
 		r.TimeoutMillis = timeout.Milliseconds()
 		output, fact, executeErr := runShellProjectConjunctionShared(runCtx, directory, managedValidationEnvironment(a.filteredEnv(), first.ValidationScratchDirectory), r, shared)

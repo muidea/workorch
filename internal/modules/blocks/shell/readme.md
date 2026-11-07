@@ -366,8 +366,12 @@ reconciliation 原文使用绑定 Workspace/Run、request/generation、Definitio
 `validation_project_raw_store.go` 提供 owner-private 的受限原文存储／读取边界，由执行封套与受限 read topic 使用。
 它只接受现有绝对 Workspace internal directory，并用 `os.Root` 固定目录句柄；owner 子目录拒绝 symlink 和宽权限，
 逐次复核实际打开 inode，文件仅以 0600 保存。每条原文以 Workspace／Run／原 ExecutionKey／stage／stdout 或 stderr
-完整 scope 隔离，原 `[]byte` 使用可逆 base64 JSON 保存，独立校验全部接收 bytes 的 SHA256 与实际已保存前缀的 SHA256。
-每流沿用 64KiB 上界；超界保留明确 incomplete／omitted reason，不能变成 PASS 或完整诊断。
+完整 scope 隔离，独立校验全部接收 bytes 的 SHA256 与实际已保存 bytes 的 SHA256。
+原文存储与单次读取容量分离：每流最多 16MiB，同一执行（含普通阶段及诊断阶段）合计最多 64MiB；
+reconciliation batch 的共同阶段与各独立阶段共享同一 64MiB quota，不能按 consumer 重置。
+64KiB 以内使用可逆 base64 JSON，较大流使用绑定完整 saved-stream hash 和有序 chunk hash 的小型 metadata，
+原 bytes 以不可变 64KiB chunk 文件保存。读取指定 offset 时只加载相关 chunk，不重复展开整流。
+任一容量超界仍 hash/count 全部接收 bytes，明确保留 incomplete／omitted reason，不能变成 PASS 或完整诊断。
 发布使用已 fsync 的临时文件和不可覆盖的 hard-link，再删除临时别名及同步目录；任何失败不返回持久成功 ref，
 重试核对原 canonical bytes 后才确认，异常已存在文件不覆盖。它不是第二 operation journal，也不提供执行恢复权威。
 `validation_project_raw_store_test.go` 覆盖原 bytes（中文／CRLF／NUL／非法 UTF-8）、空输出、并发 duplicate、scope 漂移、
@@ -399,7 +403,9 @@ rejected managed validation 原 receipt 的 effect 可以仍为 unknown；原诊
 也不把已知阶段失败改成结果未决。accepted unknown 与 workspace-durable 等其他 scope 仍拒绝。
 新 project observation 的通用 Runtime summary 只含 owner code/stage/exit 事实，不拷贝或生成原 stdout/stderr 摘要；
 原 bytes 独立保全在受限 store。
-每次最多返回该原流的 64KiB 已保存 bytes；不完整前缀保持原 incomplete/omission，不改写或摘要原文。
+每次按 offset 最多返回该原流的 64KiB 已保存 bytes，携带准确 offset、chunk SHA256 与完整 saved-stream SHA256；
+应用沿同一 receipt/fence/identity 分块读取，逐块核验并在完整拼接后复核 saved-stream hash，任一漂移不返回部分成功。
+不完整前缀保持原 incomplete/omission，不改写或摘要原文，也不从保留前缀推断总测试数或缺失失败。
 查询沿原 context/lane 进行，BeginShutdown 后拒绝新读取，已接纳的 nested receipt/Workspace/read 等真实结束后才释放依赖。
 `validation_raw_output_query_test.go` 配对实际私有 producer/raw store 与 typed receipt/Workspace fixture，
 `pkg/events/validation_raw_output_test.go` 固定原 bytes、bounds 与 detached result。
@@ -658,3 +664,12 @@ scope 包含当前完整副本文件集合，新增/删除/替换相邻输入也
 由独立评估消费原判据与 Orchestrator 当前 scoped 变更事实，不让 native test 伪造 owner baseline/receipt 或自证最小性。
 无条件 evidence-gap 报错、未观测行为、缺项和冲突仍阻断；input review/readiness/file effect 不授 credit。
 根 module build/test/race、exact checks、行为观测、单次总 deadline 和原 terminal receipt/三 ACK 不变。
+
+### 大输出失败到修复的当前合同回归
+
+`TestProjectMultiFailureDiagnosticActualSourcesAndBehavior/large-output` 在真实 Go 输出 2MiB 之后产生失败断言，
+要求完整存储、逐源行为归因与准确实现 target；容量不足不能猜测失败来源。
+`TestDriveRuntimeProjectLargeOutputConfirmedRepair` 经过实际 Shell/File/Run owners、独立输入审查、
+原失败 receipt、确认修复、新普通验证、assessment 及 Result→Workspace→Run 三 ACK；
+验证与修复 receipt 边界恢复核对原身份及预算唯一消费。provider/reviewer 是固定 fixture，测试不调用收费模型。
+这些本地回归不替代部署后的真实项目验收，不追溯补全旧 Run 缺失原文或给旧结果 credit。

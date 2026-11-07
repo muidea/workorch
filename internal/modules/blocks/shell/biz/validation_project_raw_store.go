@@ -16,10 +16,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const shellProjectRawStoreProtocol = "shell/project-stage-raw/v1"
-const shellProjectRawStoreMaxBytes = 2*MaxCommandOutputBytes + 8192
+const shellProjectRawStoreMaxBytes = 2*runtimecontract.RuntimeValidationOutputChunkMaxBytes + 8192
 
 // 仅保全 owner 的原输出，不是 operation journal 或 Runtime authority。
 // scope 仅来自已核验的原 execution 或 owner 内部 reconciliation identity。
@@ -36,6 +37,7 @@ type shellProjectRawRecord struct {
 	Scope       shellProjectRawScope
 	Output      shellProjectRawFact
 	SavedSHA256 string
+	Chunks      []string `json:",omitempty"`
 }
 
 type shellProjectRawStore struct {
@@ -91,13 +93,33 @@ func (record shellProjectRawRecord) Validate(scope shellProjectRawScope) error {
 		return common.ErrConflict
 	}
 	raw := record.Output
-	if shellProjectOutputIdentity(raw).Validate() != nil || raw.SavedBytes != int64(len(raw.Raw)) || len(raw.Raw) > MaxCommandOutputBytes {
+	if shellProjectOutputIdentity(raw).Validate() != nil || raw.SavedBytes > shellProjectRawOutputMaxBytes {
 		return common.ErrConflict
 	}
-	digest := sha256.Sum256(raw.Raw)
-	if record.SavedSHA256 != hex.EncodeToString(digest[:]) || raw.Bytes == raw.SavedBytes && raw.SHA256 != record.SavedSHA256 {
+	digestBytes, err := hex.DecodeString(record.SavedSHA256)
+	if err != nil || len(digestBytes) != sha256.Size || hex.EncodeToString(digestBytes) != record.SavedSHA256 || raw.Complete && raw.SHA256 != record.SavedSHA256 {
 		return common.ErrConflict
 	}
+	if len(record.Chunks) != 0 {
+		if raw.Raw != nil || raw.SavedBytes <= runtimecontract.RuntimeValidationOutputChunkMaxBytes || len(record.Chunks) != int((raw.SavedBytes+runtimecontract.RuntimeValidationOutputChunkMaxBytes-1)/runtimecontract.RuntimeValidationOutputChunkMaxBytes) {
+			return common.ErrConflict
+		}
+		for _, chunk := range record.Chunks {
+			digest, err := hex.DecodeString(chunk)
+			if err != nil || len(digest) != sha256.Size || hex.EncodeToString(digest) != chunk {
+				return common.ErrConflict
+			}
+		}
+	} else {
+		if raw.SavedBytes != int64(len(raw.Raw)) || len(raw.Raw) > runtimecontract.RuntimeValidationOutputChunkMaxBytes {
+			return common.ErrConflict
+		}
+		digest := sha256.Sum256(raw.Raw)
+		if record.SavedSHA256 != hex.EncodeToString(digest[:]) {
+			return common.ErrConflict
+		}
+	}
+
 	return nil
 }
 
@@ -159,8 +181,22 @@ func (s *shellProjectRawStore) Store(ctx context.Context, scope shellProjectRawS
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	if shellProjectOutputIdentity(raw).Validate() != nil || raw.SavedBytes != int64(len(raw.Raw)) || len(raw.Raw) > shellProjectRawOutputMaxBytes {
+		return "", common.ErrConflict
+	}
 	digest := sha256.Sum256(raw.Raw)
 	record := shellProjectRawRecord{ProtocolRef: shellProjectRawStoreProtocol, Scope: scope, Output: raw, SavedSHA256: hex.EncodeToString(digest[:])}
+	if raw.Complete && raw.SHA256 != record.SavedSHA256 {
+		return "", common.ErrConflict
+	}
+	if len(raw.Raw) > runtimecontract.RuntimeValidationOutputChunkMaxBytes {
+		record.Output.Raw = nil
+		for offset := 0; offset < len(raw.Raw); offset += runtimecontract.RuntimeValidationOutputChunkMaxBytes {
+			chunk := raw.Raw[offset:min(len(raw.Raw), offset+runtimecontract.RuntimeValidationOutputChunkMaxBytes)]
+			hash := sha256.Sum256(chunk)
+			record.Chunks = append(record.Chunks, hex.EncodeToString(hash[:]))
+		}
+	}
 	if err := record.Validate(scope); err != nil {
 		return "", err
 	}
@@ -175,25 +211,38 @@ func (s *shellProjectRawStore) Store(ctx context.Context, scope shellProjectRawS
 		return "", err
 	}
 	defer root.Close()
-	name := ref + ".json"
-	if existing, err := readShellProjectRawRecord(root, name); err == nil {
+	for index, hash := range record.Chunks {
+		offset := index * runtimecontract.RuntimeValidationOutputChunkMaxBytes
+		chunk := raw.Raw[offset:min(len(raw.Raw), offset+runtimecontract.RuntimeValidationOutputChunkMaxBytes)]
+		if err := s.publish(ctx, root, hash+".bin", chunk); err != nil {
+			return "", err
+		}
+	}
+	if err := s.publish(ctx, root, ref+".json", body); err != nil {
+		return "", err
+	}
+	return ref, nil
+}
+
+func (s *shellProjectRawStore) publish(ctx context.Context, root *os.Root, name string, body []byte) error {
+	if existing, err := readShellProjectRawFile(root, name, shellProjectRawStoreMaxBytes); err == nil {
 		if !bytes.Equal(existing, body) {
-			return "", common.ErrConflict
+			return common.ErrConflict
 		}
 		if err := s.syncDirectory(root); err != nil {
-			return "", err
+			return err
 		}
 		if err := ctx.Err(); err != nil {
-			return "", err
+			return err
 		}
-		return ref, nil
+		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", err
+		return err
 	}
 	temporary := ".raw-" + rand.Text()
 	file, err := root.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer func() { _ = root.Remove(temporary) }()
 	n, writeErr := file.Write(body)
@@ -205,80 +254,153 @@ func (s *shellProjectRawStore) Store(ctx context.Context, scope shellProjectRawS
 	}
 	closeErr := file.Close()
 	if writeErr != nil {
-		return "", writeErr
+		return writeErr
 	}
 	if closeErr != nil {
-		return "", closeErr
+		return closeErr
 	}
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return err
 	}
 	// 不覆盖已有原文。并发发布只能精确复用同 bytes，绝不换掉旧内容。
 	if err := s.linkFile(root, temporary, name); err != nil {
 		if !errors.Is(err, os.ErrExist) {
-			return "", err
+			return err
 		}
-		existing, err := readShellProjectRawRecord(root, name)
+		existing, err := readShellProjectRawFile(root, name, shellProjectRawStoreMaxBytes)
 		if err != nil || !bytes.Equal(existing, body) {
-			return "", common.ErrConflict
+			return common.ErrConflict
 		}
 	}
 	if err := root.Remove(temporary); err != nil {
-		return "", err
+		return err
 	}
 	if err := s.syncDirectory(root); err != nil {
-		return "", err
+		return err
 	}
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return err
 	}
-	return ref, nil
+	return nil
 }
 
-func (s *shellProjectRawStore) Read(ctx context.Context, scope shellProjectRawScope, ref string) (shellProjectRawFact, error) {
+func (s *shellProjectRawStore) readMetadata(ctx context.Context, scope shellProjectRawScope, ref string) (shellProjectRawRecord, *os.Root, error) {
 	if ctx == nil || scope.Validate() != nil || len(ref) != sha256.Size*2 || strings.ToLower(ref) != ref {
-		return shellProjectRawFact{}, common.ErrInvalidArgument
+		return shellProjectRawRecord{}, nil, common.ErrInvalidArgument
 	}
 	if _, err := hex.DecodeString(ref); err != nil {
-		return shellProjectRawFact{}, common.ErrInvalidArgument
+		return shellProjectRawRecord{}, nil, common.ErrInvalidArgument
 	}
 	if err := ctx.Err(); err != nil {
-		return shellProjectRawFact{}, err
+		return shellProjectRawRecord{}, nil, err
 	}
 	root, err := s.directory(scope, false)
 	if err != nil {
-		return shellProjectRawFact{}, err
+		return shellProjectRawRecord{}, nil, err
 	}
-	defer root.Close()
+	fail := func(err error) (shellProjectRawRecord, *os.Root, error) {
+		root.Close()
+		return shellProjectRawRecord{}, nil, err
+	}
 	body, err := readShellProjectRawRecord(root, ref+".json")
 	if err != nil {
-		return shellProjectRawFact{}, err
+		return fail(err)
 	}
 	digest := sha256.Sum256(body)
 	if hex.EncodeToString(digest[:]) != ref {
-		return shellProjectRawFact{}, common.ErrConflict
+		return fail(common.ErrConflict)
 	}
 	var record shellProjectRawRecord
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&record); err != nil {
-		return shellProjectRawFact{}, err
+		return fail(err)
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return shellProjectRawFact{}, common.ErrConflict
+		return fail(common.ErrConflict)
 	}
 	if err := record.Validate(scope); err != nil {
+		return fail(err)
+	}
+	return record, root, nil
+}
+
+func readShellProjectChunk(root *os.Root, record shellProjectRawRecord, index int) ([]byte, error) {
+	body, err := readShellProjectRawFile(root, record.Chunks[index]+".bin", runtimecontract.RuntimeValidationOutputChunkMaxBytes)
+	if err != nil {
+		return nil, err
+	}
+	digest := sha256.Sum256(body)
+	want := min(int64(runtimecontract.RuntimeValidationOutputChunkMaxBytes), record.Output.SavedBytes-int64(index*runtimecontract.RuntimeValidationOutputChunkMaxBytes))
+	if int64(len(body)) != want || hex.EncodeToString(digest[:]) != record.Chunks[index] {
+		return nil, common.ErrConflict
+	}
+	return body, nil
+}
+
+// ReadChunk never reads or decodes the rest of a large stream. The immutable
+// metadata binds the source and chunk hashes; only selected chunk bytes are read.
+func (s *shellProjectRawStore) ReadChunk(ctx context.Context, scope shellProjectRawScope, ref string, offset int64) (shellProjectRawRecord, []byte, error) {
+	record, root, err := s.readMetadata(ctx, scope, ref)
+	if err != nil {
+		return shellProjectRawRecord{}, nil, err
+	}
+	defer root.Close()
+	if offset < 0 || offset > record.Output.SavedBytes {
+		return shellProjectRawRecord{}, nil, common.ErrInvalidArgument
+	}
+	end := min(record.Output.SavedBytes, offset+runtimecontract.RuntimeValidationOutputChunkMaxBytes)
+	var raw []byte
+	if len(record.Chunks) == 0 {
+		raw = append([]byte(nil), record.Output.Raw[offset:end]...)
+	} else {
+		for pos := offset; pos < end; {
+			index := int(pos / runtimecontract.RuntimeValidationOutputChunkMaxBytes)
+			chunk, err := readShellProjectChunk(root, record, index)
+			if err != nil {
+				return shellProjectRawRecord{}, nil, err
+			}
+			start := pos % runtimecontract.RuntimeValidationOutputChunkMaxBytes
+			count := min(int64(len(chunk))-start, end-pos)
+			raw = append(raw, chunk[start:start+count]...)
+			pos += count
+		}
+	}
+	return record, raw, ctx.Err()
+}
+
+func (s *shellProjectRawStore) Read(ctx context.Context, scope shellProjectRawScope, ref string) (shellProjectRawFact, error) {
+	record, root, err := s.readMetadata(ctx, scope, ref)
+	if err != nil {
 		return shellProjectRawFact{}, err
 	}
-	return record.Output, ctx.Err()
+	defer root.Close()
+	raw := record.Output
+	if len(record.Chunks) != 0 {
+		for index := range record.Chunks {
+			chunk, err := readShellProjectChunk(root, record, index)
+			if err != nil {
+				return shellProjectRawFact{}, err
+			}
+			raw.Raw = append(raw.Raw, chunk...)
+		}
+	}
+	digest := sha256.Sum256(raw.Raw)
+	if int64(len(raw.Raw)) != raw.SavedBytes || hex.EncodeToString(digest[:]) != record.SavedSHA256 {
+		return shellProjectRawFact{}, common.ErrConflict
+	}
+	return raw, ctx.Err()
 }
 
 func readShellProjectRawRecord(root *os.Root, name string) ([]byte, error) {
+	return readShellProjectRawFile(root, name, shellProjectRawStoreMaxBytes)
+}
+func readShellProjectRawFile(root *os.Root, name string, maxBytes int) ([]byte, error) {
 	info, err := root.Lstat(name)
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() > shellProjectRawStoreMaxBytes {
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() > int64(maxBytes) {
 		return nil, common.ErrConflict
 	}
 	file, err := root.Open(name)
@@ -287,14 +409,14 @@ func readShellProjectRawRecord(root *os.Root, name string) ([]byte, error) {
 	}
 	defer file.Close()
 	opened, err := file.Stat()
-	if err != nil || !os.SameFile(info, opened) || !opened.Mode().IsRegular() || opened.Mode().Perm()&0o077 != 0 || opened.Size() > shellProjectRawStoreMaxBytes {
+	if err != nil || !os.SameFile(info, opened) || !opened.Mode().IsRegular() || opened.Mode().Perm()&0o077 != 0 || opened.Size() > int64(maxBytes) {
 		return nil, common.ErrConflict
 	}
-	body, err := io.ReadAll(io.LimitReader(file, shellProjectRawStoreMaxBytes+1))
+	body, err := io.ReadAll(io.LimitReader(file, int64(maxBytes)+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(body) > shellProjectRawStoreMaxBytes {
+	if len(body) > maxBytes {
 		return nil, fmt.Errorf("Shell 原文记录超过明确存储边界")
 	}
 	return body, nil

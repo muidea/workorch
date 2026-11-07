@@ -13,8 +13,11 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
+
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 // Shell-private 执行事实生产器。公开 owner 封套负责原文持久化、完整性及
@@ -69,10 +72,29 @@ type shellProjectConjunctionFact struct {
 
 // 原 bytes 不清洗、不摘要；hash 涵盖全部接收 bytes，即使存储边界已满。
 // 超界只保留明确标记的前缀，绝不把它标成完整诊断或通过事实。
+// Bounds cover all normal and diagnostic stages of one execution, not the
+// display envelope. No raw output is put in Runtime authority or model context.
+const shellProjectRawOutputMaxBytes = runtimecontract.RuntimeValidationOutputSavedMaxBytes
+const shellProjectExecutionRawMaxBytes = 64 * 1024 * 1024
+
+type shellProjectRawBudget struct {
+	mu        sync.Mutex
+	remaining int
+}
+
+func (b *shellProjectRawBudget) take(n int) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n = min(n, b.remaining)
+	b.remaining -= n
+	return n
+}
+
 type shellProjectRawBuffer struct {
-	buf   bytes.Buffer
-	hash  hash.Hash
-	bytes int64
+	buf    bytes.Buffer
+	hash   hash.Hash
+	bytes  int64
+	budget *shellProjectRawBudget
 }
 
 func newShellProjectRawBuffer() *shellProjectRawBuffer {
@@ -83,9 +105,12 @@ func (b *shellProjectRawBuffer) Write(p []byte) (int, error) {
 	n := len(p)
 	b.bytes += int64(n)
 	_, _ = b.hash.Write(p)
-	if remaining := MaxCommandOutputBytes - b.buf.Len(); remaining > 0 {
+	if remaining := shellProjectRawOutputMaxBytes - b.buf.Len(); remaining > 0 {
 		if len(p) > remaining {
 			p = p[:remaining]
+		}
+		if b.budget != nil {
+			p = p[:b.budget.take(len(p))]
 		}
 		_, _ = b.buf.Write(p)
 	}
@@ -96,6 +121,9 @@ func (b *shellProjectRawBuffer) fact() shellProjectRawFact {
 	fact := shellProjectRawFact{Bytes: b.bytes, SHA256: hex.EncodeToString(b.hash.Sum(nil)), SavedBytes: int64(b.buf.Len()), Complete: b.bytes == int64(b.buf.Len()), Raw: append([]byte(nil), b.buf.Bytes()...)}
 	if !fact.Complete {
 		fact.OmittedReason = "shell_stage_raw_output_capacity_exceeded"
+		if b.buf.Len() < shellProjectRawOutputMaxBytes {
+			fact.OmittedReason = "shell_execution_raw_output_capacity_exceeded"
+		}
 	}
 	return fact
 }
@@ -111,7 +139,7 @@ func shellProjectJSONCompletion(stdout []byte, complete bool) (packages, tests, 
 	pkgs, cases := map[string]member{}, map[string]member{}
 	invalid, skipped := !complete, false
 	scanner := bufio.NewScanner(bytes.NewReader(stdout))
-	scanner.Buffer(make([]byte, 4096), MaxCommandOutputBytes+1)
+	scanner.Buffer(make([]byte, 4096), shellProjectRawOutputMaxBytes+1)
 	for scanner.Scan() {
 		if len(bytes.TrimSpace(scanner.Bytes())) == 0 {
 			continue
@@ -227,6 +255,10 @@ func shellProjectFixedStages(exactArgs []string, pkg string) []shellProjectStage
 // caller 只能供应同一 operation 的 deadline，禁止无 deadline 或超过 owner 最大期限。
 // 原封套仍校验精确 request 期限，每次启动一个 owner process group；正常退出也清理后代。
 func runShellProjectStage(ctx context.Context, directory string, env []string, spec shellProjectStageSpec) (shellProjectStageFact, error) {
+	return runShellProjectStageWithBudget(ctx, directory, env, spec, &shellProjectRawBudget{remaining: shellProjectExecutionRawMaxBytes})
+}
+
+func runShellProjectStageWithBudget(ctx context.Context, directory string, env []string, spec shellProjectStageSpec, budget *shellProjectRawBudget) (shellProjectStageFact, error) {
 	fact := shellProjectStageFact{ID: spec.ID, Scope: spec.Scope, Argv: append([]string{"go"}, spec.Args...), ExitCode: -1,
 		Stdout: newShellProjectRawBuffer().fact(), Stderr: newShellProjectRawBuffer().fact()}
 	deadline, ok := ctx.Deadline()
@@ -246,6 +278,7 @@ func runShellProjectStage(ctx context.Context, directory string, env []string, s
 	}
 	fact.SourceBefore = before
 	stdout, stderr := newShellProjectRawBuffer(), newShellProjectRawBuffer()
+	stdout.budget, stderr.budget = budget, budget
 	cmd := exec.CommandContext(ctx, "go", spec.Args...)
 	cmd.Dir, cmd.Env = directory, env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

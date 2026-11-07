@@ -24,6 +24,9 @@ type shellProjectSharedStages struct {
 }
 
 func runShellProjectConjunctionShared(ctx context.Context, directory string, env []string, request RuntimeCommandRequest, shared *shellProjectSharedStages) (RuntimeCommandResult, shellProjectConjunctionFact, error) {
+	if request.projectRawBudget == nil {
+		request.projectRawBudget = &shellProjectRawBudget{remaining: shellProjectExecutionRawMaxBytes}
+	}
 	output := shellBaseOutput(request, request.Command, request.Args, directory, "", "go")
 	output.Status = "completed"
 	protocol := shellProjectConjunctionProtocolRef
@@ -89,7 +92,7 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 				stageErr = fmt.Errorf("shared project execution is no longer applicable to the original snapshot")
 			}
 		} else {
-			stage, stageErr = runShellProjectStage(ctx, directory, stageEnv, spec)
+			stage, stageErr = runShellProjectStageWithBudget(ctx, directory, stageEnv, spec, request.projectRawBudget)
 			if shared != nil && index < 3 && stageErr == nil {
 				shared.Stages = append(shared.Stages, stage)
 				shared.Specs = append(shared.Specs, spec)
