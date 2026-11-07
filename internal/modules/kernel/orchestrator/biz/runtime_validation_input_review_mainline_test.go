@@ -187,6 +187,8 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 	}
 	projectAdapter := options.Adapter == shellcommon.ValidationRecipeAdapterProjectConjunction || options.Adapter == shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic
 	projectBehaviorRepair := mode == "project_behavior_failure"
+	projectChecksumRepair := strings.HasPrefix(mode, "project_checksum_")
+	projectRepair := projectBehaviorRepair || projectChecksumRepair
 	if projectBehaviorRepair && options.Adapter != shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
 		t.Fatal("multi-source repair fixture requires the project multi-failure capability")
 	}
@@ -220,6 +222,11 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 		route.RepairOperationKinds, route.RepairTargetPolicy = []string{runtimecontract.StepKindFileEdit}, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope
 		route.RepairTargetRole, route.RepairOperationTargetSelectorRef = "deliverable_implementation", "workspace-relative-existing-file-target"
 		convergence.Routes = []runtimecontract.RuntimeValidationFailureRepairRoute{route}
+		bootstrap.DefinitionFocuses[1].ValidationFailureRepairConvergence = &convergence
+		bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[1].ValidationFailureRepairConvergence = &convergence
+	}
+	if projectChecksumRepair {
+		convergence := shippedChecksumRepairConvergence(t)
 		bootstrap.DefinitionFocuses[1].ValidationFailureRepairConvergence = &convergence
 		bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[1].ValidationFailureRepairConvergence = &convergence
 	}
@@ -264,7 +271,7 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 		}
 	}
 	bootstrap = runtimeTestBootstrapWithBindings(bootstrap)
-	if projectBehaviorRepair {
+	if projectRepair {
 		bootstrap = runtimeTestWithHistoricalPurposeMapping(t, bootstrap, "cwi-1", "cwi-2")
 	}
 	if options.SourceObligations {
@@ -282,6 +289,17 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 	}
 	if mode == "project_history_failure" {
 		initialFiles["historical_test.go"] = "package fixture\nimport \"testing\"\nfunc TestHistorical(t *testing.T){t.Fatal(\"原工程判据失败\")}\n"
+	}
+	if projectChecksumRepair {
+		module, err := os.ReadFile(filepath.Join(directory, "go.mod"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		initialFiles["go.mod"] = string(module) + "\nrequire gopkg.in/yaml.v3 v3.0.1\n"
+		initialFiles["subject.go"] = strings.Replace(initialFiles["subject.go"], "package fixture\n", "package fixture\nimport _ \"gopkg.in/yaml.v3\"\n", 1)
+		if mode == "project_checksum_existing" {
+			initialFiles["go.sum"] = checksumFixtureModuleSum
+		}
 	}
 	projectExecutionCounter := filepath.Join(root, "project-executions")
 	// 成功合取的 ordinary/race 两阶段均执行原工程；已知 ordinary 失败则不进入 race。
@@ -314,7 +332,7 @@ func TestHistorical(t *testing.T) {
 	inputTargets := map[common.CoverageWorkItemID]string{}
 	for _, requirement := range requirements {
 		preparation := preparations[requirement.Hash]
-		if len(preparation.CheckAttestations) != 1 && !options.SourceObligations && !projectBehaviorRepair {
+		if len(preparation.CheckAttestations) != 1 && !options.SourceObligations && !projectRepair {
 			t.Fatal("single-criterion fixture lost its exact owner mapping")
 		}
 		native, inputTarget := preparation.CheckAttestations[0].NativeCheckRef, preparation.TargetRef
@@ -339,7 +357,7 @@ func %s(t *testing.T) {
 		if projectBehaviorRepair {
 			initialFiles[inputTarget] = strings.Replace(initialFiles[inputTarget], "wrong delivered behavior", "WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3", 1)
 		}
-		if options.SourceObligations || projectBehaviorRepair {
+		if options.SourceObligations || projectRepair {
 			body := initialFiles[inputTarget]
 			var source strings.Builder
 			for index, check := range preparation.CheckAttestations {
@@ -534,6 +552,17 @@ func %s(t *testing.T) {
 				runtimeInputRevisionMainlineSemanticDocument(&document, command, inputTargets["cwi-2"])
 				if mode == "input_revision_dependency" {
 					runtimeInputDependencySemanticDocument(&document, command)
+				}
+			}
+			if projectChecksumRepair {
+				for i := range document.Proposals {
+					for _, obligation := range command.SemanticManifest.ProofObligations {
+						if repair := obligation.ValidationFailureRepair; repair != nil && obligation.CoverageWorkItemID == document.Proposals[i].CoverageWorkItemID {
+							proposal := &document.Proposals[i]
+							proposal.OperationKind = repair.RepairOperationKinds[0]
+							proposal.Target = runtimecontract.RuntimeOperationTargetAuthorization{Policy: repair.RepairTargetPolicy, OwnerSelectorRefs: []string{repair.RepairOperationTargetSelectorRef}, ProspectiveConstraintRefs: repair.RepairConstraintRefs, ProspectiveTargetRefs: append([]string(nil), repair.RepairDeclarationTargetSelectorCandidateRefs...)}
+						}
+					}
 				}
 			}
 			if options.TerminalSnapshot {
@@ -783,6 +812,18 @@ func %s(t *testing.T) {
 				}
 				break
 			}
+			if projectChecksumRepair && command.Decision.Focus.CoverageWorkItemIDs[0] == "cwi-2" {
+				behaviorRepairs++
+				content := checksumFixtureFullSum
+				operation := runtimecontract.RuntimeOperation{ID: "repair-checksum", Kind: runtimecontract.StepKindFileWrite, TargetRefs: []string{"go.sum"}, CoverageWorkItemIDs: command.Decision.Focus.CoverageWorkItemIDs, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &content}}}
+				if mode == "project_checksum_existing" {
+					operation.Kind = runtimecontract.StepKindFileEdit
+					oldText, newText := checksumFixtureModuleSum, checksumFixtureFullSum
+					operation.Parameters = []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}}
+				}
+				candidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: operation}}}
+				break
+			}
 			oldText, newText := "return 2", "return 4"
 			if projectBehaviorRepair {
 				newText = "return 3"
@@ -898,7 +939,7 @@ func %s(t *testing.T) {
 			case "after_project_receipt":
 				return a.ActiveDispatch != nil && a.ActiveDispatch.Candidate.Validation != nil && a.ActiveDispatch.State == runtime.DispatchStateSealed
 			case "after_repair_receipt":
-				return a.ActiveDispatch != nil && a.ActiveDispatch.RepairCommitment != nil && a.ActiveDispatch.Candidate.StateChange != nil && a.ActiveDispatch.State == runtime.DispatchStateSealed
+				return a.ActiveDispatch != nil && (a.ActiveDispatch.RepairCommitment != nil || projectChecksumRepair && a.Facts.Focus.CoverageWorkItemIDs[0] == "cwi-2") && a.ActiveDispatch.Candidate.StateChange != nil && a.ActiveDispatch.State == runtime.DispatchStateSealed
 			}
 			return false
 		}}
@@ -1034,7 +1075,7 @@ func %s(t *testing.T) {
 				t.Fatalf("restart invalid: %v", err)
 			}
 			if cut == "after_repair_receipt" {
-				if loaded.ActiveDispatch == nil || loaded.ActiveDispatch.RepairCommitment == nil || len(loaded.ActiveDispatch.OperationExecutions) != 1 {
+				if loaded.ActiveDispatch == nil || !projectChecksumRepair && loaded.ActiveDispatch.RepairCommitment == nil || len(loaded.ActiveDispatch.OperationExecutions) != 1 {
 					t.Fatal("未到达唯一原 confirmed repair dispatch")
 				}
 				key := loaded.ActiveDispatch.OperationExecutions[0].ExecutionKey
@@ -1158,11 +1199,11 @@ func %s(t *testing.T) {
 					t.Fatal(err)
 				}
 				if options.Adapter == shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
-					expectation := projectConjunctionExpectation{ProtocolRef: "shell/go-test-json/project-multi-failure-behavior"}
+					expectation := projectConjunctionExpectation{ProtocolRef: "shell/go-test-json/project-multi-failure-behavior", BuildFailure: projectChecksumRepair}
 					if projectBehaviorRepair {
 						expectation.RepairSources = len(preparations[requirements[0].Hash].CheckAttestations) + 1
 					}
-					originalProjectReceipt = assertProjectReceiptReplyLossBoundary(t, before, mode != "project_history_failure" && !projectBehaviorRepair, expectation)
+					originalProjectReceipt = assertProjectReceiptReplyLossBoundary(t, before, mode != "project_history_failure" && !projectRepair, expectation)
 				} else {
 					originalProjectReceipt = assertProjectReceiptReplyLossBoundary(t, before, mode != "project_history_failure")
 				}
@@ -1174,6 +1215,12 @@ func %s(t *testing.T) {
 				}
 				if projectBehaviorRepair {
 					expectedCount = "executed\nexecuted\n"
+				}
+				if projectChecksumRepair {
+					expectedCount = ""
+					if os.IsNotExist(err) {
+						err = nil
+					}
 				}
 				if err != nil || string(counter) != expectedCount {
 					t.Fatalf("receipt 切点未取得唯一原工程实际执行事实: %q / %v", counter, err)
@@ -1205,7 +1252,7 @@ func %s(t *testing.T) {
 		t.Logf("terminal original diagnostic: %s", diag)
 	}
 	submissionUnknown := cut == "after_assessment_submission"
-	success := (mode == "consistent" || mode == "clarify" || (mode == "input_revision" || mode == "input_revision_growth" || mode == "input_revision_dependency" || mode == "input_revision_omission" || mode == "input_revision_long" || mode == "input_revision_structure") || projectBehaviorRepair) && !submissionUnknown
+	success := (mode == "consistent" || mode == "clarify" || (mode == "input_revision" || mode == "input_revision_growth" || mode == "input_revision_dependency" || mode == "input_revision_omission" || mode == "input_revision_long" || mode == "input_revision_structure") || projectRepair) && !submissionUnknown
 	if (completed.Decision.State == runtimecontract.ConvergenceStateComplete) != success {
 		if completed.Facts.Failure != nil && completed.Facts.Failure.OriginalDiagnostic != nil {
 			t.Logf("original failure diagnostic: %+v", *completed.Facts.Failure.OriginalDiagnostic)
@@ -1238,7 +1285,7 @@ func %s(t *testing.T) {
 		t.Fatalf("mode=%s state=%s terminal=%+v failure=%+v", mode, completed.Decision.State, completed.Decision.Terminal, completed.Facts.Failure)
 	}
 	expectedValidations := options.ValidationCount
-	if projectBehaviorRepair {
+	if projectRepair {
 		expectedValidations++
 	}
 	if success && validationCalls != expectedValidations || !success && !submissionUnknown && mode != "source_B_failure" && mode != "project_history_failure" && validationCalls != 0 || (mode == "source_B_failure" || submissionUnknown) && validationCalls != 1 {
@@ -1296,6 +1343,9 @@ func %s(t *testing.T) {
 		}
 		content, err := os.ReadFile(filepath.Join(directory, ref))
 		expectedInput := initialFiles[ref]
+		if projectChecksumRepair && ref == "go.sum" {
+			expectedInput = checksumFixtureFullSum
+		}
 		if strings.HasPrefix(mode, "input_revision") && ref == inputTargets["cwi-2"] {
 			if mode == "input_revision_long" || mode == "input_revision_budget" {
 				completedRevisions := 0
@@ -1364,7 +1414,7 @@ func %s(t *testing.T) {
 			}
 		}
 	}
-	if projectBehaviorRepair && behaviorRepairs != 1 {
+	if projectRepair && behaviorRepairs != 1 {
 		t.Fatal("same-binding implementation repair was missing or repeated")
 	}
 	if projectBehaviorRepair {
@@ -1373,6 +1423,15 @@ func %s(t *testing.T) {
 			current, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(completed.OperationReceipts, originalRepairReceipt.ExecutionKey, originalRepairReceipt.Fence)
 			if !found || !runtimecontract.SameRuntimeOperationReceipt(current, *originalRepairReceipt) {
 				t.Fatal("恢复改写了原 accepted repair receipt")
+			}
+		}
+	}
+	if projectChecksumRepair {
+		assertChecksumRepairOwnerFacts(t, runtimeStateRecordFromAggregate(completed), mode)
+		if originalRepairReceipt != nil {
+			current, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(completed.OperationReceipts, originalRepairReceipt.ExecutionKey, originalRepairReceipt.Fence)
+			if !found || !runtimecontract.SameRuntimeOperationReceipt(current, *originalRepairReceipt) {
+				t.Fatal("checksum repair recovery changed original receipt")
 			}
 		}
 	}
@@ -1403,7 +1462,7 @@ func %s(t *testing.T) {
 		if options.Adapter == shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
 			protocol = "shell/go-test-json/project-multi-failure-behavior"
 		}
-		expectation := projectConjunctionExpectation{ProtocolRef: protocol, ValidationReceipts: options.ValidationCount}
+		expectation := projectConjunctionExpectation{ProtocolRef: protocol, ValidationReceipts: options.ValidationCount, BuildFailure: projectChecksumRepair}
 		if projectBehaviorRepair {
 			expectation.RepairSources = len(preparations[requirements[0].Hash].CheckAttestations) + 1
 		}
@@ -1416,7 +1475,7 @@ func %s(t *testing.T) {
 			if receiptBeforeRecovery == nil {
 				t.Fatal("未观察到实际 receipt 响应丢失边界")
 			}
-			if projectBehaviorRepair {
+			if projectRepair {
 				current, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(reopened.RuntimeState.OperationReceipts, originalProjectReceipt.ExecutionKey, originalProjectReceipt.Fence)
 				if !found || !runtimecontract.SameRuntimeOperationReceipt(current, originalProjectReceipt) {
 					t.Fatal("repair recovery rewrote original rejected receipt")

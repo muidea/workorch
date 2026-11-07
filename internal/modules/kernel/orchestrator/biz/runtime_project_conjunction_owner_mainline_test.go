@@ -51,6 +51,7 @@ type projectConjunctionExpectation struct {
 	ProtocolRef        string
 	RepairSources      int
 	ValidationReceipts int
+	BuildFailure       bool
 }
 
 func assertProjectReceiptReplyLossBoundary(t *testing.T, aggregate runtime.RuntimeAggregate, success bool, selected ...projectConjunctionExpectation) runtimecontract.RuntimeOperationReceipt {
@@ -61,6 +62,10 @@ func assertProjectReceiptReplyLossBoundary(t *testing.T, aggregate runtime.Runti
 		if selected[0].RepairSources != 0 {
 			failureStages = 2 + selected[0].RepairSources
 		}
+	}
+	failedStage := 1
+	if len(selected) != 0 && selected[0].BuildFailure {
+		failureStages, failedStage = 1, 0
 	}
 	if aggregate.Validate() != nil || aggregate.ActiveDispatch == nil || len(aggregate.ActiveDispatch.OperationExecutions) != 1 {
 		t.Fatal("receipt 响应丢失前像不完整")
@@ -75,7 +80,7 @@ func assertProjectReceiptReplyLossBoundary(t *testing.T, aggregate runtime.Runti
 		if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || !conjunction.Complete || len(conjunction.Stages) != 4 {
 			t.Fatal("成功 receipt 丢失完整四阶段事实")
 		}
-	} else if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || conjunction.Complete || len(conjunction.Stages) != failureStages || !conjunction.Stages[1].KnownFailure || conjunction.Stages[1].ExitCode == 0 || len(receipt.Evidence.Validation.PassedChecks) != 0 {
+	} else if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || conjunction.Complete || len(conjunction.Stages) != failureStages || !conjunction.Stages[failedStage].KnownFailure || conjunction.Stages[failedStage].ExitCode == 0 || len(receipt.Evidence.Validation.PassedChecks) != 0 {
 		t.Fatal("失败 receipt 丢失原工程判据或产生当前 proof")
 	}
 	for _, facts := range [][]runtimecontract.EvidenceFact{aggregate.Facts.Evidence.Accepted, aggregate.Facts.Evidence.Rejected} {
@@ -164,6 +169,7 @@ func assertProjectConjunctionPersistedOwnerOutputs(t *testing.T, ctx context.Con
 	protocol := "shell/go-test-json/project-conjunction-behavior"
 	expectedReceipts := 1
 	repairSources := 0
+	buildFailure := len(selected) != 0 && selected[0].BuildFailure
 	if len(selected) != 0 {
 		protocol, repairSources = selected[0].ProtocolRef, selected[0].RepairSources
 		if selected[0].ValidationReceipts > 0 {
@@ -177,6 +183,10 @@ func assertProjectConjunctionPersistedOwnerOutputs(t *testing.T, ctx context.Con
 			failureStages = 2 + repairSources
 		}
 	}
+	failedStage := 1
+	if buildFailure {
+		failureStages, failedStage = 1, 0
+	}
 	before, err := module.loadRuntime(ctx, record.Facts.WorkspaceID, record.Facts.RunID)
 	if err != nil || before.Validate() != nil {
 		t.Fatalf("original persisted aggregate invalid: %v", err)
@@ -189,7 +199,7 @@ func assertProjectConjunctionPersistedOwnerOutputs(t *testing.T, ctx context.Con
 		}
 		count++
 		accepted := success
-		if repairSources != 0 {
+		if repairSources != 0 || buildFailure {
 			accepted = receipt.Outcome == runtimecontract.RuntimeOperationOutcomeAccepted
 		}
 		if accepted {
@@ -208,10 +218,10 @@ func assertProjectConjunctionPersistedOwnerOutputs(t *testing.T, ctx context.Con
 			if len(conjunction.Stages) != 4 || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted {
 				t.Fatal("accepted original receipt omitted a required stage")
 			}
-		} else if len(conjunction.Stages) != failureStages || !conjunction.Stages[1].KnownFailure || conjunction.Stages[1].ExitCode == 0 || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || len(observation.PassedChecks) != 0 {
-			t.Fatalf("original project failure disappeared or supplied current CWI proof: stages=%d expected=%d outcome=%s passed=%d known=%t exit=%d", len(conjunction.Stages), failureStages, receipt.Outcome, len(observation.PassedChecks), conjunction.Stages[1].KnownFailure, conjunction.Stages[1].ExitCode)
+		} else if len(conjunction.Stages) != failureStages || !conjunction.Stages[failedStage].KnownFailure || conjunction.Stages[failedStage].ExitCode == 0 || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || len(observation.PassedChecks) != 0 {
+			t.Fatalf("original project failure disappeared or supplied current CWI proof: stages=%d expected=%d outcome=%s passed=%d known=%t exit=%d", len(conjunction.Stages), failureStages, receipt.Outcome, len(observation.PassedChecks), conjunction.Stages[failedStage].KnownFailure, conjunction.Stages[failedStage].ExitCode)
 		}
-		if !accepted && repairSources == 0 && protocol == "shell/go-test-json/project-multi-failure-behavior" && (conjunction.Stages[2].DiagnosticSourceRef != "" || len(conjunction.Stages[2].BehaviorTargetRefs) != 0 || len(conjunction.BehaviorTargetRefs) != 0 || receipt.Feedback.OriginalDiagnostic != nil && receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation != nil) {
+		if !accepted && !buildFailure && repairSources == 0 && protocol == "shell/go-test-json/project-multi-failure-behavior" && (conjunction.Stages[2].DiagnosticSourceRef != "" || len(conjunction.Stages[2].BehaviorTargetRefs) != 0 || len(conjunction.BehaviorTargetRefs) != 0 || receipt.Feedback.OriginalDiagnostic != nil && receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation != nil) {
 			t.Fatal("unobserved adjacent failure obtained source-specific repair authority")
 		}
 		if !accepted && repairSources != 0 {
@@ -315,7 +325,7 @@ func assertProjectConjunctionPersistedOwnerOutputs(t *testing.T, ctx context.Con
 			}
 		}
 	}
-	if repairSources != 0 {
+	if repairSources != 0 || buildFailure {
 		if count != 2 || acceptedCount != 1 || rejectedCount != 1 {
 			t.Fatalf("repair must retain one rejected original and one fresh accepted all-of receipt: %d/%d/%d", count, acceptedCount, rejectedCount)
 		}

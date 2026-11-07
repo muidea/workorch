@@ -119,6 +119,18 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 			}
 		}
 	}
+	// The importing source location is not the dependency repair surface. The
+	// root-module protocol identifies only its checksum metadata; absence from
+	// the sealed catalog proposes creation, which File must independently check.
+	// Other dependency failures remain classified but cannot borrow this route.
+	if class == runtimemodel.ValidationDiagnosticDependencyMismatch && !output.OutputTruncated && !output.StdoutTruncated && !output.StderrTruncated &&
+		shellStringIncluded(request.ValidationScopeTargetRefs, "go.mod") && shellGoMissingModuleChecksum(*output, execCommand) {
+		diagnostic.OwnerCode = shellcommon.ValidationDiagnosticCodeModuleChecksumCreate
+		if shellStringIncluded(request.ValidationScopeTargetRefs, "go.sum") {
+			diagnostic.OwnerCode = shellcommon.ValidationDiagnosticCodeModuleChecksumUpdate
+			diagnostic.TargetRefs = []string{"go.sum"}
+		}
+	}
 	output.ValidationFailureDiagnostic = diagnostic
 	output.RuntimeDiagnostics.ValidationFailureDiagnostic = diagnostic
 	if class == runtimemodel.ValidationDiagnosticCommandInvalid {
@@ -236,6 +248,15 @@ func shellGoDependencyMetadataMismatch(output RuntimeCommandResult, execCommand 
 		}
 	}
 	return false
+}
+
+func shellGoMissingModuleChecksum(output RuntimeCommandResult, execCommand string) bool {
+	if filepath.Base(execCommand) != "go" || output.ExitCode == 0 {
+		return false
+	}
+	text := shellGoBuildDiagnosticOutput(output, execCommand)
+	return strings.Contains(text, "missing go.sum entry for module providing package ") ||
+		strings.Contains(text, "missing go.sum entry needed to verify package ")
 }
 
 func shellGoTestExecutionFailure(output RuntimeCommandResult, execCommand string) bool {

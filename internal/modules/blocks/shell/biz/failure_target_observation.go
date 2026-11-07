@@ -79,6 +79,11 @@ func shellFailureTargetCandidateUnion(result RuntimeCommandResult, targetRole st
 		return nil, false
 	}
 	marker := decodeShellFailureTargetMarkerCandidate(result, targetRole)
+	if diagnostic.Class == runtimecontract.ValidationDiagnosticDependencyMismatch {
+		// Free-form markers cannot widen the dependency owner's typed surface
+		// to the importing implementation or any other file.
+		return diagnosticTargetRefs, !marker.Present
+	}
 	if marker.Present && (!marker.Valid || !shellTargetRefsSubset(marker.TargetRefs, validationScopeTargetRefs)) {
 		return nil, false
 	}

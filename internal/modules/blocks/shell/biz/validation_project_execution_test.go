@@ -217,11 +217,11 @@ func TestProjectDiagnosticPublicationFailureKeepsActualSourceHistory(t *testing.
 				t.Fatal("published source output no longer contains its complete original bytes", err)
 			}
 			observation := result.Result.Evidence.Validation
-			if err := runtimecontract.ValidateRuntimeValidationDiagnosticFailureObservation(observation, binding, request.ValidationScopeTargetRefs, nil); err != nil {
+			if err := runtimecontract.ValidateRuntimeValidationDiagnosticFailureObservation(observation, binding, request.ValidationScopeTargetRefs, nil, nil); err != nil {
 				t.Fatal("rejected receipt cannot preserve actual diagnostic history", err)
 			}
 			failure := runtimecontract.RuntimeValidationFailureObservation{CandidateTargetRefs: result.Conjunction.BehaviorTargetRefs}
-			if runtimecontract.ValidateRuntimeValidationDiagnosticFailureObservation(observation, binding, request.ValidationScopeTargetRefs, &failure) == nil {
+			if runtimecontract.ValidateRuntimeValidationDiagnosticFailureObservation(observation, binding, request.ValidationScopeTargetRefs, &failure, nil) == nil {
 				t.Fatal("missing original stream acquired repair authority")
 			}
 		})

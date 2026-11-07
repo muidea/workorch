@@ -146,6 +146,22 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 				output.Status = "timeout"
 			}
 			output.FailureCode = stages[len(stages)-1].FailureCode
+			if index < len(specs)-1 && stage.KnownFailure && !stage.TimedOut && !stage.CleanupFailed &&
+				stage.Stdout.Complete && stage.Stderr.Complete && stage.SourceBefore != "" && stage.SourceBefore == stage.SourceAfter {
+				// Project prerequisites need the same typed build/dependency facts
+				// as exact checks. Preserve the original stage failure and raw bytes;
+				// test attribution still requires independent behavior below.
+				diagnostic := output
+				diagnostic.Args, diagnostic.FailureCode = spec.Args, ""
+				attachShellValidationFailureDiagnostic(&diagnostic, request, "go", stage.ExitCode, false, false, stageErr)
+				if diagnostic.ValidationFailureDiagnostic != nil &&
+					(diagnostic.ValidationFailureDiagnostic.Class == runtimecontract.ValidationDiagnosticBuildFailed ||
+						diagnostic.ValidationFailureDiagnostic.Class == runtimecontract.ValidationDiagnosticDependencyMismatch) {
+					output.ValidationFailureDiagnostic = diagnostic.ValidationFailureDiagnostic
+					output.RuntimeDiagnostics.ValidationFailureDiagnostic = diagnostic.ValidationFailureDiagnostic
+					output.validationFailureTargetCandidatesInvalid = diagnostic.validationFailureTargetCandidatesInvalid
+				}
+			}
 			if index == len(specs)-1 {
 				// This stage uses only the exact reviewed checks. Preserve its
 				// native failure (including missing behavior) for the existing
@@ -156,7 +172,7 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 				output.ValidationFailureDiagnostic = diagnostic.ValidationFailureDiagnostic
 				output.RuntimeDiagnostics.ValidationFailureDiagnostic = diagnostic.ValidationFailureDiagnostic
 			}
-			if protocol == shellProjectFailureDiagnosticProtocolRef && (spec.ID == "project-test" || spec.ID == "project-race") {
+			if output.ValidationFailureDiagnostic == nil && protocol == shellProjectFailureDiagnosticProtocolRef && (spec.ID == "project-test" || spec.ID == "project-race") {
 				diagnosticEnv := shellProcessBehaviorEnvironment(shellBehaviorEnvironment(env), processPath, behaviorArgs)
 				diagnosticStage, diagnostic := runShellProjectFailureDiagnostic(ctx, directory, diagnosticEnv, request, stage, specs[3], coveragePath, processPath)
 				if diagnosticStage.ID != "" {
@@ -173,7 +189,7 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 					output.RuntimeDiagnostics.ValidationFailureDiagnostic = diagnostic.ValidationFailureDiagnostic
 				}
 			}
-			if protocol == shellProjectMultiFailureDiagnosticProtocolRef && (spec.ID == "project-test" || spec.ID == "project-race") {
+			if output.ValidationFailureDiagnostic == nil && protocol == shellProjectMultiFailureDiagnosticProtocolRef && (spec.ID == "project-test" || spec.ID == "project-race") {
 				diagnosticStages, diagnosticSpecs, diagnostic := runShellProjectMultiFailureDiagnostic(ctx, directory, env, request, stage, len(stages))
 				stages = append(stages, diagnosticStages...)
 				output.projectDiagnosticStageSpecs = diagnosticSpecs

@@ -185,7 +185,7 @@ func TestDiagnosticFailureCannotEraseAttributionOrBorrowRepairTargets(t *testing
 	binding.InputReview.Hash = StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, binding)
 	failure := RuntimeValidationFailureObservation{CandidateTargetRefs: []string{"implementation"}}
 	scope := []string{"implementation"}
-	if err := ValidateRuntimeValidationDiagnosticFailureObservation(&original, binding, scope, &failure); err != nil {
+	if err := ValidateRuntimeValidationDiagnosticFailureObservation(&original, binding, scope, &failure, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"erase-fields", "erase-union", "erase-conjunction", "erase-observation", "borrow-target", "extra-target", "credit"} {
@@ -212,7 +212,7 @@ func TestDiagnosticFailureCannotEraseAttributionOrBorrowRepairTargets(t *testing
 			case "credit":
 				changed.ExecutionConjunction.Complete = true
 			}
-			if err := ValidateRuntimeValidationDiagnosticFailureObservation(observation, binding, scope, &candidate); err == nil {
+			if err := ValidateRuntimeValidationDiagnosticFailureObservation(observation, binding, scope, &candidate, nil); err == nil {
 				t.Fatal("repair authority survived source attribution downgrade")
 			}
 		})
@@ -223,22 +223,116 @@ func TestDiagnosticFailureCannotEraseAttributionOrBorrowRepairTargets(t *testing
 		unobserved.ExecutionConjunction.Stages[i].BehaviorTargetRefs = nil
 	}
 	unobserved.ExecutionConjunction.BehaviorTargetRefs = nil
-	if err := ValidateRuntimeValidationDiagnosticFailureObservation(&unobserved, binding, scope, nil); err != nil {
+	if err := ValidateRuntimeValidationDiagnosticFailureObservation(&unobserved, binding, scope, nil, nil); err != nil {
 		t.Fatal("unobserved failure could not be preserved without repair authority", err)
 	}
 	// Successful ordinary behavior observed before a later storage/deadline
 	// failure is also preservable, without becoming a repair-target union.
 	unobserved.ExecutionConjunction.BehaviorTargetRefs = []string{"implementation"}
-	if err := ValidateRuntimeValidationDiagnosticFailureObservation(&unobserved, binding, scope, nil); err != nil {
+	if err := ValidateRuntimeValidationDiagnosticFailureObservation(&unobserved, binding, scope, nil, nil); err != nil {
 		t.Fatal("ordinary partial behavior could not be preserved", err)
 	}
-	if err := ValidateRuntimeValidationDiagnosticFailureObservation(&unobserved, binding, scope, &failure); err == nil {
+	if err := ValidateRuntimeValidationDiagnosticFailureObservation(&unobserved, binding, scope, &failure, nil); err == nil {
 		t.Fatal("ordinary partial behavior became source repair authority")
 	}
 	legacy := binding.Clone()
 	legacy.InputReview = nil
-	if err := ValidateRuntimeValidationDiagnosticFailureObservation(nil, legacy, scope, &failure); err != nil {
+	if err := ValidateRuntimeValidationDiagnosticFailureObservation(nil, legacy, scope, &failure, nil); err != nil {
 		t.Fatal("legacy failure was implicitly upgraded", err)
+	}
+}
+
+func TestPrerequisiteDiagnosticUsesOriginalToolFailureWithoutBehaviorCredit(t *testing.T) {
+	binding, _ := diagnosticSourceReviewFixture(t)
+	original := diagnosticExecutionFixture()
+	original.RecipeID = binding.ValidationRecipeID
+	c := original.ExecutionConjunction
+	c.Stages, c.BehaviorTargetRefs = c.Stages[:1], nil
+	c.Stages[0].FailureCode = "owner-prerequisite-failed"
+	for i := range binding.CheckAttestations {
+		binding.CheckAttestations[i].ObservationProtocolRef = c.ProtocolRef
+		binding.CheckAttestations[i].ExecutionStagesHash = c.RequiredStagesHash
+	}
+	scope := []string{"metadata", "implementation"}
+	for _, class := range []string{ValidationDiagnosticBuildFailed, ValidationDiagnosticDependencyMismatch} {
+		t.Run(class, func(t *testing.T) {
+			diagnostic := ValidationFailureDiagnostic{Class: class, Stage: c.Stages[0].Identity.ID, ExitCode: 1, TargetRefs: []string{"metadata"}}
+			failure := RuntimeValidationFailureObservation{DiagnosticClass: class, CandidateTargetRefs: diagnostic.TargetRefs, DiagnosticHash: StableRuntimeValidationFailureObservationDiagnosticHash(diagnostic, scope)}
+			if err := ValidateRuntimeValidationDiagnosticFailureObservation(&original, binding, scope, &failure, &diagnostic); err != nil {
+				t.Fatal(err)
+			}
+			if err := ValidateRuntimeValidationDiagnosticFailureObservation(&original, binding, scope, nil, &diagnostic); err != nil {
+				t.Fatal("prospective diagnostic cannot be preserved", err)
+			}
+			for _, scenario := range []string{"missing-execution", "complete", "storage", "omitted", "truncated", "source-drift", "timeout", "cleanup", "not-started", "unknown", "pass", "behavior-stage", "borrow-attribution", "wrong-stage", "wrong-exit", "wrong-hash", "wrong-scope", "wrong-class", "wrong-candidate", "wrong-protocol", "wrong-stages", "behavior-credit", "missing-time", "reversed-time"} {
+				t.Run(scenario, func(t *testing.T) {
+					changed, d, f := original.Clone(), diagnostic.Clone(), failure.Clone()
+					o := &changed
+					stage := &changed.ExecutionConjunction.Stages[0]
+					b := binding.Clone()
+					currentScope := scope
+					switch scenario {
+					case "missing-execution":
+						o = nil
+					case "complete":
+						changed.ExecutionConjunction.Complete = true
+					case "storage":
+						stage.Stderr.Storage = nil
+					case "omitted":
+						stage.Stderr.Storage = &RuntimeValidationOutputStorage{OmittedReason: "store-failed"}
+					case "truncated":
+						stage.Stderr.Complete, stage.Stderr.OmittedReason = false, "capacity"
+					case "source-drift":
+						stage.SourceAfter = strings.Repeat("b", 64)
+					case "timeout":
+						stage.TimedOut = true
+					case "cleanup":
+						stage.CleanupFailed = true
+					case "not-started":
+						stage.Started = false
+					case "unknown":
+						stage.KnownFailure = false
+					case "pass":
+						stage.ExitCode = 0
+					case "behavior-stage":
+						stage.Identity.RequireBehavior = true
+					case "borrow-attribution":
+						stage.DiagnosticSourceRef, stage.BehaviorTargetRefs = "source-a", []string{"implementation"}
+					case "wrong-stage":
+						d.Stage = "other"
+					case "wrong-exit":
+						d.ExitCode = 2
+					case "wrong-hash":
+						f.DiagnosticHash = strings.Repeat("b", 64)
+					case "wrong-scope":
+						currentScope = []string{"metadata"}
+					case "wrong-class":
+						f.DiagnosticClass = ValidationDiagnosticTestFailed
+					case "wrong-candidate":
+						f.CandidateTargetRefs = []string{"implementation"}
+					case "wrong-protocol":
+						changed.ObservationProtocolRef = "other"
+					case "wrong-stages":
+						b.CheckAttestations[0].ExecutionStagesHash = strings.Repeat("b", 64)
+					case "behavior-credit":
+						changed.ProofClass = RuntimeValidationProofBehavioral
+					case "missing-time":
+						stage.StartedAt = ""
+					case "reversed-time":
+						stage.StartedAt, stage.FinishedAt = stage.FinishedAt, stage.StartedAt
+					}
+					if err := ValidateRuntimeValidationDiagnosticFailureObservation(o, b, currentScope, &f, &d); err == nil {
+						t.Fatal("incomplete/changed prerequisite acquired repair authority")
+					}
+				})
+			}
+			// A typed test failure still needs the original independent source
+			// union, even when its raw process output is otherwise complete.
+			diagnostic.Class, failure.DiagnosticClass = ValidationDiagnosticTestFailed, ValidationDiagnosticTestFailed
+			if err := ValidateRuntimeValidationDiagnosticFailureObservation(&original, binding, scope, &failure, &diagnostic); err == nil {
+				t.Fatal("test failure borrowed structural attribution")
+			}
+		})
 	}
 }
 
@@ -277,10 +371,10 @@ func TestDiagnosticStorageOmissionPreservesHistoryButNeverRepairAuthority(t *tes
 				if err != nil || json.Unmarshal(body, &reloaded) != nil || !reflect.DeepEqual(reloaded, changed) {
 					t.Fatal("historical output identity changed on reload")
 				}
-				if err := ValidateRuntimeValidationDiagnosticFailureObservation(&reloaded, binding, []string{"implementation"}, nil); err != nil {
+				if err := ValidateRuntimeValidationDiagnosticFailureObservation(&reloaded, binding, []string{"implementation"}, nil, nil); err != nil {
 					t.Fatal("actual attribution history was lost on publication failure", err)
 				}
-				if err := ValidateRuntimeValidationDiagnosticFailureObservation(&reloaded, binding, []string{"implementation"}, &failure); err == nil {
+				if err := ValidateRuntimeValidationDiagnosticFailureObservation(&reloaded, binding, []string{"implementation"}, &failure, nil); err == nil {
 					t.Fatal("omitted original output acquired repair authority")
 				}
 			})

@@ -36,6 +36,8 @@ const (
 	ValidationDiagnosticCodeModuleManifestParseFailed = "module_manifest_parse_failed"
 	ValidationDiagnosticCodeSourceCompileFailed       = "source_compile_failed"
 	ValidationDiagnosticCodeTestFailed                = "test_failed"
+	ValidationDiagnosticCodeModuleChecksumCreate      = "module_checksum_create_candidate"
+	ValidationDiagnosticCodeModuleChecksumUpdate      = "module_checksum_update_required"
 )
 
 // ProspectiveSatisfactionContractRef identifies the Shell-owner pure query

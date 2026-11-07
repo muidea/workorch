@@ -1080,6 +1080,50 @@
                 "id": "dod-validation-rejected-implementation-repair",
                 "routes": [
                   {
+                    "id": "module-checksum-missing-to-file-write",
+                    "triggerOwnerModuleId": "blocks/shell",
+                    "triggerOperationKind": "validation/managed_session",
+                    "triggerDiagnosticClass": "validation_dependency_mismatch",
+                    "triggerEvidenceTargetType": "dependency_contract",
+                    "triggerOwnerDiagnosticCode": "module_checksum_create_candidate",
+                    "repairEvidenceKind": "state_change",
+                    "repairOwnerModuleId": "blocks/file",
+                    "repairOperationKinds": [
+                      "file/write"
+                    ],
+                    "repairTargetPolicy": "prospective_owner_target",
+                    "repairTargetRole": "deliverable_implementation",
+                    "repairDeclarationTargetSelectorRef": "file/workspace_deliverable",
+                    "repairDeclarationTargetSelectorOwnerRef": "software-dev",
+                    "repairDeclarationTargetSelectorSubjectRef": "dodItem_dependency_metadata",
+                    "repairDeclarationTargetSelectorCandidateRefs": [
+                      "go.sum"
+                    ],
+                    "repairOperationTargetSelectorRef": "workspace-relative-new-file-target"
+                  },
+                  {
+                    "id": "module-checksum-incomplete-to-file-edit",
+                    "triggerOwnerModuleId": "blocks/shell",
+                    "triggerOperationKind": "validation/managed_session",
+                    "triggerDiagnosticClass": "validation_dependency_mismatch",
+                    "triggerEvidenceTargetType": "dependency_contract",
+                    "triggerOwnerDiagnosticCode": "module_checksum_update_required",
+                    "repairEvidenceKind": "state_change",
+                    "repairOwnerModuleId": "blocks/file",
+                    "repairOperationKinds": [
+                      "file/edit"
+                    ],
+                    "repairTargetPolicy": "existing_owner_scope",
+                    "repairTargetRole": "deliverable_implementation",
+                    "repairDeclarationTargetSelectorRef": "file/workspace_deliverable",
+                    "repairDeclarationTargetSelectorOwnerRef": "software-dev",
+                    "repairDeclarationTargetSelectorSubjectRef": "dodItem_dependency_metadata",
+                    "repairDeclarationTargetSelectorCandidateRefs": [
+                      "go.sum"
+                    ],
+                    "repairOperationTargetSelectorRef": "workspace-relative-existing-file-target"
+                  },
+                  {
                     "id": "module-manifest-parse-to-file-edit",
                     "triggerOwnerModuleId": "blocks/shell",
                     "triggerOperationKind": "validation/managed_session",

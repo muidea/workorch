@@ -1311,6 +1311,14 @@ File 输入修改、review 或执行 credit。脚本化 provider 主线只能证
 
 ### Receipt, evidence and repair
 
+- 已封存合取的构建／依赖 prerequisite 拒绝与 assertion 行为失败分开消费：validation owner 的 typed diagnostic
+  必须绑定原失败 stage、exit、完整持久 stdout/stderr、连续未变化 source 与原 protocol/stages hash；不以行为
+  source union 作为结构失败的前提，也不借结构诊断绕过测试行为归属。Core 不解析日志、语言或依赖文件名。
+  Shell 的 root-module checksum 诊断通过 software-dev Profile 的精确路由进入 File prospective create 或 existing
+  scope confirmation；导入位置、marker 和 validation entry 都不能替代修复 target。修复 effect 保留审计归属，
+  当前验收仍须 fresh 输入重审、完整普通验证及 assessment。`TestDriveRuntimeProjectChecksumRepair` 覆盖真实 owner
+  与文件型 Run CAS、两种表面、原 receipt 响应丢失和重启，provider 使用固定脚本，不代表真实模型或业务验收通过。
+
 - capability observation 的新版本由 activation-sealed adapter 与 exact owner binding 选择；Runtime 不根据当前模板/Soul、
   diagnostic 或历史文件形态推断升级。能力 owner 对未改写输入的 fresh reobservation 仍只是事实，只有现有 SM-2/3
   transaction 可 seal 并认可同一 CWI 的新证明；SM-4 不迁移历史，SM-1 ownership 不变。

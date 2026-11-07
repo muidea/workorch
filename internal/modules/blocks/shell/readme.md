@@ -112,8 +112,13 @@ Orchestrator 的原事务负责，不增加 SM-1～SM-4 transition、availabilit
 - Shell 只署名 capability、feasibility、validation、effect 和 receipt fact；不拥有 CWI credit、repair、retry、governance 或 terminal。
 - managed Go validation 的 bounded tool output 若明确报告依赖元数据问题，Shell 必须发布
   `validation_dependency_mismatch + dependency_contract`，即使 sealed recipe 只携带 generic build hint；incidental
-  `*.go:line` 不得成为 implementation repair candidate。Shell 只发布事实；当前默认 Profile 没有该类自动 repair route，
-  由 SM-2 有界终止。
+  `*.go:line` 不得成为 implementation repair candidate。明确缺少 module checksum 且 sealed root scope 含 `go.mod` 时，
+  仅将 `go.sum` 作为依赖元数据表面：scope 已有该文件时发布 `module_checksum_update_required` 及有界候选，
+  否则发布 `module_checksum_create_candidate`，不伪造不存在文件的 structured observation。
+  当前 software-dev Profile 分别声明 File existing-scope edit 与 prospective create-only write，File 独立确认当前表面、
+  权限及版本；原 importing source 和验收输入不可借依赖诊断进入修复。其他依赖失败不借用 checksum 路由。
+  project-build/test/race 的完整、已知、source 未变的构建／依赖失败也发布同一 typed diagnostic；原阶段、退出码、
+  原文引用和失败结论保留。超时、cleanup、原文存储或 source 完整性失败不产生修复归属。
 - managed Go validation 只在 bounded tool grammar 命中时发布领域中立的可路由 owner code：`module_manifest_parse_failed` 对应
   manifest-scoped `go.mod|go.work|go.sum:line`，`source_compile_failed` 对应 manifest-scoped `*.go:line[:column]`/package conflict，
   `test_failed` 对应 typed test observation。无法精确分类的非零退出保留 `shell_exit_nonzero`，不得借 generic code 进入

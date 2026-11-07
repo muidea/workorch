@@ -614,7 +614,7 @@ func validationRecipeUnavailableResult(request RuntimeCommandRequest, err error)
 // carry a Runtime action; the File owner must independently confirm it.
 func shellValidationFailureObservation(context runtimecontract.RuntimeOperationExecutionContext, authorization shellevents.RuntimeExecutionAuthorization, diagnostic runtimecontract.ValidationFailureDiagnostic) *runtimecontract.RuntimeValidationFailureObservation {
 	diagnostic = diagnostic.Normalized()
-	if !shellValidationDiagnosticMayIdentifyImplementationEffect(diagnostic.Class) || context.WorkspaceID == "" || context.RunID == "" || context.Transaction.AuthoritySnapshotID == "" || strings.TrimSpace(context.DispatchID) == "" || strings.TrimSpace(context.OperationID) == "" || strings.TrimSpace(authorization.TargetRole) == "" || strings.TrimSpace(diagnostic.Class) == "" || len(diagnostic.TargetRefs) == 0 || len(diagnostic.TargetRefs) > shellValidationDiagnosticMaxTargetRefs || len(authorization.ValidationScopeTargetRefs) == 0 {
+	if !shellValidationDiagnosticMayIdentifyRepairSurface(diagnostic) || context.WorkspaceID == "" || context.RunID == "" || context.Transaction.AuthoritySnapshotID == "" || strings.TrimSpace(context.DispatchID) == "" || strings.TrimSpace(context.OperationID) == "" || strings.TrimSpace(authorization.TargetRole) == "" || strings.TrimSpace(diagnostic.Class) == "" || len(diagnostic.TargetRefs) == 0 || len(diagnostic.TargetRefs) > shellValidationDiagnosticMaxTargetRefs || len(authorization.ValidationScopeTargetRefs) == 0 {
 		return nil
 	}
 	if !shellTargetRefsSubset(diagnostic.TargetRefs, authorization.ValidationScopeTargetRefs) {
@@ -632,6 +632,14 @@ func shellValidationFailureObservation(context runtimecontract.RuntimeOperationE
 	// The failure signature is added by RuntimeOperationFailure below; do not
 	// validate this transient value before the caller binds that causation key.
 	return &value
+}
+
+func shellValidationDiagnosticMayIdentifyRepairSurface(diagnostic runtimecontract.ValidationFailureDiagnostic) bool {
+	return shellValidationDiagnosticMayIdentifyImplementationEffect(diagnostic.Class) ||
+		(diagnostic.Class == runtimecontract.ValidationDiagnosticDependencyMismatch &&
+			diagnostic.RecommendedEvidenceTargetType == runtimecontract.ValidationEvidenceTargetDependencyContract &&
+			diagnostic.OwnerCode == modulecommon.ValidationDiagnosticCodeModuleChecksumUpdate &&
+			len(diagnostic.TargetRefs) == 1 && diagnostic.TargetRefs[0] == "go.sum")
 }
 
 func shellTargetRefsSubset(values, scope []string) bool {

@@ -353,7 +353,7 @@ func validateOperationReceiptFeedbackAgainstDispatch(aggregate RuntimeAggregate,
 		if err != nil {
 			return err
 		}
-		if err := runtimecontract.ValidateRuntimeValidationDiagnosticFailureObservation(observation, binding, catalog.TargetRefs, failureObservation); err != nil {
+		if err := runtimecontract.ValidateRuntimeValidationDiagnosticFailureObservation(observation, binding, catalog.TargetRefs, failureObservation, feedback.OriginalDiagnostic.ValidationDiagnostic); err != nil {
 			return err
 		}
 	}

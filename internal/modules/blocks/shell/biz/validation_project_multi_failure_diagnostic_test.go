@@ -163,7 +163,7 @@ func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
 				if attributed != 1 || !reflect.DeepEqual(result.Conjunction.BehaviorTargetRefs, []string{"delivery/value.go"}) || result.Result.Evidence.Validation == nil {
 					t.Fatal("later unknown erased real earlier source attribution")
 				}
-				if err := runtimecontract.ValidateRuntimeValidationDiagnosticFailureObservation(result.Result.Evidence.Validation, binding, refs, nil); err != nil {
+				if err := runtimecontract.ValidateRuntimeValidationDiagnosticFailureObservation(result.Result.Evidence.Validation, binding, refs, nil, nil); err != nil {
 					t.Fatal("partial historical source facts cannot be preserved", err)
 				}
 			}

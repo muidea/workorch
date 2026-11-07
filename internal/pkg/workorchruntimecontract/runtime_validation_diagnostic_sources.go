@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -201,13 +202,22 @@ func ValidateRuntimeValidationDiagnosticExecution(observation RuntimeValidationO
 // contract. A repair-authorizing failure may not erase attribution or borrow
 // targets outside the exact source-stage union. Unobserved failures remain
 // persistable without granting repair authority; bindings without source declarations cannot gain them.
-func ValidateRuntimeValidationDiagnosticFailureObservation(observation *RuntimeValidationObservation, binding RuntimeValidationProofRequirementBinding, scope []string, failure *RuntimeValidationFailureObservation) error {
+func ValidateRuntimeValidationDiagnosticFailureObservation(observation *RuntimeValidationObservation, binding RuntimeValidationProofRequirementBinding, scope []string, failure *RuntimeValidationFailureObservation, diagnostic *ValidationFailureDiagnostic) error {
 	if observation != nil {
 		if err := ValidateRuntimeValidationDiagnosticExecution(*observation, binding, scope); err != nil {
 			return err
 		}
 	}
-	if failure == nil || binding.InputReview == nil || binding.InputReview.DiagnosticSourceContractRef != RuntimeValidationDiagnosticSourceReviewV1 {
+	if binding.InputReview == nil || binding.InputReview.DiagnosticSourceContractRef != RuntimeValidationDiagnosticSourceReviewV1 {
+		return nil
+	}
+	// Build/dependency rejection is a tool fact about a prerequisite stage,
+	// not a failed assertion needing independent behavior attribution. Consume
+	// the owner's typed classification; never parse native diagnostics here.
+	if diagnostic != nil && (diagnostic.Class == ValidationDiagnosticBuildFailed || diagnostic.Class == ValidationDiagnosticDependencyMismatch) {
+		return validateRuntimeValidationPrerequisiteFailure(observation, binding, scope, failure, *diagnostic)
+	}
+	if failure == nil {
 		return nil
 	}
 	if observation == nil || observation.ExecutionConjunction == nil || observation.ExecutionConjunction.Complete || len(observation.ExecutionConjunction.BehaviorTargetRefs) == 0 {
@@ -225,6 +235,56 @@ func ValidateRuntimeValidationDiagnosticFailureObservation(observation *RuntimeV
 	}
 	if !reflect.DeepEqual(failure.CandidateTargetRefs, observation.ExecutionConjunction.BehaviorTargetRefs) {
 		return fmt.Errorf("diagnostic failure candidates differ from original independently attributed source union")
+	}
+	return nil
+}
+
+func validateRuntimeValidationPrerequisiteFailure(observation *RuntimeValidationObservation, binding RuntimeValidationProofRequirementBinding, scope []string, failure *RuntimeValidationFailureObservation, diagnostic ValidationFailureDiagnostic) error {
+	if observation == nil || observation.ExecutionConjunction == nil || observation.ExecutionConjunction.Complete || observation.ProofClass != "" ||
+		observation.RecipeID != binding.ValidationRecipeID || observation.ObservationProtocolRef != observation.ExecutionConjunction.ProtocolRef {
+		return fmt.Errorf("prerequisite failure requires its original incomplete execution")
+	}
+	c := observation.ExecutionConjunction
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	if len(c.Stages) == 0 || len(c.BehaviorTargetRefs) != 0 {
+		return fmt.Errorf("prerequisite failure cannot borrow behavior attribution")
+	}
+	for _, check := range binding.CheckAttestations {
+		if check.ObservationProtocolRef != c.ProtocolRef || check.ExecutionStagesHash != c.RequiredStagesHash {
+			return fmt.Errorf("prerequisite failure changed sealed protocol or stages")
+		}
+	}
+	var previousEnd time.Time
+	for index, stage := range c.Stages {
+		start, startErr := time.Parse(time.RFC3339Nano, stage.StartedAt)
+		end, endErr := time.Parse(time.RFC3339Nano, stage.FinishedAt)
+		if startErr != nil || endErr != nil || end.Before(start) || index > 0 && start.Before(previousEnd) {
+			return fmt.Errorf("prerequisite failure has invalid stage execution order")
+		}
+		previousEnd = end
+		if !stage.Started || stage.TimedOut || stage.CleanupFailed || stage.SourceBefore == "" || stage.SourceBefore != stage.SourceAfter ||
+			index > 0 && c.Stages[index-1].SourceAfter != stage.SourceBefore || stage.DiagnosticSourceRef != "" || len(stage.BehaviorTargetRefs) != 0 {
+			return fmt.Errorf("prerequisite failure lacks unchanged original stage source")
+		}
+		for _, output := range []RuntimeValidationOutputIdentity{stage.Stdout, stage.Stderr} {
+			if !output.Complete || output.Storage == nil || output.Storage.Reference == "" || output.Storage.OmittedReason != "" {
+				return fmt.Errorf("prerequisite failure requires complete original output storage")
+			}
+		}
+		if index < len(c.Stages)-1 && (stage.ExitCode != 0 || stage.KnownFailure || !stage.TerminalComplete) {
+			return fmt.Errorf("prerequisite failure followed an unsettled stage")
+		}
+	}
+	stage := c.Stages[len(c.Stages)-1]
+	if stage.Identity.RequireBehavior || !stage.KnownFailure || stage.ExitCode == 0 || stage.FailureCode == "" ||
+		diagnostic.Stage != stage.Identity.ID || int64(diagnostic.ExitCode) != stage.ExitCode || diagnostic.TimedOut || diagnostic.CommandPolicyViolation {
+		return fmt.Errorf("prerequisite diagnostic does not match original failed stage")
+	}
+	if failure != nil && (failure.DiagnosticClass != diagnostic.Class || !sameStrings(failure.CandidateTargetRefs, diagnostic.TargetRefs) ||
+		failure.DiagnosticHash != StableRuntimeValidationFailureObservationDiagnosticHash(diagnostic, scope)) {
+		return fmt.Errorf("prerequisite failure changed typed diagnostic candidates or scope")
 	}
 	return nil
 }

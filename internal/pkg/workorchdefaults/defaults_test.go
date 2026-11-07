@@ -976,7 +976,7 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 						t.Fatalf("dodItem validation failure repair convergence = %+v", repair)
 					}
 					routes, ok := repair["routes"].([]any)
-					if !ok || len(routes) != 5 {
+					if !ok || len(routes) != 7 {
 						t.Fatalf("dodItem validation failure repair routes = %+v", repair["routes"])
 					}
 					routesByID := make(map[string]map[string]any, len(routes))
@@ -1029,6 +1029,17 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 							t.Fatalf("dodItem File repair route %q operations = %+v", routeID, operationKinds)
 						}
 						assertStringListContains(t, operationKinds, "file/edit")
+					}
+					for _, spec := range []struct{ id, code, policy, selector, operation string }{
+						{"module-checksum-missing-to-file-write", "module_checksum_create_candidate", "prospective_owner_target", "workspace-relative-new-file-target", "file/write"},
+						{"module-checksum-incomplete-to-file-edit", "module_checksum_update_required", "existing_owner_scope", "workspace-relative-existing-file-target", "file/edit"},
+					} {
+						route := routesByID[spec.id]
+						candidates, _ := route["repairDeclarationTargetSelectorCandidateRefs"].([]any)
+						kinds, _ := route["repairOperationKinds"].([]any)
+						if route["triggerDiagnosticClass"] != "validation_dependency_mismatch" || route["triggerEvidenceTargetType"] != "dependency_contract" || route["triggerOwnerDiagnosticCode"] != spec.code || route["repairOwnerModuleId"] != "blocks/file" || route["repairTargetPolicy"] != spec.policy || route["repairOperationTargetSelectorRef"] != spec.selector || len(kinds) != 1 || kinds[0] != spec.operation || len(candidates) != 1 || candidates[0] != "go.sum" || route["requireInputRepair"] == true || route["requireInputAddition"] == true {
+							t.Fatalf("checksum repair widened metadata or bypassed current File facts: %+v", route)
+						}
 					}
 					ownerFacts, ok := item["requiredOwnerFacts"].([]any)
 					if !ok || len(ownerFacts) != 1 {
