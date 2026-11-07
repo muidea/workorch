@@ -106,6 +106,7 @@ func shellReadValidationInputSubject(directory string, targets []string, binding
 	if !review {
 		return subject, ""
 	}
+	subject.EvaluationScope = runtimecontract.RuntimeValidationInputSemantics
 	if binding.CheckAttestations[0].ObservationProtocolRef == shellProjectMultiFailureDiagnosticProtocolRef {
 		subject.ProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 		subject.ScopeContractRef, subject.ScopeRequirements = shellProjectMultiFailureReviewScopeRef, shellProjectMultiFailureRequirements

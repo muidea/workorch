@@ -27,7 +27,10 @@ func validateRuntimeValidationInputReviewPayload(path string, raw json.RawMessag
 				return &RuntimeCandidatePayloadDiagnostic{Path: p, Actual: "non_object", Required: []string{"object"}}
 			}
 			fields := []string{"sourceRef", "conclusion", "reason", "inputTargetRefs"}
-			if err := validateRuntimeSemanticObjectFields(p, source, fields, fields); err != nil {
+			if err := validateRuntimeSemanticObjectFields(p, source, append(append([]string(nil), fields...), "uncertaintyKind"), fields); err != nil {
+				return err
+			}
+			if err := validateRuntimeInputReviewUncertaintyPayload(p, source); err != nil {
 				return err
 			}
 		}
@@ -43,7 +46,10 @@ func validateRuntimeValidationInputReviewPayload(path string, raw json.RawMessag
 			return &RuntimeCandidatePayloadDiagnostic{Path: checkPath, Actual: "non_object", Required: []string{"object"}}
 		}
 		fields := []string{"requiredCheckRef", "conclusion", "reason", "inputTargetRefs"}
-		if err := validateRuntimeSemanticObjectFields(checkPath, check, append(append([]string(nil), fields...), "obligations", "dependencyTargetRefs"), fields); err != nil {
+		if err := validateRuntimeSemanticObjectFields(checkPath, check, append(append([]string(nil), fields...), "obligations", "dependencyTargetRefs", "uncertaintyKind"), fields); err != nil {
+			return err
+		}
+		if err := validateRuntimeInputReviewUncertaintyPayload(checkPath, check); err != nil {
 			return err
 		}
 		if raw, exists := check["dependencyTargetRefs"]; exists {
@@ -118,6 +124,7 @@ func addRuntimeSemanticInputReviewSchema(proposal map[string]any, manifest Runti
 						"dependencyTargetRefs": runtimeImplementationTargetRefsSchema(),
 					},
 				}
+				addRuntimeInputReviewUncertaintySchema(checkSchema, *binding.InputReview)
 
 				checkSchema["required"] = append(checkSchema["required"].([]string), "obligations")
 				checkSchema["properties"].(map[string]any)["obligations"] = map[string]any{
@@ -166,6 +173,8 @@ func addRuntimeSemanticInputReviewSchema(proposal map[string]any, manifest Runti
 					}
 					reviewSchema["required"] = append(reviewSchema["required"].([]string), "diagnosticSources")
 					reviewSchema["properties"].(map[string]any)["diagnosticSources"] = map[string]any{"type": "array", "minItems": len(sourceRefs), "maxItems": len(sourceRefs), "allOf": sourceRules, "items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"sourceRef", "conclusion", "reason", "inputTargetRefs"}, "properties": map[string]any{"sourceRef": stringEnumSchema(sourceRefs), "conclusion": stringEnumSchema([]string{RuntimeValidationInputConsistent, RuntimeValidationInputConflict, RuntimeValidationInputInconclusive}), "reason": map[string]any{"type": "string", "minLength": 1, "maxLength": RuntimeValidationInputReviewMaxReasonBytes}, "inputTargetRefs": stringEnumArraySchemaWithMaximum(refs, len(refs), 1)}}}
+					sourceSchema := reviewSchema["properties"].(map[string]any)["diagnosticSources"].(map[string]any)["items"].(map[string]any)
+					addRuntimeInputReviewUncertaintySchema(sourceSchema, *binding.InputReview)
 				}
 				rules = append(rules, map[string]any{"if": condition, "then": map[string]any{"required": []string{"validationInputReview"}, "properties": map[string]any{"validationInputReview": reviewSchema}}})
 			}
@@ -177,4 +186,26 @@ func addRuntimeSemanticInputReviewSchema(proposal map[string]any, manifest Runti
 	proposal["properties"].(map[string]any)["validationInputReview"] = map[string]any{"type": "object"}
 	rules = append(rules, map[string]any{"if": map[string]any{"required": []string{"validationInputReview"}}, "then": map[string]any{"anyOf": applicable}})
 	proposal["allOf"] = append(proposal["allOf"].([]any), rules...)
+}
+
+func validateRuntimeInputReviewUncertaintyPayload(path string, object map[string]json.RawMessage) error {
+	if raw, exists := object["uncertaintyKind"]; exists {
+		var kind string
+		if json.Unmarshal(raw, &kind) != nil || kind == "" {
+			return &RuntimeCandidatePayloadDiagnostic{Path: path + ".uncertaintyKind", Actual: "non_string_or_empty", Required: []string{"nonempty declared uncertainty kind"}}
+		}
+	}
+	return nil
+}
+
+func addRuntimeInputReviewUncertaintySchema(schema map[string]any, subject RuntimeValidationInputReviewSubject) {
+	if subject.EvaluationScope != RuntimeValidationInputSemantics {
+		return
+	}
+	schema["properties"].(map[string]any)["uncertaintyKind"] = stringEnumSchema([]string{RuntimeValidationSemanticInformationMissing})
+	schema["allOf"] = []any{map[string]any{
+		"if":   map[string]any{"required": []string{"conclusion"}, "properties": map[string]any{"conclusion": map[string]any{"const": RuntimeValidationInputInconclusive}}},
+		"then": map[string]any{"required": []string{"uncertaintyKind"}},
+		"else": map[string]any{"not": map[string]any{"required": []string{"uncertaintyKind"}}},
+	}}
 }

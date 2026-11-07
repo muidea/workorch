@@ -32,6 +32,13 @@ func TestVersionedInputReviewCompleteBoundedSourceAndFreshness(t *testing.T) {
 	if code != "" || len(subject.Files) != 4 {
 		t.Fatalf("complete source: code=%s subject=%+v", code, subject)
 	}
+	if subject.EvaluationScope != runtimecontract.RuntimeValidationInputSemantics || subject.ValidateAgainstBinding(binding) != nil {
+		t.Fatal("new owner review did not bind its input-semantics scope")
+	}
+	structural, code := shellReadValidationInputSubject(root, refs, binding, false)
+	if code != "" || structural.EvaluationScope != "" || structural.Hash != "" || !reflect.DeepEqual(structural.Files, subject.Files) {
+		t.Fatal("structural source observation claimed a semantic review or changed source bytes")
+	}
 	binding.InputReview = subject
 	// Modify after reading: the observation must retain the reviewed bytes,
 	// allowing the existing freshness guard to reject the newer target.
@@ -82,7 +89,7 @@ func TestCurrentInputReviewPreservesOriginalInputsAndNativeMapping(t *testing.T)
 		return surfaces[0].ProofRequirementBindings[0]
 	}
 	current := acquire(recipe)
-	if current.InputReview.ProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocol {
+	if current.InputReview.ProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocol || current.InputReview.EvaluationScope != runtimecontract.RuntimeValidationInputSemantics {
 		t.Fatal("current input review contract not observed")
 	}
 	if repeated := acquire(recipe); !reflect.DeepEqual(current, repeated) {

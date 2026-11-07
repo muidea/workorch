@@ -36,6 +36,7 @@ type RuntimeValidationDiagnosticSourceReview struct {
 	Conclusion      string   `json:"conclusion"`
 	Reason          string   `json:"reason"`
 	InputTargetRefs []string `json:"inputTargetRefs"`
+	UncertaintyKind string   `json:"uncertaintyKind,omitempty"`
 }
 
 func validateRuntimeDiagnosticSourceSubject(s RuntimeValidationInputReviewSubject) error {
@@ -109,6 +110,9 @@ func validateRuntimeDiagnosticSourceReview(r RuntimeValidationInputReview, s Run
 		default:
 			return runtimeInputViolation(path+".conclusion", "unsupported_diagnostic_conclusion", "consistent | conflict | inconclusive", "unsupported diagnostic review conclusion")
 		}
+		if err := validateRuntimeInputReviewUncertainty(path, review.Conclusion, review.UncertaintyKind, s); err != nil {
+			return err
+		}
 		seen[review.SourceRef] = true
 	}
 	return nil
@@ -136,6 +140,7 @@ func writeRuntimeDiagnosticSourceReviewHash(h interface{ Write([]byte) (int, err
 		writeHashString(h, source.Conclusion)
 		writeHashString(h, source.Reason)
 		writeHashStrings(h, source.InputTargetRefs)
+		writeRuntimeInputReviewUncertaintyHash(h, source.UncertaintyKind)
 	}
 }
 

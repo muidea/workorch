@@ -46,6 +46,9 @@ type RuntimeValidationInputReviewSubject struct {
 	ProtocolRef string
 	Hash        string
 	Files       []RuntimeValidationInputReviewFile
+	// Declared by the input owner at a new observation boundary. Frozen
+	// subjects retain their original scope; consumers must not append it.
+	EvaluationScope string `json:",omitempty"`
 	// Optional owner-declared method for this exact review transaction. It is
 	// not inferred from current defaults or appended to frozen old subjects.
 	Recipe *RuntimeValidationRecipe `json:",omitempty"`
@@ -77,6 +80,7 @@ type RuntimeValidationInputCheckReview struct {
 	Conclusion       string   `json:"conclusion"`
 	Reason           string   `json:"reason"`
 	InputTargetRefs  []string `json:"inputTargetRefs"`
+	UncertaintyKind  string   `json:"uncertaintyKind,omitempty"`
 	// Semantic dependencies nominated by this check, never owner existence or permission facts.
 	DependencyTargetRefs []string `json:"dependencyTargetRefs,omitempty"`
 	// Decompose the immutable criterion into unique exact excerpts and describe
@@ -223,6 +227,10 @@ func StableRuntimeValidationInputReviewSubjectHash(s RuntimeValidationInputRevie
 		writeHashString(h, file.TargetRef)
 		writeHashString(h, file.ContentHash)
 	}
+	if s.EvaluationScope != "" {
+		writeHashString(h, "evaluation-scope")
+		writeHashString(h, s.EvaluationScope)
+	}
 	if s.ScopeContractRef != "" || s.ScopeRequirements != "" {
 		writeHashString(h, "validation-input-review-scope/v1")
 		writeHashStrings(h, []string{s.ScopeContractRef, s.ScopeRequirements})
@@ -242,6 +250,9 @@ func StableRuntimeValidationInputReviewSubjectHash(s RuntimeValidationInputRevie
 }
 
 func (s RuntimeValidationInputReviewSubject) ValidateAgainstBinding(b RuntimeValidationProofRequirementBinding) error {
+	if s.EvaluationScope != "" && s.EvaluationScope != RuntimeValidationInputSemantics {
+		return fmt.Errorf("unsupported input review evaluation scope")
+	}
 	if s.Recipe != nil && (s.Recipe.ValidateDeclaration() != nil || s.Recipe.ID != b.ValidationRecipeID) {
 		return fmt.Errorf("validation input review method differs from original binding")
 	}
@@ -305,6 +316,9 @@ func (r RuntimeValidationInputReview) ValidateAgainstBinding(b RuntimeValidation
 		case RuntimeValidationInputConsistent, RuntimeValidationInputConflict, RuntimeValidationInputInconclusive:
 		default:
 			return runtimeInputViolation(path+".conclusion", "unsupported_conclusion", "consistent | conflict | inconclusive", "validation input review has an unsupported conclusion")
+		}
+		if err := validateRuntimeInputReviewUncertainty(path, check.Conclusion, check.UncertaintyKind, *b.InputReview); err != nil {
+			return err
 		}
 		refs := normalizeStrings(check.InputTargetRefs)
 		if len(refs) == 0 || !reflect.DeepEqual(refs, check.InputTargetRefs) {
@@ -376,6 +390,7 @@ func writeRuntimeValidationInputReviewHash(h interface{ Write([]byte) (int, erro
 		writeHashString(h, check.Conclusion)
 		writeHashString(h, check.Reason)
 		writeHashStrings(h, check.InputTargetRefs)
+		writeRuntimeInputReviewUncertaintyHash(h, check.UncertaintyKind)
 		if len(check.DependencyTargetRefs) != 0 {
 			writeHashString(h, "dependency-targets")
 			writeHashStrings(h, check.DependencyTargetRefs)

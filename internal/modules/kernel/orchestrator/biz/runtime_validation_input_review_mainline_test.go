@@ -75,6 +75,21 @@ type validationInputReviewMainlineOptions struct {
 	DuplicateInitialReview             bool
 	InvalidRevisionCandidate           bool
 	DependencyScopeErrorOnce           bool
+	ExecutionUncertaintyOnce           string
+}
+
+func TestDriveRuntimeInputReviewDoesNotWaitForExecutionTiming(t *testing.T) {
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ExecutionUncertaintyOnce: "check"}
+	baseline := runValidationInputReviewMainline(t, "consistent", "", options)
+	t.Run("recovery", func(t *testing.T) {
+		if calls := runValidationInputReviewMainline(t, "consistent", "after_review_scope_rejection", options); calls != baseline {
+			t.Fatalf("recovery repeated provider calls: %d != %d", calls, baseline)
+		}
+	})
+	t.Run("source", func(t *testing.T) {
+		options.ExecutionUncertaintyOnce = "source"
+		runValidationInputReviewMainline(t, "consistent", "", options)
+	})
 }
 
 func TestDriveRuntimeCorrectedReviewStillRequiresInputRevision(t *testing.T) {
@@ -469,6 +484,8 @@ func %s(t *testing.T) {
 	var scopeErrorSent, scopeCorrectionSeen bool
 	var scopeManifest, scopePrefix, scopeLogical string
 	var duplicateManifest, duplicatePrefix string
+	var executionUncertaintySent, executionUncertaintyCorrected bool
+	var reviewScopeManifest, reviewScopePrefix string
 	var snapshotPaths []string
 	if options.TerminalSnapshot {
 		snapshotPaths = runtimeReviewedGitSnapshotPaths(t, directory)
@@ -477,6 +494,16 @@ func %s(t *testing.T) {
 	provider.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		calls.Add(1)
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		if executionUncertaintySent && !executionUncertaintyCorrected {
+			if command.CandidateAttempt != 1 || command.SemanticCorrectionDirective == nil || command.SemanticManifest.Hash != reviewScopeManifest || command.StablePrefixHash != reviewScopePrefix || validationCalls != 0 {
+				t.Fatal("out-of-stage review did not preserve the bounded correction transaction")
+			}
+			violations := command.SemanticCorrectionDirective.Violations
+			if len(violations) != 1 || !strings.HasSuffix(violations[0].Path, ".uncertaintyKind") || violations[0].Actual != "out_of_stage_or_missing_uncertainty" {
+				t.Fatalf("missing exact stage-scope correction: %+v", violations)
+			}
+			executionUncertaintyCorrected = true
+		}
 		if mode == "input_revision_long" {
 			logicalCalls[command.RequestIdentity.LogicalRequestID]++
 			if logicalCalls[command.RequestIdentity.LogicalRequestID] != 1 {
@@ -547,6 +574,9 @@ func %s(t *testing.T) {
 					review.Checks = append(review.Checks, runtimecontract.RuntimeValidationInputCheckReview{RequiredCheckRef: check, Conclusion: conclusion, Reason: "Confirm whether this input invokes the delivered program without bypassing the original requirement.", InputTargetRefs: []string{inputTargets[proposal.CoverageWorkItemID]}})
 					{
 						item := &review.Checks[len(review.Checks)-1]
+						if conclusion == runtimecontract.RuntimeValidationInputInconclusive {
+							item.UncertaintyKind = runtimecontract.RuntimeValidationSemanticInformationMissing
+						}
 						if mode == "input_revision_dependency" && conclusion == runtimecontract.RuntimeValidationInputConflict {
 							content, err := os.ReadFile(filepath.Join(directory, inputRevisionDeliveryDependency))
 							if os.IsNotExist(err) || (err == nil && string(content) != "4\n") {
@@ -621,6 +651,9 @@ func %s(t *testing.T) {
 						return
 					}
 					review.DiagnosticSources = append(review.DiagnosticSources, runtimecontract.RuntimeValidationDiagnosticSourceReview{SourceRef: source.SourceRef, Conclusion: conclusion, Reason: "The exact supplied fixture asserts the delivered value or preserves the original independent project constraint, without replacing the original criterion.", InputTargetRefs: []string{source.InputTargetRef}})
+					if conclusion == runtimecontract.RuntimeValidationInputInconclusive {
+						review.DiagnosticSources[len(review.DiagnosticSources)-1].UncertaintyKind = runtimecontract.RuntimeValidationSemanticInformationMissing
+					}
 				}
 			}
 			payload, err := runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(command.SemanticManifest, document)
@@ -647,6 +680,37 @@ func %s(t *testing.T) {
 			}
 			if mode == "malformed" && reviewCalls > 0 {
 				payload = []byte(strings.ReplaceAll(string(payload), `"consistent"`, `"approved"`))
+			}
+			if options.ExecutionUncertaintyOnce != "" && !executionUncertaintySent && reviewCalls > 0 {
+				var wire map[string]json.RawMessage
+				_ = json.Unmarshal(payload, &wire)
+				var proposals []map[string]json.RawMessage
+				_ = json.Unmarshal(wire["proposals"], &proposals)
+				for _, proposal := range proposals {
+					var review runtimecontract.RuntimeValidationInputReview
+					if len(proposal["validationInputReview"]) == 0 {
+						continue
+					}
+					_ = json.Unmarshal(proposal["validationInputReview"], &review)
+					if options.ExecutionUncertaintyOnce == "source" {
+						if len(review.DiagnosticSources) == 0 {
+							t.Fatal("test did not obtain real owner source inventory")
+						}
+						review.DiagnosticSources[0].Conclusion = runtimecontract.RuntimeValidationInputInconclusive
+						review.DiagnosticSources[0].UncertaintyKind = runtimecontract.RuntimeValidationExecutionObservationPending
+						review.DiagnosticSources[0].Reason = "Actual aggregate execution timing has not been measured before validation."
+					} else {
+						review.Checks[0].Conclusion = runtimecontract.RuntimeValidationInputInconclusive
+						review.Checks[0].UncertaintyKind = runtimecontract.RuntimeValidationExecutionObservationPending
+						review.Checks[0].Reason = "Actual aggregate execution timing has not been measured before validation."
+						review.Checks[0].Obligations[0].Finding = runtimecontract.RuntimeValidationInputUnknown
+					}
+					proposal["validationInputReview"], _ = json.Marshal(review)
+					break
+				}
+				wire["proposals"], _ = json.Marshal(proposals)
+				payload, _ = json.Marshal(wire)
+				executionUncertaintySent, reviewScopeManifest, reviewScopePrefix = true, command.SemanticManifest.Hash, command.StablePrefixHash
 			}
 			if options.DuplicateInitialReview && !duplicateSent && reviewCalls > 0 {
 				// Script a malformed provider fixture, retaining the real missing
@@ -819,6 +883,8 @@ func %s(t *testing.T) {
 				return false
 			case "after_review_document":
 				return a.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted && len(a.SemanticPlanning.BatchDocuments) != 0 && a.SemanticPlanning.BatchDocuments[0].Proposals[0].ValidationInputReview != nil
+			case "after_review_scope_rejection":
+				return a.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningCorrectionRequired && a.SemanticPlanning.CorrectionDirective != nil
 			case "after_review_classification":
 				return a.Facts.Failure != nil && a.Facts.Failure.Code == "validation_input_review_inconclusive"
 			case "after_review_failure":
@@ -1193,6 +1259,9 @@ func %s(t *testing.T) {
 	}
 	if (mode == "conflict" || mode == "omission" || mode == "malformed") && len(completed.GovernanceRequests) != 0 {
 		t.Fatal("conflict/format error created clarification ticket")
+	}
+	if options.ExecutionUncertaintyOnce != "" && (!executionUncertaintySent || !executionUncertaintyCorrected || len(completed.GovernanceRequests) != 0 || reviewCalls != 2) {
+		t.Fatalf("execution timing created a ticket, bypassed review or retried without bound: sent=%t corrected=%t tickets=%d reviews=%d", executionUncertaintySent, executionUncertaintyCorrected, len(completed.GovernanceRequests), reviewCalls)
 	}
 	if mode == "clarify" || mode == "exhausted" {
 		if reviewCalls != 2 || len(completed.GovernanceRequests) != 1 || len(completed.GovernanceResolutions) != 1 {

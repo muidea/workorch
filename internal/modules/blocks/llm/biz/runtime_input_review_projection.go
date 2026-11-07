@@ -27,6 +27,7 @@ func runtimeSemanticInputReviewsForRequirement(catalogs []runtimecontract.Runtim
 				ret = append(ret, runtimeSemanticInputReviewProjection{
 					OwnerModuleID: catalog.OwnerModuleID, ValidationRecipeID: binding.ValidationRecipeID,
 					SubjectHash: binding.InputReview.Hash, ProtocolRef: binding.InputReview.ProtocolRef,
+					EvaluationScope:           binding.InputReview.EvaluationScope,
 					Recipe:                    method,
 					RequiredProofConsumerRefs: consumers,
 					AllowedProofConsumerRefs:  runtimecontract.RuntimeValidationAllowedProofConsumerRefs(*binding.InputReview),
@@ -69,7 +70,13 @@ func runtimeSemanticOutputInstruction(context runtimecontract.RuntimeSemanticPla
 	}
 	for _, review := range reviews {
 		if review.Recipe != nil {
-			base += " When inputReviews includes recipe, review against that exact owner-declared method and its total TimeoutMillis, shared by preparation, all mandatory execution stages and cleanup. Zero means an unspecified owner default, not unlimited or the maximum allowed duration; an earlier parent deadline can still constrain execution. Known infeasibility cannot become consistent by shortening required observations or omitting stages. This declaration is not readiness or execution credit."
+			base += " When inputReviews includes recipe, preserve that exact owner-declared method and its total TimeoutMillis, shared by preparation, all mandatory execution stages and cleanup. Zero means an unspecified owner default, not unlimited or the maximum allowed duration; an earlier parent deadline can still constrain execution. A demonstrable contradiction between required observations and the declared limit is a conflict; never shorten observations or omit stages. Unknown actual duration or success is observed by the execution owner under that deadline, not a missing input-meaning fact. Do not require a total-runtime guarantee, prior benchmark or successful execution before input consistency can be judged. This declaration is not readiness or execution credit."
+			break
+		}
+	}
+	for _, review := range reviews {
+		if review.EvaluationScope == runtimecontract.RuntimeValidationInputSemantics {
+			base += " For a selected subject declaring evaluationScope=input_semantics, judge whether the supplied inputs retain and actually assert the original obligations and correctly map later proof responsibilities. Each inconclusive check or diagnostic source must declare uncertaintyKind=semantic_information_missing with its concrete missing input-meaning question. Execution observations (including aggregate elapsed time and success), independent assessment and terminal receipts/ACKs are later owner responsibilities, never missing semantic input merely because they have not occurred. Their absence cannot justify inconclusive. Do not invent semantic_information_missing to represent execution_observation_pending, assessment_pending or terminal_delivery_pending. Consistent remains zero execution/acceptance credit; all real execution, deadline, cleanup, repair and independent assessment gates remain required."
 			break
 		}
 	}

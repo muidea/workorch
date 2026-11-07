@@ -617,6 +617,10 @@ project adapter 遵守原 recipe/operation 及更早父 context 的单一总期�
 精确已声明总期限；0 仅表示使用 owner 默认，不代表无界或最大值。结构维护保存同一原 recipe，零 review/readiness credit。
 重读已冻结 subject 仅保留它原先声明的方法，不给旧原件追加声明。未声明 executable metadata 的 owner 不受 Shell transport 要求。
 输入修订继续由原权威、权限和预算控制；新的期限信息不改变全部必需阶段、样本和准则。
+新语义 subject 同时声明 `EvaluationScope=input_semantics` 并绑定 hash；结构维护只提供完整原文件，不声明
+该语义范围或 review hash。输入审查只判断原义务是否由输入保留及后续证明责任是否正确映射，不要求先证明
+实际总耗时或执行成功。真实耗时、超时、失败和 cleanup 继续由 Shell 在原封存总期限及更早父 deadline 内产生，
+不能以审查一致授执行 credit，也不能为未知耗时省略阶段或扩大期限。冻结原 subject 不注入新声明。
 结构 query 同时登记在 owner topic 与 concrete typed message 合同，均为 Orchestrator SM-3 的只读 participant。
 
 ### 同一 reconciliation 批次的共同执行事实

@@ -2007,6 +2007,16 @@ SM-2 的原义务、权限、预算和后继选择不变；SM-4 重驱原候选�
 
 ### 验证方法的冻结声明与维护上下文
 
+新 Shell 输入审查 subject 声明 `EvaluationScope=input_semantics`，subject hash 与 C3 完整投影绑定原范围。
+checks 和 diagnosticSources 的 inconclusive 必须携带 `uncertaintyKind=semantic_information_missing`，说明具体
+输入含义缺项；未来执行耗时/成功、assessment 与终态交付待观察不属于本阶段信息缺失。SM-3 在原报告准入
+入口拒绝错位或未分类的不明结果，沿原一次 bounded semantic correction 处理，不开事实治理票、不自动改判
+consistent。真实语义不明仍由 SM-2 沿原治理路径处理，已知矛盾/缺项仍保留原修订与失败路径。
+输入一致不保证后续能在总期限内成功：Shell 按原期限执行全部必需阶段并产生真实耗时/超时，随后独立
+assessment/三 ACK 才能授相应 credit。冻结 subject 不追加范围，已提交报告不重新裁决；SM-4 恢复原请求，
+SM-1 不变。`TestDriveRuntimeInputReviewDoesNotWaitForExecutionTiming` 覆盖 check/source 错位→同事务纠正
+→真实普通验证/assessment/三 ACK 及持久化切点恢复，恢复不比同样纠正的连续执行增加模型调用；这是离线回归，不代表 live 验收。
+
 新 owner input-review subject 可显式声明 `Recipe`，hash 绑定原方法/期限，catalog 完整性检查要求与该 owner
 原 recipe 逐值相等。SM-3 input revision compiler 只从原 subject 的声明派生原方法，不能从当前默认值或历史
 catalog 推断并追加到未声明的方法中。结构维护来源保留同一原方法及完整原 catalog/observation，fresh-load

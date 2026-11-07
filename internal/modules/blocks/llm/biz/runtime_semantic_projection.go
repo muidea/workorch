@@ -190,6 +190,7 @@ type runtimeSemanticInputReviewProjection struct {
 	ValidationRecipeID          string                                                    `json:"validationRecipeId"`
 	SubjectHash                 string                                                    `json:"subjectHash"`
 	ProtocolRef                 string                                                    `json:"protocolRef"`
+	EvaluationScope             string                                                    `json:"evaluationScope,omitempty"`
 	ScopeContractRef            string                                                    `json:"scopeContractRef,omitempty"`
 	ScopeRequirements           string                                                    `json:"scopeRequirements,omitempty"`
 	Files                       []runtimecontract.RuntimeValidationInputReviewFile        `json:"files"`

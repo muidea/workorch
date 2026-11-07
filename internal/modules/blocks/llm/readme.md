@@ -429,6 +429,11 @@ targets 不决定将来进程观察权限。purpose、proof batch 与 operations
 该方法只描述被维护的证明，不能选择执行、改变已封存期限、缩短必需观测或授验收 credit。0 是未显式声明的 owner 默认，
 不是无限或最大期限。不向未声明 transport metadata 的 owner 追加 Shell 字段；旧冻结 subject/schema/messages 不重渲染。
 原 recipe/subject/corpus/report/来源反查、完整性门禁、深 clone 和 JSON 恢复保持同一合同；这些动态方法事实留在 C3。
+owner 声明的 `EvaluationScope=input_semantics` 同样完整保留在 C3。该范围每个 inconclusive check/source 必须
+声明 `uncertaintyKind=semantic_information_missing`；schema、strict payload 与 typed 门禁同步约束。实际执行
+耗时/结果、独立 assessment、终态交付待发生不作为输入含义缺项，错位报告按原有界纠正拒绝，不改写原输出
+或自动认定一致。已知方法与期限矛盾仍是 conflict，真实语义缺项仍可 inconclusive。冻结/纠正/恢复保留原范围
+和原 C0–C3；本次请求动态范围不改变 C0–C2 前缀，不推断缓存或费用收益。
 
 `GenerateCandidate` 先保留冻结 Runtime budget/cache-plan commitment，adapter 返回后仅合入实际 wire 指纹四字段，
 随后分别消费物理 submitted、native usage 和 response-mode。不能用 adapter 的本地重编译 cache plan 覆盖原 stable prefix。
