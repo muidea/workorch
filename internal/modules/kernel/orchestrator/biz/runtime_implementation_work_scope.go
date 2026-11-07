@@ -101,7 +101,7 @@ func acquireRuntimeImplementationWorkScope(ctx context.Context, hub magicevent.H
 	if result.Selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected || result.Selection.Disposition == runtimecontract.RuntimeTargetSelectionScope {
 		content := &runtimecontract.RuntimeImplementationWorkContent{ProtocolRef: runtimecontract.RuntimeImplementationWorkContentV1, ManifestRevision: result.Selection.ObservedRevision}
 		for _, target := range result.Selection.TargetRefs {
-			snapshot, err := AcquireTargetSnapshotPrerequisite(ctx, hub, fileevents.AcquireTargetSnapshotCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.AuthoritySnapshotID, PrerequisiteID: request.RequestID, WorkspaceDeliverableDirectory: directory, TargetRef: target})
+			snapshot, err := AcquireTargetSnapshotPrerequisite(ctx, hub, fileevents.AcquireTargetSnapshotCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.AuthoritySnapshotID, PrerequisiteID: request.RequestID, WorkspaceDeliverableDirectory: directory, TargetRef: target, MaxBytes: fileevents.DefaultTargetSnapshotBytes})
 			if err != nil {
 				return observation, fmt.Errorf("implementation_work_content_unavailable: %w", err)
 			}

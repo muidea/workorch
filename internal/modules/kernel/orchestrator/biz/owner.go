@@ -15,6 +15,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
@@ -3698,10 +3699,17 @@ func classifyRuntimeDriveFailure(err error) runtimecontract.FailureFact {
 	var ownerTransient *runtime.RuntimeOwnerTransientError
 	var semanticRejection *runtime.RuntimeSemanticRejectionError
 	var executionBudgetExhausted *runtimecontract.RuntimeBudgetExhaustedError
+	var snapshotCapacity *fileevents.TargetSnapshotCapacityError
 	var durableDispatchBudgetExhausted *runtimecontract.RuntimeDurableDispatchBudgetExhaustedError
 	var timeout interface{ Timeout() bool }
 	var temporary interface{ Temporary() bool }
 	switch {
+	case errors.As(err, &snapshotCapacity):
+		return runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassInputCapacityExceeded, Code: "target_snapshot_capacity_exceeded",
+			Signature: "target-snapshot-capacity/" + snapshotCapacity.TargetRef, Message: msg,
+			TargetRefs: []string{snapshotCapacity.TargetRef},
+		}
 	case errors.As(err, &durableDispatchBudgetExhausted):
 		return runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassExecutionBudgetExhausted, Code: "execution_budget_exhausted",

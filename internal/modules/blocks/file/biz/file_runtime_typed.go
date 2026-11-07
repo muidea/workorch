@@ -287,6 +287,17 @@ func (a *RuntimeAdapter) ListFiles(request FileListRequest) (FileListResult, err
 }
 
 func (a *RuntimeAdapter) ReadFile(ctx context.Context, request FileReadRequest) (FileReadResult, error) {
+	maxBytes := defaultMaxReadBytes
+	if request.MaxBytes > 0 && request.MaxBytes < int64(maxBytes) {
+		maxBytes = int(request.MaxBytes)
+	}
+	return a.readFile(ctx, request, maxBytes)
+}
+
+// readFile shares path guards, full-stream hashing and text classification
+// between bounded prefix reads and complete snapshot acquisition. Each public
+// contract resolves its own byte bound before entering this single reader.
+func (a *RuntimeAdapter) readFile(ctx context.Context, request FileReadRequest, maxBytes int) (FileReadResult, error) {
 	if a == nil || strings.TrimSpace(request.WorkspaceDirectory) == "" || strings.TrimSpace(request.Path) == "" {
 		return FileReadResult{FailureCode: "file_read_invalid_input", FailureMessage: common.ErrInvalidArgument.Error()}, common.ErrInvalidArgument
 	}
@@ -303,10 +314,6 @@ func (a *RuntimeAdapter) ReadFile(ctx context.Context, request FileReadRequest) 
 	}
 	if info.IsDir() {
 		return fileReadFailure("file_read_is_directory", common.ErrInvalidArgument), common.ErrInvalidArgument
-	}
-	maxBytes := int(request.MaxBytes)
-	if maxBytes <= 0 || maxBytes > defaultMaxReadBytes {
-		maxBytes = defaultMaxReadBytes
 	}
 	scan, err := scanBoundedFile(ctx, target, request.StartLine, request.EndLine, maxBytes)
 	if err != nil {
@@ -330,7 +337,7 @@ func (a *RuntimeAdapter) ReadFile(ctx context.Context, request FileReadRequest) 
 	targetRef := filepath.ToSlash(rel)
 	ret := FileReadResult{
 		Status: "completed", Stage: "file_read", Path: targetRef, TargetRef: targetRef, Exists: true,
-		Content: content, ContentHash: scan.ContentHash, Size: info.Size(),
+		Content: content, ContentHash: scan.ContentHash, Size: scan.Size,
 		ModifiedAt: info.ModTime().UTC().Format(time.RFC3339Nano), LineCount: scan.LineCount,
 		Truncated: truncated, Binary: isBinary, ContentComplete: contentComplete,
 		SafeForPatch: contentComplete && scan.Size > 0, SafeForFileWrite: contentComplete && scan.Size > 0,

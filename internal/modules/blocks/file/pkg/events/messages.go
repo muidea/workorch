@@ -15,7 +15,9 @@ type AcquireTargetSnapshotCommand struct {
 	PrerequisiteID                string
 	WorkspaceDeliverableDirectory string
 	TargetRef                     string
-	MaxBytes                      int
+	// MaxBytes is the complete snapshot acquisition bound; zero selects
+	// DefaultTargetSnapshotBytes. Positive values are honored without clamping.
+	MaxBytes int
 }
 
 type AcquireTargetSnapshotResult struct {

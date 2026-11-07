@@ -16,8 +16,6 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-const runtimeDefaultTargetSnapshotBytes = 256 * 1024
-
 type runtimePrerequisiteResolverClass string
 
 const (

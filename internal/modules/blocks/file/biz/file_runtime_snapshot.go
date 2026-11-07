@@ -7,16 +7,22 @@ import (
 	"fmt"
 	"strings"
 
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func (a *RuntimeAdapter) AcquireTargetSnapshot(ctx context.Context, workspaceDirectory, targetRef string, maxBytes int) (runtimemodel.TargetSnapshot, error) {
-	result, err := a.ReadFile(ctx, FileReadRequest{
+	if maxBytes < 0 {
+		return runtimemodel.TargetSnapshot{}, fmt.Errorf("%w: negative target snapshot capacity", common.ErrInvalidArgument)
+	}
+	if maxBytes == 0 {
+		maxBytes = fileevents.DefaultTargetSnapshotBytes
+	}
+	result, err := a.readFile(ctx, FileReadRequest{
 		WorkspaceDirectory: workspaceDirectory,
 		Path:               targetRef,
-		MaxBytes:           int64(maxBytes),
-	})
+	}, maxBytes)
 	if err != nil {
 		return runtimemodel.TargetSnapshot{}, err
 	}
@@ -40,6 +46,9 @@ func (a *RuntimeAdapter) AcquireTargetSnapshot(ctx context.Context, workspaceDir
 		snapshot.ContentState = runtimemodel.SnapshotContentStateComplete
 	}
 	if !snapshot.Complete() {
+		if snapshot.ContentState == runtimemodel.SnapshotContentStateTruncated {
+			return snapshot, &fileevents.TargetSnapshotCapacityError{TargetRef: snapshot.TargetRef, SizeBytes: snapshot.Size, LimitBytes: maxBytes}
+		}
 		return snapshot, fmt.Errorf("%w: target snapshot %q is not complete (%s)", common.ErrInvalidArgument, snapshot.TargetRef, snapshot.ContentState)
 	}
 	return snapshot, nil

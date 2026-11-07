@@ -3,8 +3,10 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -90,5 +92,19 @@ func TestClassifyRuntimeDriveFailureUsesTypedRecoveryOutcomes(t *testing.T) {
 	textOnly := classifyRuntimeDriveFailure(errors.New("owner timeout outcome_unknown projection"))
 	if textOnly.Class != runtimecontract.FailureClassRuntimeContractMisalignment {
 		t.Fatalf("error text changed classification = %+v", textOnly)
+	}
+}
+
+func TestClassifyTargetSnapshotCapacityIsBoundedAndPreservesCause(t *testing.T) {
+	cause := &fileevents.TargetSnapshotCapacityError{TargetRef: "input.txt", SizeBytes: 262145, LimitBytes: 262144}
+	failure := classifyRuntimeDriveFailure(fmt.Errorf("implementation_work_content_unavailable: %w", cause))
+	if failure.Class != runtimecontract.FailureClassInputCapacityExceeded || failure.Code != "target_snapshot_capacity_exceeded" || failure.Message != "implementation_work_content_unavailable: "+cause.Error() || len(failure.TargetRefs) != 1 || failure.TargetRefs[0] != cause.TargetRef || runtime.FailureClassDisposition(failure.Class) != runtime.FailureDispositionBoundedFail {
+		t.Fatalf("capacity misclassified: %+v", failure)
+	}
+	// Identical error text without the File owner's typed cause cannot claim a
+	// resource observation or authorize a repair/retry.
+	forged := classifyRuntimeDriveFailure(errors.New(cause.Error()))
+	if forged.Class != runtimecontract.FailureClassRuntimeContractMisalignment {
+		t.Fatal("text granted capacity authority")
 	}
 }

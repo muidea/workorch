@@ -1241,6 +1241,7 @@ func TestReduceRuntimeStateDeterminedTerminalFailureOverridesPendingPrerequisite
 		{name: "mismatched candidate authority failure code", failureClass: runtimecontract.FailureClassCandidateExhausted, failureCode: "candidate_authority_exhausted", terminalCode: "runtime_contract_defect"},
 		{name: "candidate authority class rejects another code", failureClass: runtimecontract.FailureClassCandidateAuthorityExhausted, failureCode: "candidate_other_exhaustion", terminalCode: "runtime_contract_defect"},
 		{name: "candidate exhaustion code is undeclared", failureClass: runtimecontract.FailureClassCandidateExhausted, failureCode: "candidate_other_exhaustion", terminalCode: "runtime_contract_defect"},
+		{name: "snapshot acquisition capacity", failureClass: runtimecontract.FailureClassInputCapacityExceeded, failureCode: "target_snapshot_capacity_exceeded", terminalCode: "target_snapshot_capacity_exceeded"},
 		{name: "runtime contract defect", failureClass: runtimecontract.FailureClassRuntimeContractMisalignment, terminalCode: "runtime_contract_defect"},
 		{name: "governance rejected", failureClass: runtimecontract.FailureClassGovernanceRejected, terminalCode: "governance_rejected"},
 	} {

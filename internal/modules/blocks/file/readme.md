@@ -21,6 +21,12 @@ validation verdict。它不解释 Goal/DoD，不调用其它 capability owner，
 Runtime `file/read` 与 target snapshot 按实际读取保全原文、字节数及全流 SHA256，不进行脱敏、掩码或占位替换。
 正文中的 `[REDACTED]`、`[SECRET]`、`[MASKED]` 是普通文件内容，不能据此设置 `Redacted` 或判定读取不完整。
 完整性仍由真实 binary/truncated/ranged/missing 和字节边界决定；只有完整文本可成为完整 target snapshot。
+普通 `file/read` 保持 64 KiB 的有界前缀／行区间读取语义；完整 target snapshot 不经过该前缀上限。
+`AcquireTargetSnapshotCommand.MaxBytes=0` 使用 File owner 的 `DefaultTargetSnapshotBytes`（256 KiB）；
+正值是本次完整获取的显式上限，原值使用，不静默缩到默认值；负值拒绝。两条入口共用路径守卫、流式读取、
+全流 hash、UTF-8/binary 与完整性规则，`Size` 取实际扫描 bytes。超过获取上限的文本返回
+`TargetSnapshotCapacityError`，保留 target、实际 bytes 与 limit；partial snapshot 不可提交为 complete。
+此上限不是模型请求/token 预算，也不授 effect 或验收 credit；provider 投影仍独立遵守其阶段适用性、总容量和预算门禁。
 既有显式 `redacted` 状态的消费者仍拒绝不完整材料，不回填或升级旧归档。创建期 authoring 同样保全显式资源中的合法占位文本；
 其独立路径、凭据内容与容量拒绝策略不改写原文，也不用于推断 Runtime 文件状态。原始材料通过 owner 读取权限与受限存储保护。
 

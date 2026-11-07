@@ -1714,6 +1714,23 @@ owner-fact declaration 不得被工程断言替代；该 provider 守卫不提�
 该诊断只读取并验证原 bootstrap、record 和 aggregate，核对封存 feedback 版本及文件 hash；不启动 Hub、repository、
 Runtime drive 或 provider，也不改写归档。默认 CI 不读取本地运行数据；通过该检查不是重新执行或 workspace 验收。
 
+### 完整目标快照容量与推进
+
+实施 scope 与普通 target-snapshot prerequisite 统一消费 File owner 的完整获取合同；默认容量为
+`fileevents.DefaultTargetSnapshotBytes`（256 KiB），不继承普通 `file/read` 的 64 KiB 前缀上限。
+完整 scope 成员、manifest revision 前后 fence、原 input-revision 来源与前像、独立重审和普通验证保持原义务。
+已封存输入／same-contract correction／恢复仍消费原事务原件；成功获取文件不代表请求一定满足模型阶段的容量或预算。
+File 的 typed `TargetSnapshotCapacityError` 由 Orchestrator drive 边界映射成
+`input_capacity_exceeded/target_snapshot_capacity_exceeded`，SM-2 有界终止，保全原诊断和 target。
+该事实不触发模型纠错、same-focus repair、治理确认或自动扩额，不再混为 `runtime_contract_defect`。
+SM-3 只消费完整 scope 后封存，SM-4 保持 request/CAS/恢复边界；SM-1 仅接纳正常终态交付，不复活旧 Run。
+
+`TestDriveRuntimeInputRevisionCrossesReadBoundaryAndRecovers` 以真实 File/Shell/Run/Result/Workspace owner 和
+scripted provider 覆盖 64,733→72,001 bytes 修订、fresh review→普通 validation→assessment→三 ACK，以及
+receipt、retirement、validation receipt、Result persistence 恢复切点零额外 provider。
+普通 prerequisite 的独立 File-backed 测试另覆盖 72,001 bytes、CAS 前后、duplicate/stale 与 fresh-process 恢复；
+容量负例明确验证 typed 原因、partial 拒绝、终态持久化幂等及预算不变。离线主链通过不等于 live 全目标验收。
+
 ### 阶段内验证输入修订 v1
 
 封存 Profile 可用 `ImplementationWorkPolicy.InputRevisionProtocolRef=validation/input-revision/v1` 声明阶段修订。

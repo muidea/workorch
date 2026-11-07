@@ -655,6 +655,8 @@ func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtime
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "recoverable_wait_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassRuntimeContractMisalignment:
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "runtime_contract_defect", failure.Message), true, nil
+	case runtimecontract.FailureClassInputCapacityExceeded:
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, failure.Code, failure.Message), true, nil
 	case runtimecontract.FailureClassProviderProtocol:
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "provider_protocol_failure", failure.Message), true, nil
 	case runtimecontract.FailureClassProviderSubmissionUnknown:

@@ -87,6 +87,9 @@ func runtimeInputRevisionMainlineCandidate(c llmevents.RequestRuntimeCandidateCo
 			}
 		}
 	}
+	if len(modes) != 0 && modes[0] == "input_revision_growth" {
+		after = runtimeSnapshotGrowthReplacement()
+	}
 	if len(modes) != 0 && modes[0] == "input_revision_cycle" {
 		if !strings.Contains(reviewedInput, before) {
 			before, after = after, before
@@ -410,5 +413,22 @@ func assertRuntimeInputStructureFreshLoad(t *testing.T, a runtime.RuntimeAggrega
 	}
 	if !found {
 		t.Fatal("input revision lost structural owner observation")
+	}
+}
+
+// Grow a valid input from the exact live byte sizes across the ordinary read
+// boundary. The provider remains scripted; the File/Shell/Run owners are real.
+func runtimeSnapshotGrowthReplacement() string {
+	return `!="4"` + " /*" + strings.Repeat("x", 72001-64733-5) + "*/"
+}
+func TestDriveRuntimeInputRevisionCrossesReadBoundaryAndRecovers(t *testing.T) {
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol}
+	baseline := runValidationInputReviewMainline(t, "input_revision_growth", "", options)
+	for _, cut := range []string{"after_input_revision_receipt", "after_input_revision_retirement", "after_project_receipt", "after_result_persistence"} {
+		t.Run(cut, func(t *testing.T) {
+			if got := runValidationInputReviewMainline(t, "input_revision_growth", cut, options); got != baseline {
+				t.Fatalf("recovery repeated provider work: %d != %d", got, baseline)
+			}
+		})
 	}
 }

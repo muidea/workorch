@@ -4012,7 +4012,10 @@ func TestRuntimeFileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 			if err := os.MkdirAll(deliverable, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(deliverable, "target.txt"), []byte("before\n"), 0o644); err != nil {
+			// Ordinary prerequisite acquisition must also preserve a target larger
+			// than the file/read prefix bound across its Run CAS and process restart.
+			original := strings.Repeat("x", 72001)
+			if err := os.WriteFile(filepath.Join(deliverable, "target.txt"), []byte(original), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			runsPath := filepath.Join(root, "runs.json")
@@ -4154,7 +4157,7 @@ func TestRuntimeFileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 				t.Fatal(err)
 			}
 			if len(resumed.Facts.Resources.TargetSnapshots) != 1 || resumed.Facts.Resources.TargetSnapshots[0].TargetRef != "target.txt" ||
-				!resumed.Facts.Resources.TargetSnapshots[0].Complete() || len(resumed.Facts.Resources.PrerequisiteObservations) != 4 ||
+				!resumed.Facts.Resources.TargetSnapshots[0].Complete() || resumed.Facts.Resources.TargetSnapshots[0].Content != original || resumed.Facts.Resources.TargetSnapshots[0].Size != int64(len(original)) || len(resumed.Facts.Resources.PrerequisiteObservations) != 4 ||
 				len(resumed.CandidateAttempts) != 0 || resumed.ActiveDispatch != nil {
 				t.Fatalf("restart target snapshot aggregate=%+v", resumed)
 			}
@@ -4182,7 +4185,7 @@ func TestRuntimeFileBackedTargetSnapshotCommitCrashRestart(t *testing.T) {
 			duplicateResponse, err := AcquireTargetSnapshotPrerequisite(ctx, hub, fileevents.AcquireTargetSnapshotCommand{
 				WorkspaceID: "ws-v2", RunID: "run-v2", AuthoritySnapshotID: resumed.Decision.AuthoritySnapshot.ID,
 				PrerequisiteID: committedPrerequisite.ID, WorkspaceDeliverableDirectory: deliverable,
-				TargetRef: "target.txt", MaxBytes: runtimeDefaultTargetSnapshotBytes,
+				TargetRef: "target.txt", MaxBytes: fileevents.DefaultTargetSnapshotBytes,
 			})
 			if err != nil {
 				t.Fatalf("delayed duplicate File target snapshot query: %v", err)

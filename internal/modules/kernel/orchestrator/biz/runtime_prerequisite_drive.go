@@ -221,7 +221,7 @@ func (m *Biz) resolveRuntimePrerequisite(
 	case runtimecontract.PrerequisiteKindTargetSnapshot:
 		maxBytes := prerequisite.MinimumBytes
 		if maxBytes <= 0 {
-			maxBytes = runtimeDefaultTargetSnapshotBytes
+			maxBytes = fileevents.DefaultTargetSnapshotBytes
 		}
 		result, err := AcquireTargetSnapshotPrerequisite(ctx, m.EventHub(), fileevents.AcquireTargetSnapshotCommand{
 			WorkspaceID: commandScope.workspaceID, RunID: commandScope.runID, AuthoritySnapshotID: commandScope.snapshotID,

@@ -1551,3 +1551,54 @@ func managedValidationCandidate(operationID string) runtimecontract.RuntimeCandi
 		},
 	}}}}
 }
+
+func TestInputCapacityFailurePersistsAndRecoversWithoutBudgetOrCredit(t *testing.T) {
+	ctx := context.Background()
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial, err := controller.initialize(ctx, controllerFacts(), controllerDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact := runtimecontract.FailureFact{Class: runtimecontract.FailureClassInputCapacityExceeded, Code: "target_snapshot_capacity_exceeded", Signature: "target-snapshot-capacity/input.txt", Message: "size=262145 limit=262144 bytes", TargetRefs: []string{"input.txt"}}
+	failed, err := controller.recordDriveFailureFact(ctx, "ws-v2", "run-v2", fact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Decision.State != runtimecontract.ConvergenceStateFailed || failed.Decision.Terminal == nil || failed.Decision.Terminal.Code != fact.Code || !reflect.DeepEqual(failed.Facts.Failure, &fact) || failed.ActiveDispatch != nil || len(failed.OperationReceipts) != 0 || len(failed.CandidateAttempts) != 0 || !reflect.DeepEqual(initial.ExecutionBudget, failed.ExecutionBudget) {
+		t.Fatal("capacity did not close without execution or spending")
+	}
+	for _, item := range failed.Facts.Coverage {
+		if item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
+			t.Fatal("capacity failure granted credit")
+		}
+	}
+	raw, err := json.Marshal(repository.aggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored RuntimeAggregate
+	if err = json.Unmarshal(raw, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if err = restored.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	repository.aggregate = &restored
+	fresh, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := fresh.Load(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeSaves := repository.saves
+	duplicate, err := fresh.recordDriveFailureFact(ctx, "ws-v2", "run-v2", fact)
+	if err != nil || repository.saves != beforeSaves || duplicate.StateRevision != loaded.StateRevision || !reflect.DeepEqual(duplicate.Facts.Failure, loaded.Facts.Failure) || !reflect.DeepEqual(duplicate.ExecutionBudget, loaded.ExecutionBudget) {
+		t.Fatal("duplicate capacity failure mutated terminal or budget", err)
+	}
+}

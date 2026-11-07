@@ -356,6 +356,14 @@ func %s(t *testing.T) {
 			}
 		}
 	}
+	if mode == "input_revision_growth" {
+		target := inputTargets["cwi-2"]
+		content := initialFiles[target]
+		if len(content)+5 > 64733 {
+			t.Fatal("growth fixture exceeds initial boundary")
+		}
+		initialFiles[target] = content + "\n/*" + strings.Repeat("x", 64733-len(content)-5) + "*/"
+	}
 	if mode == "input_revision_dependency" {
 		target := inputTargets["cwi-2"]
 		initialFiles[target] = strings.Replace(initialFiles[target], `import ("testing";`, `import ("os"; "testing";`, 1)
@@ -1131,7 +1139,7 @@ func %s(t *testing.T) {
 		t.Logf("terminal original diagnostic: %s", diag)
 	}
 	submissionUnknown := cut == "after_assessment_submission"
-	success := (mode == "consistent" || mode == "clarify" || (mode == "input_revision" || mode == "input_revision_dependency" || mode == "input_revision_omission" || mode == "input_revision_long" || mode == "input_revision_structure") || projectBehaviorRepair) && !submissionUnknown
+	success := (mode == "consistent" || mode == "clarify" || (mode == "input_revision" || mode == "input_revision_growth" || mode == "input_revision_dependency" || mode == "input_revision_omission" || mode == "input_revision_long" || mode == "input_revision_structure") || projectBehaviorRepair) && !submissionUnknown
 	if (completed.Decision.State == runtimecontract.ConvergenceStateComplete) != success {
 		if completed.Facts.Failure != nil && completed.Facts.Failure.OriginalDiagnostic != nil {
 			t.Logf("original failure diagnostic: %+v", *completed.Facts.Failure.OriginalDiagnostic)
@@ -1229,6 +1237,11 @@ func %s(t *testing.T) {
 				}
 				for n := 1; n <= completedRevisions; n++ {
 					expectedInput = strings.Replace(expectedInput, runtimeLongInputRevisionMarker(n), runtimeLongInputRevisionAssertion(n), 1)
+				}
+			} else if mode == "input_revision_growth" {
+				expectedInput = strings.Replace(expectedInput, `!="5"`, runtimeSnapshotGrowthReplacement(), 1)
+				if len(expectedInput) != 72001 {
+					t.Fatal("growth did not reproduce live postimage size", len(expectedInput))
 				}
 			} else if mode == "input_revision_cycle" {
 				// Two visits to each full physical preimage are allowed; the next is blocked.

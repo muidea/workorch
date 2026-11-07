@@ -225,13 +225,27 @@ func TestImplementationWorkScopeRealOwnerReadOnlyAndRevisionFence(t *testing.T) 
 	if total <= 128*1024 || grownScope.Content.Validate(grownScope) != nil {
 		t.Fatal("grown scope lost complete bytes")
 	}
+	// A complete single target may cross the ordinary read and retired scope
+	// ceilings without losing any member of the selected inventory.
+	for _, size := range []int{72001, 128*1024 + 1, fileevents.DefaultTargetSnapshotBytes} {
+		if err := os.WriteFile(filepath.Join(directory, "implementation.txt"), []byte(strings.Repeat("x", size)), 0600); err != nil {
+			t.Fatal(err)
+		}
+		request := compile(policy.TargetSelectorRef, manifest())
+		scope, err := acquireRuntimeImplementationWorkScope(ctx, hub, directory, request, sources[request.RequestID])
+		if err != nil || scope.Content == nil || scope.Content.Validate(scope) != nil {
+			t.Fatal("legal full scope rejected", size, err)
+		}
+	}
 	// Full original bytes are required; an oversized source cannot silently
 	// become a complete input, even when its prefix and inventory are available.
-	if err := os.WriteFile(filepath.Join(directory, "implementation.txt"), []byte(strings.Repeat("x", 128*1024+1)), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(directory, "implementation.txt"), []byte(strings.Repeat("x", fileevents.DefaultTargetSnapshotBytes+1)), 0600); err != nil {
 		t.Fatal(err)
 	}
 	tooLarge := compile(policy.TargetSelectorRef, manifest())
-	if partial, err := acquireRuntimeImplementationWorkScope(ctx, hub, directory, tooLarge, sources[tooLarge.RequestID]); err == nil || (partial.Content != nil && partial.Content.Validate(partial) == nil) {
+	partial, err := acquireRuntimeImplementationWorkScope(ctx, hub, directory, tooLarge, sources[tooLarge.RequestID])
+	var capacity *fileevents.TargetSnapshotCapacityError
+	if !errors.As(err, &capacity) || capacity.SizeBytes != fileevents.DefaultTargetSnapshotBytes+1 || capacity.LimitBytes != fileevents.DefaultTargetSnapshotBytes || (partial.Content != nil && partial.Content.Validate(partial) == nil) {
 		t.Fatal("oversized current content became complete semantic input")
 	}
 }

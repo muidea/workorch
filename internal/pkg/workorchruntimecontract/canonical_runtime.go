@@ -320,6 +320,7 @@ const (
 	FailureClassCoverageAssessmentIncomplete       FailureClass = "coverage_assessment_incomplete"
 	FailureClassGovernanceDependency               FailureClass = "governance_dependency"
 	FailureClassRuntimeContractMisalignment        FailureClass = "runtime_internal_contract_misalignment"
+	FailureClassInputCapacityExceeded              FailureClass = "input_capacity_exceeded"
 	FailureClassExecutionFailure                   FailureClass = "execution_failure"
 	FailureClassNoProgressExhausted                FailureClass = "no_progress_exhausted"
 	FailureClassCandidateExhausted                 FailureClass = "candidate_retry_exhausted"
