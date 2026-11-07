@@ -70,14 +70,19 @@ func (m *Biz) recoverExecutionIntent(ev magicevent.Event) (workspaceevents.Recov
 	}
 	p := preparedWorkspaceExecutionIntent{workspace: w, command: workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: c.WorkspaceID, RequestID: c.RequestID, Kind: c.Kind}}
 	admission := unresolvedFreshExecutionIntent(p, *original)
-	if original.RequestID == c.RequestID {
-		receipt, err := m.reconcileOriginalFreshIdentity(ctx, w.ID, *original, originalFreshReceiptQuery(w.ID, *original))
-		if err != nil {
-			return r, err
+	receipt, err := m.reconcileOriginalFreshIdentity(ctx, w.ID, *original, originalFreshReceiptQuery(w.ID, *original))
+	if err != nil {
+		return r, err
+	}
+	if receipt != nil {
+		if original.RequestID != c.RequestID {
+			// The original is now settled from its exact durable Run receipt.
+			// This is neither the new request's admission nor a forward permit:
+			// Application must compile the current input and the Workspace owner
+			// must independently admit/reserve the new explicit request.
+			return r, r.ValidateFor(c)
 		}
-		if receipt != nil {
-			admission = workspaceevents.WorkspaceExecutionIntentResult(receipt.Admission)
-		}
+		admission = workspaceevents.WorkspaceExecutionIntentResult(receipt.Admission)
 	}
 	r.Admission = &admission
 	return r, r.ValidateFor(c)

@@ -3,6 +3,7 @@ package activationports
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -88,7 +89,7 @@ func assertBuiltinSoftwareDevCandidateAndBootstrap(
 			}
 		}
 	}
-	if parsedRepair == nil || len(parsedRepair.Routes) != 5 || !parsedRepair.RequireFreshValidation || parsedRepair.MaxAttempts != 2 {
+	if parsedRepair == nil || len(parsedRepair.Routes) != 7 || !parsedRepair.RequireFreshValidation || parsedRepair.MaxAttempts != 2 {
 		t.Fatalf("builtin software-dev repair convergence was not parsed into the admission candidate: %+v", parsedRepair)
 	}
 	addition, found := parsedRepair.RouteForTrigger(runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession, runtimecontract.ValidationDiagnosticOutputInconclusive, runtimecontract.ValidationEvidenceTargetValidationOutput, "validation_workspace_behavior_unobserved")
@@ -103,21 +104,32 @@ func assertBuiltinSoftwareDevCandidateAndBootstrap(
 		class      string
 		targetType string
 		ownerCode  string
+		create     bool
+		candidate  string
 	}{
-		{runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface, "module_manifest_parse_failed"},
-		{runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface, "source_compile_failed"},
-		{runtimecontract.ValidationDiagnosticTestFailed, runtimecontract.ValidationEvidenceTargetBehaviorEvidence, "test_failed"},
+		{runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface, "module_manifest_parse_failed", false, ""},
+		{runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface, "source_compile_failed", false, ""},
+		{runtimecontract.ValidationDiagnosticTestFailed, runtimecontract.ValidationEvidenceTargetBehaviorEvidence, "test_failed", false, ""},
+		{runtimecontract.ValidationDiagnosticDependencyMismatch, runtimecontract.ValidationEvidenceTargetDependencyContract, "module_checksum_update_required", false, "go.sum"},
+		{runtimecontract.ValidationDiagnosticDependencyMismatch, runtimecontract.ValidationEvidenceTargetDependencyContract, "module_checksum_create_candidate", true, "go.sum"},
 	}
 	for _, expected := range expectedRoutes {
 		route, found := parsedRepair.RouteForTrigger(
 			runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession,
 			expected.class, expected.targetType, expected.ownerCode,
 		)
+		policy, kind, selector := runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, runtimecontract.StepKindFileEdit, "workspace-relative-existing-file-target"
+		if expected.create {
+			policy, kind, selector = runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget, runtimecontract.StepKindFileWrite, "workspace-relative-new-file-target"
+		}
 		if !found || route.RepairOwnerModuleID != runtimecontract.RuntimeModuleFile ||
-			route.RepairTargetPolicy != runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope ||
-			len(route.RepairOperationKinds) != 1 || route.RepairOperationKinds[0] != runtimecontract.StepKindFileEdit ||
-			route.RepairOperationTargetSelectorRef != "workspace-relative-existing-file-target" {
+			route.RepairTargetPolicy != policy ||
+			len(route.RepairOperationKinds) != 1 || route.RepairOperationKinds[0] != kind ||
+			route.RepairOperationTargetSelectorRef != selector {
 			t.Fatalf("builtin software-dev exact repair route %q = %+v found=%v", expected.ownerCode, route, found)
+		}
+		if expected.candidate != "" && !reflect.DeepEqual(route.RepairDeclarationTargetSelectorCandidateRefs, []string{expected.candidate}) {
+			t.Fatalf("checksum repair escaped its exact candidate: %+v", route)
 		}
 	}
 	_, dependencyMisrouted := parsedRepair.RouteForTrigger(
@@ -171,6 +183,10 @@ func assertBuiltinSoftwareDevCandidateAndBootstrap(
 				expected.targetType,
 				expected.ownerCode,
 			); found && route.RepairOwnerModuleID == runtimecontract.RuntimeModuleFile {
+				original, _ := parsedRepair.RouteForTrigger(runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession, expected.class, expected.targetType, expected.ownerCode)
+				if !reflect.DeepEqual(route, original) {
+					t.Fatalf("bootstrap changed admitted repair route %q", expected.ownerCode)
+				}
 				compiledRepairRoutes++
 			}
 		}

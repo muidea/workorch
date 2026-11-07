@@ -28,8 +28,9 @@ func (c RecoverWorkspaceExecutionIntentCommand) Validate() error {
 	return nil
 }
 
-// Nil Admission means no original and no blocking pending request was found.
-// That absence is not a forward permit: the full ingress must still reserve.
+// Nil Admission means no original for this request and no unresolved pending
+// request remains, including after settling another original from its Run
+// receipt. This is not a forward permit: the full ingress must still reserve.
 type RecoverWorkspaceExecutionIntentResult struct {
 	WorkspaceID common.WorkspaceID
 	RequestID   string

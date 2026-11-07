@@ -548,7 +548,10 @@ payload 和独立 Run payload 身份；二者在首次 reservation 同时封存�
 同键异完整 typed payload 冲突。Run 返回正常响应后仍由独立持久原回执查询结算，不能凭响应清 pending。
 `/workspace/command/recover-execution-intent` 是 Application 显式执行 POST 的窄前置命令：只接收 scope/request/restart，
 从本 owner 不可变登记取得完整原 payload 身份，查询/结算原结果；无登记不写、不 forward，亦不授转发许可。
-它在当前 bootstrap 编译前使用，不从当前规格重建旧输入。新请求遇 pending 返回本次 request 与原 pending 的独立身份。
+它在当前 bootstrap 编译前使用，不从当前规格重建旧输入。新请求遇 pending 时按原登记的完整身份查询原 Run
+正式回执，并只通过原私有 settlement/CAS 结算；不得重发原执行。已结算则不把原接纳结果授给新请求，Application
+继续编译当前输入，新请求仍须独立准入及 reservation CAS 才可 forward。原回执未知时返回本次 request 与原 pending
+的独立身份，查询失败或身份冲突则明确失败并保留 pending。并发／响应丢失只收敛同一原 settlement，不授第二次 forward。
 未知结果返回 `fresh_intent_unresolved/fresh_intent_result_unknown`，不是已接纳或确定拒绝。
 缺 creation fence 的 Workspace 新 Restart 明确返回 `preparation_creation_fence_missing`，不自动迁移；Resume 不补标记、保持原义，
 但不得复用已登记 fresh RequestID。当前不签发 readiness/M3，不新增 SM-1～SM-4 authority。

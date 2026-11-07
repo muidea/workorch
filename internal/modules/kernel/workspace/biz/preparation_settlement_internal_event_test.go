@@ -450,9 +450,8 @@ func TestFreshSettlementColdProcessHelper(t *testing.T) {
 		}
 		other := fact.Command
 		other.RequestID = "new-after-restart"
-		public, err := owner.recoverExecutionIntent(recoveryEvent(other))
-		if err != nil || public.Admission == nil || public.Admission.PendingRequestID != fact.Command.RequestID || public.Admission.Outcome != runtimecontract.RuntimeExecutionIntentFreshUnresolved {
-			t.Fatal("cold pending did not block a new public identity", err)
+		if _, err := owner.recoverExecutionIntent(recoveryEvent(other)); err == nil {
+			t.Fatal("cold new identity ignored unavailable original Run receipt owner")
 		}
 	}
 	after, err := repo.Get(ctx, fact.Command.WorkspaceID)

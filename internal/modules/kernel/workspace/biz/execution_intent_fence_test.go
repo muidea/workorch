@@ -236,6 +236,12 @@ func TestFreshIngressRealRunOwnerOriginalRecoveryIsReadOnlyForRun(t *testing.T) 
 	if len(before) != 1 {
 		t.Fatal("Run not actually accepted", len(before))
 	}
+	next := c
+	next.RequestID = "new-explicit-restart"
+	recovered, err := f.biz.recoverExecutionIntent(recoveryEvent(next))
+	if err != nil || recovered.Admission != nil {
+		t.Fatal("new request failed to settle real original without inheriting its admission", recovered, err)
+	}
 	for range 2 {
 		r, err := f.biz.recoverExecutionIntent(recoveryEvent(c))
 		if err != nil || r.Admission == nil || r.Admission.RunID != before[0].ID || r.Admission.Reason != runtimecontract.RuntimeExecutionIntentReasonNewRunActivated {
