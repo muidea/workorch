@@ -77,6 +77,8 @@ type RuntimeValidationInputCheckReview struct {
 	Conclusion       string   `json:"conclusion"`
 	Reason           string   `json:"reason"`
 	InputTargetRefs  []string `json:"inputTargetRefs"`
+	// Semantic dependencies nominated by this check, never owner existence or permission facts.
+	DependencyTargetRefs []string `json:"dependencyTargetRefs,omitempty"`
 	// Decompose the immutable criterion into unique exact excerpts and describe
 	// input coverage. These are observations, not new acceptance criteria or a
 	// repair authorization.
@@ -180,6 +182,7 @@ func (r RuntimeValidationInputReview) Clone() RuntimeValidationInputReview {
 	}
 	r.Checks = cloneRuntimeStateRawSlice(r.Checks, func(check RuntimeValidationInputCheckReview) RuntimeValidationInputCheckReview { return check })
 	for i := range r.Checks {
+		r.Checks[i].DependencyTargetRefs = slices.Clone(r.Checks[i].DependencyTargetRefs)
 		r.Checks[i].InputTargetRefs = cloneRuntimeStateRawSlice(r.Checks[i].InputTargetRefs, func(value string) string { return value })
 		r.Checks[i].Obligations = cloneRuntimeStateRawSlice(r.Checks[i].Obligations, func(value RuntimeValidationInputObligationReview) RuntimeValidationInputObligationReview {
 			return value
@@ -313,6 +316,9 @@ func (r RuntimeValidationInputReview) ValidateAgainstBinding(b RuntimeValidation
 				return runtimeInputViolation(path+".inputTargetRefs", "unobserved_input_ref", "target refs from selected input-review subject.files only", "validation input review references an unobserved input")
 			}
 		}
+		if err := validateRuntimeInputDependencies(check); err != nil {
+			return runtimeInputViolationAt(path, err)
+		}
 		if err := validateRuntimeValidationInputObligations(check); err != nil {
 			return runtimeInputViolationAt(path, err)
 		}
@@ -370,6 +376,10 @@ func writeRuntimeValidationInputReviewHash(h interface{ Write([]byte) (int, erro
 		writeHashString(h, check.Conclusion)
 		writeHashString(h, check.Reason)
 		writeHashStrings(h, check.InputTargetRefs)
+		if len(check.DependencyTargetRefs) != 0 {
+			writeHashString(h, "dependency-targets")
+			writeHashStrings(h, check.DependencyTargetRefs)
+		}
 		if len(check.Obligations) != 0 {
 			writeHashString(h, "obligations")
 			for _, obligation := range check.Obligations {

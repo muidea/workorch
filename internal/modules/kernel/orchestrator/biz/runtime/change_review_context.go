@@ -205,6 +205,17 @@ func changeReviewSealedPreimage(a RuntimeAggregate, d rc.RuntimeDispatchRecord, 
 					}
 				}
 			}
+			// Structural unavailability has no accepted InputReview. Its exact
+			// owner maintenance source still preserves the pre-effect bytes.
+			for _, unavailable := range surface.ProofRequirementUnavailabilities {
+				if unavailable.Maintenance != nil {
+					for _, f := range unavailable.Maintenance.Files {
+						if err := add(f); err != nil {
+							return nil, err
+						}
+					}
+				}
+			}
 			for _, binding := range surface.ProofRequirementBindings {
 				if binding.InputReview != nil {
 					for _, f := range binding.InputReview.Files {

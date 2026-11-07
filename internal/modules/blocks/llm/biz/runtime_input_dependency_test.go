@@ -39,3 +39,32 @@ func TestInputRevisionPurposeRetainsOwnerObservationMethodAndDeliveryWork(t *tes
 		t.Fatal("rendered owner method tampering was accepted")
 	}
 }
+
+func TestDependencyTaskProjectionAndIntegrityUseExactOwnerScope(t *testing.T) {
+	revision := inputRevisionProviderFixture(t)
+	for n := range revision.Report.Checks {
+		revision.Report.Checks[n].DependencyTargetRefs = []string{"delivery-dependency"}
+	}
+	r := runtimeSemanticWorkProviderRequestForTest(t, true, revision)
+	p, err := runtimeProviderRequest(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a runtimeSemanticAuthorityProjection
+	if err := json.Unmarshal([]byte(p.PromptContext.Sections[3].Content), &a); err != nil {
+		t.Fatal(err)
+	}
+	w := a.Manifest.ImplementationPurpose
+	if w == nil || len(w.DependencyTasks) != len(revision.Report.Checks) || w.DependencyTasks[0].TargetRef != "delivery-dependency" || w.DependencyTasks[0].PresentInOwnerManifest {
+		t.Fatal("dependency projection omitted current owner membership")
+	}
+	if len(w.DependencyTasks[0].CandidatePolicies) != 0 {
+		t.Fatal("existing-only fixture invented prospective authority")
+	}
+	w.DependencyTasks[0].CandidatePolicies = []rc.RuntimeOperationTargetPolicy{rc.RuntimeOperationTargetPolicyProspectiveOwnerTarget}
+	raw, _ := json.Marshal(a)
+	p.PromptContext.Sections[3].Content = string(raw)
+	if validateRuntimeSemanticContextIntegrity(r.SemanticContext, r.SemanticManifest, 0, nil, nil, p.ContextBudget, p.PromptContext) == nil {
+		t.Fatal("provider projection forged dependency eligibility")
+	}
+}

@@ -659,6 +659,9 @@ func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.Run
 				intent.PreviousRoundReview.Reason = "current contents do not establish preceding intent completion"
 			}
 		}
+		if purpose == runtimecontract.RuntimeImplementationWorkPurposeInconclusive {
+			intent.Uncertainty = &runtimecontract.RuntimeImplementationUncertainty{Kind: runtimecontract.RuntimeImplementationSemanticInformationMissing}
+		}
 		document.ImplementationIntent = intent
 	}
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &document, LogicalRequestID: purposeRequestID}})
@@ -678,7 +681,11 @@ func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.Run
 	}
 	if purpose == runtimecontract.RuntimeImplementationWorkPurposeEffect {
 		round := aggregate.ImplementationWork.Rounds[priorRounds]
-		workManifest, err := semanticplan.CompileManifest(semanticplan.ManifestIdentity{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, Definition: aggregate.Definition, DefinitionSeed: aggregate.Facts.DefinitionSeed, DefinitionFocuses: aggregate.Facts.DefinitionFocuses, Execution: aggregate.Facts.Activation.ExecutionContract, Admissibilities: aggregate.Facts.Resources.OperationAdmissibilities, ImplementationWork: &round})
+		intent, err := runtimecontract.ResolveRuntimeImplementationWorkIntent(round, aggregate.SemanticPlanning)
+		if err != nil {
+			t.Fatal(err)
+		}
+		workManifest, err := semanticplan.CompileManifest(semanticplan.ManifestIdentity{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, Definition: aggregate.Definition, DefinitionSeed: aggregate.Facts.DefinitionSeed, DefinitionFocuses: aggregate.Facts.DefinitionFocuses, Execution: aggregate.Facts.Activation.ExecutionContract, Admissibilities: aggregate.Facts.Resources.OperationAdmissibilities, ImplementationWork: &round, ImplementationIntent: intent})
 		if err != nil {
 			t.Fatal(err)
 		}

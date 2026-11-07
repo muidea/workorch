@@ -6,6 +6,8 @@ import "fmt"
 // declaration and previous-round receipt identities come from the one frozen
 // work manifest, never from provider echo or a guessed fallback.
 type runtimeImplementationIntentPayload struct {
+	Uncertainty             *RuntimeImplementationUncertainty        `json:"uncertainty,omitempty"`
+	DependencyTargetRefs    []string                                 `json:"dependencyTargetRefs,omitempty"`
 	RemainingWork           string                                   `json:"remainingWork"`
 	Reason                  string                                   `json:"reason"`
 	RequirementReviews      []RuntimeImplementationRequirementReview `json:"requirementReviews,omitempty"`
@@ -22,7 +24,7 @@ func runtimeImplementationIntentToWire(i *RuntimeImplementationIntent) *runtimeI
 		return nil
 	}
 	i = i.Clone()
-	w := &runtimeImplementationIntentPayload{RemainingWork: i.RemainingWork, Reason: i.Reason, RequirementReviews: i.RequirementReviews, SelectedRequirementRefs: i.SelectedRequirementRefs}
+	w := &runtimeImplementationIntentPayload{Uncertainty: i.Uncertainty.Clone(), DependencyTargetRefs: i.DependencyTargetRefs, RemainingWork: i.RemainingWork, Reason: i.Reason, RequirementReviews: i.RequirementReviews, SelectedRequirementRefs: i.SelectedRequirementRefs}
 	if p := i.PreviousRoundReview; p != nil {
 		w.PreviousRoundReview = &runtimeImplementationRoundReviewPayload{Outcome: p.Outcome, Reason: p.Reason}
 	}
@@ -46,7 +48,7 @@ func (w *runtimeImplementationIntentPayload) compile(m RuntimeSemanticPlanManife
 	if work == nil || work.Scope.Content == nil {
 		return nil, fmt.Errorf("implementation intent lacks frozen current work content")
 	}
-	i := &RuntimeImplementationIntent{DeclarationRef: declaration, ContentHash: work.Scope.Content.Hash(), RemainingWork: w.RemainingWork, Reason: w.Reason, RequirementReviews: w.RequirementReviews, SelectedRequirementRefs: w.SelectedRequirementRefs}
+	i := &RuntimeImplementationIntent{DeclarationRef: declaration, ContentHash: work.Scope.Content.Hash(), Uncertainty: w.Uncertainty.Clone(), DependencyTargetRefs: w.DependencyTargetRefs, RemainingWork: w.RemainingWork, Reason: w.Reason, RequirementReviews: w.RequirementReviews, SelectedRequirementRefs: w.SelectedRequirementRefs}
 	if p := w.PreviousRoundReview; p != nil {
 		if work.PreviousRound == nil {
 			return nil, fmt.Errorf("previous review has no frozen preceding round")

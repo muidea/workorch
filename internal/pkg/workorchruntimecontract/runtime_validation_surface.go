@@ -125,8 +125,12 @@ func (s RuntimeValidationSurface) Validate() error {
 func validateAndNormalizeRuntimeValidationSurface(s RuntimeValidationSurface) (RuntimeValidationSurface, error) {
 	raw := s
 	if s.GenerationContext != nil {
-		if len(s.ProofRequirementPreparations) == 0 && len(s.ProofRequirementBindings) == 0 {
-			return RuntimeValidationSurface{}, fmt.Errorf("generation context requires an exact validation preparation or binding")
+		hasMaintenance := false
+		for _, u := range s.ProofRequirementUnavailabilities {
+			hasMaintenance = hasMaintenance || u.Maintenance != nil
+		}
+		if len(s.ProofRequirementPreparations) == 0 && len(s.ProofRequirementBindings) == 0 && !hasMaintenance {
+			return RuntimeValidationSurface{}, fmt.Errorf("generation context requires an exact validation preparation, binding or structural maintenance source")
 		}
 		if err := s.GenerationContext.Validate(s.GenerationContext.ObservedRevision); err != nil {
 			return RuntimeValidationSurface{}, err

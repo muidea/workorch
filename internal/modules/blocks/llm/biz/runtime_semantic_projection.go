@@ -56,21 +56,24 @@ type runtimeSemanticManifestProjection struct {
 // 工作 C3 只投影完整有界 vocabulary 与 exact owner scope；不携带 receipt、预算权限或原始诊断。
 // policy 为 immutable Profile 声明，scope 只为提议约束，不是工作/终验 dispatch authority。
 type runtimeSemanticImplementationWorkProjection struct {
-	InputCoverageRevisionTasks []runtimeInputCoverageRevisionTask                      `json:"inputCoverageRevisionTasks,omitempty"`
-	PreviousRound              *runtimecontract.RuntimeImplementationRoundReviewSource `json:"previousRound,omitempty"`
-	InputRevision              *runtimeInputRevisionProjection                         `json:"inputRevision,omitempty"`
-	CoverageWorkItemID         common.CoverageWorkItemID                               `json:"coverageWorkItemId"`
-	PurposeChoiceOnly          bool                                                    `json:"purposeChoiceOnly"`
-	RepeatedWorkStates         int                                                     `json:"repeatedWorkStates"`
-	EffectAvailable            bool                                                    `json:"effectAvailable"`
-	RoundHash                  string                                                  `json:"roundHash"`
-	Ordinal                    int                                                     `json:"ordinal"`
-	PrecedingReceiptSetHash    string                                                  `json:"precedingReceiptSetHash,omitempty"`
-	PolicyHash                 string                                                  `json:"policyHash"`
-	Policy                     runtimecontract.RuntimeImplementationWorkPolicy         `json:"policy"`
-	Scope                      runtimeSemanticImplementationScopeProjection            `json:"scope"`
-	ExcludedTargetRefs         []string                                                `json:"excludedTargetRefs,omitempty"`
-	TerminalEvidenceCredit     bool                                                    `json:"terminalEvidenceCredit"`
+	TargetOptions                runtimecontract.RuntimeImplementationTargetOptions      `json:"targetOptions"`
+	SelectedDependencyTargetRefs []string                                                `json:"selectedDependencyTargetRefs,omitempty"`
+	DependencyTasks              []runtimecontract.RuntimeImplementationDependencyTask   `json:"dependencyTasks,omitempty"`
+	InputCoverageRevisionTasks   []runtimeInputCoverageRevisionTask                      `json:"inputCoverageRevisionTasks,omitempty"`
+	PreviousRound                *runtimecontract.RuntimeImplementationRoundReviewSource `json:"previousRound,omitempty"`
+	InputRevision                *runtimeInputRevisionProjection                         `json:"inputRevision,omitempty"`
+	CoverageWorkItemID           common.CoverageWorkItemID                               `json:"coverageWorkItemId"`
+	PurposeChoiceOnly            bool                                                    `json:"purposeChoiceOnly"`
+	RepeatedWorkStates           int                                                     `json:"repeatedWorkStates"`
+	EffectAvailable              bool                                                    `json:"effectAvailable"`
+	RoundHash                    string                                                  `json:"roundHash"`
+	Ordinal                      int                                                     `json:"ordinal"`
+	PrecedingReceiptSetHash      string                                                  `json:"precedingReceiptSetHash,omitempty"`
+	PolicyHash                   string                                                  `json:"policyHash"`
+	Policy                       runtimecontract.RuntimeImplementationWorkPolicy         `json:"policy"`
+	Scope                        runtimeSemanticImplementationScopeProjection            `json:"scope"`
+	ExcludedTargetRefs           []string                                                `json:"excludedTargetRefs,omitempty"`
+	TerminalEvidenceCredit       bool                                                    `json:"terminalEvidenceCredit"`
 }
 
 type runtimeSemanticImplementationScopeProjection struct {
@@ -99,11 +102,14 @@ func runtimeSemanticImplementationWorkForProvider(work *runtimecontract.RuntimeS
 	}
 	selection := work.Scope.Selection
 	return &runtimeSemanticImplementationWorkProjection{
-		InputCoverageRevisionTasks: runtimeInputCoverageRevisionTasks(work.Scope.Request.InputRevision),
-		PreviousRound:              work.PreviousRound.Clone(),
-		CoverageWorkItemID:         work.Scope.Request.CoverageWorkItemID,
-		InputRevision:              inputRevisionForProvider(work.Scope.Request.InputRevision),
-		PurposeChoiceOnly:          work.PurposeChoiceOnly, EffectAvailable: work.EffectAvailable, RepeatedWorkStates: work.RepeatedWorkStates,
+		InputCoverageRevisionTasks:   runtimeInputCoverageRevisionTasks(work.Scope.Request.InputRevision),
+		SelectedDependencyTargetRefs: append([]string(nil), work.SelectedDependencyTargetRefs...),
+		TargetOptions:                work.TargetOptions(),
+		DependencyTasks:              work.DependencyTasks(),
+		PreviousRound:                work.PreviousRound.Clone(),
+		CoverageWorkItemID:           work.Scope.Request.CoverageWorkItemID,
+		InputRevision:                inputRevisionForProvider(work.Scope.Request.InputRevision),
+		PurposeChoiceOnly:            work.PurposeChoiceOnly, EffectAvailable: work.EffectAvailable, RepeatedWorkStates: work.RepeatedWorkStates,
 		RoundHash: work.RoundHash, Ordinal: work.Ordinal, PrecedingReceiptSetHash: work.PrecedingReceiptSetHash,
 		PolicyHash: work.PolicyHash, Policy: work.Scope.Request.Policy.ExecutionMethod(),
 		ExcludedTargetRefs: append([]string(nil), work.ExcludedTargetRefs...),

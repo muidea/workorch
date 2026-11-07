@@ -38,6 +38,9 @@ func validateRuntimeImplementationProgress(d RuntimeSemanticPlanDocument, m Runt
 	if w.Scope.Content == nil || i == nil {
 		return fmt.Errorf("implementation progress requires exact current content")
 	}
+	if err := validateImplementationResourceClaims(d, w); err != nil {
+		return err
+	}
 	refs := RuntimeImplementationRequirementRefs(m, *w, declaration)
 	if len(i.RequirementReviews) != len(refs) {
 		return fmt.Errorf("implementation progress requires every original requirement exactly once")
@@ -94,6 +97,10 @@ func validateRuntimeImplementationProgress(d RuntimeSemanticPlanDocument, m Runt
 // semantic booleans/remaining work; exact original identities are code-derived.
 func addRuntimeImplementationProgressSchema(schema, intent map[string]any, refs []string, work *RuntimeSemanticImplementationWork) {
 	fields := intent["properties"].(map[string]any)
+	fields["dependencyTargetRefs"] = runtimeImplementationTargetRefsSchema()
+	fields["dependencyTargetRefs"].(map[string]any)["maxItems"] = work.Scope.Request.Policy.MaxTargetsPerRound
+	fields["uncertainty"] = map[string]any{"type": "object", "additionalProperties": false, "required": []string{"kind"}, "properties": map[string]any{"kind": stringEnumSchema([]string{RuntimeImplementationSemanticInformationMissing, RuntimeImplementationTargetScopeUnavailable}), "targetRefs": runtimeImplementationTargetRefsSchema()}, "allOf": []any{map[string]any{"if": map[string]any{"properties": map[string]any{"kind": map[string]any{"const": RuntimeImplementationTargetScopeUnavailable}}}, "then": map[string]any{"required": []string{"targetRefs"}, "properties": map[string]any{"targetRefs": map[string]any{"minItems": 1}}}}}}
+
 	review := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"requirementRef", "workRequired"}, "properties": map[string]any{"requirementRef": map[string]any{"type": "string", "enum": refs}, "workRequired": map[string]any{"type": "boolean"}}}
 	positions := make([]any, len(refs))
 	for n, ref := range refs {
@@ -111,7 +118,17 @@ func addRuntimeImplementationProgressSchema(schema, intent map[string]any, refs 
 	allOf, _ := schema["allOf"].([]any)
 	for _, purpose := range []RuntimeImplementationWorkPurpose{RuntimeImplementationWorkPurposeEffect, RuntimeImplementationWorkPurposeTerminal, RuntimeImplementationWorkPurposeStalled, RuntimeImplementationWorkPurposeInconclusive} {
 		constraints := map[string]any{}
+		if purpose != RuntimeImplementationWorkPurposeInconclusive {
+			constraints["uncertainty"] = false
+		}
+		if purpose != RuntimeImplementationWorkPurposeEffect {
+			constraints["dependencyTargetRefs"] = map[string]any{"maxItems": 0}
+		}
+
 		required := []string{"requirementReviews"}
+		if purpose == RuntimeImplementationWorkPurposeInconclusive {
+			required = append(required, "uncertainty")
+		}
 		if purpose == RuntimeImplementationWorkPurposeEffect {
 			required = append(required, "selectedRequirementRefs")
 			constraints["selectedRequirementRefs"] = map[string]any{"minItems": 1}

@@ -43,8 +43,13 @@ func validateRuntimeValidationInputReviewPayload(path string, raw json.RawMessag
 			return &RuntimeCandidatePayloadDiagnostic{Path: checkPath, Actual: "non_object", Required: []string{"object"}}
 		}
 		fields := []string{"requiredCheckRef", "conclusion", "reason", "inputTargetRefs"}
-		if err := validateRuntimeSemanticObjectFields(checkPath, check, append(append([]string(nil), fields...), "obligations"), fields); err != nil {
+		if err := validateRuntimeSemanticObjectFields(checkPath, check, append(append([]string(nil), fields...), "obligations", "dependencyTargetRefs"), fields); err != nil {
 			return err
+		}
+		if raw, exists := check["dependencyTargetRefs"]; exists {
+			if err := validateRuntimeDependencyRefsPayload(raw); err != nil {
+				return err
+			}
 		}
 		if raw, exists := check["obligations"]; exists {
 			var obligations []json.RawMessage
@@ -106,10 +111,11 @@ func addRuntimeSemanticInputReviewSchema(proposal map[string]any, manifest Runti
 					"type": "object", "additionalProperties": false,
 					"required": []string{"requiredCheckRef", "conclusion", "reason", "inputTargetRefs"},
 					"properties": map[string]any{
-						"requiredCheckRef": stringEnumSchema(binding.RequiredCheckRefs),
-						"conclusion":       stringEnumSchema([]string{RuntimeValidationInputConsistent, RuntimeValidationInputConflict, RuntimeValidationInputInconclusive}),
-						"reason":           map[string]any{"type": "string", "minLength": 1, "maxLength": RuntimeValidationInputReviewMaxReasonBytes},
-						"inputTargetRefs":  stringEnumArraySchemaWithMaximum(refs, len(refs), 1),
+						"requiredCheckRef":     stringEnumSchema(binding.RequiredCheckRefs),
+						"conclusion":           stringEnumSchema([]string{RuntimeValidationInputConsistent, RuntimeValidationInputConflict, RuntimeValidationInputInconclusive}),
+						"reason":               map[string]any{"type": "string", "minLength": 1, "maxLength": RuntimeValidationInputReviewMaxReasonBytes},
+						"inputTargetRefs":      stringEnumArraySchemaWithMaximum(refs, len(refs), 1),
+						"dependencyTargetRefs": runtimeImplementationTargetRefsSchema(),
 					},
 				}
 

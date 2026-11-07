@@ -38,10 +38,6 @@ func (b *RuntimeImplementationWorkIntentBinding) ValidateForRound(r RuntimeImple
 // ResolveRuntimeImplementationWorkIntent rejects ambiguous original sources.
 // Hash equality alone cannot substitute for the complete accepted document.
 func ResolveRuntimeImplementationWorkIntent(r RuntimeImplementationWorkRound, semantic RuntimeSemanticPlanningLedger) (*RuntimeImplementationWorkIntentBinding, error) {
-	return resolveRuntimeImplementationWorkIntentInSession(r, semantic, newRuntimeSemanticValidationSession())
-}
-
-func resolveRuntimeImplementationWorkIntentInSession(r RuntimeImplementationWorkRound, semantic RuntimeSemanticPlanningLedger, session *runtimeSemanticValidationSession) (*RuntimeImplementationWorkIntentBinding, error) {
 	if r.ScopeObservation == nil {
 		return nil, fmt.Errorf("work intent requires original scope observation")
 	}
@@ -61,13 +57,9 @@ func resolveRuntimeImplementationWorkIntentInSession(r RuntimeImplementationWork
 		if s.Manifest.WorkspaceID != r.WorkspaceID || s.Manifest.RunID != r.RunID || s.Manifest.DefinitionSeedHash != r.DefinitionSeedHash || s.Phase != RuntimeSemanticPlanningOrderAccepted || w.Scope.Request.CoverageWorkItemID != r.CoverageWorkItemID || !runtimeRawEqual(w.Scope, *r.ScopeObservation) || s.CoverageOrderDocument.ImplementationPurpose != RuntimeImplementationWorkPurposeEffect || s.DocumentHash != StableRuntimeSemanticPlanDocumentHash(*s.CoverageOrderDocument) {
 			return nil, fmt.Errorf("implementation intent original purpose differs from round")
 		}
-		validated, err := validateRuntimeSemanticPlanManifestInSession(*s.Manifest, session)
-		if err != nil {
-			return nil, err
-		}
-		if err := validateRuntimeSemanticPlanDocumentAgainstValidatedManifest(*s.CoverageOrderDocument, validated); err != nil {
-			return nil, err
-		}
+		// The owner admitted this purpose at the original generation transition.
+		// Consumption checks exact source/content/identity above; it must not
+		// re-run historical semantic business admission during read or recovery.
 		result = &RuntimeImplementationWorkIntentBinding{Source: RuntimeImplementationWorkPurposeChoice{CoverageWorkItemID: r.CoverageWorkItemID, ScopeRequestID: r.ScopeRequest.RequestID, SemanticManifestHash: s.Manifest.Hash, LogicalRequestID: s.LogicalRequestID, DocumentHash: s.DocumentHash, Purpose: s.CoverageOrderDocument.ImplementationPurpose}, Intent: s.CoverageOrderDocument.ImplementationIntent.Clone()}
 	}
 	if err := result.ValidateForRound(r); err != nil {

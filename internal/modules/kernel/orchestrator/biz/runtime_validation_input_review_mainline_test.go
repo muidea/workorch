@@ -74,6 +74,7 @@ type validationInputReviewMainlineOptions struct {
 	SubmittedSettlementFault           string
 	DuplicateInitialReview             bool
 	InvalidRevisionCandidate           bool
+	DependencyScopeErrorOnce           bool
 }
 
 func TestDriveRuntimeCorrectedReviewStillRequiresInputRevision(t *testing.T) {
@@ -457,6 +458,8 @@ func %s(t *testing.T) {
 	var reviewCalls, validationCalls int
 	var firstReviewManifest string
 	var duplicateSent, preciseCorrectionSeen bool
+	var scopeErrorSent, scopeCorrectionSeen bool
+	var scopeManifest, scopePrefix, scopeLogical string
 	var duplicateManifest, duplicatePrefix string
 	var snapshotPaths []string
 	if options.TerminalSnapshot {
@@ -473,6 +476,12 @@ func %s(t *testing.T) {
 			}
 		}
 
+		if options.DependencyScopeErrorOnce && scopeErrorSent && !scopeCorrectionSeen {
+			if command.CandidateAttempt != 1 || command.SemanticCorrectionDirective == nil || command.SemanticManifest.Hash != scopeManifest || command.StablePrefixHash != scopePrefix || command.RequestIdentity.LogicalRequestID == scopeLogical || command.SemanticCorrectionObservation == nil || command.SemanticCorrectionDirective.SourceObservationHash != runtimecontract.StableRuntimeSemanticCorrectionObservationHash(*command.SemanticCorrectionObservation) || validationCalls != 0 {
+				t.Errorf("dependency scope correction lost original transaction or bypassed validation: attempt=%d directive=%t manifestSame=%t prefixSame=%t logicalSame=%t validations=%d", command.CandidateAttempt, command.SemanticCorrectionDirective != nil, command.SemanticManifest.Hash == scopeManifest, command.StablePrefixHash == scopePrefix, command.RequestIdentity.LogicalRequestID == scopeLogical, validationCalls)
+			}
+			scopeCorrectionSeen = true
+		}
 		if options.DuplicateInitialReview && duplicateSent && !preciseCorrectionSeen {
 			if command.CandidateAttempt != 1 || command.SemanticCorrectionDirective == nil || command.SemanticManifest.Hash != duplicateManifest || command.StablePrefixHash != duplicatePrefix || validationCalls != 0 {
 				t.Error("review correction lost frozen identity or bypassed ordinary validation")
@@ -530,6 +539,13 @@ func %s(t *testing.T) {
 					review.Checks = append(review.Checks, runtimecontract.RuntimeValidationInputCheckReview{RequiredCheckRef: check, Conclusion: conclusion, Reason: "Confirm whether this input invokes the delivered program without bypassing the original requirement.", InputTargetRefs: []string{inputTargets[proposal.CoverageWorkItemID]}})
 					{
 						item := &review.Checks[len(review.Checks)-1]
+						if mode == "input_revision_dependency" && conclusion == runtimecontract.RuntimeValidationInputConflict {
+							content, err := os.ReadFile(filepath.Join(directory, inputRevisionDeliveryDependency))
+							if os.IsNotExist(err) || (err == nil && string(content) != "4\n") {
+								item.DependencyTargetRefs = []string{inputRevisionDeliveryDependency}
+							}
+						}
+
 						finding := runtimecontract.RuntimeValidationInputCovered
 						if conclusion == runtimecontract.RuntimeValidationInputConflict {
 							finding = runtimecontract.RuntimeValidationInputConflicting
@@ -604,6 +620,22 @@ func %s(t *testing.T) {
 				t.Errorf("scripted semantic fixture violates contract: %v", err)
 				result.Set(nil, cd.NewError(cd.Unexpected, err.Error()))
 				return
+			}
+			if options.DependencyScopeErrorOnce && !scopeErrorSent && document.ImplementationIntent != nil && len(document.ImplementationIntent.DependencyTargetRefs) != 0 {
+				var wire map[string]json.RawMessage
+				_ = json.Unmarshal(payload, &wire)
+				var intent map[string]json.RawMessage
+				_ = json.Unmarshal(wire["implementationIntent"], &intent)
+				wire["implementationPurpose"], _ = json.Marshal(runtimecontract.RuntimeImplementationWorkPurposeInconclusive)
+				intent["selectedRequirementRefs"] = json.RawMessage(`[]`)
+				delete(intent, "dependencyTargetRefs")
+				intent["uncertainty"], _ = json.Marshal(runtimecontract.RuntimeImplementationUncertainty{Kind: runtimecontract.RuntimeImplementationTargetScopeUnavailable, TargetRefs: []string{inputRevisionDeliveryDependency}})
+				wire["implementationIntent"], _ = json.Marshal(intent)
+				payload, _ = json.Marshal(wire)
+				scopeErrorSent = true
+				scopeManifest = command.SemanticManifest.Hash
+				scopePrefix = command.StablePrefixHash
+				scopeLogical = command.RequestIdentity.LogicalRequestID
 			}
 			if mode == "malformed" && reviewCalls > 0 {
 				payload = []byte(strings.ReplaceAll(string(payload), `"consistent"`, `"approved"`))
@@ -1227,6 +1259,9 @@ func %s(t *testing.T) {
 			classifiedReviews-- // Malformed fixture is not an admitted review.
 		}
 		assertRuntimeInputRevisionMainline(t, completed, classifiedReviews, mode)
+		if options.DependencyScopeErrorOnce && (!scopeErrorSent || !scopeCorrectionSeen) {
+			t.Fatal("scope contradiction did not use existing bounded correction")
+		}
 		if mode == "input_revision_dependency" {
 			assertRuntimeInputDependencyMainline(t, completed, directory)
 		}

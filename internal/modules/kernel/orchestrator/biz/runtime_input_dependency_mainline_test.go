@@ -56,6 +56,9 @@ func runtimeInputDependencySemanticDocument(d *rc.RuntimeSemanticPlanDocument, c
 		return
 	}
 	for _, o := range c.SemanticManifest.ProofObligations {
+		if w := o.ImplementationWork; w != nil && w.PurposeChoiceOnly && d.ImplementationPurpose == rc.RuntimeImplementationWorkPurposeEffect {
+			d.ImplementationIntent.DependencyTargetRefs = []string{inputRevisionDeliveryDependency}
+		}
 		if w := o.ImplementationWork; w != nil && !w.PurposeChoiceOnly && d.PlanStep == rc.RuntimeSemanticPlanStepProofBatch {
 			d.Proposals = []rc.RuntimeSemanticProofProposal{{CoverageWorkItemID: o.CoverageWorkItemID, OwnerModuleID: rc.RuntimeModuleFile, OperationKind: rc.StepKindFileWrite,
 				DeclarationRef: rc.RuntimeSemanticCurrentDeclarationRef(o), RequiredEvidenceKinds: []string{rc.EvidenceKindStateChange}, RequiredEffectScopes: []rc.RuntimeEffectScope{rc.RuntimeEffectWorkspaceDurable},
@@ -95,6 +98,14 @@ func assertRuntimeInputDependencyMainline(t *testing.T, a runtime.RuntimeAggrega
 	if first.ScopeRequest.InputRevision == nil || len(first.WorkingBinding.Proposals) != 1 || first.WorkingBinding.Proposals[0].OperationKind != rc.StepKindFileWrite {
 		t.Fatal("dependency creation lost the original conflict/policy source")
 	}
+	for _, r := range a.ImplementationWork.Rounds[:2] {
+		if len(r.WorkingBinding.IntentBinding.Intent.DependencyTargetRefs) != 1 || r.WorkingBinding.IntentBinding.Intent.DependencyTargetRefs[0] != inputRevisionDeliveryDependency {
+			t.Fatal("selected dependency lost before effect")
+		}
+		if len(r.ScopeRequest.InputRevision.Report.Checks[0].DependencyTargetRefs) != 1 {
+			t.Fatal("original independent dependency finding lost")
+		}
+	}
 	for _, attempt := range a.CandidateAttempts {
 		for _, e := range attempt.Feasibilities {
 			if e.OperationID == "create-delivery-dependency" || e.OperationID == "correct-delivery-dependency" {
@@ -103,5 +114,13 @@ func assertRuntimeInputDependencyMainline(t *testing.T, a runtime.RuntimeAggrega
 				}
 			}
 		}
+	}
+}
+
+func TestDriveRuntimeDependencyScopeMisclassificationUsesBoundedCorrection(t *testing.T) {
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: rc.RuntimeValidationInputReviewProtocol, DependencyScopeErrorOnce: true}
+	baseline := runValidationInputReviewMainline(t, "input_revision_dependency", "", options)
+	if got := runValidationInputReviewMainline(t, "input_revision_dependency", "after_input_revision_retirement", options); got != baseline {
+		t.Fatalf("recovery repeated rejected or corrected request: %d != %d", got, baseline)
 	}
 }

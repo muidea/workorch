@@ -48,6 +48,7 @@ func TestResponsesWireCacheAuditObservesActualAdapterAndFrozenInput(t *testing.T
 			})}
 			config := testAIProxyProviderConfig("https://fixture.invalid/v1")
 			config.Model = request.Model
+			config.ContextProfile.MaxRequestBytes = r.SemanticContext.ProviderCeiling.MaxBytes // match the frozen model ceiling, not the unrelated small transport fixture
 			config.Capabilities.JSONSchemaResponse = true
 			provider := NewHTTPProviderWithClient(config, client)
 			var result models.ProviderCompletionResult

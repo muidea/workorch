@@ -13,23 +13,25 @@ import (
 // resource-owner observation, not the terminal TargetSelection projection.
 type RuntimeSemanticImplementationWork struct {
 	// PurposeChoiceOnly 的 vocabulary 不授 effect，接受 order intent 后另行编译工作/终验。
-	PurposeChoiceOnly       bool
-	EffectAvailable         bool
-	RepeatedWorkStates      int
-	RoundHash               string
-	Ordinal                 int
-	PrecedingReceiptSetHash string
-	PolicyHash              string
-	Scope                   RuntimeImplementationWorkScopeObservation
-	MutationInputCatalogs   []RuntimeOperationAdmissibility
-	ExcludedTargetRefs      []string
-	PreviousRound           *RuntimeImplementationRoundReviewSource
+	SelectedDependencyTargetRefs []string `json:",omitempty"`
+	PurposeChoiceOnly            bool
+	EffectAvailable              bool
+	RepeatedWorkStates           int
+	RoundHash                    string
+	Ordinal                      int
+	PrecedingReceiptSetHash      string
+	PolicyHash                   string
+	Scope                        RuntimeImplementationWorkScopeObservation
+	MutationInputCatalogs        []RuntimeOperationAdmissibility
+	ExcludedTargetRefs           []string
+	PreviousRound                *RuntimeImplementationRoundReviewSource
 }
 
 func (w RuntimeSemanticImplementationWork) Clone() RuntimeSemanticImplementationWork {
 	w.Scope = w.Scope.Clone()
 	w.MutationInputCatalogs = cloneRuntimeStateRawSlice(w.MutationInputCatalogs, cloneRuntimeOperationAdmissibilityRaw)
 	w.ExcludedTargetRefs = slices.Clone(w.ExcludedTargetRefs)
+	w.SelectedDependencyTargetRefs = slices.Clone(w.SelectedDependencyTargetRefs)
 	w.PreviousRound = w.PreviousRound.Clone()
 	return w
 }
@@ -43,6 +45,12 @@ func (w RuntimeSemanticImplementationWork) Validate() error {
 }
 
 func (w RuntimeSemanticImplementationWork) validateInSemanticSession(session *runtimeSemanticValidationSession) error {
+	if err := validateImplementationDependencyRefs(w.SelectedDependencyTargetRefs); err != nil {
+		return err
+	}
+	if w.PurposeChoiceOnly && len(w.SelectedDependencyTargetRefs) != 0 {
+		return fmt.Errorf("purpose choice cannot carry a previously selected dependency")
+	}
 	if w.Scope.Content == nil {
 		return fmt.Errorf("implementation progress requires complete current content before a semantic request")
 	}
@@ -99,6 +107,15 @@ func (w RuntimeSemanticImplementationWork) validateInSemanticSession(session *ru
 	if !reflect.DeepEqual(excluded, w.ExcludedTargetRefs) {
 		return fmt.Errorf("semantic work exclusions do not match complete mutation input catalogs")
 	}
+	if len(w.SelectedDependencyTargetRefs) > w.Scope.Request.Policy.MaxTargetsPerRound {
+		return fmt.Errorf("selected work dependencies exceed the sealed round limit")
+	}
+	for _, ref := range w.SelectedDependencyTargetRefs {
+		if len(implementationTargetPolicies(w.Scope, w.ExcludedTargetRefs, ref)) == 0 {
+			return fmt.Errorf("selected dependency is outside sealed work policy")
+		}
+	}
+
 	return nil
 }
 
@@ -249,29 +266,50 @@ func validateRuntimeSemanticImplementationWorkProofSetAgainstValidatedWork(set R
 	}
 	seen := map[string]bool{}
 	for _, proposal := range set.Proposals {
-		policy := work.Scope.Request.Policy
-		if proposal.OwnerModuleID != policy.OwnerModuleID || !slices.Contains(policy.AllowedOperations, RuntimeOperationVariantRef{Kind: proposal.OperationKind, VariantID: proposal.OperationVariantID}) || !slices.Contains(policy.AllowedTargetPolicies, proposal.Target.Policy) || !slices.Equal(proposal.RequiredEvidenceKinds, []string{EvidenceKindStateChange}) || !slices.Equal(proposal.RequiredEffectScopes, []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}) || proposal.ValidationRecipeID != "" || len(proposal.RequiredCheckRefs) != 0 || proposal.ValidationInputReview != nil {
-			return fmt.Errorf("semantic work proposal exceeds immutable work policy or borrows terminal/input-review proof")
-		}
-		targets := RuntimeSemanticProposalTargetRefs(proposal)
-		if err := validateRuntimeInputRevisionTargets(work.Scope.Request.InputRevision, proposal); err != nil {
+		targets, err := validateRuntimeSemanticWorkProposalTargets(proposal, work)
+		if err != nil {
 			return err
 		}
-		if len(targets) == 0 {
-			return fmt.Errorf("semantic work selector alone cannot authorize effects")
-		}
 		for _, target := range targets {
-			if !implementationWorkExactRef(target) || seen[target] || slices.Contains(work.ExcludedTargetRefs, target) || (len(policy.TargetSelectorCandidateRefs) != 0 && !slices.Contains(policy.TargetSelectorCandidateRefs, target)) || (proposal.Target.Policy != RuntimeOperationTargetPolicyProspectiveOwnerTarget && !slices.Contains(work.Scope.Selection.TargetRefs, target)) {
-				return fmt.Errorf("semantic work target is duplicate, protected or outside original scope")
+			if seen[target] {
+				return fmt.Errorf("semantic work target is duplicate")
 			}
 			seen[target] = true
 		}
-		if proposal.Target.Policy == RuntimeOperationTargetPolicyProspectiveOwnerTarget && !SameRuntimeProspectiveTargetAllOfConstraintRefs(proposal.Target.ProspectiveConstraintRefs, policy.ProspectiveTargetAllOfConstraintRefs) {
-			return fmt.Errorf("semantic work prospective constraints differ from sealed policy")
-		}
+	}
+	if err := validateSelectedDependencyProposals(&RuntimeImplementationIntent{DependencyTargetRefs: work.SelectedDependencyTargetRefs}, set.Proposals); err != nil {
+		return err
 	}
 	if len(seen) > work.Scope.Request.Policy.MaxTargetsPerRound {
 		return fmt.Errorf("semantic work collective targets exceed round limit")
 	}
 	return nil
+}
+
+// A capability feasibility probe receives one proposal, not the full proof set.
+// It checks that proposal's applicable work constraints with the same rule;
+// collective dependency coverage remains on complete-document admission.
+func validateRuntimeSemanticWorkProposalTargets(proposal RuntimeSemanticProofProposal, work *RuntimeSemanticImplementationWork) ([]string, error) {
+	policy := work.Scope.Request.Policy
+	if proposal.CoverageWorkItemID != work.Scope.Request.CoverageWorkItemID || proposal.OwnerModuleID != policy.OwnerModuleID || !slices.Contains(policy.AllowedOperations, RuntimeOperationVariantRef{Kind: proposal.OperationKind, VariantID: proposal.OperationVariantID}) || !slices.Contains(policy.AllowedTargetPolicies, proposal.Target.Policy) || !slices.Equal(proposal.RequiredEvidenceKinds, []string{EvidenceKindStateChange}) || !slices.Equal(proposal.RequiredEffectScopes, []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}) || proposal.ValidationRecipeID != "" || len(proposal.RequiredCheckRefs) != 0 || proposal.ValidationInputReview != nil {
+		return nil, fmt.Errorf("semantic work proposal exceeds immutable work policy or borrows terminal/input-review proof")
+	}
+	targets := RuntimeSemanticProposalTargetRefs(proposal)
+	if err := validateRuntimeInputRevisionTargets(work.Scope.Request.InputRevision, proposal); err != nil {
+		return nil, err
+	}
+	if len(targets) == 0 || len(targets) > policy.MaxTargetsPerRound {
+		return nil, fmt.Errorf("semantic work requires bounded exact targets; selector alone cannot authorize effects")
+	}
+	seen := map[string]bool{}
+	for _, target := range targets {
+		if seen[target] || !implementationTargetEligible(work.Scope, work.ExcludedTargetRefs, target, proposal.Target.Policy) {
+			return nil, fmt.Errorf("semantic work target is duplicate, protected or outside original scope")
+		}
+		seen[target] = true
+	}
+	if proposal.Target.Policy == RuntimeOperationTargetPolicyProspectiveOwnerTarget && !SameRuntimeProspectiveTargetAllOfConstraintRefs(proposal.Target.ProspectiveConstraintRefs, policy.ProspectiveTargetAllOfConstraintRefs) {
+		return nil, fmt.Errorf("semantic work prospective constraints differ from sealed policy")
+	}
+	return targets, nil
 }

@@ -71,6 +71,10 @@ func semanticManifestIdentity(aggregate RuntimeAggregate) (semanticplan.Manifest
 		reservation.OutcomeUnknownExecutionKey, reservation.OutcomeUnknownFence = "", 0
 		reservation.Hash = runtimecontract.StableRuntimeImplementationWorkRoundHash(reservation)
 		identity.ImplementationWork = &reservation
+		identity.ImplementationIntent, err = runtimecontract.ResolveRuntimeImplementationWorkIntent(reservation, aggregate.SemanticPlanning)
+		if err != nil {
+			return semanticplan.ManifestIdentity{}, err
+		}
 		identity.EligibleCoverage = []common.CoverageWorkItemID{current.CoverageWorkItemID}
 	}
 	if preview := aggregate.ImplementationWork.ScopePreview; preview != nil {

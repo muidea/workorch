@@ -1851,8 +1851,19 @@ per-transaction bound. Ordinary terminal proof still allows only one proof per e
 validation while truthfully retaining known gaps; it is neither a readiness declaration nor weaker partial acceptance.
 Real validation failures still need exact owner-grounded repair and fresh validation. At repeated-state exhaustion,
 `implementation_stalled` preserves unresolved originals and creates `implementation_work_repeated_state_exhausted`
-without reserving work. `implementation_inconclusive` selects no effects and closes as
-`implementation_work_review_inconclusive`, class `semantic_observation_inconclusive`; it is not mislabeled no-progress.
+without reserving work. `implementation_inconclusive` selects no effects and requires typed `uncertainty`:
+`semantic_information_missing` or `target_scope_unavailable` with exact affected target refs. Owner-derived target
+membership, exclusions and prospective policy determine candidate eligibility. A scope-unavailable claim that contradicts
+those facts is rejected at semantic admission and follows the existing single bounded correction, preserving its manifest,
+stable prefix and original rejection lineage. Genuine uncertainty still closes as `implementation_work_review_inconclusive`,
+class `semantic_observation_inconclusive`; it is not mislabeled no-progress. No text matching or unbounded retry is used.
+Input-review checks may nominate exact `dependencyTargetRefs` under a conflicting conclusion, separate from the actually
+reviewed `inputTargetRefs`. The next scope projects those original check dependencies and current manifest membership/
+candidate policy options; these are not permission, readiness or credit. Effect intent selects a bounded dependency set;
+its frozen proof manifest, complete proof set, working binding and operation sequence retain that selection. Concrete
+capability feasibility, permission, CAS/fence and receipts still gate effects. Dependency changes require fresh independent
+input review, ordinary validation and assessment under the unchanged all-of criteria. Accepted historical purpose results
+are consumed by exact source/content/hash joins, without re-admitting their historical semantic judgment during recovery.
 Both preserve the accepted original semantic document. Exhausted-purpose `semantic_ambiguity` is rejected as
 `implementation_work_exhausted_review_missing`
 at pure admission, private persistence and ticket I/O; it cannot instruct users to alter Goal merely to resolve this internal
@@ -2081,7 +2092,8 @@ SM-2/SM-3 的 candidate manifest、complete admission、pre-seal 与 owner-fact 
 purpose/proof、输入生成/维护及独立 assessment 按需使用该 typed 请求事实；普通 order 和无关阶段不携带。
 现有目标的首个前像及合法中途变化的前像按原操作来源消费：实施轮取原 sealed ImplementationWorkCommitment；
 没有实施轮的辅助操作沿原 dispatch → 唯一 accepted attempt → 原 logical request/session → 原 manifest 的
-MutationInputCatalogs 读取原 owner 正文（generation corpus 或 input-review subject）。精确 transaction、
+MutationInputCatalogs 读取原 owner 正文（generation corpus、input-review subject 或结构不可用时的原 maintenance files）。
+结构维护来源同时保留所需 production generation corpus，不把这些原件当作结构通过或输入审查结论。精确 transaction、
 candidate/manifest/request 身份必须一致；不得从 mutable current catalog、任意历史相同 hash 或当前文件倒推前像。
 既有治理续接沿正式 grant 的 resume/source dispatch 链回到原接纳事务，保持 candidate/manifest 与 Workspace/Run
 一致；只消费已提交的交接，缺来源、重复或循环明确拒绝，不重新决策治理或执行操作。

@@ -242,3 +242,30 @@ func TestChangeReviewFixedRestartAuxiliaryPreimage(t *testing.T) {
 		t.Fatal("candidate consumer differs from semantic consumer", err)
 	}
 }
+
+func TestChangeReviewStructuralMaintenanceRetainsOriginalPreimage(t *testing.T) {
+	a, files := auxiliaryChangePreimageFixture()
+	surface := &a.CandidateRequestSessions[0].CandidateManifest.MutationInputCatalogs[0].ValidationSurfaces[0]
+	original := surface.GenerationContext.Files[0]
+	surface.GenerationContext = nil
+	surface.ProofRequirementUnavailabilities = []rc.RuntimeValidationProofUnavailability{{Maintenance: &rc.RuntimeValidationInputMaintenance{Files: []rc.RuntimeValidationInputReviewFile{original}}}}
+	c, err := ChangeReviewContext(a, files)
+	if err != nil || c.Changes[0].Baseline == nil || *c.Changes[0].Baseline != original {
+		t.Fatal("unavailable input lost its exact maintenance original", err)
+	}
+	var restored RuntimeAggregate
+	bytes, err := json.Marshal(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(bytes, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := ChangeReviewContext(restored, files); err != nil || !reflect.DeepEqual(c, again) {
+		t.Fatal("restoration rewrote the structural original", err)
+	}
+	surface.ProofRequirementUnavailabilities[0].Maintenance.Files[0].Content += "tampered"
+	if _, err := ChangeReviewContext(a, files); err == nil {
+		t.Fatal("malformed preimage used as current fact")
+	}
+}

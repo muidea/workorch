@@ -252,8 +252,27 @@ func validateRuntimeSemanticPayloadFields(payload []byte) error {
 		if err := json.Unmarshal(raw, &intent); err != nil {
 			return &RuntimeCandidatePayloadDiagnostic{Path: "$.implementationIntent", Actual: "non_object", Cause: err}
 		}
-		if err := validateRuntimeSemanticObjectFields("$.implementationIntent", intent, []string{"remainingWork", "reason", "requirementReviews", "selectedRequirementRefs", "previousRoundReview"}, []string{"remainingWork", "reason"}); err != nil {
+		if err := validateRuntimeSemanticObjectFields("$.implementationIntent", intent, []string{"remainingWork", "reason", "requirementReviews", "selectedRequirementRefs", "previousRoundReview", "uncertainty", "dependencyTargetRefs"}, []string{"remainingWork", "reason"}); err != nil {
 			return err
+		}
+		if rawRefs, exists := intent["dependencyTargetRefs"]; exists {
+			if err := validateRuntimeDependencyRefsPayload(rawRefs); err != nil {
+				return err
+			}
+		}
+		if rawUncertainty, exists := intent["uncertainty"]; exists {
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(rawUncertainty, &fields) != nil || fields == nil {
+				return fmt.Errorf("implementation uncertainty must be an object")
+			}
+			if err := validateRuntimeSemanticObjectFields("$.implementationIntent.uncertainty", fields, []string{"kind", "targetRefs"}, []string{"kind"}); err != nil {
+				return err
+			}
+			if rawRefs, exists := fields["targetRefs"]; exists {
+				if err := validateRuntimeDependencyRefsPayload(rawRefs); err != nil {
+					return err
+				}
+			}
 		}
 		if rawReview, exists := intent["previousRoundReview"]; exists {
 			var review map[string]json.RawMessage

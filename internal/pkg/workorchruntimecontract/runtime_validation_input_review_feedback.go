@@ -99,6 +99,9 @@ func (f RuntimeValidationInputReviewFeedback) Validate() error {
 			}
 		}
 
+		if err := validateRuntimeInputDependencies(check); err != nil {
+			return err
+		}
 		if err := validateRuntimeValidationInputObligations(check); err != nil {
 			return err
 		}

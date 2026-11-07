@@ -259,7 +259,11 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 			IdempotencyClass: runtimemodel.RuntimeOperationIdempotencyAtMostOnce,
 			InputSchemaHash:  schemaHash,
 		}
-		if len(bindings) != 0 && shellValidationInputReviewRequired(recipe.AdapterRef) {
+		hasMaintenance := false
+		for _, u := range unavailabilities {
+			hasMaintenance = hasMaintenance || u.Maintenance != nil
+		}
+		if (len(bindings) != 0 || hasMaintenance) && shellValidationInputReviewRequired(recipe.AdapterRef) {
 			surface.GenerationContext = shellValidationGenerationContext(workspaceDirectory, binding.Manifest, catalogObservedRevision)
 		}
 		for _, preparation := range preparations {

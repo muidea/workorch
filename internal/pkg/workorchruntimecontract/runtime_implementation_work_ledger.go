@@ -374,17 +374,10 @@ func (b RuntimeImplementationWorkingBinding) validateForRoundInSemanticSession(r
 			return fmt.Errorf("implementation work proposal requires bounded exact targets")
 		}
 		for _, target := range targets {
-			if !implementationWorkExactRef(target) || seen[target] || slices.Contains(excluded, target) {
+			if seen[target] || !implementationTargetEligible(*r.ScopeObservation, excluded, target, proposal.Target.Policy) {
 				return fmt.Errorf("implementation work target duplicates or mutates protected validation input")
 			}
 			seen[target] = true
-			policy := r.ScopeRequest.Policy
-			if len(policy.TargetSelectorCandidateRefs) != 0 && !slices.Contains(policy.TargetSelectorCandidateRefs, target) {
-				return fmt.Errorf("implementation work target is outside declared work selector candidates")
-			}
-			if proposal.Target.Policy != RuntimeOperationTargetPolicyProspectiveOwnerTarget && !slices.Contains(selection.TargetRefs, target) {
-				return fmt.Errorf("implementation work target is absent from complete owner work scope")
-			}
 		}
 		// The existing hypothetical delta is specific to prospective OWNER
 		// FACT satisfaction. Ordinary implementation work must not borrow that
@@ -403,6 +396,9 @@ func (b RuntimeImplementationWorkingBinding) validateForRoundInSemanticSession(r
 			fact.ValidationRecipeID != "" || len(fact.RequiredCheckRefs) != 0 || fact.OwnerFactProspectiveSatisfactionObservation != nil || fact.OriginalDiagnostic != nil {
 			return fmt.Errorf("implementation work feasibility differs from exact proposal/catalog/source")
 		}
+	}
+	if err := validateSelectedDependencyProposals(b.IntentBinding.Intent, b.Proposals); err != nil {
+		return err
 	}
 	if len(seen) > r.ScopeRequest.Policy.MaxTargetsPerRound {
 		return fmt.Errorf("implementation work collective target set exceeds sealed round limit")

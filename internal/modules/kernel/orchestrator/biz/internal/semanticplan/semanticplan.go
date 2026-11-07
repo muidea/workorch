@@ -30,6 +30,7 @@ type ManifestIdentity struct {
 	// the shared repair-purpose compiler; it is never synthesized here.
 	ValidationFailureRepair      *runtimecontract.RuntimeValidationFailureRepairGenerationInput
 	InputReviewInformation       []runtimecontract.RuntimeValidationInputReviewInformation
+	ImplementationIntent         *runtimecontract.RuntimeImplementationWorkIntentBinding
 	ImplementationWork           *runtimecontract.RuntimeImplementationWorkRound
 	ImplementationPurposePreview *runtimecontract.RuntimeImplementationWorkScopePreview
 	ImplementationWorkRounds     []runtimecontract.RuntimeImplementationWorkRound
@@ -43,6 +44,16 @@ func CompileManifest(identity ManifestIdentity) (runtimecontract.RuntimeSemantic
 	manifest, err := compileManifestBase(identity)
 	if err != nil {
 		return runtimecontract.RuntimeSemanticPlanManifest{}, err
+	}
+	if identity.ImplementationWork != nil {
+		if err := identity.ImplementationIntent.ValidateForRound(*identity.ImplementationWork); err != nil {
+			return runtimecontract.RuntimeSemanticPlanManifest{}, err
+		}
+		for n := range manifest.ProofObligations {
+			if work := manifest.ProofObligations[n].ImplementationWork; work != nil {
+				work.SelectedDependencyTargetRefs = append([]string(nil), identity.ImplementationIntent.Intent.DependencyTargetRefs...)
+			}
+		}
 	}
 	manifest.InputReviewInformation = runtimecontract.RuntimeSemanticInputReviewInformationForCatalogs(identity.InputReviewInformation, manifest.OwnerCatalogs)
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)

@@ -285,7 +285,7 @@ func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinition
 			outstanding++
 		}
 		if round.WorkingBinding != nil && !semanticSession.committedWorkRound(round) {
-			intent, err := resolveRuntimeImplementationWorkIntentInSession(round, semantic, semanticSession)
+			intent, err := ResolveRuntimeImplementationWorkIntent(round, semantic)
 			if err != nil {
 				return err
 			}

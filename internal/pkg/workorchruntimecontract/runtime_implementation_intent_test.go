@@ -166,6 +166,7 @@ func TestImplementationPreviousIntentReviewAndTruthfulBudgetOutcome(t *testing.T
 		v.ImplementationPurpose = RuntimeImplementationWorkPurposeInconclusive
 		v.ImplementationIntent.SelectedRequirementRefs = nil
 		v.ImplementationIntent.PreviousRoundReview.Outcome = "inconclusive"
+		v.ImplementationIntent.Uncertainty = &RuntimeImplementationUncertainty{Kind: RuntimeImplementationSemanticInformationMissing}
 		assertImplementationSchemaAndParser(t, m, v, true)
 		v = d.Clone()
 		v.ImplementationPurpose = RuntimeImplementationWorkPurposeTerminal

@@ -53,6 +53,8 @@ type RuntimeImplementationIntent struct {
 	Reason                  string                                   `json:"reason"`
 	RequirementReviews      []RuntimeImplementationRequirementReview `json:"requirementReviews,omitempty"`
 	SelectedRequirementRefs []string                                 `json:"selectedRequirementRefs,omitempty"`
+	Uncertainty             *RuntimeImplementationUncertainty        `json:"uncertainty,omitempty"`
+	DependencyTargetRefs    []string                                 `json:"dependencyTargetRefs,omitempty"`
 	PreviousRoundReview     *RuntimeImplementationRoundReview        `json:"previousRoundReview,omitempty"`
 }
 
@@ -63,6 +65,8 @@ func (i *RuntimeImplementationIntent) Clone() *RuntimeImplementationIntent {
 	v := *i
 	v.RequirementReviews = slices.Clone(i.RequirementReviews)
 	v.SelectedRequirementRefs = slices.Clone(i.SelectedRequirementRefs)
+	v.DependencyTargetRefs = slices.Clone(i.DependencyTargetRefs)
+	v.Uncertainty = i.Uncertainty.Clone()
 	if i.PreviousRoundReview != nil {
 		copy := *i.PreviousRoundReview
 		v.PreviousRoundReview = &copy
@@ -141,6 +145,13 @@ func (c *RuntimeSemanticWorkContext) Validate(m RuntimeSemanticPlanManifest) err
 	}
 	if c == nil || !reflect.DeepEqual(c.Content, work.Scope.Content) || len(c.PriorRounds) != work.Ordinal-1 {
 		return fmt.Errorf("semantic work context missing exact source or complete prior rounds")
+	}
+	var selectedDependencies []string
+	if c.Intent != nil {
+		selectedDependencies = c.Intent.DependencyTargetRefs
+	}
+	if !slices.Equal(selectedDependencies, work.SelectedDependencyTargetRefs) {
+		return fmt.Errorf("semantic work context differs from accepted dependency selection")
 	}
 	if p := work.PreviousRound; p != nil {
 		if len(c.PriorRounds) == 0 || p.IntentBinding == nil {

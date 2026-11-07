@@ -29,8 +29,10 @@ func projectImplementationPurpose(a *RuntimeAggregate) (bool, error) {
 	if err := validateSemanticManifestIdentity(*a, *ledger.Manifest); err != nil {
 		return false, err
 	}
-	if err := ledger.CoverageOrderDocument.ValidateAgainstManifest(*ledger.Manifest); err != nil {
-		return false, err
+	// The accepted purpose is a formal owner result. This consumer binds its
+	// exact immutable body; semantic admission happened at the evaluated event.
+	if ledger.DocumentHash == "" || ledger.CoverageOrderDocument.ManifestHash != ledger.Manifest.Hash || ledger.DocumentHash != runtimecontract.StableRuntimeSemanticPlanDocumentHash(*ledger.CoverageOrderDocument) {
+		return false, fmt.Errorf("%w: accepted purpose body differs from original result", common.ErrConflict)
 	}
 	if err := ledger.ValidateHistoryStorage(); err != nil {
 		return false, err

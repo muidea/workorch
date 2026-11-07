@@ -18,6 +18,7 @@ const (
 	RuntimeSemanticContractViolationCoverageOrderDocument RuntimeSemanticContractViolationKind = "coverage_order_document"
 	RuntimeSemanticContractViolationProofBatchDocument    RuntimeSemanticContractViolationKind = "proof_batch_document"
 	RuntimeSemanticContractViolationProposalConstraint    RuntimeSemanticContractViolationKind = "proposal_constraint"
+	RuntimeSemanticContractViolationImplementationIntent  RuntimeSemanticContractViolationKind = "implementation_intent"
 )
 
 type RuntimeSemanticConstraintRule string
@@ -112,6 +113,10 @@ func (v RuntimeSemanticContractViolation) Validate() error {
 		if !strings.HasPrefix(v.Path, "$") || v.RequiredBeforeID != "" || v.RequiredAfterID != "" || len(v.RequiredCoverageWorkItemIDs) == 0 {
 			return fmt.Errorf("runtime semantic proof-batch violation requires a field path and exact batch coverage")
 		}
+	case RuntimeSemanticContractViolationImplementationIntent:
+		if !strings.HasPrefix(v.Path, "$.implementationIntent.") || v.CoverageWorkItemID == "" || v.RequiredBeforeID != "" || v.RequiredAfterID != "" || len(v.RequiredCoverageWorkItemIDs) != 0 || v.Rule != RuntimeSemanticConstraintRelational || len(v.Required) == 0 {
+			return fmt.Errorf("implementation intent violation requires exact purpose scope, field and relational constraint")
+		}
 	case RuntimeSemanticContractViolationProposalConstraint:
 		if !strings.HasPrefix(v.Path, "$.proposals[") || v.CoverageWorkItemID == "" || v.ProposalIndex < 0 ||
 			v.RequiredBeforeID != "" || v.RequiredAfterID != "" || len(v.RequiredCoverageWorkItemIDs) != 0 {
@@ -141,6 +146,14 @@ func (v RuntimeSemanticContractViolation) ValidateAgainstManifest(manifest Runti
 	manifest = manifest.Normalized()
 	if err := manifest.Validate(); err != nil {
 		return err
+	}
+	if v.Kind == RuntimeSemanticContractViolationImplementationIntent {
+		for _, o := range manifest.ProofObligations {
+			if o.CoverageWorkItemID == v.CoverageWorkItemID && o.ImplementationWork != nil && o.ImplementationWork.PurposeChoiceOnly {
+				return nil
+			}
+		}
+		return fmt.Errorf("implementation intent violation is outside the current purpose scope")
 	}
 	if v.Kind == RuntimeSemanticContractViolationCoverageOrderDocument || v.Kind == RuntimeSemanticContractViolationProofBatchDocument || v.Kind == RuntimeSemanticContractViolationProposalConstraint {
 		known := make(map[common.CoverageWorkItemID]struct{}, len(manifest.CoverageItems))
@@ -304,7 +317,7 @@ func (d RuntimeSemanticCorrectionDirective) ValidateAgainstObservation(manifest 
 			if d.PlanStep != RuntimeSemanticPlanStepCoverageOrder {
 				return fmt.Errorf("runtime semantic dependency correction is outside coverage-order step")
 			}
-		case RuntimeSemanticContractViolationCoverageOrderDocument:
+		case RuntimeSemanticContractViolationCoverageOrderDocument, RuntimeSemanticContractViolationImplementationIntent:
 			if d.PlanStep != RuntimeSemanticPlanStepCoverageOrder {
 				return fmt.Errorf("runtime semantic coverage-order document correction is outside coverage-order step")
 			}
