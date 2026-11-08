@@ -501,7 +501,7 @@ func %s(t *testing.T) {
 	var interruptedResults *failAfterResultCreateRepository
 	deliveryCut := cut == "after_result_persistence" || cut == "after_workspace_persistence" || cut == "after_run_persistence"
 	materialCut := cut == "before_material_seal" || cut == "after_material_seal"
-	if deliveryCut {
+	if deliveryCut || mode == "foreign_review" {
 		results = filerepository.NewResultRepository(filepath.Join(root, "results.json"))
 		resultRepository := results
 		if cut == "after_result_persistence" {
@@ -744,6 +744,20 @@ func %s(t *testing.T) {
 				scopePrefix = command.StablePrefixHash
 				scopeLogical = command.RequestIdentity.LogicalRequestID
 			}
+			if mode == "foreign_review" && reviewCalls > 0 {
+				var wire map[string]any
+				if err := json.Unmarshal(payload, &wire); err != nil {
+					t.Fatal(err)
+				}
+				for _, item := range wire["proposals"].([]any) {
+					p := item.(map[string]any)
+					if review, ok := p["validationInputReview"].(map[string]any); ok {
+						check := review["checks"].([]any)[0].(map[string]any)
+						check["obligations"].([]any)[0].(map[string]any)["inputTargetRefs"] = []string{"foreign/input"}
+					}
+				}
+				payload, _ = json.Marshal(wire)
+			}
 			if mode == "malformed" && reviewCalls > 0 {
 				payload = []byte(strings.ReplaceAll(string(payload), `"consistent"`, `"approved"`))
 			}
@@ -753,24 +767,25 @@ func %s(t *testing.T) {
 				var proposals []map[string]json.RawMessage
 				_ = json.Unmarshal(wire["proposals"], &proposals)
 				for _, proposal := range proposals {
-					var review runtimecontract.RuntimeValidationInputReview
+					var review map[string]any
 					if len(proposal["validationInputReview"]) == 0 {
 						continue
 					}
 					_ = json.Unmarshal(proposal["validationInputReview"], &review)
+					var item map[string]any
 					if options.ExecutionUncertaintyOnce == "source" {
-						if len(review.DiagnosticSources) == 0 {
+						sources, _ := review["diagnosticSources"].([]any)
+						if len(sources) == 0 {
 							t.Fatal("test did not obtain real owner source inventory")
 						}
-						review.DiagnosticSources[0].Conclusion = runtimecontract.RuntimeValidationInputInconclusive
-						review.DiagnosticSources[0].UncertaintyKind = runtimecontract.RuntimeValidationExecutionObservationPending
-						review.DiagnosticSources[0].Reason = "Actual aggregate execution timing has not been measured before validation."
+						item = sources[0].(map[string]any)
 					} else {
-						review.Checks[0].Conclusion = runtimecontract.RuntimeValidationInputInconclusive
-						review.Checks[0].UncertaintyKind = runtimecontract.RuntimeValidationExecutionObservationPending
-						review.Checks[0].Reason = "Actual aggregate execution timing has not been measured before validation."
-						review.Checks[0].Obligations[0].Finding = runtimecontract.RuntimeValidationInputUnknown
+						item = review["checks"].([]any)[0].(map[string]any)
+						item["obligations"].([]any)[0].(map[string]any)["finding"] = runtimecontract.RuntimeValidationInputUnknown
 					}
+					item["conclusion"] = runtimecontract.RuntimeValidationInputInconclusive
+					item["uncertaintyKind"] = runtimecontract.RuntimeValidationExecutionObservationPending
+					item["reason"] = "Actual aggregate execution timing has not been measured before validation."
 					proposal["validationInputReview"], _ = json.Marshal(review)
 					break
 				}
@@ -792,15 +807,16 @@ func %s(t *testing.T) {
 					return
 				}
 				for _, proposal := range proposals {
-					var review runtimecontract.RuntimeValidationInputReview
+					var review map[string]any
 					if len(proposal["validationInputReview"]) == 0 {
 						continue
 					}
 					if err := json.Unmarshal(proposal["validationInputReview"], &review); err != nil {
-						t.Error(err)
-						return
+						t.Fatal(err)
 					}
-					review.Checks[0].Obligations = append(review.Checks[0].Obligations, review.Checks[0].Obligations[0])
+					check := review["checks"].([]any)[0].(map[string]any)
+					obligations := check["obligations"].([]any)
+					check["obligations"] = append(obligations, obligations[0])
 					proposal["validationInputReview"], _ = json.Marshal(review)
 					break
 				}
@@ -1724,6 +1740,15 @@ func %s(t *testing.T) {
 		}
 		if members != 2 || closeout.ValidateRaw() != nil {
 			t.Fatal("Result lost complete independently bound source outcomes")
+		}
+	}
+	if mode == "foreign_review" {
+		diagnostic := closeouts[0].RuntimeCloseout.OriginalDiagnostic
+		if diagnostic == nil || len(diagnostic.SemanticViolations) != 1 || diagnostic.SemanticViolations[0].Actual != "unobserved_input_ref" || diagnostic.SemanticViolations[0].RequiredCoverageWorkItemIDs != nil || reviewCalls != 2 || len(completed.GovernanceRequests) != 0 {
+			t.Fatalf("semantic producer lost exact bounded failure: %+v; reviews=%d", diagnostic, reviewCalls)
+		}
+		if !reflect.DeepEqual(diagnostic, stored.RuntimeState.TerminalMaterialSeal.Material.RuntimeCloseout.OriginalDiagnostic) {
+			t.Fatal("file Result read-back changed original semantic failure")
 		}
 	}
 	if mode == "conflict" || mode == "omission" || mode == "exhausted" {

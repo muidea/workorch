@@ -320,6 +320,12 @@ func (r RuntimeValidationInputReview) ValidateAgainstBinding(b RuntimeValidation
 		if err := validateRuntimeInputReviewUncertainty(path, check.Conclusion, check.UncertaintyKind, *b.InputReview); err != nil {
 			return err
 		}
+		if err := validateRuntimeInputDependencies(check); err != nil {
+			return runtimeInputViolationAt(path, err)
+		}
+		if err := validateRuntimeValidationInputObligations(check); err != nil {
+			return runtimeInputViolationAt(path, err)
+		}
 		refs := normalizeStrings(check.InputTargetRefs)
 		if len(refs) == 0 || !reflect.DeepEqual(refs, check.InputTargetRefs) {
 			return runtimeInputViolation(path+".inputTargetRefs", "noncanonical_input_refs", "nonempty sorted unique owner-observed input refs", "validation input review requires canonical exact input references for every check")
@@ -327,14 +333,17 @@ func (r RuntimeValidationInputReview) ValidateAgainstBinding(b RuntimeValidation
 		for _, ref := range refs {
 			idx := sort.Search(len(b.InputReview.Files), func(i int) bool { return b.InputReview.Files[i].TargetRef >= ref })
 			if idx == len(b.InputReview.Files) || b.InputReview.Files[idx].TargetRef != ref {
-				return runtimeInputViolation(path+".inputTargetRefs", "unobserved_input_ref", "target refs from selected input-review subject.files only", "validation input review references an unobserved input")
+				// Scope membership is judged once. Locate the original semantic
+				// selection for correction instead of naming a compiled wire field.
+				fieldPath := path + ".inputTargetRefs"
+				for oi, obligation := range check.Obligations {
+					if slices.Contains(obligation.InputTargetRefs, ref) {
+						fieldPath = fmt.Sprintf("%s.obligations[%d].inputTargetRefs", path, oi)
+						break
+					}
+				}
+				return runtimeInputViolation(fieldPath, "unobserved_input_ref", "target refs from selected input-review subject.files only", "validation input review references an unobserved input")
 			}
-		}
-		if err := validateRuntimeInputDependencies(check); err != nil {
-			return runtimeInputViolationAt(path, err)
-		}
-		if err := validateRuntimeValidationInputObligations(check); err != nil {
-			return runtimeInputViolationAt(path, err)
 		}
 
 		if err := validateRuntimeValidationCompositionCheck(check, *b.InputReview); err != nil {

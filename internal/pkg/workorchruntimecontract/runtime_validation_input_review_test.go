@@ -170,8 +170,12 @@ func TestValidationInputReviewScopeIsOptionalBoundedAndChangesReportIdentity(t *
 }
 
 func TestValidationInputReviewPayloadHasNoAuthorityEscape(t *testing.T) {
-	_, document, _, _ := semanticInputReviewFixture(t)
-	raw, err := json.Marshal(document.Proposals[1].ValidationInputReview)
+	manifest, document, _, _ := semanticInputReviewFixture(t)
+	wire, err := runtimeValidationInputReviewToWire(document.Proposals[1].ValidationInputReview, document.Proposals[1], manifest.OwnerCatalogs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(wire)
 	if err != nil {
 		t.Fatal(err)
 	}

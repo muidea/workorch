@@ -314,3 +314,55 @@ func TestRuntimeInputReviewOwnerScopeIsCompleteAndOnlyChangesC3(t *testing.T) {
 		t.Fatal("truncated execution scope admitted")
 	}
 }
+
+func TestInputReviewMinimalReferencesNativeAndPromptAgree(t *testing.T) {
+	request := runtimeInputReviewProviderFixture(t)
+	catalog := &request.SemanticManifest.OwnerCatalogs[0]
+	binding := &catalog.ValidationSurfaces[0].ProofRequirementBindings[0]
+	binding.InputReview.DiagnosticSourceContractRef = runtimecontract.RuntimeValidationDiagnosticSourceReviewV1
+	binding.InputReview.DiagnosticSources = []runtimecontract.RuntimeValidationDiagnosticSource{{SourceRef: "source-exact", NativeCaseRef: "owner/case", InputTargetRef: binding.InputReview.Files[0].TargetRef}}
+	binding.InputReview.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, *binding)
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
+	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
+	refreshSemanticProgressForTest(t, &request)
+	provider, err := runtimeProviderRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{"never emit checks.inputTargetRefs", "do not emit diagnosticSources.inputTargetRefs", "supportingInputTargetRefs"} {
+		if !strings.Contains(provider.PromptContext.Sections[3].Content, required) {
+			t.Fatal("missing current provider contract:", required)
+		}
+	}
+	m := request.SemanticManifest
+	review := &runtimecontract.RuntimeValidationInputReview{SubjectHash: binding.InputReview.Hash}
+	for _, ref := range binding.RequiredCheckRefs {
+		input := []string{binding.InputReview.Files[0].TargetRef}
+		review.Checks = append(review.Checks, runtimecontract.RuntimeValidationInputCheckReview{RequiredCheckRef: ref, Conclusion: runtimecontract.RuntimeValidationInputConsistent, Reason: "Exact source preserves original criterion", InputTargetRefs: input, Obligations: []runtimecontract.RuntimeValidationInputObligationReview{{CriterionText: m.CoverageItems[0].TargetText, Finding: runtimecontract.RuntimeValidationInputCovered, Reason: "Original requirement retained", InputTargetRefs: input}}})
+	}
+	review.DiagnosticSources = []runtimecontract.RuntimeValidationDiagnosticSourceReview{{SourceRef: "source-exact", Conclusion: runtimecontract.RuntimeValidationInputConsistent, Reason: "Exact independent source reviewed", InputTargetRefs: []string{binding.InputReview.Files[0].TargetRef}}}
+	document := runtimecontract.RuntimeSemanticPlanDocument{SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: m.Hash, DefinitionSeedHash: m.DefinitionSeedHash, PlanStep: request.SemanticContext.PlanStep, BatchID: request.SemanticContext.BatchID, BatchSequence: request.SemanticContext.BatchSequence, BatchCoverageWorkItemIDs: request.SemanticContext.BatchCoverageWorkItemIDs,
+		Proposals: []runtimecontract.RuntimeSemanticProofProposal{{CoverageWorkItemID: binding.CoverageWorkItemID, OwnerModuleID: catalog.OwnerModuleID, OperationKind: catalog.ValidationSurfaces[0].OperationKind, DeclarationRef: binding.DeclarationRef, ValidationRecipeID: binding.ValidationRecipeID, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectEphemeralSession}, Target: runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: catalog.TargetRefs}, ValidationInputReview: review}}}
+	raw, err := runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(m, document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, enabled := range []bool{false, true} {
+		transport := responsesTextForRequest(llmmodels.ProviderCapabilities{JSONSchemaResponse: enabled}, provider)
+		if enabled && (transport == nil || transport.Format == nil || !transport.Format.Strict) {
+			t.Fatal("native schema lost current contract")
+		}
+		if !enabled && transport != nil {
+			t.Fatal("prompt mode gained native schema")
+		}
+		decoded, err := runtimecontract.DecodeRuntimeSemanticPlanPayloadWithManifest(m, raw)
+		if err != nil || !reflect.DeepEqual(decoded.Proposals[0].ValidationInputReview, review) {
+			t.Fatalf("mode %t lost complete review: %v", enabled, err)
+		}
+		// Old redundant fields are refused in both modes. No output repair.
+		bad := strings.Replace(string(raw), `"requiredCheckRef":`, `"inputTargetRefs":["checks/input_test.go"],"requiredCheckRef":`, 1)
+		if _, err := runtimecontract.DecodeRuntimeSemanticPlanPayloadWithManifest(m, []byte(bad)); err == nil {
+			t.Fatalf("mode %t accepted retired provider field", enabled)
+		}
+	}
+}

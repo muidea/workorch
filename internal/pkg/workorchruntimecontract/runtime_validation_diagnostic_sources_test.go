@@ -84,7 +84,7 @@ func TestDiagnosticSourceReviewHashReloadAndDetachedCopies(t *testing.T) {
 	if report.DiagnosticSources[0].InputTargetRefs[0] == "replacement" || StableRuntimeValidationInputReviewHash(copy) == StableRuntimeValidationInputReviewHash(report) {
 		t.Fatal("source review was not detached or hash bound")
 	}
-	raw, _ := json.Marshal(report)
+	raw, _ := json.Marshal(inputReviewWireForBinding(t, binding, report))
 	if err := validateRuntimeValidationInputReviewPayload("review", raw); err != nil {
 		t.Fatal(err)
 	}

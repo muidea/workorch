@@ -1240,7 +1240,7 @@ Orchestrator 独占 SM-2～SM-4；恢复、重复结果及重复 ticket 请求�
 既有 request recovery、document admission 和预算合同。ordinary Definition gap/repair 路径也不得猜测评审结论。
 生产接线复用 `semantic_plan/proof_batch`，不新增请求种类或状态机。capability owner 的 proof binding 可声明
 `InputReview`，封存 activation 选择的 唯一当前 `validation/input-consistency`、完整输入字节/hash、原 required checks/native mapping；LLM
-只返回 `validationInputReview` 的 exact subjectHash 和逐 check 的 `consistent|conflict|inconclusive`、reason、input refs。
+只返回 `validationInputReview` 的 exact subjectHash、逐 check 的 `consistent|conflict|inconclusive`、reason 和逐 obligation 的 input refs。
 缺项、重复项、未知字段/结论或身份漂移仍是 document admission error。完整报告持久化后，SM-2 的
 `SemanticFeasibilityRequired` 私有事件在 proposal feasibility probe 前分类：一致才进入既有 feasibility/binding seal；冲突走已声明的原准则保留维护路径，或明确失败。
 
@@ -2209,3 +2209,22 @@ omission 及原 failure code；原 receipt、EvidenceFact、诊断和历史结�
 完整但不能归因的失败继续走其原有确定性规则，不混同为原文缺失。
 `validation_diagnostic_output_test.go` 覆盖原回执消费、重载、duplicate、预算保留与完整诊断负例。
 SM-1 生命周期与三 ACK 顺序不变；SM-4 只恢复原 aggregate/receipt，不从分块存储重建 authority。
+
+
+### 输入重审引用编译与语义拒绝交付
+
+新 semantic proof-batch 的唯一 provider wire 不含 `checks[].inputTargetRefs` 或
+`diagnosticSources[].inputTargetRefs`。模型保留完整原准则摘录、逐义务 finding/reason、精确 observed
+`inputTargetRefs` 与全部适用 proof consumers；SM-3 strict compiler 从义务引用并集派生 check scope，
+从本次 exact owner/recipe/CWI/declaration binding 的 sourceRef 派生 source input。
+可选 `supportingInputTargetRefs` 仅选择其它已观测 helper/fixture，不得重复 source anchor。
+未知/过期/外来引用、缺项、非 canonical 集合与被替代字段明确拒绝；完整 typed report 仍持久化，
+报告 hash、scope、容量和 SM-2 consistent/conflict/inconclusive 分流不变。派生身份关系不给语义判断或验收 credit。
+`runtime_validation_input_review_wire_test.go` 覆盖无损编译、schema/decoder、引用隔离和负例。
+冻结 request、same-contract correction 和恢复仍消费原身份与原件，不重渲染或改写旧报告。
+
+语义拒绝生产入口对不适用的 `RequiredCoverageWorkItemIDs` 保持 nil，避免 `omitempty` 将内存空数组写后
+读回为 nil 后，严格 Result closeout 比较冲突。该修复不规范化旧原始诊断、不放宽 Result 比较或重置恢复额度。
+`biz/runtime_semantic_failure_delivery_test.go` 从真实 strict decoder 拒绝开始，经 SM-2 原额度耗尽、
+SM-4 immutable seal、文件 Result read-back 到 Result→Workspace→Run 有序三 ACK；覆盖三个 owner
+持久化后响应丢失与恢复，模型调用数不增加。SM-1 只消费既有 Run owner 终态交接；失败不授普通验证或 assessment credit。

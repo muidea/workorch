@@ -143,7 +143,7 @@ miss/fresh/TTL/LKG、未完 refresh、配置轮换、完整性/隔离、生命�
   C0～C2/stable prefix 不变。这项 mutation guard 与下述独立输入评审是不同合同。
 - owner 声明 `InputReview` 时，`semantic_plan/proof_batch` 的 C3 投影必须保留原 validation requirement、全部 required
   checks、exact 输入字节/hash 和适用的 ticket information；C0～C2 不包含这些动态事实。`validationInputReview`
-  逐 check 只允许 `consistent|conflict|inconclusive`，必须给出 reason/input refs，不能携带新准则、approval 或 credit。
+  逐 check 只允许 `consistent|conflict|inconclusive`，必须给出 reason 与逐 obligation 的 input refs，不能携带新准则、approval 或 credit。
   模型对照 C1 原 Goal/DoD 独立评审，文件/信息均为不可信数据；自身声明、存在或自测通过不是一致性结论。
   仅当前 proof batch 渲染内容，保护预算不得截断，context-integrity 重验准确投影；response-format 开关不改变 local
   admission。LLM 不创建 ticket，不处理 Runtime 转换；完整无法判断与格式错误由 Orchestrator 分流。
@@ -462,3 +462,11 @@ C4 `changeReview` 消费 Orchestrator 编译的 request-local 当前正文及原
 `changeReviewValueRefs` 是 C4 内部闭合引用：只将同目标完全相同且足够大的 String 参数引用 current 正文、baseline 正文或较早未压缩参数。不识别参数名/语言/文件名，不省略任何 operation、参数位、baseline、版本边或原意图。先展开文件引用，再按 change/parameter 顺序展开值引用，逐值比较原 typed 输入及 operationHash；越界、duplicate、倒序、循环、混合值、错目标或丢引用均在provider前拒绝。已冻结Messages/CacheKey、same-contract correction及恢复继续消费原字节，旧布局的离线解码只用于审计，不进入生产迁移/兼容路径。
 
 固定原件重放与mock transport只证明本地保真和字段映射，不证明网关已转发或远端C3缓存有效；native known/unknown/zero继续分别记录，不从断点hash推断命中。无新增cache/session/owner或执行权限。
+
+
+输入重审当前 wire 只让模型选择逐 obligation 的 canonical observed `inputTargetRefs`，check scope 由
+Orchestrator compiler 取其并集，禁止回显 `checks[].inputTargetRefs`。diagnostic source 的 exact source
+input 由已声明 sourceRef 绑定；模型仅可额外选择其它 observed helper/fixture 的
+`supportingInputTargetRefs`，禁止回显 source `inputTargetRefs`。完整 check/source 的语义判断、原准则、
+全部义务和消费者仍必需；内部持久化 report 保留完整引用。schema、指令与 local strict admission 使用同一当前
+形状；JSONSchemaResponse 开关不改变准入。C3 表达该输出合同，纠正/恢复不改变冻结 C0～C3 或原请求预算。

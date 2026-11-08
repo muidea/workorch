@@ -111,7 +111,7 @@ func TestInputSemanticsPreservesRealUncertaintyConflictAndFrozenSources(t *testi
 func TestInputReviewUncertaintyWireAndSchemaAgree(t *testing.T) {
 	binding, report := inputSemanticsReviewFixture(t)
 	for _, value := range []string{"null", `""`, "3", "{}"} {
-		raw, _ := json.Marshal(report)
+		raw, _ := json.Marshal(inputReviewWireForBinding(t, binding, report))
 		var object map[string]json.RawMessage
 		_ = json.Unmarshal(raw, &object)
 		var checks []map[string]json.RawMessage

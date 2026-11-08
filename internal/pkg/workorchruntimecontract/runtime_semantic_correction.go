@@ -81,7 +81,14 @@ func (v RuntimeSemanticContractViolation) Normalized() RuntimeSemanticContractVi
 	v.Path = strings.TrimSpace(v.Path)
 	v.RequiredBeforeID = common.CoverageWorkItemID(strings.TrimSpace(string(v.RequiredBeforeID)))
 	v.RequiredAfterID = common.CoverageWorkItemID(strings.TrimSpace(string(v.RequiredAfterID)))
-	v.RequiredCoverageWorkItemIDs = normalizeOrderedCoverageWorkItemIDs(v.RequiredCoverageWorkItemIDs)
+	// This union member is omitted by the wire/persistence contract when it
+	// does not apply. Do not manufacture [] for a proposal constraint: the
+	// in-memory Run image and the Result read-back must carry the same value.
+	if len(v.RequiredCoverageWorkItemIDs) == 0 {
+		v.RequiredCoverageWorkItemIDs = nil
+	} else {
+		v.RequiredCoverageWorkItemIDs = normalizeOrderedCoverageWorkItemIDs(v.RequiredCoverageWorkItemIDs)
+	}
 	v.CoverageWorkItemID = common.CoverageWorkItemID(strings.TrimSpace(string(v.CoverageWorkItemID)))
 	v.Rule = RuntimeSemanticConstraintRule(strings.TrimSpace(string(v.Rule)))
 	v.Actual = strings.TrimSpace(v.Actual)

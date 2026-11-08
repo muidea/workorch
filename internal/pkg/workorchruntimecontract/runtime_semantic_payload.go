@@ -34,15 +34,15 @@ type runtimeSemanticPlanPayload struct {
 }
 
 type runtimeSemanticProposalPayload struct {
-	CoverageWorkItemID    common.CoverageWorkItemID     `json:"coverageWorkItemId"`
-	OwnerModuleID         string                        `json:"ownerModuleId"`
-	OperationKind         string                        `json:"operationKind"`
-	OperationVariantID    string                        `json:"operationVariantId,omitempty"`
-	Target                runtimeSemanticTargetPayload  `json:"target"`
-	RequiredEvidenceKinds []string                      `json:"requiredEvidenceKinds"`
-	ValidationRecipeID    string                        `json:"validationRecipeId,omitempty"`
-	DeclarationRef        string                        `json:"declarationRef"`
-	ValidationInputReview *RuntimeValidationInputReview `json:"validationInputReview,omitempty"`
+	CoverageWorkItemID    common.CoverageWorkItemID            `json:"coverageWorkItemId"`
+	OwnerModuleID         string                               `json:"ownerModuleId"`
+	OperationKind         string                               `json:"operationKind"`
+	OperationVariantID    string                               `json:"operationVariantId,omitempty"`
+	Target                runtimeSemanticTargetPayload         `json:"target"`
+	RequiredEvidenceKinds []string                             `json:"requiredEvidenceKinds"`
+	ValidationRecipeID    string                               `json:"validationRecipeId,omitempty"`
+	DeclarationRef        string                               `json:"declarationRef"`
+	ValidationInputReview *runtimeValidationInputReviewPayload `json:"validationInputReview,omitempty"`
 }
 
 type runtimeSemanticTargetPayload struct {
@@ -137,8 +137,8 @@ func DecodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 		return RuntimeSemanticPlanDocument{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.implementationIntent", Actual: "unbound_work_source", Cause: err}
 	}
 	document.ImplementationIntent = intent
-	for _, value := range wire.Proposals {
-		document.Proposals = append(document.Proposals, RuntimeSemanticProofProposal{
+	for index, value := range wire.Proposals {
+		proposal := RuntimeSemanticProofProposal{
 			CoverageWorkItemID: value.CoverageWorkItemID, OwnerModuleID: value.OwnerModuleID,
 			OperationKind: value.OperationKind, OperationVariantID: value.OperationVariantID,
 			Target: RuntimeOperationTargetAuthorization{
@@ -147,34 +147,46 @@ func DecodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 				ProspectiveConstraintRefs: value.Target.ProspectiveConstraintRefs, ProspectiveTargetRefs: value.Target.ProspectiveTargetRefs,
 			},
 			RequiredEvidenceKinds: value.RequiredEvidenceKinds, RequiredEffectScopes: deriveRuntimeSemanticProposalEffects(manifest, value),
-			ValidationRecipeID:    value.ValidationRecipeID,
-			DeclarationRef:        value.DeclarationRef,
-			ValidationInputReview: value.ValidationInputReview,
-		})
+			ValidationRecipeID: value.ValidationRecipeID,
+			DeclarationRef:     value.DeclarationRef,
+		}
+		review, err := value.ValidationInputReview.compile(proposal, manifest.OwnerCatalogs)
+		if err != nil {
+			return RuntimeSemanticPlanDocument{}, runtimeSemanticPayloadAdmissionDiagnostic(runtimeSemanticInputReviewViolation(proposal, index, err))
+		}
+		proposal.ValidationInputReview = review
+		document.Proposals = append(document.Proposals, proposal)
 	}
 	if err := document.ValidateAgainstManifest(manifest); err != nil {
-		var dependencyOrder *RuntimeSemanticDependencyOrderError
-		if errors.As(err, &dependencyOrder) {
-			violation := dependencyOrder.Violation()
-			return RuntimeSemanticPlanDocument{}, &RuntimeCandidatePayloadDiagnostic{
-				Path:               violation.Path,
-				Actual:             fmt.Sprintf("%s at %d before %s at %d", violation.RequiredAfterID, violation.ActualAfterPosition, violation.RequiredBeforeID, violation.ActualBeforePosition),
-				Required:           []string{fmt.Sprintf("%s before %s", violation.RequiredBeforeID, violation.RequiredAfterID)},
-				SemanticViolations: []RuntimeSemanticContractViolation{violation},
-				Cause:              err,
-			}
-		}
-		var proposalConstraint *RuntimeSemanticProposalViolationError
-		if errors.As(err, &proposalConstraint) {
-			violation := proposalConstraint.Violation()
-			return RuntimeSemanticPlanDocument{}, &RuntimeCandidatePayloadDiagnostic{
-				Path: violation.Path, Actual: violation.Actual, Allowed: append([]string(nil), violation.Allowed...),
-				Required: append([]string(nil), violation.Required...), SemanticViolations: []RuntimeSemanticContractViolation{violation}, Cause: err,
-			}
-		}
-		return RuntimeSemanticPlanDocument{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.proposals", Actual: "contract_violation", Allowed: runtimeSemanticProposalFields, Cause: err}
+		return RuntimeSemanticPlanDocument{}, runtimeSemanticPayloadAdmissionDiagnostic(err)
 	}
 	return document, nil
+}
+
+func runtimeSemanticPayloadAdmissionDiagnostic(err error) error {
+	var dependencyOrder *RuntimeSemanticDependencyOrderError
+	if errors.As(err, &dependencyOrder) {
+		violation := dependencyOrder.Violation()
+		return &RuntimeCandidatePayloadDiagnostic{
+			Path:               violation.Path,
+			Actual:             fmt.Sprintf("%s at %d before %s at %d", violation.RequiredAfterID, violation.ActualAfterPosition, violation.RequiredBeforeID, violation.ActualBeforePosition),
+			Required:           []string{fmt.Sprintf("%s before %s", violation.RequiredBeforeID, violation.RequiredAfterID)},
+			SemanticViolations: []RuntimeSemanticContractViolation{violation},
+			Cause:              err,
+		}
+	}
+	var proposalConstraint *RuntimeSemanticProposalViolationError
+	if errors.As(err, &proposalConstraint) {
+		violation := proposalConstraint.Violation()
+		if strings.Contains(violation.Path, ".diagnosticSources[") && strings.HasSuffix(violation.Path, ".inputTargetRefs") {
+			violation.Path = strings.TrimSuffix(violation.Path, ".inputTargetRefs") + ".supportingInputTargetRefs"
+		}
+		return &RuntimeCandidatePayloadDiagnostic{
+			Path: violation.Path, Actual: violation.Actual, Allowed: append([]string(nil), violation.Allowed...),
+			Required: append([]string(nil), violation.Required...), SemanticViolations: []RuntimeSemanticContractViolation{violation}, Cause: err,
+		}
+	}
+	return &RuntimeCandidatePayloadDiagnostic{Path: "$.proposals", Actual: "contract_violation", Allowed: runtimeSemanticProposalFields, Cause: err}
 }
 
 // EncodeRuntimeSemanticPlanPayloadWithManifest is used by deterministic
@@ -202,6 +214,10 @@ func EncodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 		wire.BatchSequence = &sequence
 	}
 	for _, value := range document.Proposals {
+		review, err := runtimeValidationInputReviewToWire(value.ValidationInputReview, value, manifest.OwnerCatalogs)
+		if err != nil {
+			return nil, err
+		}
 		wire.Proposals = append(wire.Proposals, runtimeSemanticProposalPayload{
 			CoverageWorkItemID: value.CoverageWorkItemID, OwnerModuleID: value.OwnerModuleID,
 			OperationKind: value.OperationKind, OperationVariantID: value.OperationVariantID,
@@ -213,7 +229,7 @@ func EncodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 			RequiredEvidenceKinds: value.RequiredEvidenceKinds,
 			ValidationRecipeID:    value.ValidationRecipeID,
 			DeclarationRef:        value.DeclarationRef,
-			ValidationInputReview: value.ValidationInputReview,
+			ValidationInputReview: review,
 		})
 	}
 	return json.Marshal(wire)

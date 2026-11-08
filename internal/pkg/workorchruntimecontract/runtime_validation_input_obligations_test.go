@@ -143,7 +143,7 @@ func TestValidationInputReviewV2AdmissionAndNoCreditForOmissions(t *testing.T) {
 	}
 	for _, replacement := range []string{`"obligations":null`, `"obligations":[]`, `"obligations":[{"criterionText":"works","finding":"covered","reason":"ok","inputTargetRefs":["checks/input_test.go"],"approval":true}]`} {
 		// Exercise the closed wire shape directly as well as manifest admission.
-		raw := `{"subjectHash":"subject","checks":[{"requiredCheckRef":"check","conclusion":"consistent","reason":"ok","inputTargetRefs":["input"],` + replacement + `}]}`
+		raw := `{"subjectHash":"subject","checks":[{"requiredCheckRef":"check","conclusion":"consistent","reason":"ok",` + replacement + `}]}`
 		if validateRuntimeValidationInputReviewPayload("$.review", []byte(raw)) == nil {
 			t.Fatal("open, null or empty obligation payload accepted")
 		}

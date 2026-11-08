@@ -18,15 +18,17 @@ func TestInputReviewConstraintSurvivesStrictDecodeCorrectionAndReload(t *testing
 	}
 	for _, tc := range []struct {
 		name, path, actual string
-		mutate             func(*RuntimeValidationInputReview)
+		mutate             func(*runtimeValidationInputReviewPayload)
 	}{
-		{"duplicate", ".checks[0].obligations[1].criterionText", "duplicate_criterion_text", func(r *RuntimeValidationInputReview) {
+		{"duplicate", ".checks[0].obligations[1].criterionText", "duplicate_criterion_text", func(r *runtimeValidationInputReviewPayload) {
 			r.Checks[0].Obligations = append(r.Checks[0].Obligations, r.Checks[0].Obligations[0])
 		}},
-		{"false conclusion", ".checks[0].conclusion", "contradictory_conclusion", func(r *RuntimeValidationInputReview) {
+		{"false conclusion", ".checks[0].conclusion", "contradictory_conclusion", func(r *runtimeValidationInputReviewPayload) {
 			r.Checks[0].Obligations[0].Finding = RuntimeValidationInputMissing
 		}},
-		{"foreign excerpt", ".checks[1].obligations[0].criterionText", "foreign_criterion_excerpt", func(r *RuntimeValidationInputReview) { r.Checks[1].Obligations[0].CriterionText = "foreign criterion" }},
+		{"foreign excerpt", ".checks[1].obligations[0].criterionText", "foreign_criterion_excerpt", func(r *runtimeValidationInputReviewPayload) {
+			r.Checks[1].Obligations[0].CriterionText = "foreign criterion"
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var wire runtimeSemanticPlanPayload
