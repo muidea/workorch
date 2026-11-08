@@ -533,7 +533,7 @@ func TestShellOwnerSelectorOnlyMarkerDoesNotCreateRepairAuthority(t *testing.T) 
 	}
 	authorization := shellevents.RuntimeExecutionAuthorization{TargetRole: "implementation"}
 	diagnostic := result.ValidationFailureDiagnostic.Clone()
-	targetRefs, valid := shellFailureTargetCandidateUnion(result, authorization.TargetRole, authorization.ValidationScopeTargetRefs)
+	targetRefs, valid, _ := shellFailureTargetCandidateUnion(result, authorization.TargetRole, authorization.ValidationScopeTargetRefs)
 	if valid {
 		diagnostic.TargetRefs = targetRefs
 	} else {
@@ -559,7 +559,7 @@ func TestShellFailureTargetMarkerOutsideSealedScopeIsRejected(t *testing.T) {
 	if !marker.Present || !marker.Valid {
 		t.Fatal("closed marker fixture was not decoded")
 	}
-	targetRefs, valid := shellFailureTargetCandidateUnion(result, authorization.TargetRole, authorization.ValidationScopeTargetRefs)
+	targetRefs, valid, _ := shellFailureTargetCandidateUnion(result, authorization.TargetRole, authorization.ValidationScopeTargetRefs)
 	if valid {
 		diagnostic.TargetRefs = targetRefs
 	} else {
@@ -609,8 +609,8 @@ func TestShellFailureCandidateMergeRejectsCombinedBoundOverflow(t *testing.T) {
 		name   string
 		marker []string
 	}{
-		{name: "eight plus one", marker: markerRefs[:1]},
-		{name: "eight plus eight", marker: markerRefs},
+		{name: "limit plus one", marker: markerRefs[:1]},
+		{name: "limit plus limit", marker: markerRefs},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if refs, valid := shellMergeFailureTargetCandidateRefs(diagnosticRefs, test.marker); valid || len(refs) != 0 {
@@ -618,7 +618,7 @@ func TestShellFailureCandidateMergeRejectsCombinedBoundOverflow(t *testing.T) {
 			}
 		})
 	}
-	if refs, valid := shellMergeFailureTargetCandidateRefs(diagnosticRefs, diagnosticRefs); !valid || !reflect.DeepEqual(refs, diagnosticRefs) {
+	if refs, valid := shellMergeFailureTargetCandidateRefs(diagnosticRefs, diagnosticRefs); !valid || !reflect.DeepEqual(refs, canonicalShellFailureTargetRefs(diagnosticRefs)) {
 		t.Fatalf("deduplicated bounded candidate union = %v, want %v", refs, diagnosticRefs)
 	}
 }
@@ -644,7 +644,7 @@ func TestShellFailureCandidateUnionRejectsParserOverflowEvenWithValidMarker(t *t
 	if !result.validationFailureTargetCandidatesInvalid || result.ValidationFailureDiagnostic == nil {
 		t.Fatalf("parser overflow was not retained as a fail-closed candidate transaction: %+v", result)
 	}
-	if refs, valid := shellFailureTargetCandidateUnion(result, "implementation", scope); valid || len(refs) != 0 {
+	if refs, valid, _ := shellFailureTargetCandidateUnion(result, "implementation", scope); valid || len(refs) != 0 {
 		t.Fatalf("valid marker revived over-bounded parser candidates: refs=%v valid=%t", refs, valid)
 	}
 }

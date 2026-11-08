@@ -1061,6 +1061,12 @@ ordinary 前驱，state-change-only 不补造来源，明确 `cwi_revalidation_s
   route 字段与 sealed validation scope，并在 receipt admission/fresh-load 从 immutable owner receipt 重算。该 scope 只能来自
   matching operation execution 的 `AdmissibilitySnapshotID + AcquisitionBinding` 所绑定、已随 dispatch 封存的完整 Shell-owner
   catalog `TargetRefs`；per-operation target authorization 只裁决 validation entry，不能代替 diagnostic scope。
+- Shell producer、marker/tool 完整 union、shared typed observation 与 File confirmation 采用唯一
+  `RuntimeFailureTargetObservationMaxTargetRefs=16`。超界不取子集：原 stage/conjunction/raw 保留完整事实，
+  `ValidationFailureDiagnostic.TargetRejection` 保留封闭 code、拒绝边界的候选计数和同一 limit；错误 marker、越 sealed scope
+  与超界分别拒绝，不生成 observation 或 repair authority。该诊断字段纳入 clone/hash/receipt 完整性，
+  不改变 SM-2 exact route、confirmation、权限或预算。多个必要文件沿同一 dispatch 内多个独立 File operation
+  提供逐文件前后像和 executionKey/fence/receipt；不得用多目标 aggregate hash 代替真实版本边。
 - 验证输入补充仍由同一 SM-2 receipt/reopen/seal 私有事件处理：exact prospective Profile route 的
   `RequireInputAddition` 要求 owner typed `InputAddition` 精确匹配 completed dispatch 的原 required/native binding，且没有
   existing supplement。缺失/错配同一 CAS 终止，不回退任意文件修复。SM-3 schema/proposal 只允许一个 exact new input；

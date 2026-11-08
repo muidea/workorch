@@ -38,7 +38,7 @@ func TestDriveRuntimeProjectMultiFailureConfirmedRepair(t *testing.T) {
 	}
 }
 
-func assertMultiFailureConfirmedRepairFacts(t *testing.T, state runtimecontract.RuntimeStateRecord) {
+func assertMultiFailureConfirmedRepairFacts(t *testing.T, state runtimecontract.RuntimeStateRecord, multiFile bool) {
 	t.Helper()
 	repairs := 0
 	for _, dispatch := range state.CompletedDispatches {
@@ -47,32 +47,47 @@ func assertMultiFailureConfirmedRepairFacts(t *testing.T, state runtimecontract.
 		}
 		repairs++
 		commitment := dispatch.RepairCommitment
-		if dispatch.State != runtimecontract.RuntimeDispatchStateCommitted || len(dispatch.Candidate.StateChange.Operations) != 1 || len(dispatch.OperationExecutions) != 1 || dispatch.ImplementationWorkCommitment != nil || commitment.SourceReceiptHash == "" {
+		if dispatch.State != runtimecontract.RuntimeDispatchStateCommitted || len(dispatch.Candidate.StateChange.Operations) != 1+boolCount(multiFile) || len(dispatch.OperationExecutions) != 1+boolCount(multiFile) || dispatch.ImplementationWorkCommitment != nil || commitment.SourceReceiptHash == "" {
 			t.Fatal("confirmed repair 缺少唯一原行为 commitment/fence")
-		}
-		operation := dispatch.Candidate.StateChange.Operations[0].Operation
-		execution := dispatch.OperationExecutions[0]
-		receipt, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(state.OperationReceipts, execution.ExecutionKey, execution.Fence)
-		if !found || operation.Kind != runtimecontract.StepKindFileEdit || execution.State != runtimecontract.OperationExecutionEvidenceCommitted || execution.OwnerReceiptHash != runtimecontract.StableRuntimeOperationReceiptHash(receipt) || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || !receipt.Changed {
-			t.Fatalf("confirmed repair 真实 File receipt 缺失、漂移或未结算: found=%t kind=%s state=%s hashMatch=%t outcome=%s changed=%t", found, operation.Kind, execution.State, execution.OwnerReceiptHash == runtimecontract.StableRuntimeOperationReceiptHash(receipt), receipt.Outcome, receipt.Changed)
-		}
-		facts := 0
-		for _, fact := range state.Facts.Evidence.Accepted {
-			if fact.OperationID == operation.ID && fact.DispatchID == dispatch.ID {
-				facts++
-				if len(fact.CoverageWorkItemIDs) != 0 || fact.Kind != runtimecontract.EvidenceKindStateChange {
-					t.Fatal("历史 repair effect 获得了 CWI 或普通 validation credit")
-				}
-			}
 		}
 		confirmations := 0
 		for _, record := range state.RepairSurfaceConfirmations {
 			if record.Signature == commitment.ConfirmationHash && record.IdentitySignature == commitment.ConfirmationIdentityHash && record.Confirmation.Disposition == runtimecontract.RuntimeRepairSurfaceConfirmed && record.Confirmation.OwnerModuleID == runtimecontract.RuntimeModuleFile {
 				confirmations++
+				if multiFile && len(record.Confirmation.ConfirmedTargetRefs) != 9 {
+					t.Fatal("confirmation lost part of the complete nine-target observation")
+				}
 			}
 		}
-		if facts != 1 || confirmations != 1 || len(receipt.TargetRefs) != 1 || receipt.TargetRefs[0] != "subject.go" {
-			t.Fatal("真实 repair 事实、File confirmation 或精确 target 不唯一")
+		if confirmations != 1 {
+			t.Fatal("repair requires exactly one original File confirmation")
+		}
+		seen := map[string]bool{}
+		for _, entry := range dispatch.Candidate.StateChange.Operations {
+			operation := entry.Operation
+			var execution runtimecontract.RuntimeOperationExecutionRecord
+			for _, e := range dispatch.OperationExecutions {
+				if e.OperationID == operation.ID {
+					execution = e
+				}
+			}
+			receipt, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(state.OperationReceipts, execution.ExecutionKey, execution.Fence)
+			if !found || operation.Kind != runtimecontract.StepKindFileEdit || execution.State != runtimecontract.OperationExecutionEvidenceCommitted || execution.OwnerReceiptHash != runtimecontract.StableRuntimeOperationReceiptHash(receipt) || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || !receipt.Changed || receipt.BeforeHash == "" || receipt.AfterHash == "" || receipt.BeforeHash == receipt.AfterHash {
+				t.Fatal("confirmed repair lost its exact committed File version edge")
+			}
+			facts := 0
+			for _, fact := range state.Facts.Evidence.Accepted {
+				if fact.OperationID == operation.ID && fact.DispatchID == dispatch.ID {
+					facts++
+					if len(fact.CoverageWorkItemIDs) != 0 || fact.Kind != runtimecontract.EvidenceKindStateChange {
+						t.Fatal("repair effect acquired validation or CWI credit")
+					}
+				}
+			}
+			if facts != 1 || len(receipt.TargetRefs) != 1 || seen[receipt.TargetRefs[0]] || receipt.TargetRefs[0] != "subject.go" && (!multiFile || receipt.TargetRefs[0] != "offset.go") {
+				t.Fatal("repair operation/fact/target is not unique")
+			}
+			seen[receipt.TargetRefs[0]] = true
 		}
 	}
 	if repairs != 1 {
@@ -89,6 +104,39 @@ func TestDriveRuntimeProjectLargeOutputConfirmedRepair(t *testing.T) {
 		t.Run(cut, func(t *testing.T) {
 			if calls := runValidationInputReviewMainline(t, "project_behavior_failure", cut, options); calls != baseline {
 				t.Fatal("recovery repeated provider consumption")
+			}
+		})
+	}
+}
+
+func boolCount(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}
+
+// Four independent failures observe a complete nine-file surface. Two distinct
+// File edits are required: either alone still fails the original assertions.
+func TestDriveRuntimeNineTargetMultiFileRepairAndRecovery(t *testing.T) {
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, LargeProjectOutput: true, MultiFileProject: true}
+	baseline := runValidationInputReviewMainline(t, "project_behavior_failure", "", options)
+	for _, cut := range []string{"after_project_receipt", "after_repair_receipt"} {
+		t.Run(cut, func(t *testing.T) {
+			if calls := runValidationInputReviewMainline(t, "project_behavior_failure", cut, options); calls != baseline {
+				t.Fatalf("recovery repeated provider consumption: %d != %d", calls, baseline)
+			}
+		})
+	}
+}
+
+func TestDriveRuntimeNineTargetMultiFileDeliveryRecovery(t *testing.T) {
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, LargeProjectOutput: true, MultiFileProject: true}
+	baseline := runValidationInputReviewMainline(t, "project_behavior_failure", "", options)
+	for _, cut := range []string{"after_result_persistence", "after_workspace_persistence", "after_run_persistence"} {
+		t.Run(cut, func(t *testing.T) {
+			if calls := runValidationInputReviewMainline(t, "project_behavior_failure", cut, options); calls != baseline {
+				t.Fatalf("delivery recovery repeated provider consumption: %d != %d", calls, baseline)
 			}
 		})
 	}

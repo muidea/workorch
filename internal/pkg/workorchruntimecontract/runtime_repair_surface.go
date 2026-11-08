@@ -10,8 +10,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-const RuntimeValidationFailureObservationMaxCandidateTargetRefs = 8
-
 // RuntimeRepairSurfaceFileWorkspaceSubjectRef is the protocol-bound File
 // subject for current regular workspace targets. It is request authority
 // selected by Orchestrator, not a response field that File may choose.
@@ -72,7 +70,7 @@ func (o RuntimeValidationFailureObservation) Normalized() RuntimeValidationFailu
 
 func (o RuntimeValidationFailureObservation) Validate() error {
 	o = o.Normalized()
-	if o.WorkspaceID == "" || o.RunID == "" || o.AuthoritySnapshotID == "" || o.DispatchID == "" || o.OperationID == "" || o.FailureSignature == "" || o.TargetRole == "" || o.DiagnosticClass == "" || len(o.CandidateTargetRefs) == 0 || len(o.CandidateTargetRefs) > RuntimeValidationFailureObservationMaxCandidateTargetRefs || len(o.ValidationScopeTargetRefs) == 0 || o.DiagnosticHash == "" {
+	if o.WorkspaceID == "" || o.RunID == "" || o.AuthoritySnapshotID == "" || o.DispatchID == "" || o.OperationID == "" || o.FailureSignature == "" || o.TargetRole == "" || o.DiagnosticClass == "" || len(o.CandidateTargetRefs) == 0 || len(o.CandidateTargetRefs) > RuntimeFailureTargetObservationMaxTargetRefs || len(o.ValidationScopeTargetRefs) == 0 || o.DiagnosticHash == "" {
 		return fmt.Errorf("validation failure observation requires scope, causation, role, diagnostic and bounded targets")
 	}
 	if !runtimeTargetRefsSubset(o.CandidateTargetRefs, o.ValidationScopeTargetRefs) {

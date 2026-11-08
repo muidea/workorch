@@ -12,7 +12,7 @@ import (
 const (
 	shellFailureTargetMarkerPrefix         = "WORKORCH_FAILURE_TARGET="
 	shellFailureTargetMarkerSchema         = "workorch.shell.failure_target"
-	shellValidationDiagnosticMaxTargetRefs = runtimecontract.RuntimeValidationFailureObservationMaxCandidateTargetRefs
+	shellValidationDiagnosticMaxTargetRefs = runtimecontract.RuntimeFailureTargetObservationMaxTargetRefs
 )
 
 // shellFailureTargetRecord is intentionally a closed JSONL protocol. It is
@@ -29,6 +29,7 @@ type shellFailureTargetMarkerCandidate struct {
 	Present    bool
 	Valid      bool
 	TargetRefs []string
+	Rejection  *runtimecontract.RuntimeValidationFailureTargetRejection
 }
 
 // decodeShellFailureTargetMarkerCandidate decodes only a bounded diagnostic
@@ -47,7 +48,7 @@ func decodeShellFailureTargetMarkerCandidate(result RuntimeCommandResult, target
 	}
 	candidate := shellFailureTargetMarkerCandidate{Present: true}
 	if !valid || record.TargetRole != strings.TrimSpace(targetRole) || record.DiagnosticClass != strings.TrimSpace(diagnostic.Class) ||
-		len(record.TargetRefs) == 0 || len(record.TargetRefs) > shellValidationDiagnosticMaxTargetRefs {
+		len(record.TargetRefs) == 0 {
 		return candidate
 	}
 	for _, value := range record.TargetRefs {
@@ -56,7 +57,16 @@ func decodeShellFailureTargetMarkerCandidate(result RuntimeCommandResult, target
 		}
 	}
 	refs := canonicalShellFailureTargetRefs(record.TargetRefs)
-	if len(refs) == 0 || len(refs) > shellValidationDiagnosticMaxTargetRefs {
+	if len(refs) == 0 {
+		return candidate
+	}
+	if len(refs) > shellValidationDiagnosticMaxTargetRefs {
+		candidate.Rejection = &runtimecontract.RuntimeValidationFailureTargetRejection{Code: runtimecontract.RuntimeFailureTargetsOverCapacity, CandidateCount: len(refs), Limit: shellValidationDiagnosticMaxTargetRefs}
+		return candidate
+	}
+	// Duplicate entries beyond the wire bound are malformed, even when their
+	// deduplicated set fits. They cannot evade the closed marker contract.
+	if len(record.TargetRefs) > shellValidationDiagnosticMaxTargetRefs {
 		return candidate
 	}
 	candidate.Valid = true
@@ -68,30 +78,46 @@ func decodeShellFailureTargetMarkerCandidate(result RuntimeCommandResult, target
 // candidate transaction against the matching sealed per-operation scope.  The
 // boolean reports whether the whole transaction was admissible; an empty but
 // admissible result simply means there is no scope-bound observation.
-func shellFailureTargetCandidateUnion(result RuntimeCommandResult, targetRole string, validationScopeTargetRefs []string) ([]string, bool) {
+func shellFailureTargetCandidateUnion(result RuntimeCommandResult, targetRole string, validationScopeTargetRefs []string) ([]string, bool, *runtimecontract.RuntimeValidationFailureTargetRejection) {
+	reject := func(code string, count int) ([]string, bool, *runtimecontract.RuntimeValidationFailureTargetRejection) {
+		return nil, false, &runtimecontract.RuntimeValidationFailureTargetRejection{Code: code, CandidateCount: count, Limit: shellValidationDiagnosticMaxTargetRefs}
+	}
 	diagnostic := result.ValidationFailureDiagnostic
-	if diagnostic == nil || result.validationFailureTargetCandidatesInvalid {
-		return nil, false
+	if diagnostic == nil || diagnostic.TargetRejection != nil || result.validationFailureTargetCandidatesInvalid {
+		if diagnostic != nil && diagnostic.TargetRejection != nil {
+			return nil, false, diagnostic.TargetRejection.Clone()
+		}
+		return reject(runtimecontract.RuntimeFailureTargetsInvalid, 0)
 	}
 	diagnosticTargetRefs := canonicalShellFailureTargetRefs(diagnostic.TargetRefs)
-	if len(diagnosticTargetRefs) > shellValidationDiagnosticMaxTargetRefs ||
-		(len(diagnosticTargetRefs) != 0 && !shellTargetRefsSubset(diagnosticTargetRefs, validationScopeTargetRefs)) {
-		return nil, false
+	if len(diagnosticTargetRefs) > shellValidationDiagnosticMaxTargetRefs {
+		return reject(runtimecontract.RuntimeFailureTargetsOverCapacity, len(diagnosticTargetRefs))
+	}
+	if len(diagnosticTargetRefs) != 0 && !shellTargetRefsSubset(diagnosticTargetRefs, validationScopeTargetRefs) {
+		return reject(runtimecontract.RuntimeFailureTargetsOutsideScope, len(diagnosticTargetRefs))
 	}
 	marker := decodeShellFailureTargetMarkerCandidate(result, targetRole)
 	if diagnostic.Class == runtimecontract.ValidationDiagnosticDependencyMismatch {
-		// Free-form markers cannot widen the dependency owner's typed surface
-		// to the importing implementation or any other file.
-		return diagnosticTargetRefs, !marker.Present
+		// A marker cannot widen a dependency owner's exact typed repair surface.
+		if marker.Present {
+			return reject(runtimecontract.RuntimeFailureTargetsInvalidMarker, len(marker.TargetRefs))
+		}
+		return diagnosticTargetRefs, true, nil
 	}
-	if marker.Present && (!marker.Valid || !shellTargetRefsSubset(marker.TargetRefs, validationScopeTargetRefs)) {
-		return nil, false
+	if marker.Rejection != nil {
+		return nil, false, marker.Rejection.Clone()
+	}
+	if marker.Present && !marker.Valid {
+		return reject(runtimecontract.RuntimeFailureTargetsInvalidMarker, len(marker.TargetRefs))
+	}
+	if marker.Present && !shellTargetRefsSubset(marker.TargetRefs, validationScopeTargetRefs) {
+		return reject(runtimecontract.RuntimeFailureTargetsOutsideScope, len(marker.TargetRefs))
 	}
 	refs, valid := shellMergeFailureTargetCandidateRefs(diagnosticTargetRefs, marker.TargetRefs)
 	if !valid {
-		return nil, false
+		return reject(runtimecontract.RuntimeFailureTargetsOverCapacity, len(canonicalShellFailureTargetRefs(append(append([]string(nil), diagnosticTargetRefs...), marker.TargetRefs...))))
 	}
-	return refs, true
+	return refs, true, nil
 }
 
 func shellMergeFailureTargetCandidateRefs(diagnosticTargetRefs, markerTargetRefs []string) ([]string, bool) {

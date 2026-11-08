@@ -50,6 +50,7 @@ func TestDriveRuntimeProjectConjunctionOwnerMainline(t *testing.T) {
 type projectConjunctionExpectation struct {
 	ProtocolRef        string
 	RepairSources      int
+	RepairTargets      []string
 	ValidationReceipts int
 	BuildFailure       bool
 }
@@ -169,9 +170,13 @@ func assertProjectConjunctionPersistedOwnerOutputs(t *testing.T, ctx context.Con
 	protocol := "shell/go-test-json/project-conjunction-behavior"
 	expectedReceipts := 1
 	repairSources := 0
+	repairTargets := []string{"cmd/delivery/main.go", "subject.go"}
 	buildFailure := len(selected) != 0 && selected[0].BuildFailure
 	if len(selected) != 0 {
 		protocol, repairSources = selected[0].ProtocolRef, selected[0].RepairSources
+		if len(selected[0].RepairTargets) > 0 {
+			repairTargets = selected[0].RepairTargets
+		}
 		if selected[0].ValidationReceipts > 0 {
 			expectedReceipts = selected[0].ValidationReceipts
 		}
@@ -225,8 +230,8 @@ func assertProjectConjunctionPersistedOwnerOutputs(t *testing.T, ctx context.Con
 			t.Fatal("unobserved adjacent failure obtained source-specific repair authority")
 		}
 		if !accepted && repairSources != 0 {
-			if receipt.Feedback == nil || receipt.Feedback.OriginalDiagnostic == nil || receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation == nil || !reflect.DeepEqual(conjunction.BehaviorTargetRefs, []string{"cmd/delivery/main.go", "subject.go"}) {
-				t.Fatal("real multi-source diagnostic or implementation attribution missing")
+			if receipt.Feedback == nil || receipt.Feedback.OriginalDiagnostic == nil || receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation == nil || !reflect.DeepEqual(conjunction.BehaviorTargetRefs, repairTargets) {
+				t.Fatalf("real multi-source diagnostic or implementation attribution missing: got=%v want=%v", conjunction.BehaviorTargetRefs, repairTargets)
 			}
 			for _, stage := range conjunction.Stages[2:] {
 				if stage.DiagnosticSourceRef == "" || len(stage.BehaviorTargetRefs) == 0 {

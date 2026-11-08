@@ -285,7 +285,11 @@ func runtimeRecoverableWaitController(t *testing.T) (*RuntimeController, *contro
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialized, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), []runtimecontract.RuntimeRequirement{{
+	facts := controllerFacts()
+	// This fixture exercises an unavailable ceiling, rather than reusing the
+	// already satisfied owner observation in the general controller fixture.
+	facts.Resources.ProviderCeiling = nil
+	initialized, err := controller.initialize(context.Background(), facts, controllerDefinition(), []runtimecontract.RuntimeRequirement{{
 		Kind: runtimecontract.PrerequisiteKindProviderCeiling, OwnerModuleID: runtimecontract.RuntimeModuleLLM,
 		MinimumBytes: 64 * 1024, Reason: "provider ceiling required",
 	}})

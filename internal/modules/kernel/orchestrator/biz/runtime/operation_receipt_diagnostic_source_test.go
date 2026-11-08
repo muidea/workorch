@@ -100,10 +100,10 @@ func TestDiagnosticReceiptCannotDowngradeOriginalBindingAtIngressOrReload(t *tes
 					r.Feedback.OriginalDiagnostic.ValidationFailureObservation = &runtimecontract.RuntimeValidationFailureObservation{
 						WorkspaceID: "ws-source", RunID: "run-source", DispatchID: dispatch.ID, AuthoritySnapshotID: dispatch.Transaction.AuthoritySnapshotID,
 						OperationID: operation.ID, FailureSignature: r.Feedback.OriginalDiagnostic.Signature, TargetRole: "implementation",
-						DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed, DiagnosticHash: strings.Repeat("b", 64),
+						DiagnosticClass: runtimecontract.ValidationDiagnosticTestFailed, DiagnosticHash: strings.Repeat("b", 64),
 						CandidateTargetRefs: []string{"implementation.go"}, ValidationScopeTargetRefs: catalog.TargetRefs,
 					}
-					r.Feedback.OriginalDiagnostic.ValidationDiagnostic = &runtimecontract.ValidationFailureDiagnostic{Operation: operation.Kind, Class: runtimecontract.ValidationDiagnosticBuildFailed, TargetRefs: []string{"implementation.go"}}
+					r.Feedback.OriginalDiagnostic.ValidationDiagnostic = &runtimecontract.ValidationFailureDiagnostic{Operation: operation.Kind, Class: runtimecontract.ValidationDiagnosticTestFailed, TargetRefs: []string{"implementation.go"}}
 				}
 				err := check(a, d, r, reload)
 				if scenario == "original" || scenario == "ordinary-partial" || scenario == "source-raw-gap" {

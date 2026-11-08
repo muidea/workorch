@@ -41,17 +41,24 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 		return
 	}
 	var targetRefs []string
+	var targetRejection *runtimemodel.RuntimeValidationFailureTargetRejection
 	targetCandidatesValid := true
-	if shellValidationDiagnosticMayIdentifyImplementationEffect(class) {
+	workspaceBehavior := class == runtimemodel.ValidationDiagnosticTestFailed && shellRequiresWorkspaceBehavior(request)
+	if shellValidationDiagnosticMayIdentifyImplementationEffect(class) && !workspaceBehavior {
 		targetRefs, targetCandidatesValid = shellValidationDiagnosticTargetCandidates(*output, request, execCommand, class)
+		if !targetCandidatesValid {
+			targetRejection = &runtimemodel.RuntimeValidationFailureTargetRejection{Code: runtimemodel.RuntimeFailureTargetsOverCapacity, CandidateCount: len(targetRefs), Limit: runtimemodel.RuntimeFailureTargetObservationMaxTargetRefs}
+			targetRefs = nil
+		}
 	}
-	if class == runtimemodel.ValidationDiagnosticTestFailed && shellRequiresWorkspaceBehavior(request) {
+	if workspaceBehavior {
 		// An assertion's location is a verification input, not proof that its
 		// criterion is defective. Only independently observed implementation
 		// execution may propose File repair candidates under the default route.
 		targetRefs = normalizeShellStrings(output.workspaceBehaviorTargetRefs)
 		targetCandidatesValid = len(targetRefs) <= runtimemodel.RuntimeFailureTargetObservationMaxTargetRefs
 		if !targetCandidatesValid {
+			targetRejection = &runtimemodel.RuntimeValidationFailureTargetRejection{Code: runtimemodel.RuntimeFailureTargetsOverCapacity, CandidateCount: len(targetRefs), Limit: runtimemodel.RuntimeFailureTargetObservationMaxTargetRefs}
 			targetRefs = nil
 		}
 		// A failing check is a tool fact, not attribution to the deliverable.
@@ -77,6 +84,7 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 	}
 	output.validationFailureTargetCandidatesInvalid = !targetCandidatesValid
 	diagnostic := &runtimemodel.ValidationFailureDiagnostic{
+		TargetRejection:               targetRejection,
 		SchemaVersion:                 runtimemodel.ValidationFailureDiagnosticSchemaVersion,
 		Class:                         class,
 		OwnerCode:                     ownerCode,
@@ -411,14 +419,17 @@ var (
 // promoted: when output has no supported location, the result is deliberately
 // empty and no repair-surface observation is emitted.
 func shellValidationDiagnosticTargetRefs(output RuntimeCommandResult, request RuntimeCommandRequest, execCommand string) []string {
-	refs, _ := shellValidationDiagnosticTargetCandidates(output, request, execCommand, "")
+	refs, valid := shellValidationDiagnosticTargetCandidates(output, request, execCommand, "")
+	if !valid {
+		return nil
+	}
 	return refs
 }
 
 // shellValidationDiagnosticTargetCandidates distinguishes an empty valid
-// parser result from a bounded-protocol overflow. The caller carries that bit
-// alongside the owner-private command result so a valid marker cannot revive a
-// transaction whose structured-output half already exceeded the bound.
+// parser result from a bounded-protocol overflow. An overflowing return retains
+// the complete union only so the producer can report its exact rejected count;
+// it cannot be published as a partial/accepted diagnostic target surface.
 func shellValidationDiagnosticTargetCandidates(output RuntimeCommandResult, request RuntimeCommandRequest, execCommand, diagnosticClass string) ([]string, bool) {
 	if !shellInputHasManagedValidation(request) || strings.TrimSpace(filepath.Base(execCommand)) != "go" || len(request.ValidationScopeTargetRefs) == 0 {
 		return nil, true
@@ -444,9 +455,6 @@ func shellValidationDiagnosticTargetCandidates(output RuntimeCommandResult, requ
 					continue
 				}
 				seen[value] = struct{}{}
-				if len(seen) > shellValidationDiagnosticMaxTargetRefs {
-					return nil, false
-				}
 			}
 		}
 		for _, match := range shellGoPackageConflictPattern.FindAllStringSubmatch(record.Output, -1) {
@@ -464,9 +472,6 @@ func shellValidationDiagnosticTargetCandidates(output RuntimeCommandResult, requ
 					continue
 				}
 				seen[value] = struct{}{}
-				if len(seen) > shellValidationDiagnosticMaxTargetRefs {
-					return nil, false
-				}
 			}
 		}
 	}
@@ -475,7 +480,7 @@ func shellValidationDiagnosticTargetCandidates(output RuntimeCommandResult, requ
 		ret = append(ret, value)
 	}
 	sort.Strings(ret)
-	return ret, true
+	return ret, len(ret) <= shellValidationDiagnosticMaxTargetRefs
 }
 
 func shellValidationDiagnosticRecords(output RuntimeCommandResult, execCommand, diagnosticClass string) []shellGoTestJSONDiagnosticRecord {

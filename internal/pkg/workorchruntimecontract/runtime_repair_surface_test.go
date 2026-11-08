@@ -57,7 +57,7 @@ func TestRuntimeRepairSurfaceObservationIsFactOnlyAndBounded(t *testing.T) {
 		}
 	}
 	overflow := observation
-	for index := len(overflow.CandidateTargetRefs); index <= RuntimeValidationFailureObservationMaxCandidateTargetRefs; index++ {
+	for index := len(overflow.CandidateTargetRefs); index <= RuntimeFailureTargetObservationMaxTargetRefs; index++ {
 		ref := string(rune('c'+index)) + ".go"
 		overflow.CandidateTargetRefs = append(overflow.CandidateTargetRefs, ref)
 		overflow.ValidationScopeTargetRefs = append(overflow.ValidationScopeTargetRefs, ref)

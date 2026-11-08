@@ -136,6 +136,14 @@ func runtimeValidationInputSymbol(value string) bool {
 }
 
 func validateRuntimeValidationInputDiagnostic(d ValidationFailureDiagnostic) error {
+	if d.TargetRejection != nil {
+		if err := d.TargetRejection.Validate(); err != nil {
+			return err
+		}
+		if len(d.TargetRefs) != 0 {
+			return fmt.Errorf("rejected failure target transaction cannot publish partial targets")
+		}
+	}
 	if d.InputRepair != nil {
 		if err := d.InputRepair.Validate(); err != nil {
 			return err
@@ -172,6 +180,11 @@ func validateRuntimeValidationInputDiagnostic(d ValidationFailureDiagnostic) err
 }
 
 func writeRuntimeValidationInputDiagnosticHash(h interface{ Write([]byte) (int, error) }, d ValidationFailureDiagnostic) {
+	if d.TargetRejection != nil {
+		writeHashString(h, "failure-target-rejection")
+		writeHashString(h, d.TargetRejection.Code)
+		writeHashString(h, fmt.Sprintf("%d:%d", d.TargetRejection.CandidateCount, d.TargetRejection.Limit))
+	}
 	if len(d.InputLocations) != 0 {
 		writeHashString(h, "validation-input-locations/v1")
 		for _, location := range d.InputLocations {

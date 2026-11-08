@@ -77,6 +77,7 @@ type validationInputReviewMainlineOptions struct {
 	DependencyScopeErrorOnce           bool
 	ExecutionUncertaintyOnce           string
 	LargeProjectOutput                 bool
+	MultiFileProject                   bool
 }
 
 func TestDriveRuntimeInputReviewDoesNotWaitForExecutionTiming(t *testing.T) {
@@ -244,6 +245,9 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 		bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[1].LineageAssertions = rules
 		bootstrap.DefinitionFocuses[1].LineageAssertions = rules
 	}
+	if mode == "input_revision_numeric" {
+		bootstrap.CoverageItems[1].TargetText = "invoke the delivered program with output 4; local output usage equals ceil(payload bytes / 4), so a 51-byte payload has 13 output tokens"
+	}
 	if mode == "omission" {
 		bootstrap.CoverageItems[1].TargetText = "invoke the delivered program and document its output"
 	}
@@ -302,6 +306,20 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 			initialFiles["go.sum"] = checksumFixtureModuleSum
 		}
 	}
+	if options.MultiFileProject {
+		if !projectBehaviorRepair {
+			t.Fatal("multi-file project requires confirmed behavior repair")
+		}
+		initialFiles["offset.go"] = "package fixture\nfunc RepairOffset() int {return -1}\n"
+		var calls strings.Builder
+		for i := 0; i < 6; i++ {
+			name := fmt.Sprintf("probe%d.go", i)
+			initialFiles[name] = fmt.Sprintf("package fixture\nfunc Probe%d() int {return 0}\n", i)
+			fmt.Fprintf(&calls, "_ = Probe%d(); ", i)
+		}
+		initialFiles["subject.go"] = strings.Replace(initialFiles["subject.go"], "return 2", calls.String()+"return 2", 1)
+		initialFiles["cmd/delivery/main.go"] = strings.Replace(initialFiles["cmd/delivery/main.go"], "subject.DeliveredValue()", "subject.DeliveredValue()+subject.RepairOffset()", 1)
+	}
 	projectExecutionCounter := filepath.Join(root, "project-executions")
 	// 成功合取的 ordinary/race 两阶段均执行原工程；已知 ordinary 失败则不进入 race。
 	projectExecutionCount := strings.Repeat("executed\n", 2*options.ValidationCount)
@@ -330,6 +348,10 @@ func TestHistorical(t *testing.T) {
 			projectExecutionCount = "executed\nexecuted\nexecuted\nexecuted\n"
 		}
 	}
+	if options.MultiFileProject {
+		initialFiles["historical_test.go"] = strings.ReplaceAll(initialFiles["historical_test.go"], "DeliveredValue()!=4", "DeliveredValue()+RepairOffset()!=4")
+	}
+
 	inputTargets := map[common.CoverageWorkItemID]string{}
 	for _, requirement := range requirements {
 		preparation := preparations[requirement.Hash]
@@ -387,6 +409,8 @@ func %s(t *testing.T) {
 				if target == inputTargets["cwi-2"] {
 					initialFiles[target] += "func init() {}\n"
 				}
+			} else if mode == "input_revision_numeric" {
+				initialFiles[target] = strings.Replace(initialFiles[target], "\n}\n", fmt.Sprintf("\n payload := %q\n expectedOutputTokens := 15\n if got := (len(payload)+3)/4; got != expectedOutputTokens {t.Fatal(\"local estimate assertion conflicts with the declared formula\")}\n}\n", strings.Repeat("x", 51)), 1)
 			} else if mode == "input_revision_omission" {
 				initialFiles[target] = strings.Replace(initialFiles[target], `strings.TrimSpace(string(out))!="4"`, `strings.TrimSpace(string(out))==""`, 1)
 			} else {
@@ -586,7 +610,7 @@ func %s(t *testing.T) {
 				conclusion := runtimecontract.RuntimeValidationInputConsistent
 				if strings.HasPrefix(mode, "input_revision") {
 					for _, file := range binding.InputReview.Files {
-						if strings.Contains(file.Content, `!="5"`) || (strings.Contains(file.Content, `strings.TrimSpace(string(out))==""`) && mode != "input_revision_long" && mode != "input_revision_budget") || mode == "input_revision_cycle" || strings.Contains(file.Content, "// missing assertion ") {
+						if strings.Contains(file.Content, "expectedOutputTokens := 15") || strings.Contains(file.Content, `!="5"`) || (strings.Contains(file.Content, `strings.TrimSpace(string(out))==""`) && mode != "input_revision_long" && mode != "input_revision_budget") || mode == "input_revision_cycle" || strings.Contains(file.Content, "// missing assertion ") {
 							conclusion = runtimecontract.RuntimeValidationInputConflict
 						}
 					}
@@ -838,6 +862,10 @@ func %s(t *testing.T) {
 				}
 			}
 			candidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{ID: "deliver", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{"subject.go"}, CoverageWorkItemIDs: command.Decision.Focus.CoverageWorkItemIDs, Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}}}}}}
+			if options.MultiFileProject && command.Decision.Focus.CoverageWorkItemIDs[0] == "cwi-2" {
+				before, after := "return -1", "return 0"
+				candidate.StateChange.Operations = append(candidate.StateChange.Operations, runtimecontract.StateChangingOperation{Operation: runtimecontract.RuntimeOperation{ID: "repair-offset", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{"offset.go"}, CoverageWorkItemIDs: command.Decision.Focus.CoverageWorkItemIDs, Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &before}, {Name: "newText", String: &after}}}})
+			}
 		case runtimecontract.ConvergenceStateNeedValidation:
 			validationCalls++
 			candidate = runtimeManagedShellValidationCandidate("validate", command.Decision.Focus.CoverageWorkItemIDs[0], "subject.go", "behavior-validation")
@@ -1080,10 +1108,13 @@ func %s(t *testing.T) {
 				t.Fatalf("restart invalid: %v", err)
 			}
 			if cut == "after_repair_receipt" {
-				if loaded.ActiveDispatch == nil || !projectChecksumRepair && loaded.ActiveDispatch.RepairCommitment == nil || len(loaded.ActiveDispatch.OperationExecutions) != 1 {
+				if loaded.ActiveDispatch == nil || !projectChecksumRepair && loaded.ActiveDispatch.RepairCommitment == nil || len(loaded.ActiveDispatch.OperationExecutions) != 1+boolCount(options.MultiFileProject) {
 					t.Fatal("未到达唯一原 confirmed repair dispatch")
 				}
-				key := loaded.ActiveDispatch.OperationExecutions[0].ExecutionKey
+				keys := make(map[string]bool)
+				for _, execution := range loaded.ActiveDispatch.OperationExecutions {
+					keys[execution.ExecutionKey] = true
+				}
 				func() {
 					defer func() {
 						if recovered := recover(); recovered != "runtime-test-crash-after-owner-receipt" {
@@ -1097,10 +1128,19 @@ func %s(t *testing.T) {
 				if err != nil || before.Validate() != nil {
 					t.Fatal("真实 repair receipt 后 aggregate 无效", err)
 				}
-				if before.ActiveDispatch == nil || len(before.ActiveDispatch.OperationExecutions) != 1 || before.ActiveDispatch.OperationExecutions[0].ExecutionKey != key {
+				if before.ActiveDispatch == nil || len(before.ActiveDispatch.OperationExecutions) != 1+boolCount(options.MultiFileProject) {
 					t.Fatal("repair receipt 未保留原 execution key 与真实 claim fence")
 				}
-				receipt, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(before.OperationReceipts, key, before.ActiveDispatch.OperationExecutions[0].Fence)
+				var committed runtimecontract.RuntimeOperationExecutionRecord
+				for _, execution := range before.ActiveDispatch.OperationExecutions {
+					if execution.State == runtimecontract.OperationExecutionOwnerCommitted {
+						if committed.ExecutionKey != "" || !keys[execution.ExecutionKey] {
+							t.Fatal("repair response loss has multiple or foreign committed executions")
+						}
+						committed = execution
+					}
+				}
+				receipt, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(before.OperationReceipts, committed.ExecutionKey, committed.Fence)
 				if !found || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || !receipt.Changed {
 					t.Fatal("未封存真实唯一 accepted File receipt")
 				}
@@ -1257,7 +1297,7 @@ func %s(t *testing.T) {
 		t.Logf("terminal original diagnostic: %s", diag)
 	}
 	submissionUnknown := cut == "after_assessment_submission"
-	success := (mode == "consistent" || mode == "clarify" || (mode == "input_revision" || mode == "input_revision_growth" || mode == "input_revision_dependency" || mode == "input_revision_omission" || mode == "input_revision_long" || mode == "input_revision_structure") || projectRepair) && !submissionUnknown
+	success := (mode == "consistent" || mode == "clarify" || (mode == "input_revision" || mode == "input_revision_growth" || mode == "input_revision_dependency" || mode == "input_revision_omission" || mode == "input_revision_long" || mode == "input_revision_structure" || mode == "input_revision_numeric") || projectRepair) && !submissionUnknown
 	if (completed.Decision.State == runtimecontract.ConvergenceStateComplete) != success {
 		if completed.Facts.Failure != nil && completed.Facts.Failure.OriginalDiagnostic != nil {
 			t.Logf("original failure diagnostic: %+v", *completed.Facts.Failure.OriginalDiagnostic)
@@ -1348,6 +1388,9 @@ func %s(t *testing.T) {
 		}
 		content, err := os.ReadFile(filepath.Join(directory, ref))
 		expectedInput := initialFiles[ref]
+		if options.MultiFileProject && ref == "offset.go" {
+			expectedInput = strings.Replace(expectedInput, "return -1", "return 0", 1)
+		}
 		if projectChecksumRepair && ref == "go.sum" {
 			expectedInput = checksumFixtureFullSum
 		}
@@ -1362,6 +1405,8 @@ func %s(t *testing.T) {
 				for n := 1; n <= completedRevisions; n++ {
 					expectedInput = strings.Replace(expectedInput, runtimeLongInputRevisionMarker(n), runtimeLongInputRevisionAssertion(n), 1)
 				}
+			} else if mode == "input_revision_numeric" {
+				expectedInput = strings.Replace(expectedInput, "expectedOutputTokens := 15", "expectedOutputTokens := 13", 1)
 			} else if mode == "input_revision_growth" {
 				expectedInput = strings.Replace(expectedInput, `!="5"`, runtimeSnapshotGrowthReplacement(), 1)
 				if len(expectedInput) != 72001 {
@@ -1422,8 +1467,29 @@ func %s(t *testing.T) {
 	if projectRepair && behaviorRepairs != 1 {
 		t.Fatal("same-binding implementation repair was missing or repeated")
 	}
+	if options.MultiFileProject {
+		var current []runtimecontract.RuntimeValidationInputReviewFile
+		for _, ref := range []string{"subject.go", "offset.go"} {
+			body, err := os.ReadFile(filepath.Join(directory, ref))
+			if err != nil {
+				t.Fatal(err)
+			}
+			current = append(current, runtimecontract.RuntimeValidationInputReviewFile{TargetRef: ref, Content: string(body), ContentHash: runtimecontract.RuntimeValidationInputContentHash(string(body))})
+		}
+		changeReview, err := runtime.ChangeReviewContext(completed, current)
+		if err != nil || changeReview == nil || len(changeReview.Changes) != 3 {
+			t.Fatalf("multi-file review lost per-file version edges: %v", err)
+		}
+		counts := map[string]int{}
+		for _, edge := range changeReview.Changes {
+			counts[edge.TargetRef]++
+		}
+		if counts["subject.go"] != 2 || counts["offset.go"] != 1 {
+			t.Fatal("multi-file review borrowed an aggregate hash or omitted an effect")
+		}
+	}
 	if projectBehaviorRepair {
-		assertMultiFailureConfirmedRepairFacts(t, runtimeStateRecordFromAggregate(completed))
+		assertMultiFailureConfirmedRepairFacts(t, runtimeStateRecordFromAggregate(completed), options.MultiFileProject)
 		if originalRepairReceipt != nil {
 			current, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(completed.OperationReceipts, originalRepairReceipt.ExecutionKey, originalRepairReceipt.Fence)
 			if !found || !runtimecontract.SameRuntimeOperationReceipt(current, *originalRepairReceipt) {
@@ -1468,6 +1534,9 @@ func %s(t *testing.T) {
 			protocol = "shell/go-test-json/project-multi-failure-behavior"
 		}
 		expectation := projectConjunctionExpectation{ProtocolRef: protocol, ValidationReceipts: options.ValidationCount, BuildFailure: projectChecksumRepair}
+		if options.MultiFileProject {
+			expectation.RepairTargets = []string{"cmd/delivery/main.go", "offset.go", "probe0.go", "probe1.go", "probe2.go", "probe3.go", "probe4.go", "probe5.go", "subject.go"}
+		}
 		if projectBehaviorRepair {
 			expectation.RepairSources = len(preparations[requirements[0].Hash].CheckAttestations) + 1
 		}

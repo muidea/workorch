@@ -448,12 +448,13 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		failure = orchestratorevents.RuntimeOperationFailureWithTargetObservation(command.Transaction, operation.Kind, operationResult.FailureCode, operationResult.FailureMessage, nil, nil)
 		if operationResult.ValidationFailureDiagnostic != nil {
 			diagnostic := operationResult.ValidationFailureDiagnostic.Clone()
-			candidateTargetRefs, candidateValid := shellFailureTargetCandidateUnion(operationResult, authorization.TargetRole, authorization.ValidationScopeTargetRefs)
+			candidateTargetRefs, candidateValid, rejection := shellFailureTargetCandidateUnion(operationResult, authorization.TargetRole, authorization.ValidationScopeTargetRefs)
 			// Diagnostic text/class remains factual even when target extraction
 			// fails closed.  Candidate refs do not: a malformed, out-of-scope or
 			// over-bound marker invalidates the complete marker+tool union and
 			// cannot silently fall back to only parser-derived locations.
 			diagnostic.TargetRefs = nil
+			diagnostic.TargetRejection = rejection
 			if candidateValid {
 				diagnostic.TargetRefs = candidateTargetRefs
 			}

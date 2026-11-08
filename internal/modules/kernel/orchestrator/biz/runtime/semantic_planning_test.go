@@ -1768,7 +1768,7 @@ func TestRuntimeSemanticRetirementRejectsUnsettledSubmittedRequestWithoutMutatio
 		BatchID: ledger.Document.BatchID, BatchSequence: ledger.Document.BatchSequence,
 		BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), ledger.Document.BatchCoverageWorkItemIDs...),
 		CoverageOrderHash:        runtimecontract.StableRuntimeSemanticPlanCoverageOrderHash(*ledger.CoverageOrderDocument),
-		MaxOutputTokens:          1024, MaxRecoveryAttempts: 1,
+		MaxOutputTokens:          aggregate.Facts.Resources.ProviderCeiling.EffectiveMaxOutputTokens, MaxRecoveryAttempts: 1,
 	}
 	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
 	physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(expected.LogicalRequestID, 1)

@@ -201,8 +201,8 @@ func runShellProjectMultiFailureDiagnostic(ctx context.Context, directory string
 	result.Status, result.ExitCode = "failed", int64(original.ExitCode)
 	result.ValidationObservation = baseline.ValidationObservation
 	result.workspaceBehaviorTargetRefs = canonicalShellBehaviorTargets(result.workspaceBehaviorTargetRefs)
-	if len(result.workspaceBehaviorTargetRefs) > runtimecontract.RuntimeFailureTargetObservationMaxTargetRefs {
-		return stages, specs, nil
-	}
+	// Preserve the complete independently observed union. The common diagnostic
+	// candidate boundary reports overflow explicitly; dropping it here would
+	// hide a known capacity failure as missing attribution.
 	return stages, specs, &result
 }

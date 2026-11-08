@@ -2289,6 +2289,7 @@ func cloneValidationCandidateRaw(in ValidationCandidate) ValidationCandidate {
 
 func cloneValidationFailureDiagnosticRaw(in ValidationFailureDiagnostic) ValidationFailureDiagnostic {
 	out := in
+	out.TargetRejection = in.TargetRejection.Clone()
 	out.InputRepair = in.InputRepair.Clone()
 	out.InputLocations = cloneRuntimeStateRawSlice(in.InputLocations, func(value RuntimeValidationInputLocation) RuntimeValidationInputLocation { return value })
 	out.TargetRefs = cloneRuntimeStateRawSlice(in.TargetRefs, func(item string) string { return item })

@@ -432,7 +432,8 @@ func ValidateRuntimeFailureGovernanceDependency(failure FailureFact) error {
 
 const (
 	// RuntimeFailureTargetObservationMaxTargetRefs is the shared hard bound for
-	// direct owner-authored target observations. Producers and ingresses must
+	// direct owner observations and validation candidate/confirmation surfaces.
+	// Producers, candidate unions and resource-owner ingresses must
 	// reject an overflow; truncation would turn an unvalidated subset into
 	// repair authority.
 	RuntimeFailureTargetObservationMaxTargetRefs = 16

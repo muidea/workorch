@@ -87,6 +87,9 @@ func runtimeInputRevisionMainlineCandidate(c llmevents.RequestRuntimeCandidateCo
 			}
 		}
 	}
+	if len(modes) != 0 && modes[0] == "input_revision_numeric" {
+		before, after = "expectedOutputTokens := 15", "expectedOutputTokens := 13"
+	}
 	if len(modes) != 0 && modes[0] == "input_revision_growth" {
 		after = runtimeSnapshotGrowthReplacement()
 	}
@@ -430,5 +433,16 @@ func TestDriveRuntimeInputRevisionCrossesReadBoundaryAndRecovers(t *testing.T) {
 				t.Fatalf("recovery repeated provider work: %d != %d", got, baseline)
 			}
 		})
+	}
+}
+
+// The original criterion explicitly declares ceil(bytes/4). A scripted independent
+// reviewer reports the constant conflict; Runtime must still require a real File
+// effect, fresh content-bound review, ordinary validation and assessment. This is
+// an input-review transaction, not attribution inferred from a failed assertion.
+func TestDriveRuntimeDeclaredArithmeticInputConflictAndRecovery(t *testing.T) {
+	baseline := runValidationInputReviewMainline(t, "input_revision_numeric", "")
+	if got := runValidationInputReviewMainline(t, "input_revision_numeric", "after_input_revision_receipt"); got != baseline {
+		t.Fatalf("recovery repeated provider calls: %d != %d", got, baseline)
 	}
 }

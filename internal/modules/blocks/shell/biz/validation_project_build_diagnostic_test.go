@@ -57,7 +57,7 @@ func TestModuleChecksumDiagnosticDoesNotRepairImportingSource(t *testing.T) {
 			if scenario == "marker" {
 				output.Stdout = `WORKORCH_FAILURE_TARGET={"schemaVersion":"workorch.failure_target.v1","targetRole":"implementation","diagnosticClass":"validation_dependency_mismatch","targetRefs":["internal/client.go"]}`
 			}
-			refs, valid := shellFailureTargetCandidateUnion(output, "implementation", request.ValidationScopeTargetRefs)
+			refs, valid, _ := shellFailureTargetCandidateUnion(output, "implementation", request.ValidationScopeTargetRefs)
 			if scenario == "marker" && valid {
 				t.Fatal("free text widened typed dependency surface")
 			}

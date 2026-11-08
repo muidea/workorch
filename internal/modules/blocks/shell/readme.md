@@ -470,6 +470,15 @@ known to be defective. Ordinary `test_failed` implementation repair must not mat
 this fact. Environment, dependency, build and input-compile diagnostics retain their
 existing precedence; legacy protocols retain their original interpretation.
 
+The complete diagnostic/marker union and its typed observation share the existing
+16-target bound with the File confirmation consumer. An overflow is never clipped
+or reduced to the parser subset. `ValidationFailureDiagnostic.TargetRejection`
+retains the closed rejection code, candidate count at the rejecting boundary and
+shared limit; it does not claim the size of a later unconstructed union. The original
+failure class, exit code, source conjunction and raw bytes remain factual. Invalid
+markers and out-of-scope candidates also reject the whole transaction. A rejection
+cannot coexist with partial targets or a repair observation and grants no credit.
+
 Shell does not choose a successor, repair route or terminal state. The existing
 Orchestrator SM-2 private receipt event resolves the exact sealed profile route;
 SM-3 dispatch and SM-4 delivery/recovery remain unchanged. Result and projections
