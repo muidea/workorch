@@ -8,6 +8,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -59,8 +60,8 @@ func writeRuntimeSupplementalNativeCheckHash(h hash.Hash, binding RuntimeValidat
 }
 
 // RuntimeValidationCheckFailure is a capability-owner observation, not a repair
-// authorization. DiagnosticHash addresses the assertion text without exporting
-// logs, expected/actual secrets or tool-private messages. TargetRef is a bounded
+// authorization. DiagnosticHash binds the exact source-scoped assertion body.
+// Unrelated transcript is excluded at the owner projection boundary. TargetRef is a bounded
 // location in the sealed validation scope; it need not be the faulty resource.
 type RuntimeValidationCheckFailure struct {
 	CheckRef       string `json:"checkRef"`
@@ -69,6 +70,9 @@ type RuntimeValidationCheckFailure struct {
 	TargetRef      string `json:"targetRef,omitempty"`
 	Line           int    `json:"line,omitempty"`
 	DiagnosticHash string `json:"diagnosticHash"`
+	// AssertionText is the exact native assertion body, within the observed
+	// check/source scope. It is diagnostic input, never a verdict or permission.
+	AssertionText string `json:"assertionText,omitempty"`
 	// ComparisonHash removes only owner-known execution noise. DiagnosticHash
 	// still binds the exact private assertion; neither identity grants authority.
 	ComparisonHash    string                             `json:"comparisonHash,omitempty"`
@@ -140,7 +144,18 @@ func (o RuntimeValidationObservation) ValidateFailureDetails() error {
 		return fmt.Errorf("validation failure detail bound exceeded")
 	}
 	seen := make(map[RuntimeValidationCheckFailure]struct{}, len(o.CheckFailures))
+	assertionBytes := 0
 	for _, value := range o.CheckFailures {
+		assertionBytes += len(value.AssertionText)
+		if !utf8.ValidString(value.AssertionText) || len(value.AssertionText) > RuntimeValidationAssertionMaxBytes || assertionBytes > RuntimeValidationAssertionsMaxBytes {
+			return fmt.Errorf("validation assertion text exceeds bounded diagnostic input")
+		}
+		if value.AssertionText != "" {
+			digest := sha256.Sum256([]byte(strings.TrimSpace(value.AssertionText)))
+			if hex.EncodeToString(digest[:]) != value.DiagnosticHash {
+				return fmt.Errorf("validation assertion text differs from original diagnostic identity")
+			}
+		}
 		if !containsString(o.FailedChecks, value.CheckRef) || value.CheckRef == "" {
 			return fmt.Errorf("validation failure detail requires an observed failed check")
 		}
@@ -202,6 +217,10 @@ func writeRuntimeValidationFailureDetailsHash(h hash.Hash, observation RuntimeVa
 		writeHashString(h, observation.FailureDetailProtocolRef)
 	}
 	for _, detail := range normalizeRuntimeValidationCheckFailures(observation.CheckFailures) {
+		if detail.AssertionText != "" {
+			writeHashStrings(h, []string{"validation-assertion-text", detail.CheckRef, detail.CaseRef, detail.PackageRef,
+				detail.TargetRef, fmt.Sprint(detail.Line), detail.DiagnosticHash, detail.AssertionText})
+		}
 		if detail.ComparisonHash != "" || detail.ReportedAssertion != (RuntimeValidationReportedAssertion{}) {
 			writeHashStrings(h, []string{"validation-check-diagnostic/v2", detail.CheckRef, detail.CaseRef, detail.PackageRef,
 				detail.TargetRef, fmt.Sprint(detail.Line), detail.DiagnosticHash, detail.ComparisonHash,

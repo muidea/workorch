@@ -538,7 +538,7 @@ func runtimeTestAlignFocusTargetSurfaceFromBindings(focus runtimecontract.Covera
 	return focus.Normalized()
 }
 
-func runtimeTestEnsureSemanticPlanningLedger(t *testing.T, aggregate *RuntimeAggregate) {
+func runtimeTestEnsureSemanticPlanningLedger(t *testing.T, aggregate *RuntimeAggregate, observe ...func(*RuntimeAggregate)) {
 	t.Helper()
 	if aggregate == nil {
 		return
@@ -635,6 +635,9 @@ func runtimeTestEnsureSemanticPlanningLedger(t *testing.T, aggregate *RuntimeAgg
 		if err != nil {
 			t.Fatalf("bind test managed-validation proof requirements: %v", err)
 		}
+	}
+	for _, observation := range observe {
+		observation(aggregate)
 	}
 	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed || aggregate.SemanticPlanning.Manifest == nil || aggregate.SemanticPlanning.Manifest.DefinitionSeedHash != aggregate.Facts.DefinitionSeed.Hash {
 		ledger, err := runtimeTestBuildSealedSemanticPlanning(*aggregate)
@@ -1168,6 +1171,10 @@ func runtimeTestBuildSealedSemanticPlanning(aggregate RuntimeAggregate) (runtime
 		}
 		for _, proof := range proofs {
 			proposal := proof.proposal.Normalized()
+			if input, found := runtimecontract.RuntimeSemanticValidationInputReviewBinding(proposal, manifest.OwnerCatalogs); found && input.InputReview != nil {
+				proposal.ValidationInputReview = runtimeFailureReviewReportForTest(manifest, input, runtimecontract.RuntimeValidationInputConsistent)
+			}
+
 			feasibilityTargets := append([]string(nil), proposal.Target.ExactTargetRefs...)
 			if proposal.Target.Policy == runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope {
 				feasibilityTargets = append([]string(nil), proposal.Target.OwnerScopeTargetRefs...)
@@ -1975,6 +1982,10 @@ func runtimeTestDefinitionFocuses(facts runtimecontract.RuntimeFacts) []runtimec
 			compiled.ValidationFailureRepairConvergence = declared.ValidationFailureRepairConvergence
 		}
 		sourcePolicy, err := runtimecontract.CompileRuntimeSourceEvidencePolicy(item.SourceScope, item.SourceID, facts.Activation.ExecutionContract.ProfileContracts, nil)
+		if err != nil {
+			panic(err)
+		}
+		compiled.ImplementationWorkPolicy, err = runtimecontract.ResolveRuntimeDefinitionImplementationWorkPolicy(facts.Activation.ExecutionContract.ProfileContracts, item.SourceScope, item.SourceID)
 		if err != nil {
 			panic(err)
 		}

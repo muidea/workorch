@@ -1061,6 +1061,14 @@ func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, wo
 		return RuntimeAggregate{}, err
 	}
 	manifestHash = strings.TrimSpace(manifestHash)
+	if l := aggregate.SemanticPlanning; l.FailureInputReview != nil {
+		if l.Manifest == nil || l.Manifest.Hash != manifestHash || l.CoverageOrderDocument == nil || !sameCoverageIDs(l.CoverageOrderDocument.CoverageOrder, acceptedOrder) || len(acceptedOrder) != 1 || acceptedOrder[0] != l.FailureInputReview.Feedback.CoverageWorkItemID {
+			return RuntimeAggregate{}, common.ErrConflict
+		}
+		// Review the current binding's input; do not select or re-project a focus.
+		return aggregate, nil
+	}
+
 	if ledger := aggregate.SemanticPlanning; ledger.Manifest != nil && ledger.Manifest.Hash == manifestHash && ledger.CoverageOrderDocument != nil && sameCoverageIDs(ledger.CoverageOrderDocument.CoverageOrder, acceptedOrder) && ledger.CoverageOrderDocument.ImplementationPurpose != "" {
 		expected := aggregate.StateRevision
 		changed, purposeErr := projectImplementationPurpose(&aggregate)

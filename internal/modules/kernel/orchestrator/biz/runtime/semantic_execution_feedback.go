@@ -14,7 +14,15 @@ func SemanticExecutionFeedback(a RuntimeAggregate, c runtimecontract.RuntimeSema
 	if c.WorkspaceID != a.Facts.WorkspaceID || c.RunID != a.Facts.RunID || c.Definition.Revision != a.Definition.Revision || c.Definition.StartupInputHash != a.Definition.StartupInputHash {
 		return nil, fmt.Errorf("semantic execution feedback aggregate scope mismatch")
 	}
-	if c.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
+	if m.FailureInputReview != nil && c.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
+		if _, _, _, err := runtimeFailureInputReviewSource(a, *m.FailureInputReview); err != nil {
+			return nil, err
+		}
+		feedback := m.FailureInputReview.Feedback.Clone()
+		feedback.ManifestHash = m.Hash
+		feedback.Hash = runtimecontract.StableRuntimeSemanticExecutionFeedbackHash(feedback)
+		c.ExecutionFeedback = []runtimecontract.RuntimeSemanticExecutionFeedback{feedback}
+	} else if c.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
 		for _, obligation := range m.ProofObligations {
 			r := obligation.ValidationFailureRepair
 			if r == nil || !slices.Contains(c.BatchCoverageWorkItemIDs, obligation.CoverageWorkItemID) {

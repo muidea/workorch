@@ -1242,7 +1242,7 @@ Orchestrator 独占 SM-2～SM-4；恢复、重复结果及重复 ticket 请求�
 `InputReview`，封存 activation 选择的 唯一当前 `validation/input-consistency`、完整输入字节/hash、原 required checks/native mapping；LLM
 只返回 `validationInputReview` 的 exact subjectHash 和逐 check 的 `consistent|conflict|inconclusive`、reason、input refs。
 缺项、重复项、未知字段/结论或身份漂移仍是 document admission error。完整报告持久化后，SM-2 的
-`SemanticFeasibilityRequired` 私有事件在 proposal feasibility probe 前分类：一致才进入既有 feasibility/binding seal；冲突明确失败。
+`SemanticFeasibilityRequired` 私有事件在 proposal feasibility probe 前分类：一致才进入既有 feasibility/binding seal；冲突走已声明的原准则保留维护路径，或明确失败。
 
 v2 必须由新 activation 的 `RecipeInputReviewProtocolRef` 显式声明，并在 owner-confirmed recipe、catalog、manifest 与
 dispatch recipe commitment 中保留。空值沿用旧 owner 协议；不得省略、降级或把 v2 注入未声明的 recipe。
@@ -1744,6 +1744,45 @@ scripted provider 覆盖 64,733→72,001 bytes 修订、fresh review→普通 va
 receipt、retirement、validation receipt、Result persistence 恢复切点零额外 provider。
 普通 prerequisite 的独立 File-backed 测试另覆盖 72,001 bytes、CAS 前后、duplicate/stale 与 fresh-process 恢复；
 容量负例明确验证 typed 原因、partial 拒绝、终态持久化幂等及预算不变。离线主链通过不等于 live 全目标验收。
+
+### 普通验证失败后的独立输入重审
+
+普通 rejected validation receipt 的唯一 SM-2 接纳 CAS，在原 binding 声明 InputReview、存在 exact repair route 且
+原生 failed checks 完整时，先开启现有 `semantic_plan/proof_batch` 重审事务，再允许原 repair surface acquisition。
+`RuntimeValidationFailureInputReview` 绑定原 CWI/binding、原 subject hash、failure fingerprint、evidence hash 和
+完整 receipt-backed execution feedback；按 binding manifest 精确定位原 subject，同一 manifest 的相同历史保全
+只视为一个来源，同 hash 不同值拒绝。实际 validation owner 的原读取 revision 必须逐文件等于该 subject。
+原 binding 的 accepted batch/request generation 与 exact document hash 唯一绑定完整旧正式报告；同 manifest/subject
+的其它请求不能替代。C4 保留该报告原文及 ReviewRef/ReportHash，仅作为旧结论与新失败的因果输入，不重判旧报告。
+没有原生 failed checks 的结构/build 诊断仍走既有 typed repair；原生断言缺失、损坏或超合同容量时明确
+`validation_failure_assertions_unavailable`，原输入读取缺失/错版为 `validation_failure_input_snapshot_unavailable`。
+已确定的失败与完整原始 transcript 均保留，缺正文不能触发盲修，也不改判为结果未知。
+
+新请求只评审受影响单 CWI 的原完整 Definition 义务、owner exact 输入和适用失败；不是重新执行旧评审。
+完整结果由原 `SemanticFeasibilityRequired` 私有事件分类：consistent 以
+`validation_failure_input_reviewed` 保存正式报告，继续原 repair；同 subject/fingerprint 消费已有结果，真实新失败
+才开新审查。conflict 退休原 binding，按 `input_review_revision` 进入已有受保护输入维护；inconclusive 仅能
+走既有有界事实 Decision，补充信息保留原 failure source 并产生新请求。缺权限、歧义或不可处理冲突继续明确失败。
+本重审不编译 execution binding、不授 validation/assessment/CWI credit，不能把失败断言本身当作输入或实现归因。
+
+source pending 时不适用普通 implementation purpose/scope 或 repair confirmation；信息续办清除 mutable failure
+也不能放开这些 lane。新维护来源已提交而 working binding 未封存时，SM-2 保留语义准备需求，不因原 repair 计数
+重建 missing-evidence directive。计数及原总预算不归零。working manifest/dispatch 消费其独立的 owner-observed
+工作 scope，不重新套用终验 focus 的 target 集合；原候选严格 manifest、owner feasibility、输入 before hash、
+权限、fence/receipt/CAS 门禁继续生效。维护/修复 effect 后仍要新 all-of、独立 assessment 和有序三 ACK。
+SM-2 独占分流和正式结果，SM-3 保持冻结/纠正身份，SM-4 仅重驱动原事务；SM-1 无新转换。
+
+Shell adapter 从原生 test2json 按 package/case/source frame 拼接跨事件行和多行断言，逐 body 16KiB、总128KiB，
+条数沿原 detail limit；AssertionText 原文不修补，receipt hash 另绑定 exact bytes。无法保全适用正文明确 incomplete。
+不再要求私有 WORKORCH_ASSERTION shape 才能进入 semantic feedback；typed shape 仍可作为附加来源事实。
+完整原 transcript 仍由 Shell 原受限读取接口保全，不向模型展开整份日志或无关正文。LLM C3 仅投影 subject 身份，
+C4 携带 complete source-bound 原生断言与反馈，并沿原64KiB execution feedback预算拒绝超界，不扩额；C0～C2不受
+本轮动态失败影响。冻结、same-contract correction 与恢复逐值保留原请求。
+
+验证入口：`TestFailureInputReview*`、`TestDriveRuntimeProjectMultiFailureConfirmedRepair`、
+`TestDriveRuntimeFailedValidationInputRevisionAndRecovery`、Shell 原生正文/多行/超界测试及 LLM exact C4 渲染恢复测试。
+真实 owner 主线仅脚本化 provider，覆盖失败→consistent 实现修复与失败→conflict 输入维护、fresh validation/
+assessment/三 ACK 及恢复不增加调用；本地通过不代表 live 项目验收或真实模型语义稳定性已通过。
 
 ### 阶段内验证输入修订 v1
 

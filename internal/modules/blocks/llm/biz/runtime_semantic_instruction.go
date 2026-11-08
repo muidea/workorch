@@ -43,6 +43,10 @@ func runtimeSemanticPlanContractCatalog() string {
 }
 
 func runtimeSemanticBaseOutputInstructionWithoutWorkContent(context runtimecontract.RuntimeSemanticPlanRequestContext, manifest runtimecontract.RuntimeSemanticPlanManifest) string {
+	if manifest.FailureInputReview != nil && context.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
+		return "Return exactly one complete semantic_plan proof-batch document matching the supplied schema and original complete Definition obligation. This transaction independently re-reviews the exact failureInputReviewSubjectHash input against its unchanged original criteria in light of executionFeedback. Preserve the original recipe, all checks, diagnostic sources and all-of obligations. Report validationInputReview consistent only when the input semantics preserve the original criteria; report conflict for an actual contradiction in the inputs, or inconclusive only for genuinely missing semantic facts. A failed assertion does not by itself prove which resource is defective. Do not claim execution success, repair authority, waiver or acceptance credit. Do not restate the previous review verdict. Propose only original proof declarations; no operations or changes to criteria, permissions or budgets."
+	}
+
 	for _, obligation := range manifest.ProofObligations {
 		work := obligation.ImplementationWork
 		if work == nil {

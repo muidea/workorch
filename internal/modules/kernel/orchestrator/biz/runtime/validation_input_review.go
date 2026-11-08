@@ -116,6 +116,18 @@ func classifyRuntimeInputReview(transaction *semanticPlanningMutationTransaction
 	if !matched {
 		return true, false, fmt.Errorf("%w: input review has no exact complete request", common.ErrConflict)
 	}
+	if ledger.FailureInputReview != nil && (conclusion == runtimecontract.RuntimeValidationInputConsistent || conclusion == runtimecontract.RuntimeValidationInputConflict) {
+		a := transaction.aggregate
+		a.SemanticPlanning = ledger
+		updated, handled, settleErr := settleRuntimeFailureInputReview(a, ledger, conclusion)
+		if settleErr != nil {
+			return true, false, settleErr
+		}
+		if handled {
+			transaction.aggregate, transaction.ledger = updated, updated.SemanticPlanning
+			return true, true, nil
+		}
+	}
 	if conclusion == runtimecontract.RuntimeValidationInputConsistent {
 		return false, false, nil
 	}
@@ -293,6 +305,7 @@ func retireRuntimeInputReviewForInformation(a *RuntimeAggregate, resolution runt
 	}
 	a.SemanticPlanning = runtimecontract.RuntimeSemanticPlanningLedger{
 		SchemaVersion: ledger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningRequired, DefinitionSeed: ledger.DefinitionSeed.Clone(),
+		FailureInputReview:     ledger.FailureInputReview.Clone(),
 		CatalogRefreshAttempts: ledger.CatalogRefreshAttempts, FeasibilityGaps: ledger.FeasibilityGaps,
 		History: ledger.History, HistoryArchive: ledger.HistoryArchive,
 	}
@@ -346,6 +359,25 @@ func RuntimeInputReviewInformation(a RuntimeAggregate) ([]runtimecontract.Runtim
 }
 
 func validateRuntimeInputReviewAggregate(a RuntimeAggregate) error {
+	for _, l := range runtimeFailureInputReviewLedgers(a.SemanticPlanning) {
+		if l.FailureInputReview != nil {
+			if _, _, _, err := runtimeFailureInputReviewSource(a, *l.FailureInputReview); err != nil {
+				return err
+			}
+		}
+	}
+	if s := a.SemanticPlanning.FailureInputReview; s != nil {
+		current := false
+		for _, row := range a.Facts.Coverage {
+			if row.ID == s.Feedback.CoverageWorkItemID && row.CurrentBindingRef != nil && runtimecontract.SameRuntimeCWIBindingRef(*row.CurrentBindingRef, s.BindingRef) {
+				current = true
+			}
+		}
+		if !current {
+			return fmt.Errorf("pending failure input review lost original current binding")
+		}
+	}
+
 	information, err := RuntimeInputReviewInformation(a)
 	if err != nil {
 		return err

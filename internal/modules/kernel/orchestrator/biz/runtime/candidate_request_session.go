@@ -277,8 +277,10 @@ func candidateRequestSessionActionAllowed(aggregate RuntimeAggregate, documentKi
 	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
 		return err
 	}
-	if err := rejectCandidateBeforeRepairSurfaceConfirmation(aggregate); err != nil {
-		return err
+	if documentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan || aggregate.SemanticPlanning.FailureInputReview == nil {
+		if err := rejectCandidateBeforeRepairSurfaceConfirmation(aggregate); err != nil {
+			return err
+		}
 	}
 	if aggregate.ActiveDispatch != nil {
 		return fmt.Errorf("%w: current runtime authority does not accept a candidate request", common.ErrConflict)

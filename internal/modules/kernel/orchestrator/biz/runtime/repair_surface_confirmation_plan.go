@@ -41,6 +41,9 @@ func (p RuntimeRepairSurfaceConfirmationPlan) Required() bool {
 // rejected observations can never issue another owner query. A current repair
 // directive likewise owns the next action and excludes this handoff.
 func CurrentRuntimeRepairSurfaceConfirmationPlan(aggregate RuntimeAggregate) (RuntimeRepairSurfaceConfirmationPlan, error) {
+	if aggregate.SemanticPlanning.FailureInputReview != nil {
+		return RuntimeRepairSurfaceConfirmationPlan{}, nil
+	}
 	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedValidation || len(aggregate.Facts.Prerequisites.Pending) != 0 {
 		return RuntimeRepairSurfaceConfirmationPlan{}, nil
 	}

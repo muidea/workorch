@@ -32,6 +32,9 @@ func semanticManifestIdentity(aggregate RuntimeAggregate) (semanticplan.Manifest
 		return semanticplan.ManifestIdentity{}, fmt.Errorf("%w: runtime semantic manifest requires the current CWI ledger", common.ErrConflict)
 	}
 	eligible := runtimeSemanticPlanningFrontier(aggregate.Facts)
+	if source := aggregate.SemanticPlanning.FailureInputReview; source != nil {
+		eligible = []common.CoverageWorkItemID{source.Feedback.CoverageWorkItemID}
+	}
 	if len(eligible) == 0 {
 		return semanticplan.ManifestIdentity{}, fmt.Errorf("%w: runtime semantic manifest has no eligible CWI", common.ErrConflict)
 	}
@@ -49,9 +52,13 @@ func semanticManifestIdentity(aggregate RuntimeAggregate) (semanticplan.Manifest
 		Admissibilities:   aggregate.Facts.Resources.OperationAdmissibilities,
 		EligibleCoverage:  eligible,
 	}
+	identity.FailureInputReview = aggregate.SemanticPlanning.FailureInputReview.Clone()
 	identity.InputReviewInformation, err = RuntimeInputReviewInformation(aggregate)
 	if err != nil {
 		return semanticplan.ManifestIdentity{}, err
+	}
+	if identity.FailureInputReview != nil {
+		return identity, nil
 	}
 	if repairRequired {
 		identity.EligibleCoverage = []common.CoverageWorkItemID{repairInput.CoverageWorkItemID}
@@ -206,6 +213,7 @@ func retireSemanticPlanningGeneration(aggregate *RuntimeAggregate, reason runtim
 		Snapshot:               snapshot,
 	}
 	newLedger := runtimecontract.RuntimeSemanticPlanningLedger{
+		FailureInputReview:     ledger.FailureInputReview.Clone(),
 		SchemaVersion:          ledger.SchemaVersion,
 		Phase:                  runtimecontract.RuntimeSemanticPlanningRequired,
 		DefinitionSeed:         ledger.DefinitionSeed.Clone(),
@@ -340,6 +348,7 @@ func retireSemanticPlanningGenerationForCWIReopen(aggregate *RuntimeAggregate, r
 		Snapshot:               snapshot,
 	}
 	newLedger := runtimecontract.RuntimeSemanticPlanningLedger{
+		FailureInputReview:     ledger.FailureInputReview.Clone(),
 		SchemaVersion:          ledger.SchemaVersion,
 		Phase:                  runtimecontract.RuntimeSemanticPlanningRequired,
 		DefinitionSeed:         ledger.DefinitionSeed.Clone(),
@@ -389,6 +398,7 @@ func retireSemanticPlanningGenerationForBindingContradiction(aggregate *RuntimeA
 		Snapshot:               snapshot,
 	}
 	newLedger := runtimecontract.RuntimeSemanticPlanningLedger{
+		FailureInputReview:     ledger.FailureInputReview.Clone(),
 		SchemaVersion:          ledger.SchemaVersion,
 		Phase:                  runtimecontract.RuntimeSemanticPlanningRequired,
 		DefinitionSeed:         ledger.DefinitionSeed.Clone(),
@@ -492,7 +502,8 @@ func retireSemanticPlanningGenerationForEligibilityChange(aggregate *RuntimeAggr
 		Snapshot:                 snapshot,
 	}
 	newLedger := runtimecontract.RuntimeSemanticPlanningLedger{
-		SchemaVersion: ledger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningRequired,
+		FailureInputReview: ledger.FailureInputReview.Clone(),
+		SchemaVersion:      ledger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningRequired,
 		DefinitionSeed: ledger.DefinitionSeed.Clone(), FeasibilityGaps: append([]runtimecontract.RuntimeSemanticFeasibilityGap(nil), ledger.FeasibilityGaps...),
 		CatalogRefreshAttempts: ledger.CatalogRefreshAttempts,
 		History:                ledger.History, HistoryArchive: ledger.HistoryArchive,
@@ -720,6 +731,9 @@ func SemanticPlanActiveCoverageIDsForDrive(facts runtimecontract.RuntimeFacts, o
 // owner transaction must finish validation/assessment before a later eligible
 // CWI may start a new semantic generation.
 func SemanticOperationAuthorityReady(aggregate RuntimeAggregate) bool {
+	if aggregate.SemanticPlanning.FailureInputReview != nil {
+		return false
+	}
 	// A retired owner catalog generation can temporarily coexist with its exact
 	// no-effect binding until SM-4 delivers the typed CWIBindingRetired event.
 	// That binding is immutable audit lineage, not reusable operation authority.
@@ -727,6 +741,9 @@ func SemanticOperationAuthorityReady(aggregate RuntimeAggregate) bool {
 	// operations request or terminal projection consumes the old snapshot.
 	if RuntimeCWIBindingRetirementPending(aggregate) {
 		return false
+	}
+	if runtimeFailureInputReviewedCurrentBinding(aggregate) {
+		return true
 	}
 	if aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningSealed {
 		return true
@@ -1665,6 +1682,9 @@ func semanticPendingFocuses(facts runtimecontract.RuntimeFacts, pending []common
 	for _, id := range runtimecontract.RuntimeCWIsEligibleForPlanning(facts) {
 		eligible[id] = struct{}{}
 	}
+	if manifest.FailureInputReview != nil {
+		eligible[manifest.FailureInputReview.Feedback.CoverageWorkItemID] = struct{}{}
+	}
 	// A validation-failure repair generation is deliberately CWI-local. Its
 	// manifest cannot absorb unrelated Definition proofs merely because they
 	// are concurrently eligible in the canonical queue. A normal cumulative
@@ -1750,6 +1770,9 @@ func prepareSemanticPlanningForAdvancedFocus(aggregate *RuntimeAggregate) (err e
 	// absent from the immutable manifest/order. Retire that generation inside
 	// the same owner-local CAS that advanced SM-2; a later projection event must
 	// never be required to repair already-stale semantic authority.
+	if ledger.FailureInputReview != nil {
+		return nil
+	}
 	_, closureChanged, err := currentRuntimeCWIOrderFromSemanticLineage(aggregate.Facts, *ledger.Manifest, ledger.CoverageOrderDocument.CoverageOrder)
 	if err != nil {
 		return err

@@ -48,11 +48,12 @@ func TestDriveRuntimeProjectConjunctionOwnerMainline(t *testing.T) {
 }
 
 type projectConjunctionExpectation struct {
-	ProtocolRef        string
-	RepairSources      int
-	RepairTargets      []string
-	ValidationReceipts int
-	BuildFailure       bool
+	RejectedPassedChecks int
+	ProtocolRef          string
+	RepairSources        int
+	RepairTargets        []string
+	ValidationReceipts   int
+	BuildFailure         bool
 }
 
 func assertProjectReceiptReplyLossBoundary(t *testing.T, aggregate runtime.RuntimeAggregate, success bool, selected ...projectConjunctionExpectation) runtimecontract.RuntimeOperationReceipt {
@@ -172,7 +173,9 @@ func assertProjectConjunctionPersistedOwnerOutputs(t *testing.T, ctx context.Con
 	repairSources := 0
 	repairTargets := []string{"cmd/delivery/main.go", "subject.go"}
 	buildFailure := len(selected) != 0 && selected[0].BuildFailure
+	rejectedPassed := 0
 	if len(selected) != 0 {
+		rejectedPassed = selected[0].RejectedPassedChecks
 		protocol, repairSources = selected[0].ProtocolRef, selected[0].RepairSources
 		if len(selected[0].RepairTargets) > 0 {
 			repairTargets = selected[0].RepairTargets
@@ -223,7 +226,7 @@ func assertProjectConjunctionPersistedOwnerOutputs(t *testing.T, ctx context.Con
 			if len(conjunction.Stages) != 4 || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted {
 				t.Fatal("accepted original receipt omitted a required stage")
 			}
-		} else if len(conjunction.Stages) != failureStages || !conjunction.Stages[failedStage].KnownFailure || conjunction.Stages[failedStage].ExitCode == 0 || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || len(observation.PassedChecks) != 0 {
+		} else if len(conjunction.Stages) != failureStages || !conjunction.Stages[failedStage].KnownFailure || conjunction.Stages[failedStage].ExitCode == 0 || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || len(observation.PassedChecks) != rejectedPassed {
 			t.Fatalf("original project failure disappeared or supplied current CWI proof: stages=%d expected=%d outcome=%s passed=%d known=%t exit=%d", len(conjunction.Stages), failureStages, receipt.Outcome, len(observation.PassedChecks), conjunction.Stages[failedStage].KnownFailure, conjunction.Stages[failedStage].ExitCode)
 		}
 		if !accepted && !buildFailure && repairSources == 0 && protocol == "shell/go-test-json/project-multi-failure-behavior" && (conjunction.Stages[2].DiagnosticSourceRef != "" || len(conjunction.Stages[2].BehaviorTargetRefs) != 0 || len(conjunction.BehaviorTargetRefs) != 0 || receipt.Feedback.OriginalDiagnostic != nil && receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation != nil) {

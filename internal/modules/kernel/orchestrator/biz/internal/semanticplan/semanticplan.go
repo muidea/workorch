@@ -17,14 +17,15 @@ import (
 // semantic manifest with the current owner facts.  Keeping this value type
 // here prevents the pure comparison from depending on RuntimeAggregate.
 type ManifestIdentity struct {
-	WorkspaceID       common.WorkspaceID
-	RunID             common.RunID
-	Definition        runtimecontract.RuntimeDefinitionContext
-	DefinitionSeed    runtimecontract.RuntimeDefinitionSeed
-	DefinitionFocuses []runtimecontract.RuntimeDefinitionFocus
-	Execution         runtimecontract.RuntimeExecutionContract
-	Admissibilities   []runtimecontract.RuntimeOperationAdmissibility
-	EligibleCoverage  []common.CoverageWorkItemID
+	FailureInputReview *runtimecontract.RuntimeValidationFailureInputReview
+	WorkspaceID        common.WorkspaceID
+	RunID              common.RunID
+	Definition         runtimecontract.RuntimeDefinitionContext
+	DefinitionSeed     runtimecontract.RuntimeDefinitionSeed
+	DefinitionFocuses  []runtimecontract.RuntimeDefinitionFocus
+	Execution          runtimecontract.RuntimeExecutionContract
+	Admissibilities    []runtimecontract.RuntimeOperationAdmissibility
+	EligibleCoverage   []common.CoverageWorkItemID
 	// ValidationFailureRepair is present only after a private SM-2 CWI reopen
 	// persisted the exact typed rejection and Profile convergence. It selects
 	// the shared repair-purpose compiler; it is never synthesized here.
@@ -55,6 +56,7 @@ func CompileManifest(identity ManifestIdentity) (runtimecontract.RuntimeSemantic
 			}
 		}
 	}
+	manifest.FailureInputReview = identity.FailureInputReview.Clone()
 	manifest.InputReviewInformation = runtimecontract.RuntimeSemanticInputReviewInformationForCatalogs(identity.InputReviewInformation, manifest.OwnerCatalogs)
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
 	if err := manifest.Validate(); err != nil {

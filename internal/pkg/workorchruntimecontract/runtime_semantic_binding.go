@@ -48,6 +48,9 @@ func compileRuntimeSemanticAcceptedBatchBindingsInSession(manifest RuntimeSemant
 // 仅复用同一次调用完整校验所得的 manifest；document 与 owner facts 仍逐批完整反证。
 func compileRuntimeSemanticBindingsWithValidatedManifest(validated runtimeValidatedSemanticManifest, logicalRequestID string, document RuntimeSemanticPlanDocument, feasibilities []RuntimeSemanticProofFeasibility) ([]CoverageFocus, RuntimeCWIReconciliationContract, error) {
 	manifest := validated.manifest
+	if manifest.FailureInputReview != nil {
+		return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("failure input review cannot create a new execution binding")
+	}
 	generationID := StableRuntimeSemanticGenerationID(manifest.Hash, logicalRequestID)
 	if generationID == "" {
 		return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("runtime semantic binding requires manifest and logical-request generation identity")
@@ -478,6 +481,29 @@ func runtimeSemanticProofFocusIdentity(generationID string, coverageID common.Co
 		return "", "", fmt.Errorf("runtime semantic focus requires an exact semantic generation identity")
 	}
 	return "semantic-focus-" + idSuffix + "-" + generationSuffix, "semantic-binding-" + idSuffix + "-" + generationSuffix, nil
+}
+
+// RuntimeSemanticAcceptedBatchAddressesBinding joins a committed binding to its
+// exact accepted source document. It consumes identity and integrity only; it
+// neither recompiles proof authority nor repeats the historical review judgment.
+func RuntimeSemanticAcceptedBatchAddressesBinding(batch RuntimeSemanticPlanBatch, document RuntimeSemanticPlanDocument, coverageID common.CoverageWorkItemID, ref RuntimeCWIBindingRef) bool {
+	if ref.Validate() != nil || batch.State != RuntimeSemanticPlanBatchAccepted || batch.ManifestHash != ref.SemanticManifestHash ||
+		document.ManifestHash != batch.ManifestHash || document.DefinitionSeedHash != batch.DefinitionSeedHash ||
+		document.BatchID != batch.BatchID || document.BatchSequence != batch.Sequence || batch.DocumentHash != StableRuntimeSemanticPlanDocumentHash(document) ||
+		!containsCoverageWorkItemID(batch.CoverageWorkItemIDs, coverageID) {
+		return false
+	}
+	var proposals []RuntimeSemanticProofProposal
+	for _, proposal := range document.Proposals {
+		if proposal.CoverageWorkItemID == coverageID {
+			proposals = append(proposals, proposal)
+		}
+	}
+	if len(proposals) == 0 {
+		return false
+	}
+	focusID, bindingID, err := runtimeSemanticProofFocusIdentity(StableRuntimeSemanticGenerationID(batch.ManifestHash, batch.RequestLogicalID), coverageID, proposals)
+	return err == nil && focusID == ref.FocusID && bindingID == ref.BindingID
 }
 
 func compileRuntimeSemanticFocus(validated runtimeValidatedSemanticManifest, generationID string, item RuntimeCoverageItem, proofSet RuntimeSemanticCWIProofSet, facts map[string]RuntimeSemanticProofFeasibility, source *CoverageFocus, evidenceObligation RuntimeSemanticEvidenceObligation) (CoverageFocus, error) {

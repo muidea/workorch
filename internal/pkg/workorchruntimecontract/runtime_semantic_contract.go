@@ -194,6 +194,7 @@ func StableRuntimeDefinitionSeedHash(seed RuntimeDefinitionSeed) string {
 // RuntimeSemanticPlanManifest bounds one semantic-plan provider request.  It
 // contains only owner-neutral catalogs already persisted for the transaction.
 type RuntimeSemanticPlanManifest struct {
+	FailureInputReview        *RuntimeValidationFailureInputReview `json:",omitempty"`
 	SchemaVersion             string
 	Hash                      string
 	WorkspaceID               common.WorkspaceID
@@ -769,6 +770,7 @@ func (c RuntimeSemanticPlanRequestContext) Validate(manifest RuntimeSemanticPlan
 }
 
 func (m RuntimeSemanticPlanManifest) Normalized() RuntimeSemanticPlanManifest {
+	m.FailureInputReview = m.FailureInputReview.Clone()
 	m.SchemaVersion = strings.TrimSpace(m.SchemaVersion)
 	m.Hash = strings.TrimSpace(m.Hash)
 	m.WorkspaceID = common.WorkspaceID(strings.TrimSpace(string(m.WorkspaceID)))
@@ -891,6 +893,9 @@ func validateRuntimeSemanticPlanManifest(m RuntimeSemanticPlanManifest) (runtime
 }
 
 func validateRuntimeSemanticPlanManifestInSession(m RuntimeSemanticPlanManifest, session *runtimeSemanticValidationSession) (runtimeValidatedSemanticManifest, error) {
+	if err := validateRuntimeFailureInputReviewManifest(m); err != nil {
+		return runtimeValidatedSemanticManifest{}, err
+	}
 	if err := validateRuntimeSemanticInputReviewInformation(m); err != nil {
 		return runtimeValidatedSemanticManifest{}, err
 	}
@@ -1609,6 +1614,7 @@ func StableRuntimeSemanticPlanManifestHash(manifest RuntimeSemanticPlanManifest)
 
 func stableRuntimeSemanticPlanManifestHashCanonical(manifest RuntimeSemanticPlanManifest) string {
 	h := newRuntimeHashWriter()
+	writeRuntimeFailureInputReviewHash(h, manifest.FailureInputReview)
 	writeRuntimeSemanticInputReviewInformationHash(h, manifest.InputReviewInformation)
 	writeHashString(h, RuntimeSemanticPlanManifestSchemaCurrent)
 	writeHashString(h, string(manifest.WorkspaceID))
@@ -2467,6 +2473,8 @@ const (
 	RuntimeSemanticPlanningRetirementImplementationPurpose  RuntimeSemanticPlanningRetirementReason = "implementation_purpose_selected"
 	RuntimeSemanticPlanningRetirementInputReviewInformation RuntimeSemanticPlanningRetirementReason = "input_review_information"
 	RuntimeSemanticPlanningRetirementInputRevision          RuntimeSemanticPlanningRetirementReason = "input_review_revision"
+	RuntimeSemanticPlanningRetirementFailureInputReview     RuntimeSemanticPlanningRetirementReason = "validation_failure_input_review"
+	RuntimeSemanticPlanningRetirementFailureInputReviewed   RuntimeSemanticPlanningRetirementReason = "validation_failure_input_reviewed"
 )
 
 // RuntimeSemanticPlanningHistoryLimit is the segment/tail size, NOT a Run
@@ -2638,6 +2646,19 @@ func validateRuntimeSemanticPlanningGenerationComplete(raw, g RuntimeSemanticPla
 	}
 
 	switch g.Reason {
+	case RuntimeSemanticPlanningRetirementFailureInputReview, RuntimeSemanticPlanningRetirementFailureInputReviewed:
+		if g.InputReviewResolutionID != "" || len(g.InvalidationSignatures)+len(g.PrerequisiteIDs)+len(g.ReopenedCoverageIDs)+len(g.ReopenTriggerRefs)+len(g.ChangedCoverageIDs)+len(g.ClosureChangeTriggerRefs) != 0 {
+			return fmt.Errorf("failure input review retirement carries unrelated lineage")
+		}
+		if g.Reason == RuntimeSemanticPlanningRetirementFailureInputReview && (g.Snapshot.Phase != RuntimeSemanticPlanningSealed || g.Snapshot.FailureInputReview != nil) {
+			return fmt.Errorf("failure input review requires original sealed proof")
+		}
+		if g.Reason == RuntimeSemanticPlanningRetirementFailureInputReviewed {
+			d, ok := runtimeFailureInputReviewDocument(g.Snapshot)
+			if !ok || ValidateRuntimeSemanticInputReviewConsistency(d) != nil {
+				return fmt.Errorf("completed failure input review requires exact consistent report")
+			}
+		}
 	case RuntimeSemanticPlanningRetirementImplementationPurpose:
 		if len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 || len(g.ChangedCoverageIDs) != 0 || len(g.ClosureChangeTriggerRefs) != 0 || g.Snapshot.Phase != RuntimeSemanticPlanningOrderAccepted || g.Snapshot.CoverageOrderDocument == nil || g.Snapshot.CoverageOrderDocument.ImplementationPurpose == "" {
 			return fmt.Errorf("implementation purpose retirement requires exact original accepted order only")
@@ -2730,12 +2751,13 @@ func validateRuntimeSemanticPlanningGenerationComplete(raw, g RuntimeSemanticPla
 // RuntimeSemanticPlanningLedger is persisted owner data.  pkg validates its
 // value shape only; Orchestrator private internal events own every transition.
 type RuntimeSemanticPlanningLedger struct {
-	SchemaVersion    string
-	Phase            RuntimeSemanticPlanningPhase
-	DefinitionSeed   RuntimeDefinitionSeed
-	Manifest         *RuntimeSemanticPlanManifest
-	Attempt          int
-	StablePrefixHash string
+	FailureInputReview *RuntimeValidationFailureInputReview `json:",omitempty"`
+	SchemaVersion      string
+	Phase              RuntimeSemanticPlanningPhase
+	DefinitionSeed     RuntimeDefinitionSeed
+	Manifest           *RuntimeSemanticPlanManifest
+	Attempt            int
+	StablePrefixHash   string
 	// LogicalRequestID is the current provider request-session cursor. During an
 	// attempt-1 correction it intentionally differs from the active batch's
 	// immutable RequestLogicalID and is never a sealed binding preimage by itself.
@@ -2785,6 +2807,7 @@ func NewRuntimeSemanticPlanningLedger(seed RuntimeDefinitionSeed) (RuntimeSemant
 }
 
 func (l RuntimeSemanticPlanningLedger) Normalized() RuntimeSemanticPlanningLedger {
+	l.FailureInputReview = l.FailureInputReview.Clone()
 	return l.normalizedForValidation(nil)
 }
 
@@ -3306,6 +3329,14 @@ func validateRuntimeSemanticPlanningLedgerNormalized(raw, l RuntimeSemanticPlann
 		}
 		if l.FeasibilityGaps[idx].RefreshGeneration != idx {
 			return fmt.Errorf("runtime semantic feasibility gap generation %d is not contiguous", l.FeasibilityGaps[idx].RefreshGeneration)
+		}
+	}
+	if l.Manifest != nil && !runtimeRawEqual(l.FailureInputReview, l.Manifest.FailureInputReview) {
+		return fmt.Errorf("failure input review ledger/manifest mismatch")
+	}
+	if l.FailureInputReview != nil {
+		if err := l.FailureInputReview.Validate(); err != nil {
+			return err
 		}
 	}
 	switch l.Phase {

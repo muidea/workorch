@@ -38,19 +38,20 @@ type runtimeSemanticDefinitionSeedProjection struct {
 }
 
 type runtimeSemanticManifestProjection struct {
-	ValidationGenerationContexts []runtimeValidationGenerationContextProjection `json:"validationGenerationContexts,omitempty"`
-	SchemaVersion                string                                         `json:"schemaVersion"`
-	Hash                         string                                         `json:"hash"`
-	DefinitionRevision           string                                         `json:"definitionRevision"`
-	DefinitionSeedHash           string                                         `json:"definitionSeedHash"`
-	OperationContractRevision    string                                         `json:"operationContractRevision"`
-	CoverageItems                []runtimecontract.RuntimeCoverageItem          `json:"coverageItems"`
-	AllowedOwnerModuleIDs        []string                                       `json:"allowedOwnerModuleIds,omitempty"`
-	AllowedOperationKinds        []string                                       `json:"allowedOperationKinds,omitempty"`
-	AllowedTargetPolicies        []runtimecontract.RuntimeOperationTargetPolicy `json:"allowedTargetPolicies,omitempty"`
-	ProofObligations             []runtimeSemanticProofObligationProjection     `json:"proofObligations,omitempty"`
-	OwnerCatalogs                []runtimeSemanticOwnerCatalogProjection        `json:"ownerCatalogs,omitempty"`
-	ImplementationPurpose        *runtimeSemanticImplementationWorkProjection   `json:"implementationPurpose,omitempty"`
+	FailureInputReviewSubjectHash string                                         `json:"failureInputReviewSubjectHash,omitempty"`
+	ValidationGenerationContexts  []runtimeValidationGenerationContextProjection `json:"validationGenerationContexts,omitempty"`
+	SchemaVersion                 string                                         `json:"schemaVersion"`
+	Hash                          string                                         `json:"hash"`
+	DefinitionRevision            string                                         `json:"definitionRevision"`
+	DefinitionSeedHash            string                                         `json:"definitionSeedHash"`
+	OperationContractRevision     string                                         `json:"operationContractRevision"`
+	CoverageItems                 []runtimecontract.RuntimeCoverageItem          `json:"coverageItems"`
+	AllowedOwnerModuleIDs         []string                                       `json:"allowedOwnerModuleIds,omitempty"`
+	AllowedOperationKinds         []string                                       `json:"allowedOperationKinds,omitempty"`
+	AllowedTargetPolicies         []runtimecontract.RuntimeOperationTargetPolicy `json:"allowedTargetPolicies,omitempty"`
+	ProofObligations              []runtimeSemanticProofObligationProjection     `json:"proofObligations,omitempty"`
+	OwnerCatalogs                 []runtimeSemanticOwnerCatalogProjection        `json:"ownerCatalogs,omitempty"`
+	ImplementationPurpose         *runtimeSemanticImplementationWorkProjection   `json:"implementationPurpose,omitempty"`
 }
 
 // 工作 C3 只投影完整有界 vocabulary 与 exact owner scope；不携带 receipt、预算权限或原始诊断。
@@ -344,6 +345,9 @@ func runtimeSemanticManifestForProvider(manifest runtimecontract.RuntimeSemantic
 		SchemaVersion: manifest.SchemaVersion, Hash: manifest.Hash,
 		DefinitionRevision: manifest.DefinitionRevision, DefinitionSeedHash: manifest.DefinitionSeedHash,
 		OperationContractRevision: manifest.OperationContractRevision, CoverageItems: items,
+	}
+	if manifest.FailureInputReview != nil {
+		projection.FailureInputReviewSubjectHash = manifest.FailureInputReview.SubjectHash
 	}
 	if step == runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
 		for _, obligation := range manifest.ProofObligations {

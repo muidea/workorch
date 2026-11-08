@@ -3,6 +3,8 @@ package llm
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1944,7 +1946,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 			}
 		}
 		tail := withFeedback.PromptContext.Sections[4].Content
-		for _, want := range []string{"currentValidationFailure", "causal-validation-receipt", "check-A", "checks/a.test", `"line":47`, `"failureDetailsIncomplete":false`, `"occurrences":1`, `"contentContractRef":"owner/input/v1"`, `"contentRequirements":"One declared entry with local supporting declarations."`, `"inputLocations"`, `"line":137`, `"column":23`, `"symbol":"expectedvalue"`} {
+		for _, want := range []string{"currentValidationFailure", "causal-validation-receipt", "check-A", "checks/a.test", `"line":47`, `"failureDetailsIncomplete":true`, `"occurrences":1`, `"contentContractRef":"owner/input/v1"`, `"contentRequirements":"One declared entry with local supporting declarations."`, `"inputLocations"`, `"line":137`, `"column":23`, `"symbol":"expectedvalue"`} {
 			if !strings.Contains(tail, want) {
 				t.Fatalf("final C4 lost current failure fact %q: %s", want, tail)
 			}
@@ -1962,6 +1964,10 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 		failed.Validation.CheckFailures[0].ComparisonHash = strings.Repeat("c", 64)
 		for _, complete := range []bool{false, true} {
 			if complete {
+				body := "expected object, got array"
+				digest := sha256.Sum256([]byte(body))
+				failed.Validation.CheckFailures[0].AssertionText = body
+				failed.Validation.CheckFailures[0].DiagnosticHash = hex.EncodeToString(digest[:])
 				failed.Validation.CheckFailures[0].ReportedAssertion = runtimecontract.RuntimeValidationReportedAssertion{
 					Code: "shape_mismatch", ExpectedShape: "object", ObservedShape: "array",
 				}

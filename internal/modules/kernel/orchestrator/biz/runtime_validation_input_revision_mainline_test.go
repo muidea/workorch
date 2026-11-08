@@ -196,6 +196,9 @@ func assertRuntimeInputRevisionMainline(t *testing.T, a runtime.RuntimeAggregate
 		}
 	}
 	wantReviews := wantRounds + 1
+	if mode == "input_revision_after_failure" {
+		wantReviews++
+	}
 	if mode == "input_revision_structure" {
 		wantReviews = 1
 	}
@@ -444,5 +447,66 @@ func TestDriveRuntimeDeclaredArithmeticInputConflictAndRecovery(t *testing.T) {
 	baseline := runValidationInputReviewMainline(t, "input_revision_numeric", "")
 	if got := runValidationInputReviewMainline(t, "input_revision_numeric", "after_input_revision_receipt"); got != baseline {
 		t.Fatalf("recovery repeated provider calls: %d != %d", got, baseline)
+	}
+}
+
+// Real failed Shell receipt -> new independent review -> protected File input
+// maintenance -> fresh all-of validation/assessment -> ordered owner closeout.
+func TestDriveRuntimeFailedValidationInputRevisionAndRecovery(t *testing.T) {
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol}
+	baseline := runValidationInputReviewMainline(t, "input_revision_after_failure", "", options)
+	for _, cut := range []string{"after_failure_input_review_open", "after_failure_input_review_document", "after_input_revision_receipt"} {
+		t.Run(cut, func(t *testing.T) {
+			if calls := runValidationInputReviewMainline(t, "input_revision_after_failure", cut, options); calls != baseline {
+				t.Fatalf("recovery repeated a completed provider call: %d != %d", calls, baseline)
+			}
+		})
+	}
+}
+
+func assertFailureInputReviewCommittedResult(t *testing.T, a runtime.RuntimeAggregate, conflict bool) {
+	t.Helper()
+	reason := runtimecontract.RuntimeSemanticPlanningRetirementFailureInputReviewed
+	conclusion := runtimecontract.RuntimeValidationInputConsistent
+	if conflict {
+		reason = runtimecontract.RuntimeSemanticPlanningRetirementInputRevision
+		conclusion = runtimecontract.RuntimeValidationInputConflict
+	}
+	matches := 0
+	for _, g := range a.SemanticPlanning.AllHistory() {
+		source := g.Snapshot.FailureInputReview
+		if g.Reason != reason || source == nil {
+			continue
+		}
+		matches++
+		if source.Validate() != nil || source.Feedback.WorkspaceID != a.Facts.WorkspaceID || source.Feedback.RunID != a.Facts.RunID {
+			t.Fatal("review result lost exact original source")
+		}
+		receiptMatches := 0
+		for _, r := range a.OperationReceipts {
+			if runtimecontract.StableRuntimeOperationReceiptHash(r) == source.Feedback.ReceiptHash && r.Outcome == runtimecontract.RuntimeOperationOutcomeRejected {
+				receiptMatches++
+			}
+		}
+		if receiptMatches != 1 {
+			t.Fatal("review did not bind exactly one original rejected receipt")
+		}
+		reports := 0
+		for _, d := range g.Snapshot.BatchDocuments {
+			if d.BatchID != g.Snapshot.ActiveBatchID {
+				continue
+			}
+			for _, p := range d.Proposals {
+				if p.ValidationInputReview != nil && p.ValidationInputReview.SubjectHash == source.SubjectHash && runtimecontract.RuntimeValidationInputReviewConclusion(*p.ValidationInputReview) == conclusion {
+					reports++
+				}
+			}
+		}
+		if reports != 1 {
+			t.Fatal("missing unique formal independent review result")
+		}
+	}
+	if matches != 1 {
+		t.Fatalf("failure input was reviewed %d times", matches)
 	}
 }

@@ -1859,6 +1859,7 @@ func cloneRuntimeSemanticPlanDocumentRaw(in RuntimeSemanticPlanDocument) Runtime
 
 func cloneRuntimeSemanticPlanManifestRaw(in RuntimeSemanticPlanManifest) RuntimeSemanticPlanManifest {
 	out := in
+	out.FailureInputReview = in.FailureInputReview.Clone()
 	out.InputReviewInformation = cloneRuntimeStateRawSlice(in.InputReviewInformation, func(item RuntimeValidationInputReviewInformation) RuntimeValidationInputReviewInformation {
 		return item
 	})
@@ -1893,6 +1894,7 @@ func cloneRuntimeSemanticPlanningGenerationRaw(in RuntimeSemanticPlanningGenerat
 
 func cloneRuntimeSemanticPlanningLedgerRaw(in RuntimeSemanticPlanningLedger) RuntimeSemanticPlanningLedger {
 	out := in
+	out.FailureInputReview = in.FailureInputReview.Clone()
 	out.CompiledOrder = cloneRuntimeStateRawPointer(in.CompiledOrder, func(v RuntimeSemanticCompiledOrder) RuntimeSemanticCompiledOrder { return v })
 	out.DefinitionSeed = cloneRuntimeDefinitionSeedRaw(in.DefinitionSeed)
 	out.Manifest = cloneRuntimeStateRawPointer(in.Manifest, func(item RuntimeSemanticPlanManifest) RuntimeSemanticPlanManifest {

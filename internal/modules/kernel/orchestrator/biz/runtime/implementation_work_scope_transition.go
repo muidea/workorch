@@ -17,7 +17,7 @@ func implementationWorkScopeSources(a RuntimeAggregate, cwi common.CoverageWorkI
 	if err := rejectRuntimeProgressAfterTermination(a); err != nil {
 		return runtimecontract.RuntimeImplementationWorkScopeSources{}, err
 	}
-	if a.ActiveDispatch != nil || a.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || a.Facts.Failure != nil || a.Facts.RepairDirective != nil {
+	if a.ActiveDispatch != nil || a.SemanticPlanning.FailureInputReview != nil || a.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || a.Facts.Failure != nil || a.Facts.RepairDirective != nil {
 		return runtimecontract.RuntimeImplementationWorkScopeSources{}, fmt.Errorf("%w: ordinary work scope cannot bypass dispatch, semantic purpose or repair", common.ErrConflict)
 	}
 	if !slices.Contains(runtimecontract.RuntimeCWIsEligibleForPlanning(a.Facts), cwi) {
@@ -81,7 +81,7 @@ func CurrentRuntimeImplementationWorkReservation(a RuntimeAggregate) (*runtimeco
 // RuntimeImplementationWorkPurposePending 只读取 persisted purpose/round 与 exact CWI 声明。
 // 它不选择 effect；terminal choice、repair、失败和其它 CWI 均不会得到工作豁免。
 func RuntimeImplementationWorkPurposePending(a RuntimeAggregate) bool {
-	if a.Termination != nil || a.Facts.Failure != nil || a.Facts.RepairDirective != nil || len(a.Facts.Focus.CoverageWorkItemIDs) != 1 {
+	if a.Termination != nil || a.SemanticPlanning.FailureInputReview != nil || a.Facts.Failure != nil || a.Facts.RepairDirective != nil || len(a.Facts.Focus.CoverageWorkItemIDs) != 1 {
 		return false
 	}
 	cwi := a.Facts.Focus.CoverageWorkItemIDs[0]
@@ -151,7 +151,7 @@ func RuntimeSemanticPrerequisitesPendingForAggregate(a RuntimeAggregate) bool {
 // scope 需求，不授权实现；下一轮 effect 仍要新的模型提议及 owner feasibility。
 func NextRuntimeImplementationWorkScopeRequest(a RuntimeAggregate) (*runtimecontract.RuntimeImplementationWorkScopeRequest, error) {
 	current, err := CurrentRuntimeImplementationWorkReservation(a)
-	if err != nil || current != nil || a.ActiveDispatch != nil || a.Termination != nil || a.Facts.Failure != nil || a.Facts.RepairDirective != nil || a.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired {
+	if err != nil || current != nil || a.ActiveDispatch != nil || a.Termination != nil || a.SemanticPlanning.FailureInputReview != nil || a.Facts.Failure != nil || a.Facts.RepairDirective != nil || a.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired {
 		return nil, err
 	}
 	if len(a.Facts.Focus.CoverageWorkItemIDs) != 1 {

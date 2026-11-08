@@ -1,7 +1,10 @@
 package workorchruntimecontract
 
-// ProjectRuntimeValidationExecutionFeedback drops raw text and projects only
-// the bounded diagnostic protocol shared by semantic and operation requests.
+const RuntimeValidationAssertionMaxBytes = 16 * 1024
+const RuntimeValidationAssertionsMaxBytes = 128 * 1024
+
+// ProjectRuntimeValidationExecutionFeedback selects the observed failing
+// assertions, not the unrelated transcript. Native bodies remain byte-exact.
 func ProjectRuntimeValidationExecutionFeedback(value *RuntimeValidationObservation) *RuntimeValidationExecutionFeedback {
 	if value == nil {
 		return nil
@@ -33,13 +36,10 @@ func ProjectRuntimeValidationExecutionFeedback(value *RuntimeValidationObservati
 	} else {
 		ret.FailureDetailsIncomplete = true
 	}
-	// The explicit diagnostic extension distinguishes traceable locations from
-	// actionable reported shapes; neither a line nor a hash supplies an assertion.
-	if o.FailureDetailProtocolRef == RuntimeValidationFailureDetailProtocol {
-		for _, detail := range ret.CheckFailures {
-			if detail.ReportedAssertion == (RuntimeValidationReportedAssertion{}) {
-				ret.FailureDetailsIncomplete = true
-			}
+	// A location/hash or a closed shape cannot replace the native body.
+	for _, detail := range ret.CheckFailures {
+		if detail.AssertionText == "" {
+			ret.FailureDetailsIncomplete = true
 		}
 	}
 	for _, check := range o.FailedChecks {

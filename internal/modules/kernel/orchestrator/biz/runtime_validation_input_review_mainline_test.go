@@ -216,7 +216,7 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 	}
 	bootstrap.Activation.EvidencePolicies[0].RecipeAdapterRef = options.Adapter
 	bootstrap.Activation.EvidencePolicies[0].RecipeInputReviewProtocolRef = options.ProtocolRef
-	if projectBehaviorRepair {
+	if projectBehaviorRepair || mode == "input_revision_after_failure" {
 		convergence := bootstrap.DefinitionFocuses[1].ValidationFailureRepairConvergence.Clone()
 		route := convergence.Routes[0].Clone()
 		route.ID, route.RequireInputAddition = "multi-source-failure-to-confirmed-file-edit", false
@@ -323,6 +323,11 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 	projectExecutionCounter := filepath.Join(root, "project-executions")
 	// 成功合取的 ordinary/race 两阶段均执行原工程；已知 ordinary 失败则不进入 race。
 	projectExecutionCount := strings.Repeat("executed\n", 2*options.ValidationCount)
+	if mode == "input_revision_after_failure" {
+		// One failed project test plus fresh ordinary/race; the source-specific
+		// diagnostic runs only the failing generated check, not TestHistorical.
+		projectExecutionCount = "executed\nexecuted\nexecuted\n"
+	}
 	if mode == "project_history_failure" {
 		projectExecutionCount = "executed\n"
 		if options.Adapter == shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
@@ -614,6 +619,9 @@ func %s(t *testing.T) {
 							conclusion = runtimecontract.RuntimeValidationInputConflict
 						}
 					}
+				}
+				if mode == "input_revision_after_failure" && validationCalls == 0 {
+					conclusion = runtimecontract.RuntimeValidationInputConsistent
 				}
 				if mode == "conflict" || mode == "omission" {
 					conclusion = runtimecontract.RuntimeValidationInputConflict
@@ -933,6 +941,10 @@ func %s(t *testing.T) {
 					}
 				}
 				return false
+			case "after_failure_input_review_open":
+				return a.SemanticPlanning.FailureInputReview != nil && a.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningRequired
+			case "after_failure_input_review_document":
+				return a.SemanticPlanning.FailureInputReview != nil && a.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted
 			case "after_input_revision_retirement":
 				for _, g := range a.SemanticPlanning.History {
 					if g.Reason == runtimecontract.RuntimeSemanticPlanningRetirementInputRevision {
@@ -1297,7 +1309,7 @@ func %s(t *testing.T) {
 		t.Logf("terminal original diagnostic: %s", diag)
 	}
 	submissionUnknown := cut == "after_assessment_submission"
-	success := (mode == "consistent" || mode == "clarify" || (mode == "input_revision" || mode == "input_revision_growth" || mode == "input_revision_dependency" || mode == "input_revision_omission" || mode == "input_revision_long" || mode == "input_revision_structure" || mode == "input_revision_numeric") || projectRepair) && !submissionUnknown
+	success := (mode == "consistent" || mode == "clarify" || (mode == "input_revision" || mode == "input_revision_growth" || mode == "input_revision_dependency" || mode == "input_revision_omission" || mode == "input_revision_long" || mode == "input_revision_structure" || mode == "input_revision_numeric" || mode == "input_revision_after_failure") || projectRepair) && !submissionUnknown
 	if (completed.Decision.State == runtimecontract.ConvergenceStateComplete) != success {
 		if completed.Facts.Failure != nil && completed.Facts.Failure.OriginalDiagnostic != nil {
 			t.Logf("original failure diagnostic: %+v", *completed.Facts.Failure.OriginalDiagnostic)
@@ -1331,6 +1343,9 @@ func %s(t *testing.T) {
 	}
 	expectedValidations := options.ValidationCount
 	if projectRepair {
+		expectedValidations++
+	}
+	if mode == "input_revision_after_failure" {
 		expectedValidations++
 	}
 	if success && validationCalls != expectedValidations || !success && !submissionUnknown && mode != "source_B_failure" && mode != "project_history_failure" && validationCalls != 0 || (mode == "source_B_failure" || submissionUnknown) && validationCalls != 1 {
@@ -1488,7 +1503,11 @@ func %s(t *testing.T) {
 			t.Fatal("multi-file review borrowed an aggregate hash or omitted an effect")
 		}
 	}
+	if mode == "input_revision_after_failure" {
+		assertFailureInputReviewCommittedResult(t, completed, true)
+	}
 	if projectBehaviorRepair {
+		assertFailureInputReviewCommittedResult(t, completed, false)
 		assertMultiFailureConfirmedRepairFacts(t, runtimeStateRecordFromAggregate(completed), options.MultiFileProject)
 		if originalRepairReceipt != nil {
 			current, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(completed.OperationReceipts, originalRepairReceipt.ExecutionKey, originalRepairReceipt.Fence)
@@ -1539,6 +1558,9 @@ func %s(t *testing.T) {
 		}
 		if projectBehaviorRepair {
 			expectation.RepairSources = len(preparations[requirements[0].Hash].CheckAttestations) + 1
+		}
+		if mode == "input_revision_after_failure" {
+			expectation.RepairSources, expectation.RejectedPassedChecks = 1, 1
 		}
 		assertProjectConjunctionPersistedOwnerOutputs(t, ctx, hub, module, *reopened.RuntimeState, success, expectation)
 		counter, err := os.ReadFile(projectExecutionCounter)

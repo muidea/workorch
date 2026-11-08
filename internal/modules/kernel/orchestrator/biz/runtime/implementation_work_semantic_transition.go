@@ -85,8 +85,24 @@ func projectImplementationPurpose(a *RuntimeAggregate) (bool, error) {
 // projects a bounded state-change output without rewriting terminal Focus proof.
 func reduceImplementationWork(a RuntimeAggregate) (runtimecontract.RuntimeDecision, bool, error) {
 	round, err := CurrentRuntimeImplementationWorkReservation(a)
-	if err != nil || round == nil || round.WorkingBinding == nil {
+	if err != nil {
 		return runtimecontract.RuntimeDecision{}, false, err
+	}
+	if (round == nil || round.WorkingBinding == nil) && a.ActiveDispatch == nil && a.Termination == nil && a.Facts.Failure == nil && a.Facts.RepairDirective == nil && a.SemanticPlanning.FailureInputReview == nil && len(a.Facts.Focus.CoverageWorkItemIDs) == 1 && len(a.Facts.Prerequisites.Pending) == 0 {
+		pending, err := runtimecontract.PendingRuntimeValidationInputRevision(a.SemanticPlanning, a.ImplementationWork, a.Facts.Focus.CoverageWorkItemIDs[0])
+		if err != nil {
+			return runtimecontract.RuntimeDecision{}, false, err
+		}
+		if pending != nil {
+			// The committed conflict owns input maintenance until its work binding
+			// is sealed. Retained repair counters are audit/budget facts, not a new
+			// generic missing-evidence directive that can preempt this transaction.
+			decision, err := validationOutputDecision(runtimecontract.RuntimeDecision{Focus: a.Facts.Focus}, a.Facts)
+			return decision, true, err
+		}
+	}
+	if round == nil || round.WorkingBinding == nil {
+		return runtimecontract.RuntimeDecision{}, false, nil
 	}
 	if a.Facts.Failure != nil || a.Facts.RepairDirective != nil || a.Termination != nil {
 		return runtimecontract.RuntimeDecision{}, false, nil

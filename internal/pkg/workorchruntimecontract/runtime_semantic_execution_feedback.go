@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -15,31 +16,37 @@ const RuntimeSemanticExecutionFeedbackMaxBytes = 64 * 1024
 // RuntimeSemanticExecutionFeedback is a detached factual C4 value, not a
 // second planning ledger. Its authority references come from the sealed repair
 // obligation; execution references come from the matching committed receipt.
-// No raw diagnostics, operation parameters, next action or credit travel here.
+// Only applicable source-bound assertion bodies and the prior formal report
+// travel here; unrelated logs, operation parameters and credit do not.
 type RuntimeSemanticExecutionFeedback struct {
-	WorkspaceID        common.WorkspaceID                  `json:"workspaceId"`
-	RunID              common.RunID                        `json:"runId"`
-	DefinitionRevision string                              `json:"definitionRevision"`
-	StartupInputHash   string                              `json:"startupInputHash"`
-	ManifestHash       string                              `json:"manifestHash"`
-	CoverageWorkItemID common.CoverageWorkItemID           `json:"coverageWorkItemId"`
-	FailedFocusID      string                              `json:"failedFocusId"`
-	FailureSignature   string                              `json:"failureSignature"`
-	OwnerModuleID      string                              `json:"ownerModuleId"`
-	OperationKind      string                              `json:"operationKind"`
-	EvidenceID         common.EvidenceRecordID             `json:"evidenceId"`
-	EvidenceRevision   string                              `json:"evidenceRevision"`
-	DispatchID         string                              `json:"dispatchId"`
-	OperationID        string                              `json:"operationId"`
-	ReceiptRef         string                              `json:"receiptRef"`
-	ReceiptHash        string                              `json:"receiptHash"`
-	Validation         *RuntimeValidationExecutionFeedback `json:"validation"`
-	Diagnostic         *RuntimeSemanticExecutionDiagnostic `json:"diagnostic"`
-	Hash               string                              `json:"hash"`
+	PreviousInputReview *RuntimeValidationInputReviewFeedback `json:"previousInputReview,omitempty"`
+	WorkspaceID         common.WorkspaceID                    `json:"workspaceId"`
+	RunID               common.RunID                          `json:"runId"`
+	DefinitionRevision  string                                `json:"definitionRevision"`
+	StartupInputHash    string                                `json:"startupInputHash"`
+	ManifestHash        string                                `json:"manifestHash"`
+	CoverageWorkItemID  common.CoverageWorkItemID             `json:"coverageWorkItemId"`
+	FailedFocusID       string                                `json:"failedFocusId"`
+	FailureSignature    string                                `json:"failureSignature"`
+	OwnerModuleID       string                                `json:"ownerModuleId"`
+	OperationKind       string                                `json:"operationKind"`
+	EvidenceID          common.EvidenceRecordID               `json:"evidenceId"`
+	EvidenceRevision    string                                `json:"evidenceRevision"`
+	DispatchID          string                                `json:"dispatchId"`
+	OperationID         string                                `json:"operationId"`
+	ReceiptRef          string                                `json:"receiptRef"`
+	ReceiptHash         string                                `json:"receiptHash"`
+	Validation          *RuntimeValidationExecutionFeedback   `json:"validation"`
+	Diagnostic          *RuntimeSemanticExecutionDiagnostic   `json:"diagnostic"`
+	Hash                string                                `json:"hash"`
 }
 
 func (f RuntimeSemanticExecutionFeedback) Clone() RuntimeSemanticExecutionFeedback {
 	f.Diagnostic = f.Diagnostic.Clone()
+	if f.PreviousInputReview != nil {
+		v := f.PreviousInputReview.Clone()
+		f.PreviousInputReview = &v
+	}
 	if f.Validation != nil {
 		v := f.Validation.Clone()
 		f.Validation = &v
@@ -60,7 +67,17 @@ func StableRuntimeSemanticExecutionFeedbackHash(f RuntimeSemanticExecutionFeedba
 // invitation for the provider to reconstruct it from a signature or prose.
 func ValidateRuntimeSemanticExecutionFeedback(c RuntimeSemanticPlanRequestContext, m RuntimeSemanticPlanManifest) error {
 	expected := map[common.CoverageWorkItemID]RuntimeSemanticValidationFailureRepair{}
-	if c.PlanStep == RuntimeSemanticPlanStepProofBatch {
+	if c.PlanStep == RuntimeSemanticPlanStepProofBatch && m.FailureInputReview != nil {
+		s := m.FailureInputReview
+		if err := s.Validate(); err != nil {
+			return err
+		}
+		f := s.Feedback
+		if len(c.BatchCoverageWorkItemIDs) != 1 || c.BatchCoverageWorkItemIDs[0] != f.CoverageWorkItemID {
+			return fmt.Errorf("failure input review batch scope mismatch")
+		}
+		expected[f.CoverageWorkItemID] = RuntimeSemanticValidationFailureRepair{FailedFocusID: f.FailedFocusID, FailureSignature: f.FailureSignature, TriggerOwnerModuleID: f.OwnerModuleID, TriggerOperationKind: f.OperationKind}
+	} else if c.PlanStep == RuntimeSemanticPlanStepProofBatch {
 		for _, obligation := range m.ProofObligations {
 			if obligation.ValidationFailureRepair != nil && containsCoverageWorkItemID(c.BatchCoverageWorkItemIDs, obligation.CoverageWorkItemID) {
 				expected[obligation.CoverageWorkItemID] = *obligation.ValidationFailureRepair
@@ -75,6 +92,14 @@ func ValidateRuntimeSemanticExecutionFeedback(c RuntimeSemanticPlanRequestContex
 		return fmt.Errorf("semantic execution feedback exceeds bounded context capacity")
 	}
 	for _, f := range c.ExecutionFeedback {
+		if m.FailureInputReview != nil {
+			expectedFeedback := m.FailureInputReview.Feedback.Clone()
+			expectedFeedback.ManifestHash = m.Hash
+			expectedFeedback.Hash = StableRuntimeSemanticExecutionFeedbackHash(expectedFeedback)
+			if !reflect.DeepEqual(f, expectedFeedback) {
+				return fmt.Errorf("failure input review feedback differs from sealed source")
+			}
+		}
 		r, found := expected[f.CoverageWorkItemID]
 		if !found || f.WorkspaceID != c.WorkspaceID || f.RunID != c.RunID || f.DefinitionRevision != c.Definition.Revision ||
 			f.StartupInputHash != c.Definition.StartupInputHash || f.ManifestHash != m.Hash || f.FailedFocusID != r.FailedFocusID ||
@@ -85,6 +110,9 @@ func ValidateRuntimeSemanticExecutionFeedback(c RuntimeSemanticPlanRequestContex
 		if !known || descriptor.OwnerModuleID != f.OwnerModuleID || f.EvidenceID == "" || f.EvidenceRevision == "" ||
 			f.DispatchID == "" || f.OperationID == "" || f.ReceiptRef == "" || f.ReceiptHash == "" || f.Hash != StableRuntimeSemanticExecutionFeedbackHash(f) {
 			return fmt.Errorf("semantic execution feedback has incomplete or changed provenance")
+		}
+		if m.FailureInputReview == nil && f.PreviousInputReview != nil {
+			return fmt.Errorf("previous input review is inapplicable outside failure input review")
 		}
 		if f.Validation != nil {
 			if err := f.Validation.Validate(); err != nil {
@@ -120,12 +148,12 @@ type RuntimeValidationExecutionFeedback struct {
 }
 
 func (f RuntimeValidationExecutionFeedback) Clone() RuntimeValidationExecutionFeedback {
-	f.ExecutedChecks = append([]string(nil), f.ExecutedChecks...)
-	f.PassedChecks = append([]string(nil), f.PassedChecks...)
-	f.FailedChecks = append([]string(nil), f.FailedChecks...)
-	f.SkippedChecks = append([]string(nil), f.SkippedChecks...)
-	f.IncompleteChecks = append([]string(nil), f.IncompleteChecks...)
-	f.CheckFailures = append([]RuntimeValidationCheckFailure(nil), f.CheckFailures...)
+	f.ExecutedChecks = slices.Clone(f.ExecutedChecks)
+	f.PassedChecks = slices.Clone(f.PassedChecks)
+	f.FailedChecks = slices.Clone(f.FailedChecks)
+	f.SkippedChecks = slices.Clone(f.SkippedChecks)
+	f.IncompleteChecks = slices.Clone(f.IncompleteChecks)
+	f.CheckFailures = slices.Clone(f.CheckFailures)
 	return f
 }
 

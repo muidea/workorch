@@ -137,7 +137,14 @@ func completeEvidenceDispatch(
 			return err
 		}
 	}
-	repairSurfaceConfirmationPending := false
+	reviewPending := false
+	if admission.Evidence.Status == ExecutionEvidenceStatusRejected && !invalidated && !repairRejected && !diagnosticUnavailable {
+		reviewPending, err = openRuntimeFailureInputReview(aggregate, fact, admission.Operation)
+		if err != nil {
+			return err
+		}
+	}
+	repairSurfaceConfirmationPending := reviewPending
 	if admission.Evidence.Status == ExecutionEvidenceStatusAccepted && !invalidated {
 		if repair, found, err := currentRuntimeSemanticValidationFailureRepair(*aggregate); err != nil {
 			return err
@@ -156,7 +163,7 @@ func completeEvidenceDispatch(
 			}
 		}
 	}
-	if admission.Evidence.Status == ExecutionEvidenceStatusRejected && !invalidated && !repairRejected && !diagnosticUnavailable {
+	if admission.Evidence.Status == ExecutionEvidenceStatusRejected && !invalidated && !repairRejected && !diagnosticUnavailable && !reviewPending {
 		// A structured observation waits for owner confirmation only when its exact
 		// diagnostic tuple has a sealed Profile route. A complete but unmatched
 		// tuple is terminal in this receipt CAS just like a target-free unmatched
@@ -204,7 +211,7 @@ func completeEvidenceDispatch(
 	if err != nil {
 		return err
 	}
-	canAdvanceFocus := !invalidated && len(aggregate.Facts.Prerequisites.Pending) == 0
+	canAdvanceFocus := !invalidated && !reviewPending && len(aggregate.Facts.Prerequisites.Pending) == 0
 	previousFocusID := aggregate.Facts.Focus.ID
 	if canAdvanceFocus && !historicalHandoff {
 		advanced, err := advanceRuntimeCWIFocus(aggregate.Facts, aggregate.CoverageProofLineage)

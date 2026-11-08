@@ -40,7 +40,10 @@ func TestShellValidationFailureDetailsJoinExactFailedCheckAfterNoisyOutput(t *te
 		t.Fatalf("wrong check/location association: %+v", detail)
 	}
 	encoded, _ := json.Marshal(observation.CheckFailures)
-	for _, private := range []string{"private-token", "private-value", "/outside", "unrelated assertion"} {
+	if detail.AssertionText != "expected private-token, got private-value" {
+		t.Fatal("exact scoped assertion lost")
+	}
+	for _, private := range []string{"/outside", "unrelated assertion"} {
 		if strings.Contains(string(encoded), private) {
 			t.Fatalf("raw text leaked: %s", encoded)
 		}
@@ -55,7 +58,7 @@ func TestShellValidationFailureDetailsAreBoundedAndDoNotInventLocations(t *testi
 		goTestJSONFacts: &shellGoTestJSONFacts{}}
 	for i := 0; i <= runtimecontract.RuntimeValidationFailureDetailLimit; i++ {
 		output.goTestJSONFacts.DiagnosticRecords = append(output.goTestJSONFacts.DiagnosticRecords, shellGoTestJSONDiagnosticRecord{
-			Action: "output", Test: "TestA", Output: fmt.Sprintf("a_test.go:%d: assertion %d", i+1, i)})
+			Action: "output", Test: "TestA", Output: fmt.Sprintf("a_test.go:%d: assertion %d\n", i+1, i)})
 	}
 	request := RuntimeCommandRequest{ValidationScopeTargetRefs: []string{"a_test.go"}}
 	attachShellValidationCheckFailures(&output, request)
@@ -70,5 +73,36 @@ func TestShellValidationFailureDetailsAreBoundedAndDoNotInventLocations(t *testi
 	attachShellValidationCheckFailures(&output, RuntimeCommandRequest{})
 	if len(output.ValidationObservation.CheckFailures) != 0 {
 		t.Fatal("unknown scope manufactured source location")
+	}
+}
+
+func TestShellValidationFailureDetailsPreserveMultilineNativeBody(t *testing.T) {
+	output := RuntimeCommandResult{ValidationObservation: &runtimecontract.RuntimeValidationObservation{FailedChecks: []string{"TestA"}}, goTestJSONFacts: &shellGoTestJSONFacts{CaseOutcomes: map[string]string{"pkg\x00TestA": "fail"}, DiagnosticRecords: []shellGoTestJSONDiagnosticRecord{
+		{Action: "output", Package: "pkg", Test: "TestA", Output: "    a_test.go:7: expected:\n"},
+		{Action: "output", Package: "pkg", Test: "TestA", Output: "        original exact value\r\n        got another value\n"},
+		{Action: "output", Package: "pkg", Test: "TestA", Output: "--- FAIL: TestA (0.00s)\n"},
+	}}}
+	attachShellValidationCheckFailures(&output, RuntimeCommandRequest{ValidationScopeTargetRefs: []string{"a_test.go"}})
+	o := output.ValidationObservation
+	if o.FailureDetailsTruncated || len(o.CheckFailures) != 1 || o.CheckFailures[0].AssertionText != "expected:\n        original exact value\r\n        got another value" {
+		t.Fatalf("multiline native body lost: %+v", o)
+	}
+	if o.ValidateFailureDetails() != nil {
+		t.Fatal("multiline identity invalid")
+	}
+	if runtimecontract.ProjectRuntimeValidationExecutionFeedback(o).FailureDetailsIncomplete {
+		t.Fatal("complete native body marked missing")
+	}
+}
+
+func TestShellValidationFailureDetailsExplicitGaps(t *testing.T) {
+	for name, body := range map[string]string{"oversize": strings.Repeat("a", runtimecontract.RuntimeValidationAssertionMaxBytes+1), "utf8": string([]byte{0xff}), "unframed": "first line\nno native continuation frame"} {
+		t.Run(name, func(t *testing.T) {
+			output := RuntimeCommandResult{ValidationObservation: &runtimecontract.RuntimeValidationObservation{FailedChecks: []string{"TestA"}}, goTestJSONFacts: &shellGoTestJSONFacts{DiagnosticRecords: []shellGoTestJSONDiagnosticRecord{{Action: "output", Test: "TestA", Output: "a_test.go:1: " + body}}}}
+			attachShellValidationCheckFailures(&output, RuntimeCommandRequest{ValidationScopeTargetRefs: []string{"a_test.go"}})
+			if !output.ValidationObservation.FailureDetailsTruncated || !runtimecontract.ProjectRuntimeValidationExecutionFeedback(output.ValidationObservation).FailureDetailsIncomplete {
+				t.Fatal("partial native body appeared complete")
+			}
+		})
 	}
 }

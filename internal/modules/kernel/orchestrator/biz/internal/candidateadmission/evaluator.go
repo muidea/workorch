@@ -95,8 +95,13 @@ func Evaluate(input EvaluationInput) *runtimecontract.RuntimeCandidateFailure {
 	if failure := MissingValidationFailure(input.Facts, input.Decision, input.Candidate, input.ValidationGap); failure != nil {
 		return completeCandidateFailure(input.Manifest, input.Candidate, failure)
 	}
-	if failure := GroundedTargetFailure(input.Facts, input.Decision, input.Candidate); failure != nil {
-		return completeCandidateFailure(input.Manifest, input.Candidate, failure)
+	if input.Manifest.ImplementationWorkingBinding == nil {
+		// Ordinary proof/repair consumes terminal focus grounding. Work consumes
+		// the distinct owner-observed scope already sealed into its manifest;
+		// reapplying terminal targets here would reject legal input maintenance.
+		if failure := GroundedTargetFailure(input.Facts, input.Decision, input.Candidate); failure != nil {
+			return completeCandidateFailure(input.Manifest, input.Candidate, failure)
+		}
 	}
 	if finding, found := RejectedShapeReplay(input.Candidate, input.RejectedOperationShapes); found {
 		return completeCandidateFailure(input.Manifest, input.Candidate, failureFromFinding(finding))
