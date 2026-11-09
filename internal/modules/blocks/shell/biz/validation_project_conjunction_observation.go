@@ -73,12 +73,30 @@ func shellProjectConjunctionObservation(fact shellProjectConjunctionFact, expect
 			SourceBefore: stage.SourceBefore, SourceAfter: stage.SourceAfter, Tests: stage.Tests, PassedTests: stage.PassedTests,
 			TerminalComplete: stage.TerminalComplete, KnownFailure: stage.KnownFailure, FailureCode: stage.FailureCode,
 			DiagnosticSourceRef: stage.DiagnosticSourceRef, DiagnosticOriginStageID: stage.DiagnosticOriginStageID, DiagnosticIsolationRef: stage.DiagnosticIsolationRef, BehaviorTargetRefs: slices.Clone(stage.BehaviorTargetRefs),
+			NativeSourceFailure: stage.NativeSourceFailure,
 		})
+		for _, child := range stage.NativeExecutions {
+			if child.Identity.Stdout != shellProjectOutputIdentity(child.Stdout) || child.Identity.Stderr != shellProjectOutputIdentity(child.Stderr) || !shellProjectRawIdentityConsistent(child.Stdout) || !shellProjectRawIdentityConsistent(child.Stderr) {
+				return runtimecontract.RuntimeValidationExecutionConjunction{}, fmt.Errorf("native execution raw identity mismatch")
+			}
+			ret.Stages[len(ret.Stages)-1].NativeExecutions = append(ret.Stages[len(ret.Stages)-1].NativeExecutions, child.Identity.Clone())
+		}
 	}
 	if err := ret.Validate(); err != nil {
 		return runtimecontract.RuntimeValidationExecutionConjunction{}, err
 	}
 	return ret, nil
+}
+
+func shellProjectRawIdentityConsistent(raw shellProjectRawFact) bool {
+	if shellProjectOutputIdentity(raw).Validate() != nil || raw.SavedBytes != int64(len(raw.Raw)) {
+		return false
+	}
+	if raw.Complete || raw.Bytes == raw.SavedBytes {
+		digest := sha256.Sum256(raw.Raw)
+		return raw.SHA256 == hex.EncodeToString(digest[:])
+	}
+	return true
 }
 
 func shellProjectOutputIdentity(raw shellProjectRawFact) runtimecontract.RuntimeValidationOutputIdentity {

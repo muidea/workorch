@@ -329,6 +329,35 @@ preparation/supplement 使用实际选中协议的容量和期限说明：multi-
 单个 operation 的准备、全部执行阶段与 cleanup 共用本次封存的 deadline（显式声明范围 1000–600000ms，默认不变），不能重置期限、减样本或跳过原准则。
 普通 mutation 排除全部原 project test 与 validation namespace；来源评审不开放输入维护授权。
 
+原生测试需要独立子执行时，当前生成与完整来源评审统一声明 owner source channel 方法。
+同包 helper 在 `WORKORCH_NATIVE_SOURCE_CHILD == t.Name()` 时执行完整原断言；否则以 `t.Parallel()`
+及继承环境的 `exec.Command(WORKORCH_NATIVE_SOURCE_RUNNER, t.Name()).Run()` 请求执行，并将非零状态报告给
+`testing.T`。不得回放子测试 stdout/stderr。直接 `os.Executable`（含导入别名）在结构观察中返回
+`native_check_unmanaged_self_execution`，沿既有精确受保护输入维护取得新输入与独立评审，不由开发代理改写 live 输入。
+原 in-process 方法仍可使用；只有封存 corpus 实际调用 literal runner 环境入口才准备通道。
+
+通道属于原 managed session 内部，不新增 dispatch、执行权限或 Runtime authority。
+Shell 在原 operation deadline 内编译固定最小 client；每 stage 使用随机独立 Linux abstract Unix socket。
+client 仅可提交 native 名，不能提交 binary、package、argv、环境、正文或结果。Shell 通过 SO_PEERCRED、
+实际父进程及其编译身份，要求父测试 binary 由该 stage 的 go-test 进程直接启动；匹配封存 source/native/package
+及准确输入 package cwd 后，由 Shell 执行该实际 binary 的 exact native selector。记录 binary SHA256、
+实际 argv、时间、exit、终止及 cleanup；打开实际父 executable inode 并通过继承描述符执行同一文件，
+不因路径被替换或删除而重开另一个 binary。替换父进程、递归、越 scope 和重复来源明确拒绝。
+这不是任意子进程拦截器，也不是 OS sandbox；不能按嵌套 RUN 字符串恢复旧混合输出来源。
+
+子执行 stdout/stderr 在共享父流之前分开保全，再对已采集 stdout 作确定性 test2json 投影，不重执行业务。
+使用普通 verbose 模式以保持 stderr 独立；禁止使用会合并 stderr 的 test2json command 模式或 test.v=test2json。
+普通验证、单源/多源独立诊断与断言提取消费同一个 acquisition 事实；父子 outcome 冲突、foreign case、
+未结束、skip、原文缺失或超容量均不授完整来源或 repair。覆盖率沿原 owner 目录收集，不能借其他 source 的行为归属。
+全部 child 共用原期限和单流16MiB/执行64MiB预算，取消时终止 process group、完整 join 后再发布。
+
+`RuntimeValidationExecutionStage.NativeExecutions` 只携带 owner 事实及受限原文引用；`NativeSourceFailure`
+精确保留拒绝，不等于原失败未知。子原文按原 stage 加 `/native/<sourceRef>` 进入同一 raw store/query 边界，
+沿原 receipt hash、executionKey/fence、Workspace/Run 和 bytes/SHA256 读取；保存失败撤销归因资格，已保存历史仍可读取。
+`validation_native_channel_test.go` 覆盖三个实际并行子进程、相同正文、分块 stderr、乱序、单源复现、替换父进程、
+重复/伪造来源、容量、取消及 Workspace 隔离；组合 owner 主线覆盖输入维护、不同失败、fresh all-of、assessment 和三 ACK。
+这些本地机制回归不证明线上项目已收敛，原判据、期限和全部验收责任不变。
+
 root test/race 完整失败后，只有全部 failed package/case 能唯一匹配封存来源、没有 skip/build/unknown/source drift，
 才可在原单 operation deadline 内并行重跑至多五个 top-level native 来源（总 stage 仍不超过八项）。每源独立的完整有界 workspace 副本、HOME/TMP/cache 环境、
 coverage file 和 child-process instrumentation，精确保留 race 模式，不能借另一失败源的 aggregate coverage 归属。

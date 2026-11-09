@@ -60,6 +60,15 @@ func (m *Biz) handleRuntimeValidationRawOutput(event magicevent.Event, result ma
 	}
 	var identity *runtimecontract.RuntimeValidationOutputIdentity
 	for _, stage := range receipt.Evidence.Validation.ExecutionConjunction.Stages {
+		for _, child := range stage.NativeExecutions {
+			if command.StageID == stage.Identity.ID+"/native/"+child.SourceRef {
+				value := child.Stdout.Clone()
+				if command.Stream == "stderr" {
+					value = child.Stderr.Clone()
+				}
+				identity = &value
+			}
+		}
 		if stage.Identity.ID == command.StageID {
 			value := stage.Stdout.Clone()
 			if command.Stream == "stderr" {

@@ -75,6 +75,19 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 	}
 	behaviorArgs = shellProcessBehaviorArgs(behaviorArgs, processPath)
 	specs := shellProjectFixedStages(behaviorArgs, pkg)
+	if request.validationProofBinding.InputReview != nil && request.validationProofBinding.InputReview.DiagnosticSourceContractRef == runtimecontract.RuntimeValidationDiagnosticSourceReviewV1 && shellNativeChannelMethodRequired(request.validationProofBinding.InputReview.Files) {
+		sources := request.validationProofBinding.InputReview.DiagnosticSources
+		client, clientErr := prepareShellNativeRunner(ctx, request.ValidationScratchDirectory, env)
+		if clientErr != nil {
+			return output, sealShellProjectConjunction(nil, nil, nil), clientErr
+		}
+		env = append(env, shellNativeRunnerEnv+"="+client)
+		for index := range specs {
+			if specs[index].JSON {
+				specs[index].NativeSources = sources
+			}
+		}
+	}
 	output.projectStageSpecs = specs
 	var stages []shellProjectStageFact
 	var executeErr error
@@ -110,6 +123,7 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 			output.EvidenceQuality, output.EvidenceReason = "", ""
 			output.ZeroWork, output.goTestJSONFacts = false, nil
 			attachShellValidationObservation(&output, "go", spec.Args, request.ValidationRecipeID, true)
+			attachShellNativeExecutionFacts(&output, stage)
 			attachShellValidationCheckFailures(&output, request)
 			stageOutput = output
 			if projectSelected && index < len(specs)-1 {

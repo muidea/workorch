@@ -79,6 +79,7 @@ type validationInputReviewMainlineOptions struct {
 	LargeProjectOutput                 bool
 	DynamicProjectObservations         bool
 	SequentialProjectFailures          bool
+	NativeProjectSources               bool
 	MultiFileProject                   bool
 }
 
@@ -461,6 +462,13 @@ func %s(t *testing.T) {
 		target := inputTargets["cwi-2"]
 		initialFiles[target] = strings.Replace(initialFiles[target], `import ("testing";`, `import ("os"; "testing";`, 1)
 		initialFiles[target] = strings.Replace(initialFiles[target], "\n}\n", "\n note,err:=os.ReadFile(\"../../../"+inputRevisionDeliveryDependency+"\"); if err!=nil || strings.TrimSpace(string(note))!=\"4\" { t.Fatal(\"missing or incorrect delivery note\") }\n}\n", 1)
+	}
+	if options.NativeProjectSources {
+		for ref, content := range initialFiles {
+			if strings.HasSuffix(ref, "_test.go") {
+				initialFiles[ref] = nativeSourceChannelMainlineInput(t, content)
+			}
+		}
 	}
 	for ref, content := range initialFiles {
 		path := filepath.Join(directory, ref)
@@ -1731,6 +1739,9 @@ func %s(t *testing.T) {
 		if err != nil || string(counter) != projectExecutionCount {
 			t.Fatalf("sequence recovery repeated or omitted project executions: %q / %v", counter, err)
 		}
+	}
+	if options.NativeProjectSources {
+		assertNativeSourceChannelMainlineFacts(t, *stored.RuntimeState)
 	}
 	if (options.DeliveryGuard || options.TerminalMaterialGuards) && success {
 		bindings, err := runtimecontract.RuntimeDeliveryLineageBindingsFromState(*stored.RuntimeState)

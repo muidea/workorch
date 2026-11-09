@@ -53,6 +53,10 @@ func attachShellValidationCheckFailures(output *RuntimeCommandResult, request Ru
 	})
 	output.validationFailureDetailIssue = issue
 	observation.FailureDetailsTruncated = incomplete
+	if sourceIssue := output.goTestJSONFacts.NativeSourceIssue; sourceIssue != nil {
+		output.validationFailureDetailIssue = sourceIssue
+		observation.FailureDetailsTruncated = true
+	}
 	for _, assertion := range assertions {
 		record := assertion.record
 		check, _, _ := strings.Cut(record.Test, "/")

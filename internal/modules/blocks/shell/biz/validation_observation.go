@@ -39,7 +39,44 @@ type shellGoTestJSONFacts struct {
 	HasBuildOutput    bool
 	// Package-scoped native case outcomes are private parse facts, not another
 	// state machine. Passing/skipped subcase output cannot diagnose a failed sibling.
-	CaseOutcomes map[string]string
+	CaseOutcomes      map[string]string
+	NativeSourceIssue *shellFailureDetailIssue
+}
+
+// All original/single-source/multi-source consumers use this one projection.
+// Raw parent and child streams remain separate. Only owner-executed children
+// may contribute source-bound messages; a nested RUN string cannot do so.
+func attachShellNativeExecutionFacts(output *RuntimeCommandResult, stage shellProjectStageFact) {
+	if output.goTestJSONFacts == nil {
+		return
+	}
+	facts := output.goTestJSONFacts
+	if stage.NativeSourceFailure != "" {
+		facts.NativeSourceIssue = &shellFailureDetailIssue{code: stage.NativeSourceFailure, reason: "owner-controlled native execution source is incomplete"}
+		return
+	}
+	for _, child := range stage.NativeExecutions {
+		identity := child.Identity
+		pkg, native, _ := strings.Cut(identity.NativeCaseRef, "/")
+		// NativeCaseRef uses the last slash; package paths contain slashes.
+		if at := strings.LastIndex(identity.NativeCaseRef, "/"); at >= 0 {
+			pkg, native = identity.NativeCaseRef[:at], identity.NativeCaseRef[at+1:]
+		}
+		parsed := child.Facts
+		key := pkg + "\x00" + native
+		if parsed == nil || identity.Validate() != nil || !identity.TerminalComplete || identity.TimedOut || identity.CleanupFailed || !shellProjectRawFactValid(child.Stdout) || !shellProjectRawFactValid(child.Stderr) || facts.CaseOutcomes[key] == "" || parsed.CaseOutcomes[key] != facts.CaseOutcomes[key] {
+			facts.NativeSourceIssue = &shellFailureDetailIssue{code: "validation_native_source_outcome_mismatch", reason: "native child output does not match its executed source and parent outcome"}
+			return
+		}
+		facts.DiagnosticRecords = append(facts.DiagnosticRecords, parsed.DiagnosticRecords...)
+		for ref, outcome := range parsed.CaseOutcomes {
+			if prior := facts.CaseOutcomes[ref]; prior != "" && prior != outcome {
+				facts.NativeSourceIssue = &shellFailureDetailIssue{code: "validation_native_source_outcome_mismatch", reason: "native child and parent outcomes conflict"}
+				return
+			}
+			facts.CaseOutcomes[ref] = outcome
+		}
+	}
 }
 
 // attachShellValidationObservation records the owner fact that a sealed

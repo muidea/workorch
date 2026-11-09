@@ -17,6 +17,7 @@ type shellProjectStageRawReferences struct {
 	Stderr  string
 	// 同一总期限内未发布的流显式保留原因，不以空引用假称完整诊断。
 	OmittedReason string
+	Native        []shellProjectStageRawReferences `json:",omitempty"`
 }
 
 type shellProjectExecutionResult struct {
@@ -120,6 +121,7 @@ func (a *RuntimeAdapter) executeShellProjectScope(ctx context.Context, request R
 // Shared by the execution envelope and its real-store failure regression. It
 // publishes original bytes only; it does not judge evidence or grant repair.
 func persistShellProjectStageRaw(ctx context.Context, store *shellProjectRawStore, scope shellProjectRawScope, fact shellProjectConjunctionFact, result *shellProjectExecutionResult) error {
+	var failure error
 	for _, stage := range fact.Stages {
 		refs := shellProjectStageRawReferences{StageID: stage.ID}
 		for _, stream := range []string{"stdout", "stderr"} {
@@ -135,11 +137,10 @@ func persistShellProjectStageRaw(ctx context.Context, store *shellProjectRawStor
 				if ctx.Err() != nil {
 					refs.OmittedReason = "shell_stage_raw_operation_context_expired"
 				}
-				result.Raw = append(result.Raw, refs)
-				for _, pending := range fact.Stages[len(result.Raw):] {
-					result.Raw = append(result.Raw, shellProjectStageRawReferences{StageID: pending.ID, OmittedReason: refs.OmittedReason})
+				if failure == nil {
+					failure = err
 				}
-				return err
+				continue
 			}
 			if stream == "stdout" {
 				refs.Stdout = ref
@@ -147,9 +148,32 @@ func persistShellProjectStageRaw(ctx context.Context, store *shellProjectRawStor
 				refs.Stderr = ref
 			}
 		}
+		for _, child := range stage.NativeExecutions {
+			childRefs := shellProjectStageRawReferences{StageID: stage.ID + "/native/" + child.Identity.SourceRef}
+			for _, stream := range []string{"stdout", "stderr"} {
+				raw := child.Stdout
+				if stream == "stderr" {
+					raw = child.Stderr
+				}
+				childScope := scope
+				childScope.StageID, childScope.Stream = childRefs.StageID, stream
+				ref, err := store.Store(ctx, childScope, raw)
+				if err != nil {
+					childRefs.OmittedReason = "shell_native_raw_storage_failed"
+					if failure == nil {
+						failure = err
+					}
+				} else if stream == "stdout" {
+					childRefs.Stdout = ref
+				} else {
+					childRefs.Stderr = ref
+				}
+			}
+			refs.Native = append(refs.Native, childRefs)
+		}
 		result.Raw = append(result.Raw, refs)
 	}
-	return nil
+	return failure
 }
 
 func shellProjectOutputStorage(ref, omittedReason string) *runtimecontract.RuntimeValidationOutputStorage {
@@ -179,6 +203,20 @@ func finishShellProjectExecution(result *shellProjectExecutionResult, executeErr
 			}
 			stage.Stdout.Storage = shellProjectOutputStorage(refs.Stdout, refs.OmittedReason)
 			stage.Stderr.Storage = shellProjectOutputStorage(refs.Stderr, refs.OmittedReason)
+			for childIndex := range stage.NativeExecutions {
+				child := &stage.NativeExecutions[childIndex]
+				childRefs := shellProjectStageRawReferences{OmittedReason: "shell_native_raw_storage_unavailable"}
+				if childIndex < len(refs.Native) && refs.Native[childIndex].StageID == stage.Identity.ID+"/native/"+child.SourceRef {
+					childRefs = refs.Native[childIndex]
+				}
+				child.Stdout.Storage = shellProjectOutputStorage(childRefs.Stdout, childRefs.OmittedReason)
+				child.Stderr.Storage = shellProjectOutputStorage(childRefs.Stderr, childRefs.OmittedReason)
+				if childRefs.Stdout == "" || childRefs.Stderr == "" || childRefs.OmittedReason != "" {
+					result.Result.ValidationFailureDiagnostic = nil
+					result.Result.RuntimeDiagnostics.ValidationFailureDiagnostic = nil
+					result.Result.workspaceBehaviorTargetRefs = nil
+				}
+			}
 			if refs.Stdout == "" || refs.Stderr == "" || refs.OmittedReason != "" {
 				result.Result.ValidationFailureDiagnostic = nil
 				result.Result.RuntimeDiagnostics.ValidationFailureDiagnostic = nil

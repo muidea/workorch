@@ -2235,6 +2235,15 @@ C4、正式来源 hash、冻结/纠正/恢复和渲染后门禁都绑定该 type
 响应丢失、预算保留/耗尽、三种重审结论与完整诊断负例。真实 owner 主线核对重审及终态交付不重复执行。
 SM-1 生命周期与三 ACK 顺序不变；SM-4 只恢复原 aggregate/receipt，不从分块存储重建 authority。
 
+能力 owner 可在原 stage 内返回 typed `NativeExecutions`（封存 source/native 身份、实际 executable hash/argv、
+时间、exit、终止/cleanup 与独立 raw storage identity）及 `NativeSourceFailure`。这不是额外 all-of stage、
+dispatch 或 proof credit。接收边界核对来源属于本次 binding、唯一性、父 stage 时间范围和原文完整性；
+不解释具体测试语言、进程拓扑或重做能力 owner 的来源裁决。完整合取及可修复诊断均要求其适用子原件完整。
+SM-2 继续消费正式失败/重审与原 all-of/assessment；SM-3 保留唯一 sealed executionKey/fence/receipt，
+SM-4 只恢复已提交原件；SM-1 与三 ACK 不变。`runtime_native_source_channel_mainline_test.go` 使用真实
+File/Shell/Run/Result/Workspace owners，从输入冲突维护到不同实施/构建/业务失败、fresh all-of、独立 assessment
+及三 ACK，并核对 receipt 与 Result 响应丢失恢复不增加 provider 请求。这是脚本 provider 的本地机制验证，非 live credit。
+
 
 ### 输入重审引用编译与语义拒绝交付
 

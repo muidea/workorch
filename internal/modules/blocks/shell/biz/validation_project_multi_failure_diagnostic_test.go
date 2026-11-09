@@ -74,7 +74,7 @@ func TestProjectMultiFailureSourcePublicationIsExactAndProtectsOriginalTests(t *
 }
 
 func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
-	for _, scenario := range []string{"interleaved-output", "large-output", "dynamic-observation", "isolated-overlap", "cancel-overlap", "diagnostic-capacity", "exact", "disjoint", "unobserved", "partial-unobserved", "missing-assertion", "over-capacity", "skip", "drift", "missing-source", "changed-assertion", "additive-input-test", "legacy"} {
+	for _, scenario := range []string{"native-source-channel", "interleaved-output", "large-output", "dynamic-observation", "isolated-overlap", "cancel-overlap", "diagnostic-capacity", "exact", "disjoint", "unobserved", "partial-unobserved", "missing-assertion", "over-capacity", "skip", "drift", "missing-source", "changed-assertion", "additive-input-test", "legacy"} {
 		t.Run(scenario, func(t *testing.T) {
 			root, internal := t.TempDir(), t.TempDir()
 			recipe := isolatedInputRecipe()
@@ -87,6 +87,16 @@ func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
 			}
 			target := shellValidationNativeCheckTargetRef(requirement, checks...)
 			files := map[string]string{"go.mod": "module fixture\ngo 1.26\n", "delivery/value.go": "package delivery\nfunc Value() int{return 3}\n", target: fmt.Sprintf("package checks\nimport(\"testing\"; delivery \"fixture/delivery\")\nfunc %s(t *testing.T){if delivery.Value()!=4{t.Fatal(\"WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3\")}}\n", checks[0].NativeCheckRef), "delivery/value_test.go": "package delivery\nimport \"testing\"\nfunc TestProduction(t *testing.T){if Value()!=4{t.Fatal(\"WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3\")}}\n"}
+			if scenario == "native-source-channel" {
+				for _, ref := range []string{target, "delivery/value_test.go"} {
+					body := strings.Replace(files[ref], `"testing"`, `"testing";"os";"os/exec"`, 1)
+					if ref == "delivery/value_test.go" {
+						body = strings.Replace(body, `import "testing";"os";"os/exec"`, `import("testing";"os";"os/exec")`, 1)
+					}
+					body = strings.Replace(body, "(t *testing.T){", "(t *testing.T){if managedNativeSource(t){return};", 1)
+					files[ref] = body + managedNativeSourceTestHelper
+				}
+			}
 			if scenario == "dynamic-observation" {
 				files["delivery/value_test.go"] = `package delivery
 import("testing";"time")
@@ -172,9 +182,10 @@ func TestProduction(t *testing.T){
 			if err != nil {
 				t.Fatal(err)
 			}
-			binding.InputReview, _ = shellInputReview(root, refs, binding)
+			var reviewCode string
+			binding.InputReview, reviewCode = shellInputReview(root, refs, binding)
 			if binding.InputReview == nil {
-				t.Fatal("complete project input not observed")
+				t.Fatal("complete project input not observed", reviewCode)
 			}
 			if scenario == "partial-unobserved" {
 				last := binding.InputReview.DiagnosticSources[len(binding.InputReview.DiagnosticSources)-1]
@@ -260,7 +271,7 @@ func TestProduction(t *testing.T){
 			if err == nil || result.Conjunction == nil || result.Conjunction.Complete || result.Result.Evidence.Quality == common.EvidenceQualityValid || result.Conjunction.Validate() != nil {
 				t.Fatalf("failed project credited or lost: err=%v conjunction=%+v", err, result.Conjunction)
 			}
-			wantDiagnostic := scenario == "dynamic-observation" || scenario == "isolated-overlap" || scenario == "interleaved-output" || scenario == "large-output" || scenario == "exact" || scenario == "disjoint" || scenario == "additive-input-test"
+			wantDiagnostic := scenario == "native-source-channel" || scenario == "dynamic-observation" || scenario == "isolated-overlap" || scenario == "interleaved-output" || scenario == "large-output" || scenario == "exact" || scenario == "disjoint" || scenario == "additive-input-test"
 			diagnostic := result.Result.ValidationFailureDiagnostic
 			if wantDiagnostic {
 				if diagnostic == nil || diagnostic.Unavailability != "" {

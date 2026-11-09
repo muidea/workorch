@@ -27,6 +27,10 @@ func shellProjectDiagnosticInputCurrent(directory string, request RuntimeCommand
 		return false
 	}
 	current.LineageAssertions = slices.Clone(binding.InputReview.LineageAssertions)
+	// The diagnostic is inside the already sealed transaction. Check current
+	// source bytes/membership against its exact declared method, rather than
+	// silently swapping a newer built-in review declaration mid-execution.
+	current.ScopeContractRef, current.ScopeRequirements = binding.InputReview.ScopeContractRef, binding.InputReview.ScopeRequirements
 	current.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*current, binding)
 	return reflect.DeepEqual(current, binding.InputReview)
 }
@@ -34,7 +38,7 @@ func shellProjectDiagnosticInputCurrent(directory string, request RuntimeCommand
 // Every failing case must resolve uniquely against the previously sealed owner
 // inventory. Package failures must be exhausted by real test-case failures.
 func shellProjectMultiFailedCases(stage shellProjectStageFact, sources []runtimecontract.RuntimeValidationDiagnosticSource) (map[string][]string, bool) {
-	if !stage.Started || stage.ExitCode == 0 || !stage.KnownFailure || stage.TimedOut || stage.CleanupFailed || !stage.TerminalComplete || !shellProjectRawFactValid(stage.Stdout) || !shellProjectRawFactValid(stage.Stderr) || stage.SourceBefore == "" || stage.SourceBefore != stage.SourceAfter {
+	if stage.NativeSourceFailure != "" || !stage.Started || stage.ExitCode == 0 || !stage.KnownFailure || stage.TimedOut || stage.CleanupFailed || !stage.TerminalComplete || !shellProjectRawFactValid(stage.Stdout) || !shellProjectRawFactValid(stage.Stderr) || stage.SourceBefore == "" || stage.SourceBefore != stage.SourceAfter {
 		return nil, false
 	}
 	failed := map[string][]string{}
@@ -138,6 +142,13 @@ func runShellProjectMultiFailureDiagnostic(ctx context.Context, directory string
 		return reject(runtimecontract.ValidationDiagnosticInputChanged, "validation_failure_input_changed", "independent diagnostic requires the exact current sealed input subject")
 	}
 	sources := request.validationProofBinding.InputReview.DiagnosticSources
+	if original.NativeSourceFailure != "" {
+		kind := runtimecontract.ValidationDiagnosticSourcesUnavailable
+		if original.NativeSourceFailure == "validation_native_source_raw_capacity_exceeded" {
+			kind = runtimecontract.ValidationDiagnosticCapacityExceeded
+		}
+		return reject(kind, original.NativeSourceFailure, "owner-controlled native source acquisition failed; original known failure and raw output are preserved")
+	}
 	want, eligible := shellProjectMultiFailedCases(original, sources)
 	if !eligible {
 		return reject(runtimecontract.ValidationDiagnosticSourcesUnavailable, "validation_failure_sources_unresolved", "complete failed native cases do not resolve uniquely against the sealed source inventory")
@@ -286,6 +297,9 @@ func runShellProjectFailureSourceIsolated(ctx context.Context, directory string,
 	}
 	args = shellProcessBehaviorArgs(args, processPath)
 	spec := shellProjectStageSpec{ID: "project-diagnostic-" + strings.TrimPrefix(source.SourceRef, "shell-project-source-"), Scope: "diagnostic-source:" + source.SourceRef, Args: args, JSON: true}
+	if shellNativeChannelMethodRequired(request.validationProofBinding.InputReview.Files) {
+		spec.NativeSources = []runtimecontract.RuntimeValidationDiagnosticSource{source}
+	}
 	result.spec = &spec
 	stageEnv := shellProcessBehaviorEnvironment(shellBehaviorEnvironment(env), processPath, args)
 	stage, _ := runShellProjectStageWithBudget(ctx, directory, stageEnv, spec, request.projectRawBudget)
@@ -302,6 +316,7 @@ func runShellProjectFailureSourceIsolated(ctx context.Context, directory string,
 	output.Status, output.ExitCode = "failed", int64(stage.ExitCode)
 	output.Stdout, output.Stderr = string(stage.Stdout.Raw), string(stage.Stderr.Raw)
 	attachShellValidationObservation(&output, "go", args, request.ValidationRecipeID, true)
+	attachShellNativeExecutionFacts(&output, stage)
 	attachShellValidationCheckFailures(&output, request)
 	if issue := output.validationFailureDetailIssue; issue != nil {
 		return fail(issue.unavailability(), issue.code, "independent source "+source.SourceRef+": "+issue.reason)

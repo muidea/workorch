@@ -27,10 +27,11 @@ const shellProjectConjunctionProtocolRef = "shell/go-test-json/project-conjuncti
 const shellProjectConjunctionReviewScopeRequirements = "Shell 在一个隔离副本和一个原 operation deadline 内按固定 all_of 执行 go build ./...、go test -json -count=1 ./...、go test -race -json -count=1 ./...，最后独立执行当前 CWI 准确评审的原始/补充 InputV4 检查及实际实现行为观测。前三阶段覆盖整个根 Go module 的 ./...，包括旧输入和相邻 CWI harness；它们不是当前 CWI 语义证明，也不从当前 CWI 的评审推断相邻输入已评审。任何失败、跳过的测试、未结束事件、零实际测试或不完整输出均不能完成合取。完整 source/member set 的执行前后 hash 必须一致；GOWORK=off。评审字节仍必须包含当前 CWI 完整 package/helpers/fixtures 和根 module/workspace 定义，不提高 16 files / 64 KiB 边界。依赖未评审外部 harness/fixtures 才能解释当前准则的输入不能判为 consistent；必须明确缺失上下文或超限不可用。所有原 Goal/DoD 准则保持 mandatory，完整项目执行不代替逐 CWI 行为断言、一致性判断或验收 credit。"
 
 type shellProjectStageSpec struct {
-	ID    string
-	Scope string
-	Args  []string
-	JSON  bool
+	ID            string
+	Scope         string
+	Args          []string
+	JSON          bool
+	NativeSources []runtimecontract.RuntimeValidationDiagnosticSource
 }
 
 // facts 中 argv 是实际 OS 进程的准确参数，不是 template/provider 的命令标签。
@@ -48,10 +49,12 @@ type shellProjectStageFact struct {
 	KnownFailure                 bool
 	FailureCode                  string
 	SourceBefore, SourceAfter    string
-	DiagnosticSourceRef          string   `json:",omitempty"`
-	DiagnosticOriginStageID      string   `json:",omitempty"`
-	DiagnosticIsolationRef       string   `json:",omitempty"`
-	BehaviorTargetRefs           []string `json:",omitempty"`
+	DiagnosticSourceRef          string                     `json:",omitempty"`
+	DiagnosticOriginStageID      string                     `json:",omitempty"`
+	DiagnosticIsolationRef       string                     `json:",omitempty"`
+	BehaviorTargetRefs           []string                   `json:",omitempty"`
+	NativeExecutions             []shellNativeExecutionFact `json:",omitempty"`
+	NativeSourceFailure          string                     `json:",omitempty"`
 }
 
 type shellProjectRawFact struct {
@@ -281,8 +284,13 @@ func runShellProjectStageWithBudget(ctx context.Context, directory string, env [
 	fact.SourceBefore = before
 	stdout, stderr := newShellProjectRawBuffer(), newShellProjectRawBuffer()
 	stdout.budget, stderr.budget = budget, budget
+	channel, stageEnv, channelErr := startShellNativeChannel(ctx, directory, env, spec, budget)
+	if channelErr != nil {
+		fact.FailureCode = "validation_native_source_channel_unavailable"
+		return fact, channelErr
+	}
 	cmd := exec.CommandContext(ctx, "go", spec.Args...)
-	cmd.Dir, cmd.Env = directory, env
+	cmd.Dir, cmd.Env = directory, stageEnv
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
@@ -296,8 +304,12 @@ func runShellProjectStageWithBudget(ctx context.Context, directory string, env [
 	err := cmd.Start()
 	if err == nil {
 		fact.Started = true
+		if channel != nil {
+			channel.start(cmd.Process.Pid)
+		}
 		err = cmd.Wait()
 	}
+	fact.NativeExecutions, fact.NativeSourceFailure = channel.finish()
 	if cmd.Process != nil {
 		cleanupErr := terminateShellProcessGroup(cmd.Process.Pid)
 		fact.CleanupFailed = cleanupErr != nil
@@ -329,6 +341,8 @@ func runShellProjectStageWithBudget(ctx context.Context, directory string, env [
 		fact.FailureCode = "validation_project_process_unavailable"
 	case fact.CleanupFailed:
 		fact.FailureCode = "validation_project_cleanup_failed"
+	case fact.NativeSourceFailure != "":
+		fact.FailureCode = fact.NativeSourceFailure
 	case !fact.Stdout.Complete || !fact.Stderr.Complete:
 		fact.FailureCode = "validation_project_output_incomplete"
 	case sourceErr != nil || fact.SourceBefore != fact.SourceAfter:
@@ -368,6 +382,11 @@ func shellProjectConjunctionCommitmentHash(fact shellProjectConjunctionFact) str
 	for index := range preimage.Stages {
 		preimage.Stages[index].Stdout.Raw = nil
 		preimage.Stages[index].Stderr.Raw = nil
+		preimage.Stages[index].NativeExecutions = append([]shellNativeExecutionFact(nil), preimage.Stages[index].NativeExecutions...)
+		for child := range preimage.Stages[index].NativeExecutions {
+			preimage.Stages[index].NativeExecutions[child].Stdout.Raw = nil
+			preimage.Stages[index].NativeExecutions[child].Stderr.Raw = nil
+		}
 	}
 	body, _ := json.Marshal(preimage)
 	digest := sha256.Sum256(body)

@@ -46,7 +46,7 @@ func shellNativeCheckReadinessDiagnostic(inspection shellNativeCheckInspection, 
 // protocol failures cannot acquire mutation authority from their error text.
 func shellValidationInputMaintenance(directory string, refs []string, inspection shellNativeCheckInspection, requirement runtimecontract.RuntimeValidationProofRequirement, recipe runtimecontract.RuntimeValidationRecipe, checks []runtimecontract.RuntimeValidationCheckAttestationBinding) *runtimecontract.RuntimeValidationInputMaintenance {
 	switch inspection.Code {
-	case "native_check_versioned_contract_invalid", "native_check_source_invalid", "native_check_signature_invalid", "native_check_assertion_unresolved", "native_check_missing", "native_check_ambiguous", "native_check_runner_override":
+	case "native_check_versioned_contract_invalid", "native_check_source_invalid", "native_check_signature_invalid", "native_check_assertion_unresolved", "native_check_missing", "native_check_ambiguous", "native_check_runner_override", "native_check_unmanaged_self_execution":
 	default:
 		return nil
 	}

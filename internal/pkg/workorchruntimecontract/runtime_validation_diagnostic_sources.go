@@ -150,12 +150,26 @@ func writeRuntimeDiagnosticSourceReviewHash(h interface{ Write([]byte) (int, err
 // remain the capability owner's responsibility.
 func ValidateRuntimeValidationDiagnosticExecution(observation RuntimeValidationObservation, binding RuntimeValidationProofRequirementBinding, scope []string) error {
 	c := observation.ExecutionConjunction
-	if c == nil || c.Complete {
+	if c == nil {
 		return nil
 	}
 	hasSources := false
 	for _, stage := range c.Stages {
+		for _, child := range stage.NativeExecutions {
+			found := false
+			if binding.InputReview != nil {
+				for _, source := range binding.InputReview.DiagnosticSources {
+					found = found || (source.SourceRef == child.SourceRef && source.NativeCaseRef == child.NativeCaseRef)
+				}
+			}
+			if !found {
+				return fmt.Errorf("native execution changed sealed source identity")
+			}
+		}
 		hasSources = hasSources || stage.DiagnosticSourceRef != "" || stage.BehaviorTargetRefs != nil
+	}
+	if c.Complete {
+		return nil
 	}
 	extended := binding.InputReview != nil && binding.InputReview.DiagnosticSourceContractRef == RuntimeValidationDiagnosticSourceReviewV1
 	// A noncomplete ordinary execution can retain behavior observed before a
@@ -233,6 +247,14 @@ func ValidateRuntimeValidationDiagnosticFailureObservation(observation *RuntimeV
 	}
 	hasSources := false
 	for _, stage := range observation.ExecutionConjunction.Stages {
+		if stage.NativeSourceFailure != "" {
+			return fmt.Errorf("native source failure cannot authorize repair")
+		}
+		for _, child := range stage.NativeExecutions {
+			if !child.TerminalComplete || child.TimedOut || child.CleanupFailed || !child.Stdout.Complete || !child.Stderr.Complete || child.Stdout.Storage == nil || child.Stderr.Storage == nil || child.Stdout.Storage.Reference == "" || child.Stderr.Storage.Reference == "" {
+				return fmt.Errorf("diagnostic native execution requires complete stored original output")
+			}
+		}
 		hasSources = hasSources || stage.DiagnosticSourceRef != ""
 		if stage.Stdout.Storage == nil || stage.Stderr.Storage == nil || stage.Stdout.Storage.Reference == "" || stage.Stderr.Storage.Reference == "" {
 			return fmt.Errorf("diagnostic failure requires all original output storage, not historical attribution alone")

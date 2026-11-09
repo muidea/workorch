@@ -60,9 +60,51 @@ type RuntimeValidationExecutionStage struct {
 	DiagnosticSourceRef string `json:",omitempty"`
 	// Paired owner provenance permits overlapping diagnostic copies after an
 	// exact failed original. It never completes or reorders ordinary all-of.
-	DiagnosticOriginStageID string   `json:",omitempty"`
-	DiagnosticIsolationRef  string   `json:",omitempty"`
-	BehaviorTargetRefs      []string `json:",omitempty"`
+	DiagnosticOriginStageID string                             `json:",omitempty"`
+	DiagnosticIsolationRef  string                             `json:",omitempty"`
+	BehaviorTargetRefs      []string                           `json:",omitempty"`
+	NativeExecutions        []RuntimeValidationNativeExecution `json:",omitempty"`
+	NativeSourceFailure     string                             `json:",omitempty"`
+}
+
+// Capability-owner controlled child execution, bound before output is shared.
+// These are observations within the original stage, not additional all-of
+// stages, dispatches, proof credit or retry budgets.
+type RuntimeValidationNativeExecution struct {
+	SourceRef                                 string
+	NativeCaseRef                             string
+	ParentExecutableSHA256                    string
+	Argv                                      []string
+	StartedAt, FinishedAt                     string
+	ExitCode                                  int64
+	TimedOut, CleanupFailed, TerminalComplete bool
+	Stdout, Stderr                            RuntimeValidationOutputIdentity
+}
+
+func (n RuntimeValidationNativeExecution) Clone() RuntimeValidationNativeExecution {
+	n.Argv = slices.Clone(n.Argv)
+	n.Stdout = n.Stdout.Clone()
+	n.Stderr = n.Stderr.Clone()
+	return n
+}
+
+func (n RuntimeValidationNativeExecution) Validate() error {
+	start, e1 := time.Parse(time.RFC3339Nano, n.StartedAt)
+	end, e2 := time.Parse(time.RFC3339Nano, n.FinishedAt)
+	if !boundedValidationExecutionRef(n.SourceRef, 512) || !boundedValidationExecutionRef(n.NativeCaseRef, 2048) || !validationExecutionDigest(n.ParentExecutableSHA256) || len(n.Argv) == 0 || len(n.Argv) > 64 || e1 != nil || e2 != nil || end.Before(start) || n.ExitCode < -1 || n.Stdout.Validate() != nil || n.Stderr.Validate() != nil {
+		return fmt.Errorf("native execution identity or output invalid")
+	}
+	bytes := 0
+	for _, arg := range n.Argv {
+		bytes += len(arg)
+		if !boundedValidationExecutionRef(arg, 4096) {
+			return fmt.Errorf("native execution argv invalid")
+		}
+	}
+	if bytes > 16*1024 {
+		return fmt.Errorf("native execution argv over capacity")
+	}
+	return nil
 }
 
 // 仅传有界实际执行事实和原输出身份，不传原诊断、句柄或第二份 credit。
@@ -103,6 +145,10 @@ func (c RuntimeValidationExecutionConjunction) Clone() RuntimeValidationExecutio
 	if c.Stages != nil {
 		c.Stages = append(make([]RuntimeValidationExecutionStage, 0, len(c.Stages)), c.Stages...)
 		for index := range c.Stages {
+			c.Stages[index].NativeExecutions = slices.Clone(c.Stages[index].NativeExecutions)
+			for child := range c.Stages[index].NativeExecutions {
+				c.Stages[index].NativeExecutions[child] = c.Stages[index].NativeExecutions[child].Clone()
+			}
 			c.Stages[index].BehaviorTargetRefs = slices.Clone(c.Stages[index].BehaviorTargetRefs)
 			if c.Stages[index].Argv != nil {
 				c.Stages[index].Argv = append(make([]string, 0, len(c.Stages[index].Argv)), c.Stages[index].Argv...)
@@ -163,6 +209,32 @@ func (c RuntimeValidationExecutionConjunction) Validate() error {
 	var identities []RuntimeValidationExecutionStageIdentity
 	var previousEnd time.Time
 	for index, stage := range c.Stages {
+		if len(stage.NativeExecutions) > RuntimeValidationDiagnosticSourceLimit || stage.NativeSourceFailure != "" && !boundedValidationExecutionRef(stage.NativeSourceFailure, 512) {
+			return fmt.Errorf("native execution capacity or failure invalid")
+		}
+		children := map[string]bool{}
+		for _, child := range stage.NativeExecutions {
+			if child.Validate() != nil || children[child.SourceRef] {
+				return fmt.Errorf("native execution invalid or duplicate")
+			}
+			children[child.SourceRef] = true
+			start, e1 := time.Parse(time.RFC3339Nano, stage.StartedAt)
+			end, e2 := time.Parse(time.RFC3339Nano, stage.FinishedAt)
+			a, _ := time.Parse(time.RFC3339Nano, child.StartedAt)
+			b, _ := time.Parse(time.RFC3339Nano, child.FinishedAt)
+			if e1 != nil || e2 != nil || a.Before(start) || b.After(end) {
+				return fmt.Errorf("native execution outside parent stage")
+			}
+			if c.Complete && (child.ExitCode != 0 || child.TimedOut || child.CleanupFailed || !child.TerminalComplete || !child.Stdout.Complete || !child.Stderr.Complete) {
+				return fmt.Errorf("complete execution has incomplete native child")
+			}
+			if c.Complete && storageDeclared && (child.Stdout.Storage == nil || child.Stderr.Storage == nil || child.Stdout.Storage.Reference == "" || child.Stderr.Storage.Reference == "") {
+				return fmt.Errorf("native execution raw storage missing")
+			}
+		}
+		if c.Complete && stage.NativeSourceFailure != "" {
+			return fmt.Errorf("complete execution has native source failure")
+		}
 		if stage.DiagnosticIsolationRef != "" || stage.DiagnosticOriginStageID != "" {
 			origin, found := origins[stage.DiagnosticOriginStageID]
 			start, e1 := time.Parse(time.RFC3339Nano, stage.StartedAt)

@@ -158,6 +158,9 @@ func inspectShellNativeValidationSources(targetRefs []string, attestations []run
 			if shellEntrypointObservationProtocol(check.ObservationProtocolRef) && strings.HasSuffix(ref, "_test.go") && shellNativeRunnerOverride(file) {
 				return shellNativeCheckInspection{Code: "native_check_runner_override", CheckRef: check.NativeCheckRef, TargetRefs: []string{ref}}
 			}
+			if shellProjectObservationProtocol(check.ObservationProtocolRef) && shellNativeUnmanagedSelfExecution(file) {
+				return shellNativeCheckInspection{Code: "native_check_unmanaged_self_execution", CheckRef: check.NativeCheckRef, TargetRefs: []string{ref}}
+			}
 			if check.SupplementalNativeCheckRef == "" || ref != shellSupplementTargetRef(check.NativeCheckRef) {
 				continue
 			}

@@ -3,13 +3,17 @@ package shell
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
+	modulecommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
@@ -18,14 +22,49 @@ import (
 
 // 实际私有 producer/raw store 配对 typed receipt/Workspace fixture；不冒充公开执行或完整装配。
 func TestValidationRawOutputQueryDerivesOriginalReceiptScopeAndBytes(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		name := "ordinary"
+		if native {
+			name = "native-source"
+		}
+		t.Run(name, func(t *testing.T) { testValidationRawOutputQueryScopeAndBytes(t, native) })
+	}
+}
+
+func testValidationRawOutputQueryScopeAndBytes(t *testing.T, native bool) {
 	ctx := context.Background()
 	request, execution := projectExecutionFixture(t, false)
+	if native {
+		request, execution = projectExecutionFixture(t, false, modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic)
+		target := request.TargetRefs[0]
+		body, err := os.ReadFile(filepath.Join(request.WorkspaceDeliverableDirectory, target))
+		if err != nil {
+			t.Fatal(err)
+		}
+		input := strings.Replace(string(body), `"testing"`, `"testing";"os";"os/exec"`, 1)
+		input = strings.Replace(input, "(t *testing.T){", "(t *testing.T){if managedNativeSource(t){return};", 1) + managedNativeSourceTestHelper
+		writeNativeStructureSource(t, request.WorkspaceDeliverableDirectory, target, input)
+		recipe := isolatedInputRecipe()
+		recipe.AdapterRef = modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic
+		recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
+		requirement := shellValidationProofRequirementForTest(t, recipe.ID, "execution-cwi")
+		binding, err := runtimecontract.RuntimeValidationProofRequirementBindingForRecipe(requirement, recipe.ID, request.ValidationCheckAttestations...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var code string
+		binding.InputReview, code = shellInputReview(request.WorkspaceDeliverableDirectory, request.ValidationScopeTargetRefs, binding)
+		if code != "" {
+			t.Fatal(code)
+		}
+		request.validationProofBinding = binding
+	}
 	produced, err := NewRuntimeAdapter().executeShellProjectConjunction(ctx, request, execution)
 	if err != nil || produced.Conjunction == nil || !produced.Conjunction.Complete {
 		t.Fatalf("实际 producer 前置失败：%v", err)
 	}
 	observation := produced.Result.ValidationObservation.Clone()
-	observation.ObservationProtocolRef = shellProjectConjunctionProtocolRef
+	observation.ObservationProtocolRef = produced.Conjunction.ProtocolRef
 	observation.ExecutionConjunction = produced.Conjunction
 	receipt := runtimecontract.RuntimeOperationReceipt{ExecutionKey: execution.Execution.ExecutionKey, Fence: execution.Execution.Fence, OperationID: execution.OperationID, Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectEphemeralSession, Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &observation}}
 	if receipt.Validate() != nil {
@@ -80,7 +119,15 @@ func TestValidationRawOutputQueryDerivesOriginalReceiptScopeAndBytes(t *testing.
 		t.Fatal(err)
 	}
 	defer store.Close()
+	var streams []shellProjectStageRawReferences
 	for _, refs := range produced.Raw {
+		streams = append(streams, refs)
+		streams = append(streams, refs.Native...)
+	}
+	if native && len(streams) <= len(produced.Raw) {
+		t.Fatal("native raw queries have no real child execution")
+	}
+	for _, refs := range streams {
 		for stream, ref := range map[string]string{"stdout": refs.Stdout, "stderr": refs.Stderr} {
 			command.StageID, command.Stream = refs.StageID, stream
 			raw, err := store.Read(ctx, shellProjectRawScope{WorkspaceID: command.WorkspaceID, RunID: command.RunID, ExecutionKey: command.ExecutionKey, StageID: command.StageID, Stream: command.Stream}, ref)
@@ -132,7 +179,11 @@ func TestValidationRawOutputQueryDerivesOriginalReceiptScopeAndBytes(t *testing.
 				changed.Evidence.Validation.ExecutionConjunction.Complete = false
 				changed.Evidence.Validation.ProofClass = ""
 				for index := range changed.Evidence.Validation.ExecutionConjunction.Stages {
-					changed.Evidence.Validation.ExecutionConjunction.Stages[index].Stderr.Storage = &runtimecontract.RuntimeValidationOutputStorage{OmittedReason: "not_saved"}
+					stage := &changed.Evidence.Validation.ExecutionConjunction.Stages[index]
+					stage.Stderr.Storage = &runtimecontract.RuntimeValidationOutputStorage{OmittedReason: "not_saved"}
+					for child := range stage.NativeExecutions {
+						stage.NativeExecutions[child].Stderr.Storage = &runtimecontract.RuntimeValidationOutputStorage{OmittedReason: "not_saved"}
+					}
 				}
 				queryResponse.Receipt, c.SourceReceiptHash, c.Stream = &changed, runtimecontract.StableRuntimeOperationReceiptHash(changed), "stderr"
 			case "workspace":
@@ -156,7 +207,11 @@ func TestValidationRawOutputQueryDerivesOriginalReceiptScopeAndBytes(t *testing.
 				queryResponse.Receipt, c.SourceReceiptHash = &changed, runtimecontract.StableRuntimeOperationReceiptHash(changed)
 			case "output-identity":
 				for index := range changed.Evidence.Validation.ExecutionConjunction.Stages {
-					changed.Evidence.Validation.ExecutionConjunction.Stages[index].Stderr.SHA256 = changed.Evidence.Validation.ExecutionConjunction.RequiredStagesHash
+					stage := &changed.Evidence.Validation.ExecutionConjunction.Stages[index]
+					stage.Stderr.SHA256 = changed.Evidence.Validation.ExecutionConjunction.RequiredStagesHash
+					for child := range stage.NativeExecutions {
+						stage.NativeExecutions[child].Stderr.SHA256 = changed.Evidence.Validation.ExecutionConjunction.RequiredStagesHash
+					}
 				}
 				queryResponse.Receipt, c.SourceReceiptHash, c.Stream = &changed, runtimecontract.StableRuntimeOperationReceiptHash(changed), "stderr"
 			}

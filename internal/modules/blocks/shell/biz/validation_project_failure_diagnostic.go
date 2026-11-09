@@ -16,7 +16,7 @@ const shellProjectFailureDiagnosticStageID = "reviewed-cwi-failure-diagnostic"
 // a guessed implementation target. In particular a known failure does not hide
 // a skipped/unfinished/unknown sibling or a package build failure.
 func shellProjectExactFailedCases(stage shellProjectStageFact, request RuntimeCommandRequest) ([]string, bool) {
-	if !stage.Started || stage.ExitCode == 0 || !stage.KnownFailure || stage.TimedOut || stage.CleanupFailed || !stage.TerminalComplete || !shellProjectRawFactValid(stage.Stdout) || !shellProjectRawFactValid(stage.Stderr) || stage.SourceBefore == "" || stage.SourceBefore != stage.SourceAfter {
+	if stage.NativeSourceFailure != "" || !stage.Started || stage.ExitCode == 0 || !stage.KnownFailure || stage.TimedOut || stage.CleanupFailed || !stage.TerminalComplete || !shellProjectRawFactValid(stage.Stdout) || !shellProjectRawFactValid(stage.Stderr) || stage.SourceBefore == "" || stage.SourceBefore != stage.SourceAfter {
 		return nil, false
 	}
 	pkg, err := shellIsolatedValidationPackage(request.ValidationCheckAttestations)
@@ -88,6 +88,7 @@ func runShellProjectFailureDiagnostic(ctx context.Context, directory string, env
 	output.Status, output.ExitCode = "failed", int64(stage.ExitCode)
 	output.Stdout, output.Stderr = string(stage.Stdout.Raw), string(stage.Stderr.Raw)
 	attachShellValidationObservation(&output, "go", spec.Args, request.ValidationRecipeID, true)
+	attachShellNativeExecutionFacts(&output, stage)
 	attachShellValidationCheckFailures(&output, request)
 	output.workspaceProcessBehaviorTargetRefs, output.workspaceProcessBehaviorError = shellProcessBehaviorTargets(ctx, "go", directory, processPath, env, request.ValidationScopeTargetRefs)
 	_ = attachShellWorkspaceBehavior(&output, request, directory, coveragePath)
@@ -98,6 +99,7 @@ func runShellProjectFailureDiagnostic(ctx context.Context, directory string, env
 	baseline := shellBaseOutput(request, "go", spec.Args, directory, "", "go")
 	baseline.ExitCode, baseline.Stdout, baseline.Stderr = int64(original.ExitCode), string(original.Stdout.Raw), string(original.Stderr.Raw)
 	attachShellValidationObservation(&baseline, "go", spec.Args, request.ValidationRecipeID, true)
+	attachShellNativeExecutionFacts(&baseline, original)
 	attachShellValidationCheckFailures(&baseline, request)
 	if baseline.ValidationObservation == nil || baseline.ValidationObservation.ValidateFailureDetails() != nil || baseline.ValidationObservation.FailureDetailsTruncated || !shellSameFailureAssertions(baseline.ValidationObservation.CheckFailures, output.ValidationObservation.CheckFailures) {
 		return stage, nil
