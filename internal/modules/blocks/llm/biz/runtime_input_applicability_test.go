@@ -115,7 +115,7 @@ func TestCandidateLocalFilesExpandExactlyAndRejectWrongSource(t *testing.T) {
 	for _, change := range []string{"none", "missing", "duplicate", "scope", "hash", "text", "mixed", "rule"} {
 		t.Run(change, func(t *testing.T) {
 			tail := clone()
-			compactRuntimeCandidateWorkFiles(&tail, contexts)
+			compactRuntimeCandidateWorkFiles(&tail, runtimeCandidateAuthorityBodySources(runtimeCandidateOutputContractProjection{}, contexts))
 			if len(tail.WorkFileRefs) != 1 || tail.ImplementationWorkContent.Snapshots[0].Content != "" {
 				t.Fatal("exact duplicate not shared")
 			}
@@ -126,7 +126,7 @@ func TestCandidateLocalFilesExpandExactlyAndRejectWrongSource(t *testing.T) {
 			case "duplicate":
 				tail.WorkFileRefs = append(tail.WorkFileRefs, tail.WorkFileRefs[0])
 			case "scope":
-				tail.WorkFileRefs[0].Generation = 1
+				tail.WorkFileRefs[0].Source = "C3.context.validationGenerationContexts[1].context.Files[0].content"
 			case "hash":
 				tail.ImplementationWorkContent.Snapshots[0].ContentHash = "foreign"
 			case "text":
@@ -136,7 +136,7 @@ func TestCandidateLocalFilesExpandExactlyAndRejectWrongSource(t *testing.T) {
 			case "rule":
 				tail.ReferenceRule = "claimed rule"
 			}
-			err := expandRuntimeCandidateWorkFiles(&tail, prompt)
+			err := expandRuntimeCandidateFiles(&tail, prompt)
 			if change == "none" {
 				tail.WorkFileRefs = nil
 				tail.ReferenceRule = ""
@@ -153,12 +153,12 @@ func TestCandidateLocalFilesExpandExactlyAndRejectWrongSource(t *testing.T) {
 	}
 	tail := clone()
 	tail.ImplementationWorkContent.Snapshots[0].Content = "different before image"
-	compactRuntimeCandidateWorkFiles(&tail, contexts)
+	compactRuntimeCandidateWorkFiles(&tail, runtimeCandidateAuthorityBodySources(runtimeCandidateOutputContractProjection{}, contexts))
 	if len(tail.WorkFileRefs) != 0 {
 		t.Fatal("different before image shared by target/hash alone")
 	}
 	tail = clone()
-	compactRuntimeCandidateWorkFiles(&tail, contexts)
+	compactRuntimeCandidateWorkFiles(&tail, runtimeCandidateAuthorityBodySources(runtimeCandidateOutputContractProjection{}, contexts))
 	raw, _ := json.Marshal(tail)
 	prompt := makePrompt()
 	section := models.PromptSection{ID: "C4.execution-tail", Content: string(raw)}

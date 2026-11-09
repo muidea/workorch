@@ -63,21 +63,33 @@ func expandChangeReviewFiles(c *rc.RuntimeChangeReviewContext, refs []runtimeCha
 			return fmt.Errorf("change review reference is duplicate or outside request")
 		}
 		seen[ref.Current] = true
-		found := false
 		f := &c.Current[ref.Current]
-		for _, s := range sources {
-			if ref.Source != s.ref {
-				continue
-			}
-			if found || f.Content != "" || s.file.Content == "" || f.TargetRef != s.file.TargetRef || f.ContentHash != s.file.ContentHash || rc.RuntimeValidationInputContentHash(s.file.Content) != f.ContentHash {
-				return fmt.Errorf("change review reference differs from exact source")
-			}
-			f.Content = s.file.Content
-			found = true
+		source, err := runtimeFileReferenceSource(ref.Source, sources)
+		if err != nil {
+			return err
 		}
-		if !found {
-			return fmt.Errorf("change review reference source unavailable")
+		if f.Content != "" || f.TargetRef != source.TargetRef || f.ContentHash != source.ContentHash {
+			return fmt.Errorf("change review reference differs from exact source")
 		}
+		f.Content = source.Content
 	}
 	return nil
+}
+
+func runtimeFileReferenceSource(ref string, sources []runtimeChangeReviewBodySource) (rc.RuntimeValidationInputReviewFile, error) {
+	var file rc.RuntimeValidationInputReviewFile
+	found := false
+	for _, source := range sources {
+		if ref != source.ref {
+			continue
+		}
+		if found || source.file.Content == "" || rc.RuntimeValidationInputContentHash(source.file.Content) != source.file.ContentHash {
+			return file, fmt.Errorf("file reference source is duplicate or differs from exact content/hash")
+		}
+		file, found = source.file, true
+	}
+	if !found {
+		return file, fmt.Errorf("file reference source unavailable in request")
+	}
+	return file, nil
 }

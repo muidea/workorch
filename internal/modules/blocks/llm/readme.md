@@ -454,6 +454,18 @@ C4 `changeReview` 消费 Orchestrator 编译的 request-local 当前正文及原
 动态事实不进入 C0-C2；actual/expanded bytes 和引用数进入现有审计，不充当 token 或缓存收益。
 恢复继续使用原冻结请求，不读取新正文来改写旧输入。
 
+operations 的闭合正文来源包括 C3 `context.validationGenerationContexts` 和本次
+`outputContract.operationContracts[].inputRevision` 的适用输入文件（semantic review 的
+`Binding.InputReview.Files` 或 structural maintenance 的 `ownerObservation.Files`）。C3 原文件、完整报告与原 recipe
+仍 inline；`workFileRefs` 以 `snapshot + source` 精确复用 C3 正文，不接受外部 JSON 路径查询。
+`changeReviewFileRefs` 还可复用本次 C4 工作 snapshots；展开顺序固定为 C3 来源→work→changeReview→operation value，
+故不允许 work 自引用、review 循环或反向引用。只有 target/hash/正文逐值相等才复用，不把历史前像与新 revision 合并。
+同一解码实现供完整性门禁、actual/expanded bytes 审计和 correction 原 C3/新 C4 组合使用；原 report、recipe、文件与
+来源身份须逐值等于 sealed manifest 的 provider 投影，此检查不重新裁决已提交的语义报告。
+Orchestrator 原 scope 与依赖成员继续完整保留：selected work body 和 change-review corpus 的责任不同，不因只改两个目标
+就删除其它适用依赖。只有新请求采用当前编码；已冻结 Messages/CacheKey、同请求恢复和旧执行事实不重渲染、不迁移。
+回归：`runtime_candidate_file_refs_test.go`、`runtime_input_applicability_test.go`、`runtime_provider_input_test.go`。
+
 
 ### 阶段历史与同请求操作值复用
 

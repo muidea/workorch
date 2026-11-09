@@ -2029,6 +2029,12 @@ operations 的 generation/preparation 仅属于封存 state-change task，InputR
 同一 frozen request 的 C3 corpus，展开后的两个来源均独立校验。SM-3 仅 fresh 请求使用新分段/选择，SM-4 的原冻结
 消息、schema、cache key 和已发操作不重渲染；SM-1/SM-2、权限/预算、原验收、receipt/终态事实与三 ACK 不变。
 
+operations 正文复用由 LLM owner 的唯一闭合 codec 完成：C3 generation corpus 与本次 inputRevision 的适用原文件是
+inline 来源；C4 work 仅可引用 C3，changeReview 可引用 C3 或已经展开的 work，最后展开历史 operation values。
+渲染门禁与冻结 correction 组合消费同一展开值，核对完整 owner scope/前轮因果及 manifest-bound 原报告、recipe 和来源，
+不重新裁决报告语义。changeReview 的完整当前成员与工作正文的 manifest 必需目标各守原适用范围；复用不删除未选写的依赖。
+SM-3 新请求编译及 SM-4 原冻结输入消费边界保持不变，不以新编码重渲染旧事务、不扩 provider ceiling 或预算。
+
 验证输入报告的同一 check 内 criterionText 必须唯一；同一 excerpt 的联合消费者使用单条 obligation，finding/reason
 保留全部适用缺项、冲突和 unknown，不以某一消费者 covered 抵消其它责任。SM-3 的严格 decoder 从纯 validator
 保留精确 checks/obligations 路径、闭合 actual 分类和 owner 规则（重复时包括首次 occurrence 的位置），沿原 semantic

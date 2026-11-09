@@ -23,7 +23,7 @@ func TestOperationsFrozenWorkContentRenderGateAndIsolation(t *testing.T) {
 				return &llmmodels.PromptContext{Sections: []llmmodels.PromptSection{{ID: "C4.execution-tail", Content: string(raw)}}}
 			}
 			p := render()
-			if err := validateRuntimeCandidateWorkContentIntegrity(c, m, p); err != nil {
+			if _, err := runtimeCandidateExecutionTailForIntegrity(c, m, p); err != nil {
 				t.Fatal(err)
 			}
 			for _, which := range []string{"missing", "altered", "duplicate", "foreign"} {
@@ -46,7 +46,7 @@ func TestOperationsFrozenWorkContentRenderGateAndIsolation(t *testing.T) {
 					raw, _ := json.Marshal(projection)
 					p.Sections[0].Content = string(raw)
 				}
-				if validateRuntimeCandidateWorkContentIntegrity(c, m, p) == nil {
+				if _, err := runtimeCandidateExecutionTailForIntegrity(c, m, p); err == nil {
 					t.Fatal("post-render change reached provider", which)
 				}
 			}

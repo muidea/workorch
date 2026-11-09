@@ -76,7 +76,10 @@ func freezeRuntimeProviderInput(r models.RuntimeCandidateRequest, p models.Provi
 	if r.DocumentKind == rc.RuntimeProviderDocumentOperations {
 		// A correction joins old C3 with new C4. Resolve references against
 		// that actual composition, never against a discarded fresh projection.
-		if err := validateRuntimeCandidateWorkContentIntegrity(r.CandidateContext, r.CandidateManifest, p.PromptContext); err != nil {
+		if err := validateRuntimeCandidateWorkIntentIntegrity(r.CandidateManifest, p.PromptContext); err != nil {
+			return nil, nil, err
+		}
+		if err := validateRuntimeCandidateContextIntegrity(r.DefinitionContext, r.CandidateContext, r.CandidateManifest, r.CandidateAttempt, r.CandidateCorrectionObservation, p.ContextBudget, p.PromptContext); err != nil {
 			return nil, nil, err
 		}
 	}

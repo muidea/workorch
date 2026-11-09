@@ -134,9 +134,7 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 		}
 	}
 	executionTail := buildRuntimeCandidateExecutionTailProjection(candidateContext, request.CandidateAttempt, request.CandidateCorrectionObservation, manifest, request.CandidateCorrection)
-	executionTail.ChangeReviewValueRefs = compactChangeReviewValues(executionTail.ChangeReview)
-	executionTail.ChangeReviewFileRefs = compactChangeReviewFiles(executionTail.ChangeReview, changeReviewBodySources(nil, "", runtimeCandidateApplicableGenerationContexts(candidateContext, manifest), "C3.context.validationGenerationContexts"))
-	compactRuntimeCandidateWorkFiles(&executionTail, runtimeCandidateApplicableGenerationContexts(candidateContext, manifest))
+	compactRuntimeCandidateFiles(&executionTail, runtimeCandidateAuthorityBodySources(outputContract, runtimeCandidateApplicableGenerationContexts(candidateContext, manifest)))
 	executionTailJSON, err := json.Marshal(executionTail)
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
@@ -181,9 +179,6 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 		providerRequest.ContextBudget.CachePlan.StablePrefixHash = wantPrefix
 	}
 	populateRuntimeCandidateContextBudget(providerRequest.ContextBudget, providerRequest.PromptContext)
-	if err := validateRuntimeCandidateWorkContentIntegrity(candidateContext, manifest, providerRequest.PromptContext); err != nil {
-		return llmmodels.ProviderRequest{}, err
-	}
 	if err := validateRuntimeCandidateWorkIntentIntegrity(manifest, providerRequest.PromptContext); err != nil {
 		providerRequest.ContextBudget.ContextGateAction = "fail_fast"
 		providerRequest.ContextBudget.ContextGateReason = "runtime_context_integrity_failed"
@@ -342,15 +337,22 @@ func validateRuntimeCandidateContextIntegrity(
 	expectedContexts := runtimeCandidateApplicableGenerationContexts(context, manifest)
 	{
 		var actual struct {
-			Context runtimeCandidateAuthorityProjection `json:"context"`
+			Context        runtimeCandidateAuthorityProjection      `json:"context"`
+			OutputContract runtimeCandidateOutputContractProjection `json:"outputContract"`
 		}
 		if json.Unmarshal([]byte(contents["C3"]), &actual) != nil || !reflect.DeepEqual(actual.Context.ValidationProofPreparations, expectedPreparations) || !reflect.DeepEqual(actual.Context.ValidationGenerationContexts, expectedContexts) {
 			missing = append(missing, "P4.validation_preparation_context")
 		}
+		if !runtimeCandidateInputRevisionSourcesMatch(manifest, actual.OutputContract.OperationContracts) {
+			missing = append(missing, "P4.input_revision_sources")
+		}
 	}
 	{
-		var tail runtimeCandidateExecutionTailProjection
-		if json.Unmarshal([]byte(contents["C4"]), &tail) != nil || expandChangeReviewFiles(tail.ChangeReview, tail.ChangeReviewFileRefs, changeReviewBodySources(nil, "", expectedContexts, "C3.context.validationGenerationContexts")) != nil || expandChangeReviewValues(tail.ChangeReview, tail.ChangeReviewValueRefs) != nil ||
+		tail, err := runtimeCandidateExecutionTailForIntegrity(context, manifest, prompt)
+		if err != nil {
+			missing = append(missing, err.Error())
+		}
+		if err != nil ||
 			!reflect.DeepEqual(tail.ChangeReview, context.ChangeReview) || tail.ChangeReviewResponsibility != runtimeChangeReviewInstruction(context.ChangeReview) ||
 			!reflect.DeepEqual(tail.AcceptedEvidence, runtimeProviderSafeEvidence(runtimeCandidateRelevantEvidence(context, context.Evidence.Accepted))) ||
 			!reflect.DeepEqual(tail.RejectedEvidence, runtimeProviderSafeEvidence(runtimeCandidateRelevantEvidence(context, context.Evidence.Rejected))) ||
