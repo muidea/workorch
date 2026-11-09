@@ -136,6 +136,15 @@ func runtimeValidationInputSymbol(value string) bool {
 }
 
 func validateRuntimeValidationInputDiagnostic(d ValidationFailureDiagnostic) error {
+	if err := d.Unavailability.Validate(); err != nil {
+		return err
+	}
+	if d.Unavailability != "" && (d.Class != ValidationDiagnosticOutputInconclusive ||
+		d.RecommendedEvidenceTargetType != ValidationEvidenceTargetValidationOutput ||
+		d.OwnerCode == "" || d.Stage == "" || len(d.TargetRefs) != 0 || d.TargetRejection != nil ||
+		d.InputRepair != nil || len(d.InputLocations) != 0 || d.InputAddition != (RuntimeValidationInputAddition{})) {
+		return fmt.Errorf("unavailable validation diagnostic cannot grant repair or input authority")
+	}
 	if d.TargetRejection != nil {
 		if err := d.TargetRejection.Validate(); err != nil {
 			return err
@@ -180,6 +189,10 @@ func validateRuntimeValidationInputDiagnostic(d ValidationFailureDiagnostic) err
 }
 
 func writeRuntimeValidationInputDiagnosticHash(h interface{ Write([]byte) (int, error) }, d ValidationFailureDiagnostic) {
+	if d.Unavailability != "" {
+		writeHashString(h, "diagnostic-unavailability")
+		writeHashString(h, string(d.Unavailability))
+	}
 	if d.TargetRejection != nil {
 		writeHashString(h, "failure-target-rejection")
 		writeHashString(h, d.TargetRejection.Code)

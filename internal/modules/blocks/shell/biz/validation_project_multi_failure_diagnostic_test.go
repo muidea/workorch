@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -71,7 +72,7 @@ func TestProjectMultiFailureSourcePublicationIsExactAndProtectsOriginalTests(t *
 }
 
 func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
-	for _, scenario := range []string{"large-output", "exact", "disjoint", "unobserved", "partial-unobserved", "skip", "drift", "missing-source", "changed-assertion", "additive-input-test", "legacy"} {
+	for _, scenario := range []string{"interleaved-output", "large-output", "exact", "disjoint", "unobserved", "partial-unobserved", "missing-assertion", "over-capacity", "skip", "drift", "missing-source", "changed-assertion", "additive-input-test", "legacy"} {
 		t.Run(scenario, func(t *testing.T) {
 			root, internal := t.TempDir(), t.TempDir()
 			recipe := isolatedInputRecipe()
@@ -84,6 +85,18 @@ func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
 			}
 			target := shellValidationNativeCheckTargetRef(requirement, checks...)
 			files := map[string]string{"go.mod": "module fixture\ngo 1.26\n", "delivery/value.go": "package delivery\nfunc Value() int{return 3}\n", target: fmt.Sprintf("package checks\nimport(\"testing\"; delivery \"fixture/delivery\")\nfunc %s(t *testing.T){if delivery.Value()!=4{t.Fatal(\"WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3\")}}\n", checks[0].NativeCheckRef), "delivery/value_test.go": "package delivery\nimport \"testing\"\nfunc TestProduction(t *testing.T){if Value()!=4{t.Fatal(\"WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3\")}}\n"}
+			if scenario == "missing-assertion" {
+				files["delivery/value_test.go"] = "package delivery\nimport \"testing\"\nfunc TestProduction(t *testing.T){if Value()!=4{t.Fail()}}\n"
+			}
+			if scenario == "over-capacity" {
+				for i := 0; i < 6; i++ {
+					files[fmt.Sprintf("delivery/extra%d_test.go", i)] = fmt.Sprintf("package delivery\nimport \"testing\"\nfunc TestExtra%d(t *testing.T){if Value()!=4{t.Fatal(\"extra failure\")}}\n", i)
+				}
+			}
+			if scenario == "interleaved-output" {
+				files["delivery/value_test.go"] = strings.Replace(files["delivery/value_test.go"], `import "testing"`, `import("testing";"fmt")`, 1)
+				files["delivery/value_test.go"] = strings.Replace(files["delivery/value_test.go"], "if Value()!=4", `t.Log("ordinary source log");fmt.Println("unrelated process output");if Value()!=4`, 1)
+			}
 			if scenario == "large-output" {
 				files["delivery/value_test.go"] = strings.Replace(files["delivery/value_test.go"], `import "testing"`, `import("testing";"strings")`, 1)
 				files["delivery/value_test.go"] = strings.Replace(files["delivery/value_test.go"], "if Value()!=4", `for range 600 {t.Log(strings.Repeat("x",4096))};if Value()!=4`, 1)
@@ -153,9 +166,27 @@ func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
 			if err == nil || result.Conjunction == nil || result.Conjunction.Complete || result.Result.Evidence.Quality == common.EvidenceQualityValid || result.Conjunction.Validate() != nil {
 				t.Fatalf("failed project credited or lost: err=%v conjunction=%+v", err, result.Conjunction)
 			}
-			wantDiagnostic := scenario == "large-output" || scenario == "exact" || scenario == "disjoint" || scenario == "additive-input-test"
-			if (result.Result.ValidationFailureDiagnostic != nil) != wantDiagnostic {
-				t.Fatalf("%s wrong attribution: diagnostic=%+v stages=%+v", scenario, result.Result.ValidationFailureDiagnostic, result.Conjunction.Stages)
+			wantDiagnostic := scenario == "interleaved-output" || scenario == "large-output" || scenario == "exact" || scenario == "disjoint" || scenario == "additive-input-test"
+			diagnostic := result.Result.ValidationFailureDiagnostic
+			if wantDiagnostic {
+				if diagnostic == nil || diagnostic.Unavailability != "" {
+					t.Fatalf("%s lost complete attribution: %+v", scenario, diagnostic)
+				}
+			} else if scenario != "legacy" {
+				if diagnostic == nil || diagnostic.Unavailability == "" || len(diagnostic.TargetRefs) != 0 || diagnostic.Class != runtimecontract.ValidationDiagnosticOutputInconclusive || result.Result.Evidence.Validation == nil {
+					t.Fatalf("%s lost explicit diagnostic rejection: %+v", scenario, diagnostic)
+				}
+				expected := map[string]runtimecontract.RuntimeValidationDiagnosticUnavailability{
+					"unobserved": runtimecontract.ValidationDiagnosticBehaviorUnobserved, "partial-unobserved": runtimecontract.ValidationDiagnosticBehaviorUnobserved,
+					"missing-assertion": runtimecontract.ValidationDiagnosticAssertionsUnavailable, "over-capacity": runtimecontract.ValidationDiagnosticCapacityExceeded,
+					"skip": runtimecontract.ValidationDiagnosticSourcesUnavailable, "drift": runtimecontract.ValidationDiagnosticInputChanged, "missing-source": runtimecontract.ValidationDiagnosticInputChanged,
+					"changed-assertion": runtimecontract.ValidationDiagnosticReproductionUnavailable,
+				}[scenario]
+				if diagnostic.Unavailability != expected {
+					t.Fatalf("%s misclassified cause: got=%s want=%s", scenario, diagnostic.Unavailability, expected)
+				}
+			} else if diagnostic != nil {
+				t.Fatalf("legacy fixture unexpectedly attributed: %+v", diagnostic)
 			}
 			if scenario == "partial-unobserved" {
 				attributed := 0
@@ -219,5 +250,31 @@ func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
 				t.Fatal("original failure erased")
 			}
 		})
+	}
+}
+
+// The diagnostic shares the original operation context; cancellation must not
+// be reported as a timeout or change the known original execution failure.
+func TestProjectMultiFailureDiagnosticContextDisposition(t *testing.T) {
+	for _, timeout := range []bool{false, true} {
+		var ctx context.Context
+		if timeout {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+			defer cancel()
+		} else {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithCancel(context.Background())
+			cancel()
+		}
+		baseline := RuntimeCommandResult{ValidationObservation: &runtimecontract.RuntimeValidationObservation{FailedChecks: []string{"native"}}}
+		stages, _, got := runShellProjectMultiFailureDiagnostic(ctx, t.TempDir(), nil, RuntimeCommandRequest{}, shellProjectStageFact{ID: "project-test", ExitCode: 1}, 2, baseline)
+		want := runtimecontract.ValidationDiagnosticExecutionUnavailable
+		if timeout {
+			want = runtimecontract.ValidationDiagnosticDeadlineExceeded
+		}
+		if got == nil || got.ValidationFailureDiagnostic == nil || got.ValidationFailureDiagnostic.Unavailability != want || got.ValidationFailureDiagnostic.ExitCode != 1 || len(stages) != 0 || !reflect.DeepEqual(got.ValidationObservation.FailedChecks, baseline.ValidationObservation.FailedChecks) {
+			t.Fatalf("timeout=%t lost exact disposition: %+v", timeout, got)
+		}
 	}
 }

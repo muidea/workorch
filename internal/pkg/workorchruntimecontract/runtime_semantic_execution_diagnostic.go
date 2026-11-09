@@ -24,11 +24,12 @@ type RuntimeSemanticExecutionDiagnostic struct {
 // fields. Neither a default exit code nor command kind proves a process ran;
 // actual check execution remains a separate validation observation.
 type RuntimeValidationDiagnosticFeedback struct {
-	Class            string `json:"class"`
-	OwnerCode        string `json:"ownerCode"`
-	CommandKind      string `json:"commandKind"`
-	ReportedExitCode int    `json:"reportedExitCode"`
-	TimedOut         bool   `json:"timedOut"`
+	Unavailability   RuntimeValidationDiagnosticUnavailability `json:"unavailability,omitempty"`
+	Class            string                                    `json:"class"`
+	OwnerCode        string                                    `json:"ownerCode"`
+	CommandKind      string                                    `json:"commandKind"`
+	ReportedExitCode int                                       `json:"reportedExitCode"`
+	TimedOut         bool                                      `json:"timedOut"`
 }
 
 func (d *RuntimeSemanticExecutionDiagnostic) Clone() *RuntimeSemanticExecutionDiagnostic {
@@ -49,6 +50,12 @@ func (d RuntimeSemanticExecutionDiagnostic) Validate(owner string) error {
 	}
 	values := []string{d.FeedbackHash, d.OwnerModuleID, d.OriginalClass, d.OriginalCode, d.Signature, d.ExpectedRevision, d.ObservedRevision}
 	if d.ValidationDiagnostic != nil {
+		if err := d.ValidationDiagnostic.Unavailability.Validate(); err != nil {
+			return err
+		}
+		if d.ValidationDiagnostic.Unavailability != "" && (d.ValidationDiagnostic.Class != ValidationDiagnosticOutputInconclusive || d.ValidationDiagnostic.OwnerCode == "") {
+			return fmt.Errorf("unavailable diagnostic feedback requires exact inconclusive owner outcome")
+		}
 		values = append(values, d.ValidationDiagnostic.Class, d.ValidationDiagnostic.OwnerCode, d.ValidationDiagnostic.CommandKind)
 	}
 	for _, value := range values {
@@ -82,7 +89,7 @@ func ProjectRuntimeSemanticExecutionDiagnostic(feedback *RuntimeFeedback, owner 
 	}
 	if d.ValidationDiagnostic != nil {
 		v := d.ValidationDiagnostic
-		ret.ValidationDiagnostic = &RuntimeValidationDiagnosticFeedback{Class: v.Class, OwnerCode: v.OwnerCode, CommandKind: v.CommandKind, ReportedExitCode: v.ExitCode, TimedOut: v.TimedOut}
+		ret.ValidationDiagnostic = &RuntimeValidationDiagnosticFeedback{Unavailability: v.Unavailability, Class: v.Class, OwnerCode: v.OwnerCode, CommandKind: v.CommandKind, ReportedExitCode: v.ExitCode, TimedOut: v.TimedOut}
 	}
 	return ret, ret.Validate(owner)
 }

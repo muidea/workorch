@@ -79,12 +79,12 @@ func TestShellValidationFailureDetailsAreBoundedAndDoNotInventLocations(t *testi
 func TestShellValidationFailureDetailsPreserveMultilineNativeBody(t *testing.T) {
 	output := RuntimeCommandResult{ValidationObservation: &runtimecontract.RuntimeValidationObservation{FailedChecks: []string{"TestA"}}, goTestJSONFacts: &shellGoTestJSONFacts{CaseOutcomes: map[string]string{"pkg\x00TestA": "fail"}, DiagnosticRecords: []shellGoTestJSONDiagnosticRecord{
 		{Action: "output", Package: "pkg", Test: "TestA", Output: "    a_test.go:7: expected:\n"},
-		{Action: "output", Package: "pkg", Test: "TestA", Output: "        original exact value\r\n        got another value\n"},
+		{Action: "output", Package: "pkg", Test: "TestA", Output: "        original exact value\r\n\n        got another value\n"},
 		{Action: "output", Package: "pkg", Test: "TestA", Output: "--- FAIL: TestA (0.00s)\n"},
 	}}}
 	attachShellValidationCheckFailures(&output, RuntimeCommandRequest{ValidationScopeTargetRefs: []string{"a_test.go"}})
 	o := output.ValidationObservation
-	if o.FailureDetailsTruncated || len(o.CheckFailures) != 1 || o.CheckFailures[0].AssertionText != "expected:\n        original exact value\r\n        got another value" {
+	if o.FailureDetailsTruncated || len(o.CheckFailures) != 1 || o.CheckFailures[0].AssertionText != "expected:\n        original exact value\r\n\n        got another value" {
 		t.Fatalf("multiline native body lost: %+v", o)
 	}
 	if o.ValidateFailureDetails() != nil {
@@ -104,5 +104,30 @@ func TestShellValidationFailureDetailsExplicitGaps(t *testing.T) {
 				t.Fatal("partial native body appeared complete")
 			}
 		})
+	}
+}
+
+func TestShellValidationAssertionFramesSeparateOuterLogsAndNestedSourceText(t *testing.T) {
+	// Native decoration defines the body boundary; neither application log
+	// vocabulary nor a source-looking nested transcript can choose attribution.
+	body := "    a_test.go:7: nested command output:\n        b_test.go:19: inner failure\n        tool: command failed\nouter process output\n    a_test.go:9: actual failure\n--- FAIL: TestA (0.00s)\n"
+	for _, split := range []int{0, 23, len(body) - 2} {
+		out := RuntimeCommandResult{ValidationObservation: &runtimecontract.RuntimeValidationObservation{FailedChecks: []string{"TestA"}}, goTestJSONFacts: &shellGoTestJSONFacts{CaseOutcomes: map[string]string{"pkg\x00TestA": "fail"}}}
+		for _, text := range []string{body[:split], body[split:]} {
+			out.goTestJSONFacts.DiagnosticRecords = append(out.goTestJSONFacts.DiagnosticRecords, shellGoTestJSONDiagnosticRecord{Action: "output", Package: "pkg", Test: "TestA", Output: text})
+		}
+		attachShellValidationCheckFailures(&out, RuntimeCommandRequest{ValidationScopeTargetRefs: []string{"a_test.go", "b_test.go"}})
+		o := out.ValidationObservation
+		if o.FailureDetailsTruncated || len(o.CheckFailures) != 2 || o.CheckFailures[0].TargetRef != "a_test.go" || o.CheckFailures[0].Line != 7 || o.CheckFailures[0].AssertionText != "nested command output:\n        b_test.go:19: inner failure\n        tool: command failed" || o.CheckFailures[1].Line != 9 || o.CheckFailures[1].AssertionText != "actual failure" {
+			t.Fatalf("split=%d frame identity/body lost: %+v", split, o)
+		}
+	}
+}
+
+func TestShellValidationAssertionEqualIndentUnknownContinuationRemainsIncomplete(t *testing.T) {
+	out := RuntimeCommandResult{ValidationObservation: &runtimecontract.RuntimeValidationObservation{FailedChecks: []string{"TestA"}}, goTestJSONFacts: &shellGoTestJSONFacts{DiagnosticRecords: []shellGoTestJSONDiagnosticRecord{{Action: "output", Test: "TestA", Output: "    a_test.go:3: assertion\n    unknown continuation\n"}}}}
+	attachShellValidationCheckFailures(&out, RuntimeCommandRequest{ValidationScopeTargetRefs: []string{"a_test.go"}})
+	if !out.ValidationObservation.FailureDetailsTruncated {
+		t.Fatal("ambiguous same-frame text was silently dropped")
 	}
 }

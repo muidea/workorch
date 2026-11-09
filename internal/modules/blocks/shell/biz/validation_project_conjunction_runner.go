@@ -104,12 +104,14 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 		output.StdoutBytes, output.StderrBytes = stage.Stdout.Bytes, stage.Stderr.Bytes
 		output.StdoutTruncated, output.StderrTruncated = !stage.Stdout.Complete, !stage.Stderr.Complete
 		output.OutputTruncated = output.StdoutTruncated || output.StderrTruncated
+		stageOutput := output
 		if spec.JSON {
 			// 每阶段独立解析，前一阶段的失败或 quality 不能作为后一阶段前像。
 			output.EvidenceQuality, output.EvidenceReason = "", ""
 			output.ZeroWork, output.goTestJSONFacts = false, nil
 			attachShellValidationObservation(&output, "go", spec.Args, request.ValidationRecipeID, true)
 			attachShellValidationCheckFailures(&output, request)
+			stageOutput = output
 			if projectSelected && index < len(specs)-1 {
 				// 前三阶段的 PASS 不投影为当前 CWI 的 exact native proof。
 				output.ValidationObservation = &runtimecontract.RuntimeValidationObservation{RecipeID: request.ValidationRecipeID, ObservationProtocolRef: protocol}
@@ -193,13 +195,15 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 				}
 			}
 			if output.ValidationFailureDiagnostic == nil && protocol == shellProjectMultiFailureDiagnosticProtocolRef && (spec.ID == "project-test" || spec.ID == "project-race") {
-				diagnosticStages, diagnosticSpecs, diagnostic := runShellProjectMultiFailureDiagnostic(ctx, directory, env, request, stage, len(stages))
+				diagnosticStages, diagnosticSpecs, diagnostic := runShellProjectMultiFailureDiagnostic(ctx, directory, env, request, stage, len(stages), stageOutput)
 				stages = append(stages, diagnosticStages...)
 				output.projectDiagnosticStageSpecs = diagnosticSpecs
 				if diagnostic != nil {
 					output.ValidationObservation = diagnostic.ValidationObservation
 					output.workspaceBehaviorTargetRefs = diagnostic.workspaceBehaviorTargetRefs
-					attachShellValidationFailureDiagnostic(diagnostic, request, "go", stage.ExitCode, false, false, stageErr)
+					if diagnostic.ValidationFailureDiagnostic == nil {
+						attachShellValidationFailureDiagnostic(diagnostic, request, "go", stage.ExitCode, false, false, stageErr)
+					}
 					output.ValidationFailureDiagnostic = diagnostic.ValidationFailureDiagnostic
 					output.RuntimeDiagnostics.ValidationFailureDiagnostic = diagnostic.ValidationFailureDiagnostic
 				}

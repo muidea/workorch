@@ -15,7 +15,11 @@ func TestDriveRuntimeProjectMultiFailureOwnerMainline(t *testing.T) {
 	for _, mode := range []string{"consistent", "project_history_failure"} {
 		t.Run(mode, func(t *testing.T) {
 			baseline := runValidationInputReviewMainline(t, mode, "", options)
-			for _, cut := range []string{"after_review_document", "after_review_binding", "after_project_receipt"} {
+			cuts := []string{"after_review_document", "after_review_binding", "after_project_receipt"}
+			if mode == "project_history_failure" {
+				cuts = append(cuts, "after_failure_input_review_open", "after_failure_input_review_document")
+			}
+			for _, cut := range cuts {
 				t.Run(cut, func(t *testing.T) {
 					if calls := runValidationInputReviewMainline(t, mode, cut, options); calls != baseline {
 						t.Fatalf("source review/receipt recovery repeated provider consumption: %d != %d", calls, baseline)

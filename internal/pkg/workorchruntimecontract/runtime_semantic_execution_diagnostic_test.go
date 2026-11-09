@@ -63,6 +63,21 @@ func TestSemanticExecutionDiagnosticPreservesFactsWithoutRawOrAuthority(t *testi
 			}
 		})
 	}
+	f.OriginalDiagnostic.ValidationDiagnostic = &ValidationFailureDiagnostic{Class: ValidationDiagnosticOutputInconclusive, Unavailability: ValidationDiagnosticBehaviorUnobserved, Stage: "ordinary-test", OwnerCode: "behavior_unobserved", RecommendedEvidenceTargetType: ValidationEvidenceTargetValidationOutput, ExitCode: 1}
+	unavailable, err := ProjectRuntimeSemanticExecutionDiagnostic(&f, RuntimeModuleShell)
+	if err != nil || unavailable.ValidationDiagnostic.Unavailability != ValidationDiagnosticBehaviorUnobserved {
+		t.Fatal("lost typed owner cause", err)
+	}
+	f.OriginalDiagnostic.ValidationDiagnostic.Unavailability = ValidationDiagnosticReproductionUnavailable
+	changedCause, err := ProjectRuntimeSemanticExecutionDiagnostic(&f, RuntimeModuleShell)
+	if err != nil || changedCause.FeedbackHash == unavailable.FeedbackHash {
+		t.Fatal("changed cause retained receipt feedback identity", err)
+	}
+	invalid := changedCause.Clone()
+	invalid.ValidationDiagnostic.Class = ValidationDiagnosticTestFailed
+	if invalid.Validate(RuntimeModuleShell) == nil {
+		t.Fatal("unavailable feedback invented implementation diagnosis")
+	}
 	f.OriginalDiagnostic.ValidationDiagnostic = nil
 	d, err = ProjectRuntimeSemanticExecutionDiagnostic(&f, RuntimeModuleShell)
 	if err != nil || d.ValidationDiagnostic != nil {

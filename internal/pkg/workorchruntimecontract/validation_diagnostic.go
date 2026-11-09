@@ -43,27 +43,54 @@ const (
 )
 
 type ValidationFailureDiagnostic struct {
-	TargetRejection               *RuntimeValidationFailureTargetRejection `json:"targetRejection,omitempty"`
-	InputRepair                   *RuntimeValidationInputRepair            `json:"inputRepair,omitempty"`
-	InputLocations                []RuntimeValidationInputLocation         `json:"inputLocations,omitempty"`
-	InputAddition                 RuntimeValidationInputAddition           `json:"inputAddition,omitzero"`
-	SchemaVersion                 string                                   `json:"schemaVersion,omitempty"`
-	Class                         string                                   `json:"class,omitempty"`
-	OwnerCode                     string                                   `json:"ownerCode,omitempty"`
-	Reason                        string                                   `json:"reason,omitempty"`
-	RecommendedEvidenceTargetType string                                   `json:"recommendedEvidenceTargetType,omitempty"`
-	Stage                         string                                   `json:"stage,omitempty"`
-	Operation                     string                                   `json:"operation,omitempty"`
-	CommandKind                   string                                   `json:"commandKind,omitempty"`
-	ExitCode                      int                                      `json:"exitCode,omitempty"`
-	TimedOut                      bool                                     `json:"timedOut,omitempty"`
-	CommandPolicyViolation        bool                                     `json:"commandPolicyViolation,omitempty"`
-	UnavailableCommand            string                                   `json:"unavailableCommand,omitempty"`
-	TargetRefs                    []string                                 `json:"targetRefs,omitempty"`
-	ObservationType               string                                   `json:"observationType,omitempty"`
-	EvidenceMode                  string                                   `json:"evidenceMode,omitempty"`
-	StdoutPreview                 string                                   `json:"stdoutPreview,omitempty"`
-	StderrPreview                 string                                   `json:"stderrPreview,omitempty"`
+	// Diagnostic transaction failure, never execution uncertainty or repair authority.
+	Unavailability                RuntimeValidationDiagnosticUnavailability `json:"unavailability,omitempty"`
+	TargetRejection               *RuntimeValidationFailureTargetRejection  `json:"targetRejection,omitempty"`
+	InputRepair                   *RuntimeValidationInputRepair             `json:"inputRepair,omitempty"`
+	InputLocations                []RuntimeValidationInputLocation          `json:"inputLocations,omitempty"`
+	InputAddition                 RuntimeValidationInputAddition            `json:"inputAddition,omitzero"`
+	SchemaVersion                 string                                    `json:"schemaVersion,omitempty"`
+	Class                         string                                    `json:"class,omitempty"`
+	OwnerCode                     string                                    `json:"ownerCode,omitempty"`
+	Reason                        string                                    `json:"reason,omitempty"`
+	RecommendedEvidenceTargetType string                                    `json:"recommendedEvidenceTargetType,omitempty"`
+	Stage                         string                                    `json:"stage,omitempty"`
+	Operation                     string                                    `json:"operation,omitempty"`
+	CommandKind                   string                                    `json:"commandKind,omitempty"`
+	ExitCode                      int                                       `json:"exitCode,omitempty"`
+	TimedOut                      bool                                      `json:"timedOut,omitempty"`
+	CommandPolicyViolation        bool                                      `json:"commandPolicyViolation,omitempty"`
+	UnavailableCommand            string                                    `json:"unavailableCommand,omitempty"`
+	TargetRefs                    []string                                  `json:"targetRefs,omitempty"`
+	ObservationType               string                                    `json:"observationType,omitempty"`
+	EvidenceMode                  string                                    `json:"evidenceMode,omitempty"`
+	StdoutPreview                 string                                    `json:"stdoutPreview,omitempty"`
+	StderrPreview                 string                                    `json:"stderrPreview,omitempty"`
+}
+
+type RuntimeValidationDiagnosticUnavailability string
+
+const (
+	ValidationDiagnosticAssertionsUnavailable   RuntimeValidationDiagnosticUnavailability = "assertions_unavailable"
+	ValidationDiagnosticSourcesUnavailable      RuntimeValidationDiagnosticUnavailability = "sources_unavailable"
+	ValidationDiagnosticCapacityExceeded        RuntimeValidationDiagnosticUnavailability = "capacity_exceeded"
+	ValidationDiagnosticReproductionUnavailable RuntimeValidationDiagnosticUnavailability = "reproduction_unavailable"
+	ValidationDiagnosticBehaviorUnobserved      RuntimeValidationDiagnosticUnavailability = "behavior_unobserved"
+	ValidationDiagnosticInputChanged            RuntimeValidationDiagnosticUnavailability = "input_changed"
+	ValidationDiagnosticExecutionUnavailable    RuntimeValidationDiagnosticUnavailability = "execution_unavailable"
+	ValidationDiagnosticDeadlineExceeded        RuntimeValidationDiagnosticUnavailability = "deadline_exceeded"
+)
+
+func (u RuntimeValidationDiagnosticUnavailability) Validate() error {
+	switch u {
+	case "", ValidationDiagnosticAssertionsUnavailable, ValidationDiagnosticSourcesUnavailable,
+		ValidationDiagnosticCapacityExceeded, ValidationDiagnosticReproductionUnavailable,
+		ValidationDiagnosticBehaviorUnobserved, ValidationDiagnosticInputChanged,
+		ValidationDiagnosticExecutionUnavailable, ValidationDiagnosticDeadlineExceeded:
+		return nil
+	default:
+		return fmt.Errorf("unknown validation diagnostic unavailability %q", u)
+	}
 }
 
 // RuntimeValidationFailureTargetRejection explains why the complete candidate
@@ -150,7 +177,7 @@ func sameValidationFailureDiagnostic(left, right *ValidationFailureDiagnostic) b
 	}
 	l := left.Normalized()
 	r := right.Normalized()
-	return reflect.DeepEqual(l.TargetRejection, r.TargetRejection) && SameRuntimeValidationInputRepair(l.InputRepair, r.InputRepair) && reflect.DeepEqual(l.InputLocations, r.InputLocations) && l.InputAddition == r.InputAddition && l.SchemaVersion == r.SchemaVersion && l.Class == r.Class && l.OwnerCode == r.OwnerCode && l.Reason == r.Reason &&
+	return l.Unavailability == r.Unavailability && reflect.DeepEqual(l.TargetRejection, r.TargetRejection) && SameRuntimeValidationInputRepair(l.InputRepair, r.InputRepair) && reflect.DeepEqual(l.InputLocations, r.InputLocations) && l.InputAddition == r.InputAddition && l.SchemaVersion == r.SchemaVersion && l.Class == r.Class && l.OwnerCode == r.OwnerCode && l.Reason == r.Reason &&
 		l.RecommendedEvidenceTargetType == r.RecommendedEvidenceTargetType && l.Stage == r.Stage &&
 		l.Operation == r.Operation && l.CommandKind == r.CommandKind && l.ExitCode == r.ExitCode &&
 		l.TimedOut == r.TimedOut && l.CommandPolicyViolation == r.CommandPolicyViolation &&

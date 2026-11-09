@@ -1747,8 +1747,8 @@ receipt、retirement、validation receipt、Result persistence 恢复切点零�
 
 ### 普通验证失败后的独立输入重审
 
-普通 rejected validation receipt 的唯一 SM-2 接纳 CAS，在原 binding 声明 InputReview、存在 exact repair route 且
-原生 failed checks 完整时，先开启现有 `semantic_plan/proof_batch` 重审事务，再允许原 repair surface acquisition。
+普通 rejected validation receipt 的唯一 SM-2 接纳 CAS，在原 binding 声明 InputReview、原生 failed checks 完整且存在 exact repair route，或 owner 明确报告
+独立重现／行为观察／执行条件／期限不足时，先开启现有 `semantic_plan/proof_batch` 重审事务，再允许原 repair surface acquisition。
 `RuntimeValidationFailureInputReview` 绑定原 CWI/binding、原 subject hash、failure fingerprint、evidence hash 和
 完整 receipt-backed execution feedback；按 binding manifest 精确定位原 subject，同一 manifest 的相同历史保全
 只视为一个来源，同 hash 不同值拒绝。实际 validation owner 的原读取 revision 必须逐文件等于该 subject。
@@ -1760,7 +1760,8 @@ receipt、retirement、validation receipt、Result persistence 恢复切点零�
 
 新请求只评审受影响单 CWI 的原完整 Definition 义务、owner exact 输入和适用失败；不是重新执行旧评审。
 完整结果由原 `SemanticFeasibilityRequired` 私有事件分类：consistent 以
-`validation_failure_input_reviewed` 保存正式报告，继续原 repair；同 subject/fingerprint 消费已有结果，真实新失败
+`validation_failure_input_reviewed` 保存正式报告：已有完整归因则继续原 repair；owner 已明确诊断不可用则以
+`validation_failure_diagnostic_unavailable` 终止，不把一致报告当作实现归因。同 subject/fingerprint 消费已有结果，真实新失败
 才开新审查。conflict 退休原 binding，按 `input_review_revision` 进入已有受保护输入维护；inconclusive 仅能
 走既有有界事实 Decision，补充信息保留原 failure source 并产生新请求。缺权限、歧义或不可处理冲突继续明确失败。
 本重审不编译 execution binding、不授 validation/assessment/CWI credit，不能把失败断言本身当作输入或实现归因。
@@ -2212,8 +2213,16 @@ SM-2 在原 rejected validation receipt→fact CAS 中消费准确 `ExecutionCon
 `validation_diagnostic_output_unavailable`，记录 stage/stream、原 exit、knownFailure、接收/保存 bytes、
 omission 及原 failure code；原 receipt、EvidenceFact、诊断和历史结论不变。
 该确定失败直接终止，不猜 repair target、不打开普通修复生成、不消耗新的候选或操作预算，也不授 credit。
-完整但不能归因的失败继续走其原有确定性规则，不混同为原文缺失。
-`validation_diagnostic_output_test.go` 覆盖原回执消费、重载、duplicate、预算保留与完整诊断负例。
+完整原文与完整归因分开表达。Shell 的 `ValidationFailureDiagnostic.Unavailability` 是闭合 typed 原因，
+包括 assertions/sources/capacity/reproduction/behavior/input/execution/deadline，不依赖 reason 字串推断。
+有完整原生断言和精确来源时，即使缺独立重现或行为归因也先走上述受影响输入重审；输入一致不能补足归因。
+断言、来源、容量或输入版本不满足时，当前 failure 为 `validation_failure_diagnostic_unavailable` 并精确终止。
+原 receipt/failure code/exit/budget 不改写，typed 不可用结果不得携带 repair target/input-maintenance authority。
+失败后的 provider feedback 仅投影适用失败检查和其执行/冲突状态，排除无关通过清单；所有 skipped/incomplete
+状态及原生断言继续保留，超界仍明确拒绝。原完整观察保留在 receipt，不把普通 native PASS 当作当前 CWI credit。
+C4、正式来源 hash、冻结/纠正/恢复和渲染后门禁都绑定该 typed 原因；C0～C2不因动态失败改变。
+`validation_diagnostic_output_test.go`、`validation_diagnostic_unavailability_test.go` 覆盖原回执 CAS、重载、duplicate、
+响应丢失、预算保留/耗尽、三种重审结论与完整诊断负例。真实 owner 主线核对重审及终态交付不重复执行。
 SM-1 生命周期与三 ACK 顺序不变；SM-4 只恢复原 aggregate/receipt，不从分块存储重建 authority。
 
 

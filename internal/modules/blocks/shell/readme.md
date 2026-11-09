@@ -682,3 +682,21 @@ scope 包含当前完整副本文件集合，新增/删除/替换相邻输入也
 原失败 receipt、确认修复、新普通验证、assessment 及 Result→Workspace→Run 三 ACK；
 验证与修复 receipt 边界恢复核对原身份及预算唯一消费。provider/reviewer 是固定 fixture，测试不调用收费模型。
 这些本地回归不替代部署后的真实项目验收，不追溯补全旧 Run 缺失原文或给旧结果 credit。
+
+### 原生失败帧与独立诊断不可用
+
+原生 package/case/source frame 先按缩进拼接精确多行正文（含空行和更深缩进的源码样文本），
+退回外层的独立输出结束当前 frame；同层未知续行仍标 incomplete，不按日志关键词裁剪。
+原始 bytes/读取引用继续完整保全。JSON stage 只解析一次，独立归因消费其完整 native observation，
+不能因未取得 repair target 丢掉原 FailedChecks/断言，或把已运行的普通失败投影成空观察。
+
+multi-source adapter 的所有非成功出口返回 `ValidationFailureDiagnostic.Unavailability` 的闭合 typed 原因及
+精确 owner code/stage/原 exit；不返回静默 nil、不授部分行为 union 完整修复权限。原生断言不完整、来源未解析、
+容量、独立重现、行为、输入变化、执行条件和原操作 deadline 各自区分。context cancellation 为 execution unavailable，
+不能冒充 deadline；诊断不创建更长 deadline。独立阶段已执行事实和原失败 raw/receipt继续保留。
+Orchestrator 消费其适用事实决定输入重审或精确终止，Shell 不选择下一步，也不修改旧结果。
+
+`TestShellValidationAssertionFramesSeparateOuterLogsAndNestedSourceText`、原生多行/空行/未知续行测试、
+`TestProjectMultiFailureDiagnosticActualSourcesAndBehavior` 和 context disposition 覆盖 producer；
+`TestDriveRuntimeProjectMultiFailureOwnerMainline/project_history_failure` 覆盖完整断言→独立重审→一致但无行为归因→
+精确失败交付/恢复，已归因失败仍覆盖原 File repair→新 all-of→assessment→有序三 ACK。

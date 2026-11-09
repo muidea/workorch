@@ -10,6 +10,20 @@ func ProjectRuntimeValidationExecutionFeedback(value *RuntimeValidationObservati
 		return nil
 	}
 	o := value.Normalized()
+	if len(o.FailedChecks) != 0 {
+		// Failure feedback needs every failed case, not the unrelated passing
+		// suite. Preserve conflicting dispositions for those same checks.
+		relevant := func(values []string) []string {
+			var ret []string
+			for _, c := range values {
+				if containsString(o.FailedChecks, c) {
+					ret = append(ret, c)
+				}
+			}
+			return ret
+		}
+		o.ExecutedChecks, o.PassedChecks = relevant(o.ExecutedChecks), relevant(o.PassedChecks)
+	}
 	ret := &RuntimeValidationExecutionFeedback{RecipeID: o.RecipeID, ObservationProtocolRef: o.ObservationProtocolRef,
 		FailureDetailsIncomplete: o.FailureDetailsTruncated || o.OutputTruncated, ChecksTruncated: o.OutputTruncated}
 	bounded := func(values []string) []string {

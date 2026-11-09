@@ -203,12 +203,12 @@ func ValidateRuntimeValidationDiagnosticExecution(observation RuntimeValidationO
 // targets outside the exact source-stage union. Unobserved failures remain
 // persistable without granting repair authority; bindings without source declarations cannot gain them.
 func ValidateRuntimeValidationDiagnosticFailureObservation(observation *RuntimeValidationObservation, binding RuntimeValidationProofRequirementBinding, scope []string, failure *RuntimeValidationFailureObservation, diagnostic *ValidationFailureDiagnostic) error {
-	if diagnostic != nil && diagnostic.TargetRejection != nil {
+	if diagnostic != nil && (diagnostic.TargetRejection != nil || diagnostic.Unavailability != "") {
 		if err := validateRuntimeValidationInputDiagnostic(*diagnostic); err != nil {
 			return err
 		}
 		if failure != nil {
-			return fmt.Errorf("rejected target transaction cannot carry repair observation authority")
+			return fmt.Errorf("rejected diagnostic transaction cannot carry repair observation authority")
 		}
 	}
 	if observation != nil {

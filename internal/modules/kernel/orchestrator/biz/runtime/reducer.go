@@ -610,7 +610,7 @@ func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtime
 		return runtimecontract.RuntimeDecision{}, false, nil
 	}
 	failure := facts.Failure
-	if failure.Code == runtimeValidationDiagnosticOutputUnavailable {
+	if failure.Code == runtimeValidationDiagnosticOutputUnavailable || failure.Code == runtimeValidationFailureDiagnosticUnavailable {
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, failure.Code, failure.Message), true, nil
 	}
 	if failure.Code == runtimeCWIRevalidationSourceUnavailable {

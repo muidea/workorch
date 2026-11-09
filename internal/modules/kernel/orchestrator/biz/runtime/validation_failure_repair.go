@@ -131,7 +131,7 @@ func openRuntimeValidationFailureRepairGeneration(aggregate *RuntimeAggregate, f
 		return false, nil
 	}
 	if aggregate.Facts.Repair.Exhausted || aggregate.Facts.Repair.RepairAttempts > trigger.convergence.MaxAttempts {
-		if err := markRuntimeValidationFailureRepairExhausted(&aggregate.Facts, trigger); err != nil {
+		if err := markRuntimeValidationFailureRepairExhausted(&aggregate.Facts, trigger.failure, trigger.convergence); err != nil {
 			return false, err
 		}
 		return false, nil
@@ -808,15 +808,15 @@ func runtimeStringsWithin(values, allowed []string) bool {
 	return true
 }
 
-func markRuntimeValidationFailureRepairExhausted(facts *runtimecontract.RuntimeFacts, trigger runtimeValidationFailureRepairTrigger) error {
+func markRuntimeValidationFailureRepairExhausted(facts *runtimecontract.RuntimeFacts, original runtimecontract.FailureFact, convergence runtimecontract.RuntimeValidationFailureRepairConvergence) error {
 	if facts == nil {
 		return common.ErrInvalidArgument
 	}
 	facts.Repair.Exhausted = true
-	failure := trigger.failure.Clone()
+	failure := original.Clone()
 	failure.Class = runtimecontract.FailureClassNoProgressExhausted
 	failure.Code = "validation_failure_repair_exhausted"
-	failure.Message = fmt.Sprintf("validation failure repair convergence %q exhausted its bounded %d attempts", trigger.convergence.ID, trigger.convergence.MaxAttempts)
+	failure.Message = fmt.Sprintf("validation failure repair convergence %q exhausted its bounded %d attempts", convergence.ID, convergence.MaxAttempts)
 	return replaceRuntimeFailureAuthority(facts, failure, runtimeFailureAuthorityRetire, nil)
 }
 

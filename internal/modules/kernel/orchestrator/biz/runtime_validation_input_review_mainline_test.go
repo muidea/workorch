@@ -1273,6 +1273,9 @@ func %s(t *testing.T) {
 				}
 				if options.Adapter == shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
 					expectation := projectConjunctionExpectation{ProtocolRef: "shell/go-test-json/project-multi-failure-behavior", BuildFailure: projectChecksumRepair}
+					if mode == "project_history_failure" {
+						expectation.RejectedPassedChecks = 1
+					}
 					if projectBehaviorRepair {
 						expectation.RepairSources = len(preparations[requirements[0].Hash].CheckAttestations) + 1
 					}
@@ -1367,10 +1370,18 @@ func %s(t *testing.T) {
 	if success && validationCalls != expectedValidations || !success && !submissionUnknown && mode != "source_B_failure" && mode != "project_history_failure" && validationCalls != 0 || (mode == "source_B_failure" || submissionUnknown) && validationCalls != 1 {
 		t.Fatalf("unexpected validation calls: %d; state=%s terminal=%+v failure=%+v evidenceRevision=%s observations=%+v", validationCalls, completed.Decision.State, completed.Decision.Terminal, completed.Facts.Failure, completed.Facts.EvidenceRevision, completed.Facts.EvidenceApplicabilityObservations)
 	}
-	if mode == "project_history_failure" && (validationCalls != 2 || completed.Facts.Failure == nil || completed.Facts.Failure.Code != "candidate_authority_exhausted" || len(completed.Facts.Evidence.Rejected) != 1) {
-		// 这里计数的是 provider candidate 请求：第二个相同候选必须在 owner I/O 前被原拒绝重放门禁终止。
-		// 实际 receipt/阶段次数由 assertProjectConjunctionPersistedOwnerOutputs 独立反证。
-		t.Fatal("original project failure retried owner execution or lost bounded candidate rejection")
+	if mode == "project_history_failure" {
+		if options.Adapter == shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
+			// Complete native assertions can be reviewed independently of
+			// implementation attribution. A consistent input report cannot
+			// manufacture missing behavior or issue another validation.
+			if validationCalls != 1 || completed.Facts.Failure == nil || completed.Facts.Failure.Code != "validation_failure_diagnostic_unavailable" || len(completed.Facts.Evidence.Rejected) != 1 || completed.Facts.Failure.ValidationDiagnostic == nil || completed.Facts.Failure.ValidationDiagnostic.Unavailability != runtimecontract.ValidationDiagnosticBehaviorUnobserved {
+				t.Fatalf("unattributed failure repeated validation or lost its exact cause: calls=%d failure=%+v", validationCalls, completed.Facts.Failure)
+			}
+			assertFailureInputReviewCommittedResult(t, completed, false)
+		} else if validationCalls != 2 || completed.Facts.Failure == nil || completed.Facts.Failure.Code != "candidate_authority_exhausted" || len(completed.Facts.Evidence.Rejected) != 1 {
+			t.Fatal("original project failure retried owner execution or lost bounded candidate rejection")
+		}
 	}
 	if options.SourceObligations {
 		if success || mode == "source_B_failure" {
@@ -1569,6 +1580,9 @@ func %s(t *testing.T) {
 			protocol = "shell/go-test-json/project-multi-failure-behavior"
 		}
 		expectation := projectConjunctionExpectation{ProtocolRef: protocol, ValidationReceipts: options.ValidationCount, BuildFailure: projectChecksumRepair}
+		if mode == "project_history_failure" && options.Adapter == shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
+			expectation.RejectedPassedChecks = 1
+		}
 		if options.MultiFileProject {
 			expectation.RepairTargets = []string{"cmd/delivery/main.go", "offset.go", "probe0.go", "probe1.go", "probe2.go", "probe3.go", "probe4.go", "probe5.go", "subject.go"}
 		}

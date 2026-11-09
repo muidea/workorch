@@ -144,6 +144,12 @@ func completeEvidenceDispatch(
 			return err
 		}
 	}
+	if !invalidated && !reviewPending && !diagnosticUnavailable && admission.Evidence.Status == ExecutionEvidenceStatusRejected {
+		diagnosticUnavailable, err = markValidationFailureDiagnosticUnavailable(aggregate, fact)
+		if err != nil {
+			return err
+		}
+	}
 	repairSurfaceConfirmationPending := reviewPending
 	if admission.Evidence.Status == ExecutionEvidenceStatusAccepted && !invalidated {
 		if repair, found, err := currentRuntimeSemanticValidationFailureRepair(*aggregate); err != nil {
@@ -178,7 +184,7 @@ func completeEvidenceDispatch(
 			if matched && (aggregate.Facts.Repair.Exhausted || aggregate.Facts.Repair.RepairAttempts > trigger.convergence.MaxAttempts) {
 				// Existing-owner confirmation uses the same sealed Profile budget
 				// as prospective repair. The rejected receipt closes it in this CAS.
-				if err := markRuntimeValidationFailureRepairExhausted(&aggregate.Facts, trigger); err != nil {
+				if err := markRuntimeValidationFailureRepairExhausted(&aggregate.Facts, trigger.failure, trigger.convergence); err != nil {
 					return err
 				}
 			}

@@ -9,6 +9,45 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+// Input consistency is independent of implementation attribution. A complete
+// native failure may require reviewing its original input even when independent
+// reproduction/behavior could not produce a repair target. This grants no route.
+type runtimeFailureInputReviewTrigger struct {
+	coverageID  common.CoverageWorkItemID
+	failure     runtimecontract.FailureFact
+	convergence runtimecontract.RuntimeValidationFailureRepairConvergence
+}
+
+func matchRuntimeFailureInputReviewTrigger(a RuntimeAggregate, fact runtimecontract.EvidenceFact, op runtimecontract.RuntimeOperation) (runtimeFailureInputReviewTrigger, bool, error) {
+	existing, matched, err := matchRuntimeValidationFailureRepairTrigger(a, fact, op)
+	if err != nil || matched {
+		return runtimeFailureInputReviewTrigger{coverageID: existing.coverageID, failure: existing.failure, convergence: existing.convergence}, matched, err
+	}
+	var empty runtimeFailureInputReviewTrigger
+	f := a.Facts.Normalized()
+	if fact.Kind != runtimecontract.EvidenceKindValidation || f.Failure == nil || f.Failure.ValidationDiagnostic == nil || f.Failure.OriginalDiagnostic == nil || len(f.Focus.CoverageWorkItemIDs) != 1 || f.Resources.FailureTarget != nil {
+		return empty, false, nil
+	}
+	switch f.Failure.ValidationDiagnostic.Unavailability {
+	case runtimecontract.ValidationDiagnosticReproductionUnavailable, runtimecontract.ValidationDiagnosticBehaviorUnobserved,
+		runtimecontract.ValidationDiagnosticExecutionUnavailable, runtimecontract.ValidationDiagnosticDeadlineExceeded:
+	default:
+		return empty, false, nil
+	}
+	coverageID := f.Focus.CoverageWorkItemIDs[0]
+	binding, found := coverageEvidenceBindingForCoverage(f.Focus, coverageID)
+	descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(op.Kind)
+	original := f.Failure.OriginalDiagnostic
+	if !found || !known || descriptor.OwnerModuleID != original.OwnerModuleID || original.OperationID != fact.OperationID || op.ID != fact.OperationID || fact.FailureSignature != f.Failure.Signature || !contains(op.BindingRefs, binding.ID) || !contains(fact.BindingRefs, binding.ID) {
+		return empty, false, nil
+	}
+	declaration, found, err := runtimeDefinitionFocusForCoverage(f.DefinitionFocuses, coverageID)
+	if err != nil || !found || declaration.ValidationFailureRepairConvergence == nil {
+		return empty, false, err
+	}
+	return runtimeFailureInputReviewTrigger{coverageID: coverageID, failure: f.Failure.Clone(), convergence: declaration.ValidationFailureRepairConvergence.Clone()}, true, nil
+}
+
 // The evidence CAS opens the existing semantic transaction before any repair
 // target acquisition. This is a new review of affected inputs, not a replay of
 // the prior report or a reclassification of the failed execution.
@@ -16,7 +55,7 @@ func openRuntimeFailureInputReview(a *RuntimeAggregate, fact runtimecontract.Evi
 	if a == nil || fact.Kind != runtimecontract.EvidenceKindValidation || a.Facts.Failure == nil || a.ActiveDispatch != nil || (a.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed && !runtimeFailureInputReviewedCurrentBinding(*a)) {
 		return false, nil
 	}
-	trigger, matched, err := matchRuntimeValidationFailureRepairTrigger(*a, fact, op)
+	trigger, matched, err := matchRuntimeFailureInputReviewTrigger(*a, fact, op)
 	if err != nil || !matched {
 		return false, err
 	}
@@ -70,7 +109,7 @@ func openRuntimeFailureInputReview(a *RuntimeAggregate, fact runtimecontract.Evi
 		return false, nil
 	}
 	if a.Facts.Repair.Exhausted || a.Facts.Repair.RepairAttempts > trigger.convergence.MaxAttempts {
-		return true, markRuntimeValidationFailureRepairExhausted(&a.Facts, trigger)
+		return true, markRuntimeValidationFailureRepairExhausted(&a.Facts, trigger.failure, trigger.convergence)
 	}
 	fingerprint := runtimecontract.RuntimeValidationFailureFingerprint(fact, binding)
 	if fingerprint == "" {
@@ -223,6 +262,13 @@ func settleRuntimeFailureInputReview(a RuntimeAggregate, l runtimecontract.Runti
 	a.SemanticPlanning, err = a.SemanticPlanning.AppendHistory(generation)
 	if err != nil {
 		return a, false, err
+	}
+	// A consistent input review cannot invent missing implementation behavior.
+	if unavailable, err := markValidationFailureDiagnosticUnavailable(&a, fact); err != nil {
+		return a, false, err
+	} else if unavailable {
+		a.Facts, a.Decision, err = reduceRuntimeAggregateWithDirective(a, a.Facts, nil)
+		return a, true, err
 	}
 	// The unchanged original repair route still owns target acquisition, fence,
 	// attempt limits and effect authority. A review does not reserve a new budget.

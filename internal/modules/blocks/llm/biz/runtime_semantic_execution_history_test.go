@@ -25,7 +25,7 @@ func TestRuntimeSemanticExecutionHistoryStaysVolatileAndIntegrityProtected(t *te
 		ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, RequestedTargetRefs: []string{"source.txt"},
 		Diagnostic: &runtimecontract.RuntimeSemanticExecutionDiagnostic{FeedbackHash: "feedback-hash", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 			OriginalClass: "contract", OriginalCode: "owner_fact", Signature: "signature", Truncated: true, SummaryOnly: true,
-			ValidationDiagnostic: &runtimecontract.RuntimeValidationDiagnosticFeedback{CommandKind: "managed_validation", ReportedExitCode: 2}},
+			ValidationDiagnostic: &runtimecontract.RuntimeValidationDiagnosticFeedback{Class: runtimecontract.ValidationDiagnosticOutputInconclusive, Unavailability: runtimecontract.ValidationDiagnosticBehaviorUnobserved, OwnerCode: "behavior_unobserved", CommandKind: "managed_validation", ReportedExitCode: 2}},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +49,7 @@ func TestRuntimeSemanticExecutionHistoryStaysVolatileAndIntegrityProtected(t *te
 	if !reflect.DeepEqual(tail.ExecutionHistory, c.ExecutionHistory) || tail.CoverageProgress.Satisfied != 0 {
 		t.Fatal("receipt lost or promoted to CWI credit")
 	}
-	for _, mutation := range []string{"missing", "drop", "outcome", "hash", "scope", "expected", "requested", "diagnostic", "exit", "truncated"} {
+	for _, mutation := range []string{"missing", "drop", "outcome", "hash", "scope", "expected", "requested", "diagnostic", "exit", "unavailability", "truncated"} {
 		t.Run(mutation, func(t *testing.T) {
 			provider, err := runtimeProviderRequest(request)
 			if err != nil {
@@ -76,6 +76,8 @@ func TestRuntimeSemanticExecutionHistoryStaysVolatileAndIntegrityProtected(t *te
 				value.ExecutionHistory.Receipts[0].Diagnostic = nil
 			case "exit":
 				value.ExecutionHistory.Receipts[0].Diagnostic.ValidationDiagnostic.ReportedExitCode = 0
+			case "unavailability":
+				value.ExecutionHistory.Receipts[0].Diagnostic.ValidationDiagnostic.Unavailability = runtimecontract.ValidationDiagnosticAssertionsUnavailable
 			case "truncated":
 				value.ExecutionHistory.Receipts[0].Diagnostic.Truncated = false
 			}

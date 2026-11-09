@@ -7,6 +7,7 @@ import (
 )
 
 const runtimeValidationDiagnosticOutputUnavailable = "validation_diagnostic_output_unavailable"
+const runtimeValidationFailureDiagnosticUnavailable = "validation_failure_diagnostic_unavailable"
 
 // SM-2 consumes the exact rejected receipt in its existing evidence CAS. Missing
 // native output cannot authorize a model guess, repair target or same-state retry.
@@ -39,6 +40,26 @@ func markValidationDiagnosticOutputUnavailable(aggregate *RuntimeAggregate, admi
 			}
 			return true, nil
 		}
+	}
+	return false, nil
+}
+
+func markValidationFailureDiagnosticUnavailable(aggregate *RuntimeAggregate, fact runtimecontract.EvidenceFact) (bool, error) {
+	if aggregate == nil || fact.Kind != runtimecontract.EvidenceKindValidation || aggregate.Facts.Failure == nil {
+		return false, nil
+	}
+	// Consume the owner's diagnostic outcome, not its transcript or vocabulary.
+	// This happens in the rejected receipt CAS before review/repair or any new
+	// candidate request. A known failed execution remains a known failure.
+	diagnostic := aggregate.Facts.Failure.ValidationDiagnostic
+	if diagnostic != nil && diagnostic.Unavailability != "" {
+		failure := aggregate.Facts.Failure.Clone()
+		failure.Code = runtimeValidationFailureDiagnosticUnavailable
+		failure.Message = fmt.Sprintf("validation diagnostic unavailable: stage=%s cause=%s ownerCode=%s exit=%d; %s; original failure=%s", diagnostic.Stage, diagnostic.Unavailability, diagnostic.OwnerCode, diagnostic.ExitCode, diagnostic.Reason, fact.FailureCode)
+		if err := replaceRuntimeFailureAuthority(&aggregate.Facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 	return false, nil
 }

@@ -4641,3 +4641,15 @@ func TestRuntimeCandidateProviderSeparatesAuthorityFromRejectedShapeTail(t *test
 		}
 	}
 }
+
+func TestRuntimeCandidateFailureProjectionRetainsDiagnosticUnavailability(t *testing.T) {
+	f := &runtimecontract.FailureFact{ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{Class: runtimecontract.ValidationDiagnosticOutputInconclusive, Unavailability: runtimecontract.ValidationDiagnosticBehaviorUnobserved, OwnerCode: "behavior_unobserved", Reason: "owner private reason"}}
+	projected := runtimeProviderSafeFailure(f)
+	if projected.ValidationDiagnostic == nil || projected.ValidationDiagnostic.Unavailability != f.ValidationDiagnostic.Unavailability {
+		t.Fatal("provider projection lost typed diagnostic cause")
+	}
+	encoded, err := json.Marshal(projected)
+	if err != nil || strings.Contains(string(encoded), "owner private reason") {
+		t.Fatal("private diagnostic escaped projection", err)
+	}
+}

@@ -97,6 +97,28 @@ func shellSourceBoundAssertions(facts *shellGoTestJSONFacts, failed map[string]s
 	incomplete := false
 	consume := func(record shellGoTestJSONDiagnosticRecord, line string) {
 		key := record.Package + "\x00" + record.Test
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		// Native testing decoration owns its indented continuation, including
+		// source-looking text printed by a nested command. It must not be
+		// re-attributed to the enclosing test as a new assertion location.
+		if idx, ok := pending[key]; ok {
+			if strings.TrimSpace(line) == "" || indent > out[idx].indent {
+				if len(out[idx].body)+1+len(line) > runtimecontract.RuntimeValidationAssertionMaxBytes {
+					incomplete = true
+					delete(pending, key)
+				} else {
+					out[idx].body += "\n" + line
+				}
+				return
+			}
+			// Less-indented output is outside this native source frame. Keep
+			// it in the raw transcript; it is neither a continuation nor a gap
+			// in the completed decorated message. Equal-indent unknown text
+			// below remains ambiguous and fails closed.
+			if indent < out[idx].indent {
+				delete(pending, key)
+			}
+		}
 		match := shellGoAssertionLocationPattern.FindStringSubmatch(line)
 		if len(match) == 4 {
 			n, err := strconv.Atoi(match[2])
@@ -105,12 +127,11 @@ func shellSourceBoundAssertions(facts *shellGoTestJSONFacts, failed map[string]s
 				delete(pending, key)
 				return
 			}
-			indent := len(line) - len(strings.TrimLeft(line, " \t"))
 			out = append(out, shellSourceAssertion{record: record, target: match[1], line: n, indent: indent, body: match[3]})
 			pending[key] = len(out) - 1
 			return
 		}
-		idx, ok := pending[key]
+		_, ok := pending[key]
 		if !ok {
 			return
 		}
@@ -119,18 +140,8 @@ func shellSourceBoundAssertions(facts *shellGoTestJSONFacts, failed map[string]s
 			delete(pending, key)
 			return
 		}
-		indent := len(line) - len(strings.TrimLeft(line, " \t"))
-		if trim == "" || indent > out[idx].indent {
-			if len(out[idx].body)+1+len(line) > runtimecontract.RuntimeValidationAssertionMaxBytes {
-				incomplete = true
-				delete(pending, key)
-			} else {
-				out[idx].body += "\n" + line
-			}
-		} else {
-			incomplete = true
-			delete(pending, key)
-		}
+		incomplete = true
+		delete(pending, key)
 	}
 	// test2json may split a single native line across several Output events.
 	// Reassemble its bytes before interpreting source frames or continuations.
