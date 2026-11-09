@@ -418,6 +418,11 @@ declarationRef、当前 contentHash、前轮 dispatchId/receiptSetHash 从一个
 内部文档及 admission 仍完整校验这些身份。schema/parser/编码使用同一当前 wire，旧 echo 不作为兼容输入。
 
 input revision 按来源二选一投影：完整原语义报告/被审输入，或原 owner 结构观察/完整文件/诊断；结构来源不伪装 review。
+结构观察没有语义报告 checks，`runtimeInputCoverageRevisionTasks` 必须返回 nil，不创建会被 `omitempty` 丢弃的空列表。
+purpose 与 proof 请求的完整 C3 经同请求引用展开后仍与生产投影逐值相等；真实报告的任务索引、原结构观察、文件与
+诊断继续完整校验，不能用 nil/empty 宽松比较替代。`TestStructuralRevisionPurposeAndProofRequestRoundtrip` 覆盖合法结构
+来源、缺项/篡改拒绝、冻结重复恢复及 Workspace 隔离。此修复只影响 SM-3 请求投影，SM-4 保持消费原冻结输入，
+不改变 SM-1/SM-2、权限预算、原报告或验收 credit。
 它只额外开放原 InputTargetRefs；普通 delivery 依赖仍可在 sealed policy/scope 内创建或修正，不能把整轮当成
 input-only 编辑任务。原 owner subject 的 ScopeRequirements/Recipe 同时约束后续合法观察方法和 deadline；当前编辑
 targets 不决定将来进程观察权限。purpose、proof batch 与 operations 表达同一规则，原前像/结构要求只适用被修订输入。

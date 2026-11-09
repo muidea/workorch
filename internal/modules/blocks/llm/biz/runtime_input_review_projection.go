@@ -176,7 +176,10 @@ type runtimeInputCoverageRevisionTask struct {
 }
 
 func runtimeInputCoverageRevisionTasks(revision *runtimecontract.RuntimeValidationInputRevision) []runtimeInputCoverageRevisionTask {
-	if revision == nil {
+	// Structural owner observations carry no semantic report. Do not create an
+	// empty optional worklist: omitempty would drop it and break the exact C3
+	// roundtrip comparison against this producer's projection.
+	if revision == nil || len(revision.Report.Checks) == 0 {
 		return nil
 	}
 	ret := make([]runtimeInputCoverageRevisionTask, 0, len(revision.Report.Checks))

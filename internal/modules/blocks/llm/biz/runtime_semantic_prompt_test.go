@@ -66,7 +66,9 @@ func runtimeSemanticWorkProviderSourceRequestForTest(t *testing.T, purpose bool,
 	if revision != nil {
 		revision.WorkspaceID, revision.RunID, revision.DefinitionSeedHash = ctx.WorkspaceID, ctx.RunID, ctx.DefinitionSeed.Hash
 		revision.Binding.CoverageWorkItemID = item.ID
-		revision.Binding.InputReview.Files[0].TargetRef = "main.go"
+		if revision.Binding.InputReview != nil {
+			revision.Binding.InputReview.Files[0].TargetRef = "main.go"
+		}
 		revision.InputTargetRefs = []string{"main.go"}
 		for i := range revision.Report.Checks {
 			revision.Report.Checks[i].InputTargetRefs = []string{"main.go"}
@@ -74,8 +76,10 @@ func runtimeSemanticWorkProviderSourceRequestForTest(t *testing.T, purpose bool,
 				revision.Report.Checks[i].Obligations[j].InputTargetRefs = []string{"main.go"}
 			}
 		}
-		revision.Binding.InputReview.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*revision.Binding.InputReview, revision.Binding)
-		revision.Report.SubjectHash = revision.Binding.InputReview.Hash
+		if revision.Binding.InputReview != nil {
+			revision.Binding.InputReview.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*revision.Binding.InputReview, revision.Binding)
+			revision.Report.SubjectHash = revision.Binding.InputReview.Hash
+		}
 		sources := runtimecontract.RuntimeImplementationWorkScopeSources{WorkspaceID: ctx.WorkspaceID, RunID: ctx.RunID, AuthoritySnapshotID: "authority-work", Seed: ctx.DefinitionSeed, Focuses: []runtimecontract.RuntimeDefinitionFocus{focus}, Profiles: ctx.Activation.ExecutionContract.ProfileContracts, CoverageWorkItemID: item.ID, ManifestBinding: scopeRequest.ManifestBinding, InputRevision: revision}
 		scopeRequest, err = sources.Compile()
 		if err != nil {
