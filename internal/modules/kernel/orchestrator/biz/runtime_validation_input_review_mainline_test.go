@@ -80,6 +80,7 @@ type validationInputReviewMainlineOptions struct {
 	DynamicProjectObservations         bool
 	SequentialProjectFailures          bool
 	NativeProjectSources               bool
+	IncrementalNativeSources           bool
 	MultiFileProject                   bool
 }
 
@@ -463,10 +464,16 @@ func %s(t *testing.T) {
 		initialFiles[target] = strings.Replace(initialFiles[target], `import ("testing";`, `import ("os"; "testing";`, 1)
 		initialFiles[target] = strings.Replace(initialFiles[target], "\n}\n", "\n note,err:=os.ReadFile(\"../../../"+inputRevisionDeliveryDependency+"\"); if err!=nil || strings.TrimSpace(string(note))!=\"4\" { t.Fatal(\"missing or incorrect delivery note\") }\n}\n", 1)
 	}
+	nativeFinalInputs := map[string]string{}
 	if options.NativeProjectSources {
 		for ref, content := range initialFiles {
 			if strings.HasSuffix(ref, "_test.go") {
-				initialFiles[ref] = nativeSourceChannelMainlineInput(t, content)
+				if options.IncrementalNativeSources {
+					nativeFinalInputs[ref] = incrementalNativeInput(t, content, "wired")
+					initialFiles[ref] = incrementalNativeInput(t, content, "legacy")
+				} else {
+					initialFiles[ref] = nativeSourceChannelMainlineInput(t, content)
+				}
 			}
 		}
 	}
@@ -618,6 +625,9 @@ func %s(t *testing.T) {
 			document := validationInputAdditionMainlineSemanticDocument(command)
 			if strings.HasPrefix(mode, "input_revision") {
 				runtimeInputRevisionMainlineSemanticDocument(&document, command, inputTargets["cwi-2"])
+				if options.IncrementalNativeSources {
+					incrementalNativeSemanticDocument(&document, command)
+				}
 				if mode == "input_revision_dependency" {
 					runtimeInputDependencySemanticDocument(&document, command)
 				}
@@ -656,6 +666,13 @@ func %s(t *testing.T) {
 				}
 				if mode == "input_revision_after_failure" && validationCalls == 0 {
 					conclusion = runtimecontract.RuntimeValidationInputConsistent
+				}
+				if options.IncrementalNativeSources {
+					for _, f := range binding.InputReview.Files {
+						if incrementalNativeIncomplete(f.Content) {
+							conclusion = runtimecontract.RuntimeValidationInputConflict
+						}
+					}
 				}
 				if mode == "conflict" || mode == "omission" {
 					conclusion = runtimecontract.RuntimeValidationInputConflict
@@ -755,6 +772,9 @@ func %s(t *testing.T) {
 						// Only the generated wrong expectation conflicts with the
 						// criterion; the independent historical source is unchanged.
 						review.DiagnosticSources[len(review.DiagnosticSources)-1].Conclusion = runtimecontract.RuntimeValidationInputConsistent
+					}
+					if options.IncrementalNativeSources && incrementalNativeIncomplete(body) {
+						review.DiagnosticSources[len(review.DiagnosticSources)-1].Conclusion = runtimecontract.RuntimeValidationInputConflict
 					}
 					if conclusion == runtimecontract.RuntimeValidationInputInconclusive {
 						review.DiagnosticSources[len(review.DiagnosticSources)-1].UncertaintyKind = runtimecontract.RuntimeValidationSemanticInformationMissing
@@ -883,6 +903,11 @@ func %s(t *testing.T) {
 			}
 			if strings.HasPrefix(mode, "input_revision") && command.CandidateManifest.ImplementationWorkingBinding != nil {
 				candidate = runtimeInputRevisionMainlineCandidate(command, inputTargets["cwi-2"], mode)
+				if options.IncrementalNativeSources {
+					if next, found := incrementalNativeCandidate(t, command, nativeFinalInputs); found {
+						candidate = next
+					}
+				}
 				if mode == "input_revision_dependency" {
 					if dependency, ok := runtimeInputDependencyCandidate(command); ok {
 						candidate = dependency
@@ -1022,6 +1047,24 @@ func %s(t *testing.T) {
 				for _, r := range a.ImplementationWork.Rounds {
 					if r.ScopeRequest.InputRevision != nil && r.CompletedReceiptSetHash != "" {
 						return true
+					}
+				}
+				return false
+			case "after_partial_native_helper":
+				for _, r := range a.ImplementationWork.Rounds {
+					if r.CompletedReceiptSetHash == "" || r.WorkingBinding == nil {
+						continue
+					}
+					for _, d := range a.CompletedDispatches {
+						if d.ID == r.DispatchID && d.Candidate.StateChange != nil {
+							for _, op := range d.Candidate.StateChange.Operations {
+								for _, p := range op.Operation.Parameters {
+									if p.Name == "newText" && p.String != nil && strings.Contains(*p.String, "// native-adoption:helper") {
+										return true
+									}
+								}
+							}
+						}
 					}
 				}
 				return false
@@ -1509,6 +1552,12 @@ func %s(t *testing.T) {
 				expectedInput = strings.Replace(expectedInput, `!="5"`, `!="4"`, 1)
 			}
 		}
+		if options.IncrementalNativeSources && nativeFinalInputs[ref] != "" {
+			expectedInput = nativeFinalInputs[ref]
+			if ref == inputTargets["cwi-2"] {
+				expectedInput = strings.Replace(expectedInput, `!="5"`, `!="4"`, 1)
+			}
+		}
 		if err != nil || string(content) != expectedInput {
 			t.Fatal("review path rewrote existing input")
 		}
@@ -1734,7 +1783,11 @@ func %s(t *testing.T) {
 		t.Fatalf("terminal owner delivery incomplete: %v", err)
 	}
 	if options.SequentialProjectFailures {
-		assertSequentialProjectFailureClosure(t, *stored.RuntimeState, behaviorRepairs, reviewCalls)
+		if options.IncrementalNativeSources {
+			assertSequentialProjectFailureClosure(t, *stored.RuntimeState, behaviorRepairs, reviewCalls, len(nativeFinalInputs)*3+1)
+		} else {
+			assertSequentialProjectFailureClosure(t, *stored.RuntimeState, behaviorRepairs, reviewCalls)
+		}
 		counter, err := os.ReadFile(projectExecutionCounter)
 		if err != nil || string(counter) != projectExecutionCount {
 			t.Fatalf("sequence recovery repeated or omitted project executions: %q / %v", counter, err)

@@ -10,6 +10,34 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+// Test the complete producer output, including the exact deadline appended by
+// failure diagnostics. A bounded generation declaration alone does not prove
+// the conjunctive supplement can cross the same consumer boundary.
+func TestProjectSupplementCompleteDeclarationFitsOriginalEnvelope(t *testing.T) {
+	for _, adapter := range []string{modulecommon.ValidationRecipeAdapterProjectConjunction, modulecommon.ValidationRecipeAdapterProjectFailureDiagnostic, modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic} {
+		for _, timeout := range []int64{0, 1000, 300000, 600000} {
+			t.Run(fmt.Sprintf("%s/%d", adapter, timeout), func(t *testing.T) {
+				recipe := runtimecontract.RuntimeValidationRecipe{ID: "project", Command: "go", Args: []string{"test", "-v", "./..."}, AdapterRef: adapter, TimeoutMillis: timeout, InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol}
+				requirement := shellValidationProofRequirementForTest(t, recipe.ID, "cwi-supplement")
+				checks, ok := shellValidationCheckAttestations(recipe, requirement)
+				if !ok || len(checks) == 0 {
+					t.Fatal("missing exact owner check")
+				}
+				addition := shellValidationInputAddition(checks[0])
+				addition.ContentRequirements += shellValidationDeclaredDeadlineRequirement(timeout)
+				if err := addition.Validate(); err != nil {
+					t.Fatalf("complete supplement (%d bytes) exceeds original boundary: %v", len(addition.ContentRequirements), err)
+				}
+				for _, text := range []string{shellProjectContentRequirements(adapter), shellAssertionFeedbackRequirements, shellValidationDeclaredDeadlineRequirement(timeout), "supplemental nativeCheckRef", "all original checks all-of"} {
+					if !strings.Contains(addition.ContentRequirements, text) {
+						t.Fatal("supplement omitted the original method or obligations")
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestSupplementContentContractAndFreshReadinessAgreeWithoutReplacementPreparation(t *testing.T) {
 	recipe := runtimecontract.RuntimeValidationRecipe{ID: "native", Command: "go", Args: []string{"test", "./..."}, AdapterRef: modulecommon.ValidationRecipeAdapterProjectNative}
 	requirement := shellValidationProofRequirementForTest(t, recipe.ID, "cwi-supplement")

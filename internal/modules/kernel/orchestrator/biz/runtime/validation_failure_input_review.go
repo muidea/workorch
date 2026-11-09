@@ -202,7 +202,12 @@ func runtimeFailureInputReviewLedgers(l runtimecontract.RuntimeSemanticPlanningL
 // Consuming a committed review retains the current sealed operation binding;
 // it does not rerun its semantic proof or manufacture a new binding/seal.
 func runtimeFailureInputReviewedCurrentBinding(a RuntimeAggregate) bool {
-	if a.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired {
+	if a.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || len(a.Facts.Focus.CoverageWorkItemIDs) != 1 {
+		return false
+	}
+	coverageID := a.Facts.Focus.CoverageWorkItemIDs[0]
+	row, bound := currentRuntimeCWIBindingForFocus(a.Facts, coverageID)
+	if !bound || row.CurrentBindingRef == nil || row.CurrentBindingRef.FocusID != a.Facts.Focus.ID {
 		return false
 	}
 	var history []runtimecontract.RuntimeSemanticPlanningGeneration
@@ -211,13 +216,11 @@ func runtimeFailureInputReviewedCurrentBinding(a RuntimeAggregate) bool {
 	}
 	for _, g := range slices.Backward(history) {
 		s := g.Snapshot.FailureInputReview
-		if g.Reason != runtimecontract.RuntimeSemanticPlanningRetirementFailureInputReviewed || s == nil {
+		if g.Reason != runtimecontract.RuntimeSemanticPlanningRetirementFailureInputReviewed || s == nil || s.Feedback.CoverageWorkItemID != coverageID {
 			continue
 		}
-		for _, row := range a.Facts.Coverage {
-			if row.ID == s.Feedback.CoverageWorkItemID && row.CurrentBindingRef != nil && runtimecontract.SameRuntimeCWIBindingRef(*row.CurrentBindingRef, s.BindingRef) {
-				return true
-			}
+		if runtimecontract.SameRuntimeCWIBindingRef(*row.CurrentBindingRef, s.BindingRef) {
+			return true
 		}
 	}
 	return false

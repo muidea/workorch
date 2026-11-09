@@ -520,6 +520,32 @@ func TestFailureInputReviewConsistentStructuredRepairRetainsCurrentAuthority(t *
 	if err := updated.Validate(); err != nil {
 		t.Fatal("reload", err)
 	}
+	// A settled predecessor keeps its reviewed binding for audit. That result
+	// cannot grant operation readiness to an unbound successor or another focus.
+	for _, kind := range []string{"other CWI", "other focus", "no binding", "new binding"} {
+		t.Run(kind, func(t *testing.T) {
+			next := updated.CloneRaw()
+			switch kind {
+			case "other CWI":
+				next.Facts.Focus.CoverageWorkItemIDs = []common.CoverageWorkItemID{"next-cwi"}
+			case "other focus":
+				next.Facts.Focus.ID = "next-focus"
+			case "no binding":
+				next.Facts.Coverage[0].CurrentBindingRef = nil
+			case "new binding":
+				next.Facts.Coverage[0].CurrentBindingRef.BindingID = "new-binding"
+			}
+			before := next.CloneRaw()
+			for range 2 {
+				if runtimeFailureInputReviewedCurrentBinding(next) {
+					t.Fatal("historical input review granted unrelated current authority")
+				}
+			}
+			if !reflect.DeepEqual(next, before) {
+				t.Fatal("readiness query changed the formal report")
+			}
+		})
+	}
 	// The same already-reviewed failure consumes the formal report. A genuinely
 	// changed native failure on this same binding opens a new bounded review.
 	fact := updated.Facts.Evidence.Rejected[0]

@@ -20,6 +20,11 @@ func implementationWorkScopeSources(a RuntimeAggregate, cwi common.CoverageWorkI
 	if a.ActiveDispatch != nil || a.SemanticPlanning.FailureInputReview != nil || a.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || a.Facts.Failure != nil || a.Facts.RepairDirective != nil {
 		return runtimecontract.RuntimeImplementationWorkScopeSources{}, fmt.Errorf("%w: ordinary work scope cannot bypass dispatch, semantic purpose or repair", common.ErrConflict)
 	}
+	if need, err := currentImplementationInputReview(a); err != nil {
+		return runtimecontract.RuntimeImplementationWorkScopeSources{}, err
+	} else if need != nil {
+		return runtimecontract.RuntimeImplementationWorkScopeSources{}, fmt.Errorf("%w: ordinary work scope awaits current input review", common.ErrConflict)
+	}
 	if !slices.Contains(runtimecontract.RuntimeCWIsEligibleForPlanning(a.Facts), cwi) {
 		return runtimecontract.RuntimeImplementationWorkScopeSources{}, fmt.Errorf("%w: work scope CWI is not eligible", common.ErrConflict)
 	}
@@ -82,6 +87,9 @@ func CurrentRuntimeImplementationWorkReservation(a RuntimeAggregate) (*runtimeco
 // 它不选择 effect；terminal choice、repair、失败和其它 CWI 均不会得到工作豁免。
 func RuntimeImplementationWorkPurposePending(a RuntimeAggregate) bool {
 	if a.Termination != nil || a.SemanticPlanning.FailureInputReview != nil || a.Facts.Failure != nil || a.Facts.RepairDirective != nil || len(a.Facts.Focus.CoverageWorkItemIDs) != 1 {
+		return false
+	}
+	if need, err := currentImplementationInputReview(a); err != nil || need != nil {
 		return false
 	}
 	cwi := a.Facts.Focus.CoverageWorkItemIDs[0]
@@ -156,6 +164,9 @@ func NextRuntimeImplementationWorkScopeRequest(a RuntimeAggregate) (*runtimecont
 	}
 	if len(a.Facts.Focus.CoverageWorkItemIDs) != 1 {
 		return nil, nil
+	}
+	if need, err := currentImplementationInputReview(a); err != nil || need != nil {
+		return nil, err
 	}
 	cwi := a.Facts.Focus.CoverageWorkItemIDs[0]
 	// A retained focus can temporarily lose planning eligibility when an exact

@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"encoding/json"
-	"github.com/muidea/workorch/internal/pkg/common"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +10,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -31,6 +31,19 @@ func (r implementationWorkCommittedTestRepository) Load(_ context.Context, w com
 }
 func (r implementationWorkCommittedTestRepository) Save(ctx context.Context, a RuntimeAggregate, revision uint64) error {
 	return r.store.Save(ctx, a, revision)
+}
+
+func restoreImplementationHistoryTestController(t *testing.T, owner *implementationWorkRealFileFixture) {
+	t.Helper()
+	reopened, err := NewRuntimeController(implementationWorkCommittedTestRepository{owner.repository})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The receipt handlers retain this controller's address. Replacing only
+	// owner.controller leaves those consumers on the old cold-audit repository,
+	// unlike production's formal owner query. Reconstruct all facets together;
+	// the independently decoded full audit below still runs every round.
+	*owner.controller = *reopened
 }
 
 func refreshImplementationHistoryTestOwners(t *testing.T, owner *implementationWorkRealFileFixture, a RuntimeAggregate) RuntimeAggregate {
@@ -106,20 +119,14 @@ func TestImplementationWorkThirtyThreeRoundsHistoryRolloverAndTerminalPurpose(t 
 			t.Fatal(err)
 		}
 		owner.repository.aggregate = &reopened
-		owner.controller, err = NewRuntimeController(implementationWorkCommittedTestRepository{owner.repository})
-		if err != nil {
-			t.Fatal(err)
-		}
+		restoreImplementationHistoryTestController(t, owner)
 		owner.aggregate = &reopened
 	}
 	before := a.CloneRaw()
 	for _, purpose := range []runtimecontract.RuntimeImplementationWorkPurpose{runtimecontract.RuntimeImplementationWorkPurposeInconclusive} {
 		restored := before.CloneRaw()
 		owner.aggregate, owner.repository.aggregate = &restored, &restored
-		owner.controller, err = NewRuntimeController(implementationWorkCommittedTestRepository{owner.repository})
-		if err != nil {
-			t.Fatal(err)
-		}
+		restoreImplementationHistoryTestController(t, owner)
 		failed := implementationWorkPrivatePipeline(t, purpose, []string{"target.txt"}, owner)
 		expectedCode := "implementation_work_repeated_state_exhausted"
 		if purpose == runtimecontract.RuntimeImplementationWorkPurposeInconclusive {
@@ -145,10 +152,7 @@ func TestImplementationWorkThirtyThreeRoundsHistoryRolloverAndTerminalPurpose(t 
 	}
 	restored := before.CloneRaw()
 	owner.aggregate, owner.repository.aggregate = &restored, &restored
-	owner.controller, err = NewRuntimeController(implementationWorkCommittedTestRepository{owner.repository})
-	if err != nil {
-		t.Fatal(err)
-	}
+	restoreImplementationHistoryTestController(t, owner)
 	terminal := implementationWorkPrivatePipeline(t, runtimecontract.RuntimeImplementationWorkPurposeTerminal, []string{"target.txt"}, owner)
 	if terminal.SemanticPlanning.HistoryCount() != 67 || terminal.SemanticPlanning.HistoryArchive == nil || len(terminal.SemanticPlanning.HistoryArchive.Segments) != 4 || len(terminal.SemanticPlanning.History) != 3 {
 		t.Fatal("67th retirement failed to roll over complete history")

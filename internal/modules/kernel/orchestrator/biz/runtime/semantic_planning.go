@@ -64,6 +64,15 @@ func semanticManifestIdentity(aggregate RuntimeAggregate) (semanticplan.Manifest
 		identity.EligibleCoverage = []common.CoverageWorkItemID{repairInput.CoverageWorkItemID}
 		identity.ValidationFailureRepair = &repairInput
 	}
+	if need, reviewErr := currentImplementationInputReview(aggregate); reviewErr != nil {
+		return semanticplan.ManifestIdentity{}, reviewErr
+	} else if need != nil {
+		if aggregate.ImplementationWork.ScopePreview != nil || repairRequired {
+			return semanticplan.ManifestIdentity{}, fmt.Errorf("%w: current input review cannot mix implementation scope or repair", common.ErrConflict)
+		}
+		identity.EligibleCoverage = []common.CoverageWorkItemID{need.coverageID}
+		return identity, nil
+	}
 	if current, workErr := CurrentRuntimeImplementationWorkReservation(aggregate); workErr != nil {
 		return semanticplan.ManifestIdentity{}, workErr
 	} else if current != nil {

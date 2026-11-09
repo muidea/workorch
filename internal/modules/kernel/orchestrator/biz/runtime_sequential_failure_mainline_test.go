@@ -91,12 +91,19 @@ func sequentialProjectRepairBodies(t *testing.T, ordinal int) (string, string) {
 	}
 }
 
-func assertSequentialProjectFailureClosure(t *testing.T, state runtimecontract.RuntimeStateRecord, repairs, reviews int) {
+func assertSequentialProjectFailureClosure(t *testing.T, state runtimecontract.RuntimeStateRecord, repairs, reviews int, maintenanceRounds ...int) {
 	t.Helper()
 	if err := state.Validate(); err != nil {
 		t.Fatal("sequence lost persisted owner invariants", err)
 	}
-	if repairs != 3 || reviews != 5 || len(state.GovernanceRequests) != 0 || len(state.ImplementationWork.Rounds) != 1 {
+	wantRounds, wantReviews := 1, 5
+	if len(maintenanceRounds) != 0 {
+		wantRounds = maintenanceRounds[0]
+		// First structural source has no model report; subsequent changed
+		// postimages are independently reviewed before the failure chain.
+		wantReviews += wantRounds - 2
+	}
+	if repairs != 3 || reviews != wantReviews || len(state.GovernanceRequests) != 0 || len(state.ImplementationWork.Rounds) != wantRounds {
 		t.Fatalf("sequence omitted or repeated a phase: repairs=%d reviews=%d rounds=%d tickets=%d", repairs, reviews, len(state.ImplementationWork.Rounds), len(state.GovernanceRequests))
 	}
 	round := state.ImplementationWork.Rounds[0]

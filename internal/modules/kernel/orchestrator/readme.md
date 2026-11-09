@@ -2131,6 +2131,24 @@ SM-3 原 seal/receipt 是只读来源；SM-4 恢复已持久 aggregate/batch，�
 
 ### 输入修订与终态的正式来源消费
 
+受保护输入的增量维护完成后，旧 `InputRevision` 仍只消费一次。SM-2 在普通 work scope/purpose
+生成前，从同一次 receipt settlement/CAS 保全的真实 owner 资源变化边判断当前输入或其声明依赖是否相交。
+仅有 proposal scope、无关目标/owner 的变更不触发新审查；在途工作、正式 failure、exact repair 和
+failure-input-review 继续各自原事务。该需求只由现有工作、原来源及失效记录派生，不新增 pending 队列、
+已校验标记、预算或写权限，也不重开旧授权。scope 入口和 semantic manifest 消费同一 owner 内部投影。
+
+需要审查的新后像沿普通 semantic/input-review 路径取得 fresh owner subject。新 conflict 才产生新 exact
+维护来源；consistent 在同一普通证明事务内继续 feasibility、all-of 和独立 assessment，不先退休报告再
+发 purpose 请求重判同一输入。SM-3 原冻结/纠正保持原输入，SM-4 从正式聚合恢复；SM-1 和三 ACK 不变。
+`TestDriveRuntimeIncrementalNativeMaintenanceAndRecovery` 使用真实 File/Shell/Run/Workspace/Result owners，
+从未接 owner runner 的多个旧输入分轮移除旧执行、只加 helper、再接入口，随后串起真实输入冲突、
+编译/行为失败修复、fresh all-of、definition_proof 及三 ACK，覆盖 partial receipt 和 Result 响应丢失恢复。
+脚本 provider 只证明该机制，不代表线上原项目或真实模型稳定性已验收。
+失败输入已审查的历史结果只能为当前 focus/CWI 的 exact binding 保留操作就绪性。
+前驱 CWI 保留的 binding 不能跳过后继规划；同 CWI 换 focus/binding 后也不能借用旧审查。
+该消费边界不重判原报告，不改写原结果或预算；公开 authoring 多 CWI fullflow 必须验证
+真实失败修复、fresh 验证、重开前驱及评估后的后继规划，不用局部修复成功代替完整验收。
+
 输入修订的 accepted review 与 owner observation 在各自接纳入口判定；后续投影不再次接纳整份
 semantic document。一次 owner transition 中统一投影完整原来源，反查新 consumer、精确唯一消费及
 当前 pending/focus；不逐条历史再递归编译全部 Pending。新或实际变化的 generation 仍按原

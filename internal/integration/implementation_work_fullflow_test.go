@@ -682,9 +682,9 @@ func (p *implementationWorkFullflowProvider) serveHTTP(w http.ResponseWriter, r 
 		}
 		_ = json.Unmarshal(authority["context"], &c3)
 		if c3.Intent != nil {
-			source, attempt, sourceErr := fixtureFrozenWorkSource(request.Input, authority["context"])
+			source, attempt, sourceErr := fixtureFrozenWorkSource(request.Input, authority["context"], authority["outputContract"])
 			if sourceErr != nil || c3.Intent.Intent == nil || source == nil || source.ContentHash != c3.Intent.Intent.ContentHash || source.ScopeRequestID != c3.Intent.Source.ScopeRequestID || len(source.Snapshots) != 1 || source.Snapshots[0].TargetRef != "internal/logic/logic.go" || source.Snapshots[0].ContentHash != runtimecontract.RuntimeValidationInputContentHash(source.Snapshots[0].Content) {
-				err = fmt.Errorf("operations request lost exact selected frozen work bytes")
+				err = fmt.Errorf("operations request lost exact selected frozen work bytes: source=%v", sourceErr)
 				kind = "runtime/frozen_source_missing"
 			} else if !p.exhaustWork && !p.omissionInjected && attempt == 0 {
 				p.omissionInjected = true
@@ -1021,7 +1021,51 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 						}
 						review.Checks = append(review.Checks, item)
 					}
-					proposal["validationInputReview"] = review
+					// The synthetic provider emits the current minimal wire, not the
+					// persisted owner report with derived membership fields.
+					wireReview := map[string]any{"subjectHash": review.SubjectHash}
+					var wireChecks []any
+					for _, check := range review.Checks {
+						item := map[string]any{"requiredCheckRef": check.RequiredCheckRef, "conclusion": check.Conclusion, "reason": check.Reason, "obligations": check.Obligations}
+						if check.UncertaintyKind != "" {
+							item["uncertaintyKind"] = check.UncertaintyKind
+						}
+						if len(check.DependencyTargetRefs) > 0 {
+							item["dependencyTargetRefs"] = check.DependencyTargetRefs
+						}
+						wireChecks = append(wireChecks, item)
+					}
+					wireReview["checks"] = wireChecks
+					if len(review.DiagnosticSources) > 0 {
+						var wireSources []any
+						for _, sourceReview := range review.DiagnosticSources {
+							fixed := ""
+							for _, source := range input.DiagnosticSources {
+								if source.SourceRef == sourceReview.SourceRef {
+									fixed = source.InputTargetRef
+								}
+							}
+							if fixed == "" || !slices.Contains(sourceReview.InputTargetRefs, fixed) {
+								return nil, kind, fmt.Errorf("source review lost owner-bound input")
+							}
+							source := map[string]any{"sourceRef": sourceReview.SourceRef, "conclusion": sourceReview.Conclusion, "reason": sourceReview.Reason}
+							var supporting []string
+							for _, ref := range sourceReview.InputTargetRefs {
+								if ref != fixed {
+									supporting = append(supporting, ref)
+								}
+							}
+							if len(supporting) > 0 {
+								source["supportingInputTargetRefs"] = supporting
+							}
+							if sourceReview.UncertaintyKind != "" {
+								source["uncertaintyKind"] = sourceReview.UncertaintyKind
+							}
+							wireSources = append(wireSources, source)
+						}
+						wireReview["diagnosticSources"] = wireSources
+					}
+					proposal["validationInputReview"] = wireReview
 					kind += "/independent_input_review"
 				}
 			default:
@@ -1492,7 +1536,7 @@ func implementationWorkFullflowReviewComposition(criterion string, files []runti
 	if strings.Contains(criterion, "决策工单") || strings.Contains(criterion, "审批工单") {
 		return runtimecontract.RuntimeValidationInputInconclusive, runtimecontract.RuntimeValidationInputUnknown, "当前组合不提供Decision/Approval工单证明消费者。"
 	}
-	if (strings.Contains(criterion, "完整") || strings.Contains(criterion, "全")) && !strings.Contains(scope, "Shell 的根 module build/test/race 另外实际执行") && !strings.Contains(scope, "Root build/test/race and independently reviewed CWI behavior remain mandatory") {
+	if (strings.Contains(criterion, "完整") || strings.Contains(criterion, "全")) && !strings.Contains(scope, "Shell 的根 module build/test/race 另外实际执行") && !strings.Contains(scope, "Root build/test/race and independent reviewed CWI behavior remain mandatory") {
 		return runtimecontract.RuntimeValidationInputInconclusive, runtimecontract.RuntimeValidationInputUnknown, "完整工程义务缺owner声明的实际项目级合取，不能从隔离包推定。"
 	}
 	return runtimecontract.RuntimeValidationInputConsistent, runtimecontract.RuntimeValidationInputCovered, "原全文义务由真实工程断言与subject中封存的typed消费者合取：输入直接调用生产实现并构建运行CLI；Shell声明根module build/test/race；工作/修复账本在原执行cutoff独立核验；Git历史receipt与最终snapshot、正式Result逐项索引及有序ACK在终态材料产生后核验。此评审仅封存职责，不声明未来事实存在，不授credit。"
