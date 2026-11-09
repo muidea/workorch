@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -24,6 +25,14 @@ func TestFailureInputReviewProviderRetainsExactInputsAndReceiptBody(t *testing.T
 	f := rc.RuntimeSemanticExecutionFeedback{WorkspaceID: c.WorkspaceID, RunID: c.RunID, DefinitionRevision: c.Definition.Revision, StartupInputHash: c.Definition.StartupInputHash, ManifestHash: m.Hash, CoverageWorkItemID: m.CoverageItems[0].ID, FailedFocusID: "original-focus", FailureSignature: "failure", OwnerModuleID: rc.RuntimeModuleShell, OperationKind: rc.RuntimeBlockKindManagedValidationSession, EvidenceID: "failure-event", EvidenceRevision: "evidence:1", DispatchID: "dispatch", OperationID: "operation", ReceiptRef: "receipt", ReceiptHash: "receipt-hash",
 		Diagnostic: &rc.RuntimeSemanticExecutionDiagnostic{FeedbackHash: "owner-feedback", OwnerModuleID: rc.RuntimeModuleShell, OriginalClass: "execution_failure", OriginalCode: "validation_failed", Signature: "failure", SummaryOnly: true},
 		Validation: rc.ProjectRuntimeValidationExecutionFeedback(&rc.RuntimeValidationObservation{RecipeID: "review-recipe", FailedChecks: []string{"check"}, FailureDetailProtocolRef: rc.RuntimeValidationFailureDetailProtocol, CheckFailures: []rc.RuntimeValidationCheckFailure{{CheckRef: "check", TargetRef: "checks/input_test.go", Line: 15, DiagnosticHash: hex.EncodeToString(digest[:]), ComparisonHash: hex.EncodeToString(digest[:]), AssertionText: body}}})}
+	// Preserve a real-size failure set through the provider projection, complete
+	// envelope gate, frozen reload and rendered integrity; no hidden count32 cap.
+	for n := 1; n < 39; n++ {
+		detail := f.Validation.CheckFailures[0]
+		detail.CaseRef = "check/" + strings.Repeat("native_case_", 12) + fmt.Sprintf("%03d", n)
+		detail.Line += n
+		f.Validation.CheckFailures = append(f.Validation.CheckFailures, detail)
+	}
 	binding := m.OwnerCatalogs[0].ValidationSurfaces[0].ProofRequirementBindings[0]
 	report := rc.RuntimeValidationInputReview{SubjectHash: input.Hash}
 	for _, check := range binding.RequiredCheckRefs {
@@ -44,6 +53,10 @@ func TestFailureInputReviewProviderRetainsExactInputsAndReceiptBody(t *testing.T
 	rendered, err := runtimeProviderRequest(request)
 	if err != nil {
 		t.Fatal(err)
+	}
+	var projected runtimeSemanticTailProjection
+	if err := json.Unmarshal([]byte(rendered.PromptContext.Sections[4].Content), &projected); err != nil || len(projected.ExecutionFeedback) != 1 || len(projected.ExecutionFeedback[0].Validation.CheckFailures) != 39 {
+		t.Fatal("39 failures did not reach provider unchanged", err)
 	}
 	for i := 0; i < 3; i++ {
 		if before.PromptContext.Sections[i].Content != rendered.PromptContext.Sections[i].Content {

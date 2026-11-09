@@ -49,6 +49,8 @@ type shellProjectStageFact struct {
 	FailureCode                  string
 	SourceBefore, SourceAfter    string
 	DiagnosticSourceRef          string   `json:",omitempty"`
+	DiagnosticOriginStageID      string   `json:",omitempty"`
+	DiagnosticIsolationRef       string   `json:",omitempty"`
 	BehaviorTargetRefs           []string `json:",omitempty"`
 }
 

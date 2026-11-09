@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -592,5 +593,73 @@ func TestFailureInputReviewCannotCompileExecutionCredit(t *testing.T) {
 	m.Hash = rc.StableRuntimeSemanticPlanManifestHash(m)
 	if m.Validate() == nil {
 		t.Fatal("failure review crossed workspace boundary")
+	}
+}
+
+// Producer detail bounds and the provider envelope are distinct contracts.
+// The SM-2 receipt admission must keep the known failure/receipt and reject an
+// over-capacity review before another semantic request or blind repair.
+func TestFailureInputReviewWholeEnvelopeCapacityFromCommittedReceipt(t *testing.T) {
+	for _, count := range []int{39, 6} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			repository, coordinator, evidence, before := runtimeFailureInputReviewFixture(t, false)
+			observation := evidence.Receipt.Evidence.Validation
+			original := observation.CheckFailures[0]
+			observation.CheckFailures = nil
+			for n := 0; n < count; n++ {
+				detail := original
+				detail.Line = n + 1
+				detail.CaseRef = detail.CheckRef + "/" + strings.Repeat("native_case_", 8) + fmt.Sprint(n)
+				detail.AssertionText = fmt.Sprintf("failure=%d ", n) + strings.Repeat("x", 300)
+				if count == 6 {
+					detail.AssertionText += strings.Repeat("y", 12000)
+				}
+				sum := sha256.Sum256([]byte(detail.AssertionText))
+				detail.DiagnosticHash = hex.EncodeToString(sum[:])
+				detail.ComparisonHash = detail.DiagnosticHash
+				observation.CheckFailures = append(observation.CheckFailures, detail)
+			}
+			if err := observation.ValidateFailureDetails(); err != nil {
+				t.Fatal("valid native details rejected before envelope", err)
+			}
+			receipt := evidence.Receipt.Clone()
+			for i := range repository.aggregate.OperationReceipts {
+				if repository.aggregate.OperationReceipts[i].ExecutionKey == receipt.ExecutionKey {
+					repository.aggregate.OperationReceipts[i] = receipt.Clone()
+				}
+			}
+			for i := range repository.aggregate.ActiveDispatch.OperationExecutions {
+				repository.aggregate.ActiveDispatch.OperationExecutions[i].OwnerReceiptHash = rc.StableRuntimeOperationReceiptHash(receipt)
+			}
+			budget := repository.aggregate.ExecutionBudget.Clone()
+			got, err := coordinator.commitEvidence(context.Background(), evidence)
+			if err != nil {
+				t.Fatal(err)
+			}
+			a := got.Aggregate
+			stored, found := rc.RuntimeOperationReceiptForExecutionKeyFence(a.OperationReceipts, receipt.ExecutionKey, receipt.Fence)
+			if !found || !reflect.DeepEqual(stored, receipt) || !reflect.DeepEqual(a.ExecutionBudget, budget) || !reflect.DeepEqual(a.ExecutionBudget.Policy, before.ExecutionBudget.Policy) {
+				t.Fatal("envelope admission changed original receipt or execution budget")
+			}
+			if count == 39 {
+				if a.SemanticPlanning.FailureInputReview == nil || len(a.SemanticPlanning.FailureInputReview.Feedback.Validation.CheckFailures) != 39 || a.SemanticPlanning.FailureInputReview.Feedback.PreviousInputReview == nil {
+					t.Fatal("39 complete native details did not reach review with exact prior report")
+				}
+			} else if a.Facts.Failure == nil || a.Facts.Failure.Code != "validation_failure_feedback_capacity_exceeded" || a.SemanticPlanning.FailureInputReview != nil || a.ActiveDispatch != nil {
+				t.Fatalf("overflow lost precise bounded result: %+v", a.Facts.Failure)
+			}
+			snapshot, _ := json.Marshal(a)
+			var reloaded RuntimeAggregate
+			if err := json.Unmarshal(snapshot, &reloaded); err != nil {
+				t.Fatal(err)
+			}
+			if err := reloaded.Validate(); err != nil {
+				t.Fatal("receipt reload", err)
+			}
+			duplicate, err := coordinator.commitEvidence(context.Background(), evidence)
+			if err != nil || duplicate.Aggregate.StateRevision != a.StateRevision || !reflect.DeepEqual(duplicate.Aggregate.ExecutionBudget, a.ExecutionBudget) {
+				t.Fatal("duplicate capacity result retried or charged budget", err)
+			}
+		})
 	}
 }

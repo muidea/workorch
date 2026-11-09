@@ -130,8 +130,8 @@ Orchestrator 的原事务负责，不增加 SM-1～SM-4 transition、availabilit
   protocol 或终态。
 - 原始 stdout/stderr、secret 和自由文本 diagnostic 不得进入 Runtime authority；公开 diagnostic 只提供有界阶段事实及受限原文引用，不用脱敏改写的工具输出充当原文。
 - managed native check 的 failure feedback 从同一 JSON event 关联 check/case 与 assertion location，仅对 sealed validation
-  scope 内的唯一相对路径发布 `CheckFailures`（最多 32 项，超限显式标记）。assertion 正文不导出，`DiagnosticHash` 保留
-  精确正文身份；新失败附带可选 `validation/check-failure` 诊断协议，`ComparisonHash` 只归一本 owner 当前 scratch
+  scope 内的唯一相对路径发布 `CheckFailures`（最多64项，超限显式标记）。适用的完整 `AssertionText` 通过受限 typed feedback
+  传递，`DiagnosticHash` 绑定精确正文；新失败附带可选 `validation/check-failure` 诊断协议，`ComparisonHash` 只归一本 owner 当前 scratch
   前缀及其中 Go testing 自动生成的目录后缀，不抹掉任意临时路径、文件名或断言值。旧回执及 v1 digest 不改写。
   只有 exact package/case 的 native fail 才可附带 `ReportedAssertion`；passing/skipped case 的日志不能描述另一个失败。
   自报的 expected/observed shape 是有界诊断而非独立事实、执行证明、通过标记或 repair authority。父检查 PASS 但子检查 skip 时发布
@@ -330,18 +330,40 @@ preparation/supplement 使用实际选中协议的容量和期限说明：multi-
 普通 mutation 排除全部原 project test 与 validation namespace；来源评审不开放输入维护授权。
 
 root test/race 完整失败后，只有全部 failed package/case 能唯一匹配封存来源、没有 skip/build/unknown/source drift，
-才可在原单 operation deadline 内分别重跑至多五个 top-level native 来源（总 stage 仍不超过八项）。每源独立
+才可在原单 operation deadline 内并行重跑至多五个 top-level native 来源（总 stage 仍不超过八项）。每源独立的完整有界 workspace 副本、HOME/TMP/cache 环境、
 coverage file 和 child-process instrumentation，精确保留 race 模式，不能借另一失败源的 aggregate coverage 归属。
 owner 新生成的计数使用 atomic 模式，允许原输入中继承 instrumentation 的真实嵌套 `go test -race`；不能因 owner
 注入 count 模式使原工程命令失败。完整 count/atomic owner profiles 都按原 exact manifest scope、正计数、非
 test/harness 和原容量门禁读取；set/未知格式、缺失/截断仍拒绝，旧 count 原事实不改写。
-所有原失败 case/subcase 与 assertion details 必须完整复现，且每源实际触达有限 scope 内非 test/non-harness
-实现；source/输出/cleanup/deadline/storage 任一不完整均不发布修复诊断。阶段保全 `DiagnosticSourceRef` 与
+各子执行共享原 context/deadline 与单执行 64MiB 原文总预算；有界 goroutine 全部 join、进程排空及副本 cleanup 后才发布。按封存 source catalog 顺序汇总，不以完成顺序选择结论。
+所有原失败 case/subcase 与 source-bound 失败身份集合必须完整复现，且每源实际触达有限 scope 内非 test/non-harness
+实现；source/输出/cleanup/deadline/storage 任一不完整均不发布修复诊断。阶段保全 `DiagnosticSourceRef`、exact `DiagnosticOriginStageID`、唯一副本 `DiagnosticIsolationRef` 与
 独立 `BehaviorTargetRefs`、实际 argv、原 raw identity/store refs；普通 receipt/hash/reload/duplicate 链仍绑定完整正文。
 若实际归属后原文发布失败，已发生的逐源行为、全部原输出 bytes/hash 身份、已保存流和明确 omission 原因仍保全为
 rejected history；不抹除历史，也不发布 structured repair。`TestProjectDiagnosticPublicationFailureKeepsActualSourceHistory`
 使用真实 runner/raw store 的发布失败与取消边界核验完整原文及零授权；不是公开 fullflow 或 live。
 原工程失败与全部测试不改写，四阶段 conjunction 仍 incomplete、quality invalid、零 CWI credit。
+
+原生失败观察在 Shell 内唯一编译：只对 exact sealed input/hash 中静态确认的直接 `*testing.T.Log/Logf` 及闭合参数表达式，
+排除普通观察 frame（含归属其缩进的嵌套 stdout）；完整原 bytes 仍保全。静态类型不完整、helper 调用、用户 Stringer/Formatter、
+shadowed/mixed call site 均保留为潜在断言。支持参数限已解析 builtin primitive/byte-rune slices、标准 time 值和闭合的
+builtin len/cap/conversion、time/runtime/strings 值操作；不执行输入、不猜用户函数纯度，也不按消息词汇分类。
+`go/types` 使用本机 Go toolchain 的导入类型信息；无法解析时只减少排除，不产生观察推断。
+
+复现使用唯一 `shellSameFailureAssertions` 比较 check/case/package/target、body ComparisonHash 和 reported shape 的完整集合；
+ComparisonHash 只沿用 owner 已声明的 scratch noise 规则，不清洗耗时/值。helper 装饰行号和同一断言的重复次数不是额外失败身份，
+各自原文/位置/hash 仍留在原 receipt。单源与多源诊断共用该规则；真实 body/value/case/source 改变或缺项仍拒绝。
+断言 count 上限为64，单条16KiB、总正文128KiB不变；count/body/aggregate/frame分别报 exact ownerCode。
+这不意味着64条任意大小都能发送：含旧正式报告及全部metadata的整个 execution feedback JSON 仍受64KiB限制，
+共同 typed compiler 显式测量并报告 actual/limit，不截断、不重试、不扩预算。
+
+生成与 source review 共用 proof topology 声明，沿已有 typed check/source/consumer binding：每个当前 native check 保留全部适用义务，
+除原义务明确需要，不在每个检查重复根项目 suite 或完整历史证明图；独立 root all-of、当前行为、assessment 与末端 receipt 继续分别履责。
+隔离并行仅解决诊断串行成本，不能证明任何具体项目在原300秒内可行，也不授 credit。
+`TestNative*`、`TestInapplicableLargeObservationIsExcludedBeforeAssertionCapacity` 覆盖原生观察/真失败、动态值、用户格式化、
+31/32/33/39/64/65条及单条/总量边界；`TestProjectMultiFailureDiagnosticActualSourcesAndBehavior` 覆盖动态日志、互斥文件/并行屏障、
+运行中取消、partial/unobserved/changed-assertion/source drift。取消后原文未发布时按已有边界撤销诊断，保留真实阶段及 omission。
+
 `TestProjectMultiFailureDiagnosticActualSourcesAndBehavior/disjoint` 用两个实际失败来源分别触达不同实现文件，
 固定每源独立的精确行为 target 及最终完整 union；不得借另一来源的 coverage 为本来源归属。
 只有完整来源归属后才沿既有 typed diagnostic→resource-owner confirmation→exact repair→fresh all-of 路线；

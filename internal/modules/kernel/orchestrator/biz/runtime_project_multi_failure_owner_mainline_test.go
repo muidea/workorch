@@ -145,3 +145,18 @@ func TestDriveRuntimeNineTargetMultiFileDeliveryRecovery(t *testing.T) {
 		})
 	}
 }
+
+// No owner result/target/credit is scripted: changing native observations must
+// survive receipt loss, exact input re-review, confirmed File repair, fresh
+// ordinary all-of, assessment and ordered terminal delivery without extra calls.
+func TestDriveRuntimeDynamicObservationsRepairAndRecovery(t *testing.T) {
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, DynamicProjectObservations: true}
+	baseline := runValidationInputReviewMainline(t, "project_behavior_failure", "", options)
+	for _, cut := range []string{"after_project_receipt", "after_failure_input_review_document", "after_repair_receipt", "after_result_persistence", "after_workspace_persistence", "after_run_persistence"} {
+		t.Run(cut, func(t *testing.T) {
+			if calls := runValidationInputReviewMainline(t, "project_behavior_failure", cut, options); calls != baseline {
+				t.Fatalf("recovery added provider consumption: %d/%d", calls, baseline)
+			}
+		})
+	}
+}

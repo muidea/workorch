@@ -1,7 +1,6 @@
 package workorchruntimecontract
 
 import (
-	"encoding/json"
 	"fmt"
 	"hash"
 )
@@ -40,9 +39,8 @@ func (s RuntimeValidationFailureInputReview) Validate() error {
 	if f.PreviousInputReview == nil || f.PreviousInputReview.Validate() != nil || f.PreviousInputReview.Report.SubjectHash != s.SubjectHash || f.PreviousInputReview.CoverageWorkItemID != f.CoverageWorkItemID {
 		return fmt.Errorf("failure input review requires the exact previous formal report")
 	}
-	data, err := json.Marshal([]RuntimeSemanticExecutionFeedback{f})
-	if err != nil || len(data) > RuntimeSemanticExecutionFeedbackMaxBytes {
-		return fmt.Errorf("failure input review exceeds bounded execution feedback capacity")
+	if err := ValidateRuntimeExecutionFeedbackCapacity([]RuntimeSemanticExecutionFeedback{f}); err != nil {
+		return err
 	}
 	descriptor, ok := RuntimeOperationDescriptorForKind(f.OperationKind)
 	if !ok || descriptor.OwnerModuleID != f.OwnerModuleID || f.Validation == nil || f.Validation.Validate() != nil || f.Validation.FailureDetailsIncomplete || f.Validation.ChecksTruncated || len(f.Validation.FailedChecks) == 0 {

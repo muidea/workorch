@@ -78,7 +78,8 @@ type RuntimeCommandResult struct {
 	// `go test -json` transcript. Observation, classification and target
 	// extraction share this immutable parse so they cannot disagree about the
 	// same tool output. It never crosses the Shell owner boundary.
-	goTestJSONFacts *shellGoTestJSONFacts
+	goTestJSONFacts              *shellGoTestJSONFacts
+	validationFailureDetailIssue *shellFailureDetailIssue
 	// v2 behavior-observation candidates are independent of assertion locations.
 	// They never authorize repair without the existing File-owner confirmation.
 	workspaceBehaviorTargetRefs        []string

@@ -253,6 +253,8 @@ func TestRuntimeValidationExecutionDiagnosticHashCloneAndReload(t *testing.T) {
 	fact := EvidenceFact{ID: "evidence", Validation: &original}
 	for _, mutate := range []func(*RuntimeValidationExecutionStage){
 		func(s *RuntimeValidationExecutionStage) { s.DiagnosticSourceRef = "other-source" },
+		func(s *RuntimeValidationExecutionStage) { s.DiagnosticIsolationRef = "other-copy" },
+		func(s *RuntimeValidationExecutionStage) { s.DiagnosticOriginStageID = "other-original" },
 		func(s *RuntimeValidationExecutionStage) { s.BehaviorTargetRefs[0] = "other-target" },
 	} {
 		changed := original.Clone()
@@ -276,5 +278,66 @@ func TestRuntimeValidationExecutionDiagnosticHashCloneAndReload(t *testing.T) {
 		if original.ExecutionConjunction.Stages[1].BehaviorTargetRefs[0] != "implementation" {
 			t.Fatal("diagnostic clone aliases original target set")
 		}
+	}
+}
+
+func TestIsolatedDiagnosticsOverlapOnlyAfterTheirExactOriginalFailure(t *testing.T) {
+	original := diagnosticExecutionFixture()
+	c := original.ExecutionConjunction
+	c.Stages[1].DiagnosticOriginStageID = c.Stages[0].Identity.ID
+	c.Stages[1].DiagnosticIsolationRef = "copy-one"
+	second := c.Stages[1]
+	second.Identity.ID = "source-two-stage"
+	second.DiagnosticSourceRef = "source-2"
+	second.DiagnosticIsolationRef = "copy-two"
+	c.Stages = append(c.Stages, second)
+	if err := original.ValidateFailureDetails(); err != nil {
+		t.Fatal("independent copies cannot overlap", err)
+	}
+	for _, scenario := range []string{"shared-copy", "missing-copy", "foreign-origin", "diagnostic-origin", "early-start", "changed-source", "credit", "bad-origin", "missing-source-origin", "unstarted-copy", "unknown-copy-time", "reversed"} {
+		t.Run(scenario, func(t *testing.T) {
+			value := original.Clone()
+			stages := value.ExecutionConjunction.Stages
+			switch scenario {
+			case "shared-copy":
+				stages[2].DiagnosticIsolationRef = stages[1].DiagnosticIsolationRef
+			case "missing-copy":
+				stages[2].DiagnosticIsolationRef = ""
+				stages[2].DiagnosticOriginStageID = ""
+			case "foreign-origin":
+				stages[2].DiagnosticOriginStageID = "other"
+			case "diagnostic-origin":
+				stages[2].DiagnosticOriginStageID = stages[1].Identity.ID
+			case "early-start":
+				stages[2].StartedAt = stages[0].StartedAt
+			case "changed-source":
+				stages[2].SourceBefore = StableRuntimeValidationExecutionStagesHash(nil)
+			case "credit":
+				value.ExecutionConjunction.Complete = true
+			case "bad-origin":
+				stages[0].TimedOut = true
+			case "missing-source-origin":
+				stages[0].SourceBefore = ""
+				stages[0].SourceAfter = ""
+				stages[2].SourceBefore = ""
+			case "unstarted-copy":
+				stages[2].Started = false
+			case "unknown-copy-time":
+				stages[2].FinishedAt = ""
+			case "reversed":
+				stages[2].FinishedAt = stages[0].StartedAt
+			}
+			if value.ValidateFailureDetails() == nil {
+				t.Fatal("invalid isolation or original failure admitted")
+			}
+		})
+	}
+	bytes, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var loaded RuntimeValidationObservation
+	if err = json.Unmarshal(bytes, &loaded); err != nil || !reflect.DeepEqual(original, loaded) {
+		t.Fatal("copy/origin facts lost on reload", err)
 	}
 }

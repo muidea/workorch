@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -163,6 +164,10 @@ func openRuntimeFailureInputReview(a *RuntimeAggregate, fact runtimecontract.Evi
 	if err := source.Validate(); err != nil {
 		// Complete raw output with unavailable applicable assertions is a determined
 		// diagnostic gap. Never spend repair attempts guessing from hashes.
+		var capacity *runtimecontract.RuntimeExecutionFeedbackCapacityError
+		if errors.As(err, &capacity) {
+			return true, markRuntimeFailureInputReviewUnavailable(a, "validation_failure_feedback_capacity_exceeded", err.Error())
+		}
 		return true, markRuntimeFailureInputReviewUnavailable(a, "validation_failure_assertions_unavailable", err.Error())
 	}
 	ledger := a.SemanticPlanning

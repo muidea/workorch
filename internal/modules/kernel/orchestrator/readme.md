@@ -1755,7 +1755,8 @@ receipt、retirement、validation receipt、Result persistence 恢复切点零�
 原 binding 的 accepted batch/request generation 与 exact document hash 唯一绑定完整旧正式报告；同 manifest/subject
 的其它请求不能替代。C4 保留该报告原文及 ReviewRef/ReportHash，仅作为旧结论与新失败的因果输入，不重判旧报告。
 没有原生 failed checks 的结构/build 诊断仍走既有 typed repair；原生断言缺失、损坏或超合同容量时明确
-`validation_failure_assertions_unavailable`，原输入读取缺失/错版为 `validation_failure_input_snapshot_unavailable`。
+`validation_failure_assertions_unavailable`；完整序列化反馈（含旧正式报告和metadata）超过原64KiB时为
+`validation_failure_feedback_capacity_exceeded`，reason携带actual bytes/limit；原输入读取缺失/错版为 `validation_failure_input_snapshot_unavailable`。
 已确定的失败与完整原始 transcript 均保留，缺正文不能触发盲修，也不改判为结果未知。
 
 新请求只评审受影响单 CWI 的原完整 Definition 义务、owner exact 输入和适用失败；不是重新执行旧评审。
@@ -1774,14 +1775,23 @@ source pending 时不适用普通 implementation purpose/scope 或 repair confir
 SM-2 独占分流和正式结果，SM-3 保持冻结/纠正身份，SM-4 仅重驱动原事务；SM-1 无新转换。
 
 Shell adapter 从原生 test2json 按 package/case/source frame 拼接跨事件行和多行断言，逐 body 16KiB、总128KiB，
-条数沿原 detail limit；AssertionText 原文不修补，receipt hash 另绑定 exact bytes。无法保全适用正文明确 incomplete。
+条数上限64；明确普通观察由Shell sealed-source compiler排除，歧义仍保留潜在断言；AssertionText 原文不修补，receipt hash 另绑定 exact bytes。无法保全适用正文明确 incomplete。
 不再要求私有 WORKORCH_ASSERTION shape 才能进入 semantic feedback；typed shape 仍可作为附加来源事实。
 完整原 transcript 仍由 Shell 原受限读取接口保全，不向模型展开整份日志或无关正文。LLM C3 仅投影 subject 身份，
 C4 携带 complete source-bound 原生断言与反馈，并沿原64KiB execution feedback预算拒绝超界，不扩额；C0～C2不受
 本轮动态失败影响。冻结、same-contract correction 与恢复逐值保留原请求。
 
-验证入口：`TestFailureInputReview*`、`TestDriveRuntimeProjectMultiFailureConfirmedRepair`、
+验证入口：`TestFailureInputReviewWholeEnvelopeCapacityFromCommittedReceipt` 从39条完整receipt及原正式报告到SM-2重审，
+覆盖whole-envelope溢出精确失败、原receipt/预算不变、duplicate/JSON reload；
+`TestDriveRuntimeDynamicObservationsRepairAndRecovery` 使用真实Shell/File/Run/Result/Workspace，只有provider文档脚本化，
+动态普通日志→独立来源复现→原receipt重审→File修复→fresh all-of→assessment→三ACK；覆盖receipt、重审文档、修复effect及三owner持久化后响应丢失。
+该fixture不代表live项目全部义务或原300秒可行性。SM-2消费Shell正式typed来源/隔离/行为事实，不解析日志；SM-3保持唯一dispatch/key/fence/receipt，
+SM-4恢复不重复执行，SM-1无新transition。其它验证入口：`TestFailureInputReview*`、`TestDriveRuntimeProjectMultiFailureConfirmedRepair`、
 `TestDriveRuntimeFailedValidationInputRevisionAndRecovery`、Shell 原生正文/多行/超界测试及 LLM exact C4 渲染恢复测试。
+`TestDriveRuntimeSequentialFailuresToAcceptanceAndRecovery` 在同一 Run 中连接失败后的conflict受保护输入维护、
+consistent实施修复、修复引入的真实build失败、另一个body/value变化的业务失败、fresh普通all-of、
+消费其正式证据的definition_proof assessment及有序三ACK；Result持久化响应丢失后恢复不增加provider调用或工程执行。
+夹具在startup前显式声明三个修复预算和现有profile deliverable证明映射，不扩live/default预算，不改变原operation期限。
 真实 owner 主线仅脚本化 provider，覆盖失败→consistent 实现修复与失败→conflict 输入维护、fresh validation/
 assessment/三 ACK 及恢复不增加调用；本地通过不代表 live 项目验收或真实模型语义稳定性已通过。
 

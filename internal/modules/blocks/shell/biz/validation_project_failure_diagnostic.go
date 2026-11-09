@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const shellProjectFailureDiagnosticRequirements = "v7 only: after a complete unchanged root test/race failure exclusively in exact reviewed native cases, execute one independent instrumented exact-package diagnostic under the original deadline. Preserve original failed stages and raw streams. Require identical failed cases and assertions, complete output, observed implementation, unchanged sources and cleanup. Diagnostic never completes the four-stage conjunction or grants credit. Unknown, neighboring, skipped, ambiguous, missing, stale or over-budget facts remain closed."
+const shellProjectFailureDiagnosticRequirements = "v7 only: after a complete unchanged root test/race failure exclusively in exact reviewed native cases, execute one independent instrumented exact-package diagnostic under the original deadline. Preserve original failed stages and raw streams. Require identical failed cases and assertions, complete output, observed implementation, unchanged sources and cleanup. Diagnostic never completes the four-stage conjunction or grants credit. Unknown, neighboring, skipped, ambiguous, missing, stale or over-budget facts remain closed." + shellNativeFailureObservationRequirements
 const shellProjectFailureDiagnosticStageID = "reviewed-cwi-failure-diagnostic"
 
 // This gate consumes actual package-qualified events, never command labels or
@@ -99,7 +99,7 @@ func runShellProjectFailureDiagnostic(ctx context.Context, directory string, env
 	baseline.ExitCode, baseline.Stdout, baseline.Stderr = int64(original.ExitCode), string(original.Stdout.Raw), string(original.Stderr.Raw)
 	attachShellValidationObservation(&baseline, "go", spec.Args, request.ValidationRecipeID, true)
 	attachShellValidationCheckFailures(&baseline, request)
-	if baseline.ValidationObservation == nil || !slices.Equal(baseline.ValidationObservation.CheckFailures, output.ValidationObservation.CheckFailures) {
+	if baseline.ValidationObservation == nil || baseline.ValidationObservation.ValidateFailureDetails() != nil || baseline.ValidationObservation.FailureDetailsTruncated || !shellSameFailureAssertions(baseline.ValidationObservation.CheckFailures, output.ValidationObservation.CheckFailures) {
 		return stage, nil
 	}
 	after, err := shellProjectSourceSetHash(directory)

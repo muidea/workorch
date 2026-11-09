@@ -57,6 +57,9 @@ func TestProjectAdditionalTestsShareInventoryAndReadinessRules(t *testing.T) {
 	if strings.Contains(requirements, "16 files/64 KiB") || strings.Contains(requirements, "未声明 native Test") || !strings.Contains(requirements, "64 files/256 KiB") {
 		t.Fatal("selected instructions contradict reader")
 	}
+	if !strings.Contains(requirements, shellProjectProofTopologyRequirements) || !strings.Contains(subject.ScopeRequirements, shellProjectProofTopologyRequirements) || !strings.Contains(subject.ScopeRequirements, shellNativeFailureObservationRequirements) {
+		t.Fatal("generation and exact source review disagree on current proof responsibilities")
+	}
 }
 
 func TestStructuralMaintenanceRetainsExactMalformedInputWithoutReview(t *testing.T) {

@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"os"
 	"path"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -143,6 +145,9 @@ func runShellProjectMultiFailureDiagnostic(ctx context.Context, directory string
 	if len(want) > 5 || prefixCount+len(want) > runtimecontract.RuntimeValidationExecutionMaxStages {
 		return reject(runtimecontract.ValidationDiagnosticCapacityExceeded, "validation_failure_sources_over_capacity", "failed source union exceeds the bounded independent diagnostic execution capacity")
 	}
+	if issue := baseline.validationFailureDetailIssue; issue != nil {
+		return reject(issue.unavailability(), issue.code, issue.reason)
+	}
 	if baseline.ValidationObservation == nil || baseline.ValidationObservation.ValidateFailureDetails() != nil || baseline.ValidationObservation.FailureDetailsTruncated {
 		return reject(runtimecontract.ValidationDiagnosticAssertionsUnavailable, "validation_failure_assertions_unavailable", "native source-bound assertion bodies are missing, invalid, ambiguous or over capacity")
 	}
@@ -150,7 +155,12 @@ func runShellProjectMultiFailureDiagnostic(ctx context.Context, directory string
 	if err != nil {
 		return reject(runtimecontract.ValidationDiagnosticSourcesUnavailable, "validation_failure_scope_unavailable", "independent coverage scope could not be compiled")
 	}
-	result := baseline
+	type job struct {
+		source runtimecontract.RuntimeValidationDiagnosticSource
+		cases  []string
+		result shellSourceDiagnosticResult
+	}
+	var jobs []job
 	for _, source := range sources {
 		cases, failed := want[source.SourceRef]
 		if !failed {
@@ -159,62 +169,36 @@ func runShellProjectMultiFailureDiagnostic(ctx context.Context, directory string
 		if !shellProjectFailureDetailsComplete(cases, baseline.ValidationObservation.CheckFailures) || ctx.Err() != nil {
 			return reject(runtimecontract.ValidationDiagnosticAssertionsUnavailable, "validation_failure_assertions_unavailable", "failed native cases lack complete exact source-bound assertions")
 		}
-		file, err := os.CreateTemp(request.ValidationScratchDirectory, "project-source-*.cover")
-		if err != nil {
-			return reject(runtimecontract.ValidationDiagnosticExecutionUnavailable, "validation_failure_execution_unavailable", "independent diagnostic scratch could not be created")
+		jobs = append(jobs, job{source: source, cases: cases})
+	}
+	// At most five independent sources. Each owns a complete bounded workspace,
+	// environment, coverage and process lifetime. Join every job before receipt
+	// publication; catalog order, not completion order, determines the result.
+	var joined sync.WaitGroup
+	for index := range jobs {
+		joined.Add(1)
+		go func(index int) {
+			defer joined.Done()
+			j := &jobs[index]
+			j.result = runShellProjectFailureSourceIsolated(ctx, directory, env, request, original, baseline, j.source, j.cases, coveragePackages)
+		}(index)
+	}
+	joined.Wait()
+	result := baseline
+	var first *shellSourceDiagnosticResult
+	for index := range jobs {
+		job := &jobs[index].result
+		if job.stage != nil {
+			stages = append(stages, *job.stage)
+			specs = append(specs, *job.spec)
 		}
-		coveragePath := file.Name()
-		if file.Close() != nil {
-			return reject(runtimecontract.ValidationDiagnosticExecutionUnavailable, "validation_failure_execution_unavailable", "independent diagnostic scratch could not be closed")
+		if job.code != "" && first == nil {
+			first = job
 		}
-		processPath, err := prepareShellProcessBehavior(request, directory)
-		if err != nil {
-			return reject(runtimecontract.ValidationDiagnosticExecutionUnavailable, "validation_failure_execution_unavailable", "independent process observation could not be prepared")
-		}
-		native := path.Base(source.NativeCaseRef)
-		pkg := path.Dir(source.InputTargetRef)
-		selector := "./" + pkg
-		if pkg == "." {
-			selector = "."
-		}
-		args := []string{"test", "-coverpkg=" + coveragePackages, "-covermode=atomic", "-coverprofile=" + coveragePath, "-json", "-count=1", "-run", "^" + regexp.QuoteMeta(native) + "$", selector}
-		if original.ID == "project-race" {
-			args = append(args[:1], append([]string{"-race"}, args[1:]...)...)
-		}
-		args = shellProcessBehaviorArgs(args, processPath)
-		spec := shellProjectStageSpec{ID: "project-diagnostic-" + strings.TrimPrefix(source.SourceRef, "shell-project-source-"), Scope: "diagnostic-source:" + source.SourceRef, Args: args, JSON: true}
-		specs = append(specs, spec)
-		stageEnv := shellProcessBehaviorEnvironment(shellBehaviorEnvironment(env), processPath, args)
-		stage, _ := runShellProjectStageWithBudget(ctx, directory, stageEnv, spec, request.projectRawBudget)
-		stages = append(stages, stage)
-		got, complete := shellProjectMultiFailedCases(stage, sources)
-		if !complete || len(got) != 1 || !slices.Equal(got[source.SourceRef], cases) || stage.SourceBefore != original.SourceAfter || ctx.Err() != nil {
-			return reject(runtimecontract.ValidationDiagnosticReproductionUnavailable, "validation_failure_reproduction_unavailable", "independent execution did not reproduce the exact original failed cases on unchanged sources")
-		}
-		output := shellBaseOutput(request, "go", args, directory, "", "go")
-		output.Status, output.ExitCode = "failed", int64(stage.ExitCode)
-		output.Stdout, output.Stderr = string(stage.Stdout.Raw), string(stage.Stderr.Raw)
-		attachShellValidationObservation(&output, "go", args, request.ValidationRecipeID, true)
-		attachShellValidationCheckFailures(&output, request)
-		var expected []runtimecontract.RuntimeValidationCheckFailure
-		pkgRef := strings.TrimSuffix(source.NativeCaseRef, "/"+native)
-		for _, detail := range baseline.ValidationObservation.CheckFailures {
-			if detail.PackageRef == pkgRef && detail.CheckRef == native {
-				expected = append(expected, detail)
-			}
-		}
-		if output.ValidationObservation == nil || output.ValidationObservation.ValidateFailureDetails() != nil || output.ValidationObservation.FailureDetailsTruncated || !slices.Equal(expected, output.ValidationObservation.CheckFailures) || !shellProjectFailureDetailsComplete(cases, output.ValidationObservation.CheckFailures) {
-			return reject(runtimecontract.ValidationDiagnosticReproductionUnavailable, "validation_failure_assertions_changed", "independent execution did not preserve every original source-bound assertion")
-		}
-		output.workspaceProcessBehaviorTargetRefs, output.workspaceProcessBehaviorError = shellProcessBehaviorTargets(ctx, "go", directory, processPath, stageEnv, request.ValidationScopeTargetRefs)
-		_ = attachShellWorkspaceBehavior(&output, request, directory, coveragePath)
-		after, sourceErr := shellProjectSourceSetHash(directory)
-		if sourceErr != nil || after != original.SourceAfter || len(output.workspaceBehaviorTargetRefs) == 0 || output.workspaceProcessBehaviorError != nil || ctx.Err() != nil {
-			return reject(runtimecontract.ValidationDiagnosticBehaviorUnobserved, "validation_failure_behavior_unobserved", "independent execution lacks complete unchanged-source implementation behavior")
-		}
-		stages[len(stages)-1].DiagnosticSourceRef = source.SourceRef
-		stages[len(stages)-1].BehaviorTargetRefs = slices.Clone(output.workspaceBehaviorTargetRefs)
-		result.workspaceBehaviorTargetRefs = append(result.workspaceBehaviorTargetRefs, output.workspaceBehaviorTargetRefs...)
+		result.workspaceBehaviorTargetRefs = append(result.workspaceBehaviorTargetRefs, job.targets...)
+	}
+	if first != nil {
+		return reject(first.unavailability, first.code, first.reason)
 	}
 	if len(stages) != len(want) || !shellProjectDiagnosticInputCurrent(directory, request) || ctx.Err() != nil {
 		return reject(runtimecontract.ValidationDiagnosticInputChanged, "validation_failure_input_changed", "independent source union or original input is no longer complete and current")
@@ -226,4 +210,121 @@ func runShellProjectMultiFailureDiagnostic(ctx context.Context, directory string
 	// candidate boundary reports overflow explicitly; dropping it here would
 	// hide a known capacity failure as missing attribution.
 	return stages, specs, &result
+}
+
+// A source result is private to this operation; it is neither a scheduler nor
+// another authority/receipt. Only a complete source union can authorize repair.
+type shellSourceDiagnosticResult struct {
+	stage          *shellProjectStageFact
+	spec           *shellProjectStageSpec
+	targets        []string
+	unavailability runtimecontract.RuntimeValidationDiagnosticUnavailability
+	code, reason   string
+}
+
+func runShellProjectFailureSourceIsolated(ctx context.Context, directory string, env []string, request RuntimeCommandRequest, original shellProjectStageFact, baseline RuntimeCommandResult, source runtimecontract.RuntimeValidationDiagnosticSource, cases []string, coveragePackages string) (result shellSourceDiagnosticResult) {
+	fail := func(kind runtimecontract.RuntimeValidationDiagnosticUnavailability, code, reason string) shellSourceDiagnosticResult {
+		result.unavailability, result.code, result.reason = kind, code, reason
+		result.targets = nil
+		return result
+	}
+	scratch, err := os.MkdirTemp(request.ValidationScratchDirectory, "diagnostic-source-")
+	if err != nil {
+		return fail(runtimecontract.ValidationDiagnosticExecutionUnavailable, "validation_failure_execution_unavailable", "independent diagnostic copy could not be prepared")
+	}
+	defer func() {
+		if err := os.RemoveAll(scratch); err != nil {
+			result.unavailability = runtimecontract.ValidationDiagnosticExecutionUnavailable
+			result.code = "validation_failure_cleanup_unavailable"
+			result.reason = "independent diagnostic copy did not complete cleanup"
+			result.targets = nil
+			if result.stage != nil {
+				result.stage.CleanupFailed = true
+				result.stage.DiagnosticSourceRef = ""
+				result.stage.BehaviorTargetRefs = nil
+			}
+		}
+	}()
+	for _, name := range []string{"workspace", "home", "tmp", "cache"} {
+		if err := os.Mkdir(filepath.Join(scratch, name), 0700); err != nil {
+			return fail(runtimecontract.ValidationDiagnosticExecutionUnavailable, "validation_failure_execution_unavailable", "independent diagnostic directories could not be prepared")
+		}
+	}
+	copied := filepath.Join(scratch, "workspace")
+	if _, err := copyManagedValidationWorkspace(directory, copied); err != nil {
+		return fail(runtimecontract.ValidationDiagnosticExecutionUnavailable, "validation_failure_execution_unavailable", "complete independent workspace copy unavailable")
+	}
+	current, err := shellProjectSourceSetHash(copied)
+	if err != nil || current != original.SourceAfter || !shellProjectDiagnosticInputCurrent(copied, request) || ctx.Err() != nil {
+		return fail(runtimecontract.ValidationDiagnosticInputChanged, "validation_failure_input_changed", "independent diagnostic copy differs from the exact original source")
+	}
+	directory = copied
+	request.ValidationScratchDirectory = scratch
+	env = managedValidationEnvironment(env, scratch)
+	sources := request.validationProofBinding.InputReview.DiagnosticSources
+	file, err := os.CreateTemp(request.ValidationScratchDirectory, "project-source-*.cover")
+	if err != nil {
+		return fail(runtimecontract.ValidationDiagnosticExecutionUnavailable, "validation_failure_execution_unavailable", "independent diagnostic scratch could not be created")
+	}
+	coveragePath := file.Name()
+	if file.Close() != nil {
+		return fail(runtimecontract.ValidationDiagnosticExecutionUnavailable, "validation_failure_execution_unavailable", "independent diagnostic scratch could not be closed")
+	}
+	processPath, err := prepareShellProcessBehavior(request, directory)
+	if err != nil {
+		return fail(runtimecontract.ValidationDiagnosticExecutionUnavailable, "validation_failure_execution_unavailable", "independent process observation could not be prepared")
+	}
+	native := path.Base(source.NativeCaseRef)
+	pkg := path.Dir(source.InputTargetRef)
+	selector := "./" + pkg
+	if pkg == "." {
+		selector = "."
+	}
+	args := []string{"test", "-coverpkg=" + coveragePackages, "-covermode=atomic", "-coverprofile=" + coveragePath, "-json", "-count=1", "-run", "^" + regexp.QuoteMeta(native) + "$", selector}
+	if original.ID == "project-race" {
+		args = append(args[:1], append([]string{"-race"}, args[1:]...)...)
+	}
+	args = shellProcessBehaviorArgs(args, processPath)
+	spec := shellProjectStageSpec{ID: "project-diagnostic-" + strings.TrimPrefix(source.SourceRef, "shell-project-source-"), Scope: "diagnostic-source:" + source.SourceRef, Args: args, JSON: true}
+	result.spec = &spec
+	stageEnv := shellProcessBehaviorEnvironment(shellBehaviorEnvironment(env), processPath, args)
+	stage, _ := runShellProjectStageWithBudget(ctx, directory, stageEnv, spec, request.projectRawBudget)
+	if stage.Started {
+		stage.DiagnosticOriginStageID = original.ID
+		stage.DiagnosticIsolationRef = filepath.Base(request.ValidationScratchDirectory)
+	}
+	result.stage = &stage
+	got, complete := shellProjectMultiFailedCases(stage, sources)
+	if !complete || len(got) != 1 || !slices.Equal(got[source.SourceRef], cases) || stage.SourceBefore != original.SourceAfter || ctx.Err() != nil {
+		return fail(runtimecontract.ValidationDiagnosticReproductionUnavailable, "validation_failure_reproduction_unavailable", "independent execution did not reproduce the exact original failed cases on unchanged sources")
+	}
+	output := shellBaseOutput(request, "go", args, directory, "", "go")
+	output.Status, output.ExitCode = "failed", int64(stage.ExitCode)
+	output.Stdout, output.Stderr = string(stage.Stdout.Raw), string(stage.Stderr.Raw)
+	attachShellValidationObservation(&output, "go", args, request.ValidationRecipeID, true)
+	attachShellValidationCheckFailures(&output, request)
+	if issue := output.validationFailureDetailIssue; issue != nil {
+		return fail(issue.unavailability(), issue.code, "independent source "+source.SourceRef+": "+issue.reason)
+	}
+	var expected []runtimecontract.RuntimeValidationCheckFailure
+	pkgRef := strings.TrimSuffix(source.NativeCaseRef, "/"+native)
+	for _, detail := range baseline.ValidationObservation.CheckFailures {
+		if detail.PackageRef == pkgRef && detail.CheckRef == native {
+			expected = append(expected, detail)
+		}
+	}
+	if output.ValidationObservation == nil || output.ValidationObservation.ValidateFailureDetails() != nil || output.ValidationObservation.FailureDetailsTruncated || !shellSameFailureAssertions(expected, output.ValidationObservation.CheckFailures) || !shellProjectFailureDetailsComplete(cases, output.ValidationObservation.CheckFailures) {
+		return fail(runtimecontract.ValidationDiagnosticReproductionUnavailable, "validation_failure_assertions_changed", "independent execution did not preserve every original source-bound assertion")
+	}
+	output.workspaceProcessBehaviorTargetRefs, output.workspaceProcessBehaviorError = shellProcessBehaviorTargets(ctx, "go", directory, processPath, stageEnv, request.ValidationScopeTargetRefs)
+	_ = attachShellWorkspaceBehavior(&output, request, directory, coveragePath)
+	after, sourceErr := shellProjectSourceSetHash(directory)
+	if sourceErr != nil || after != original.SourceAfter || len(output.workspaceBehaviorTargetRefs) == 0 || output.workspaceProcessBehaviorError != nil || ctx.Err() != nil {
+		return fail(runtimecontract.ValidationDiagnosticBehaviorUnobserved, "validation_failure_behavior_unobserved", "independent execution lacks complete unchanged-source implementation behavior")
+	}
+	stage.DiagnosticSourceRef = source.SourceRef
+	stage.BehaviorTargetRefs = slices.Clone(output.workspaceBehaviorTargetRefs)
+
+	result.targets = slices.Clone(output.workspaceBehaviorTargetRefs)
+	return result
 }

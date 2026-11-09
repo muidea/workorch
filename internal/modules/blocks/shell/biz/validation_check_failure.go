@@ -3,6 +3,7 @@ package shell
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ func attachShellValidationCheckFailures(output *RuntimeCommandResult, request Ru
 	if output == nil || output.ValidationObservation == nil || output.goTestJSONFacts == nil {
 		return
 	}
+	output.validationFailureDetailIssue = nil
 	observation := output.ValidationObservation.Clone()
 	observation.CheckFailures = nil
 	observation.FailureDetailsTruncated = false
@@ -42,9 +44,14 @@ func attachShellValidationCheckFailures(output *RuntimeCommandResult, request Ru
 			scope[target] = struct{}{}
 		}
 	}
+	observationLines := shellNativeObservationLines(request.validationProofBinding.InputReview)
 	seen := make(map[runtimecontract.RuntimeValidationCheckFailure]struct{})
-	assertionBytes := 0
-	assertions, incomplete := shellSourceBoundAssertions(output.goTestJSONFacts, failed)
+	assertionBytes, detailCount := 0, 0
+	assertions, incomplete, issue := shellSourceBoundAssertions(output.goTestJSONFacts, failed, func(record shellGoTestJSONDiagnosticRecord, ref string, line int) bool {
+		target, ok := shellDiagnosticTargetInScope(ref, record.Package, record.ImportPath, output.WorkingDirectory, scope)
+		return !ok || observationLines[target][line]
+	})
+	output.validationFailureDetailIssue = issue
 	observation.FailureDetailsTruncated = incomplete
 	for _, assertion := range assertions {
 		record := assertion.record
@@ -63,18 +70,32 @@ func attachShellValidationCheckFailures(output *RuntimeCommandResult, request Ru
 		probe := runtimecontract.RuntimeValidationObservation{FailedChecks: []string{check}, CheckFailures: []runtimecontract.RuntimeValidationCheckFailure{detail}, FailureDetailProtocolRef: observation.FailureDetailProtocolRef}
 		if probe.ValidateFailureDetails() != nil {
 			observation.FailureDetailsTruncated = true
+			if output.validationFailureDetailIssue == nil {
+				output.validationFailureDetailIssue = &shellFailureDetailIssue{code: "validation_failure_assertion_invalid", reason: "source-bound assertion violates the current diagnostic contract"}
+			}
 			continue
 		}
 		if _, duplicate := seen[detail]; duplicate {
 			continue
 		}
 		seen[detail] = struct{}{}
+		detailCount++
 		if len(observation.CheckFailures) == runtimecontract.RuntimeValidationFailureDetailLimit || assertionBytes+len(detail.AssertionText) > runtimecontract.RuntimeValidationAssertionsMaxBytes {
 			observation.FailureDetailsTruncated = true
+			if output.validationFailureDetailIssue == nil {
+				if len(observation.CheckFailures) == runtimecontract.RuntimeValidationFailureDetailLimit {
+					output.validationFailureDetailIssue = &shellFailureDetailIssue{code: "validation_failure_assertion_count_exceeded", reason: fmt.Sprintf("native failure detail count exceeds limit=%d", runtimecontract.RuntimeValidationFailureDetailLimit), capacity: true}
+				} else {
+					output.validationFailureDetailIssue = &shellFailureDetailIssue{code: "validation_failure_assertions_bytes_exceeded", reason: fmt.Sprintf("native assertion bodies require at least bytes=%d above limit=%d", assertionBytes+len(detail.AssertionText), runtimecontract.RuntimeValidationAssertionsMaxBytes), capacity: true}
+				}
+			}
 			continue
 		}
 		assertionBytes += len(detail.AssertionText)
 		observation.CheckFailures = append(observation.CheckFailures, detail)
+	}
+	if issue := output.validationFailureDetailIssue; issue != nil && issue.code == "validation_failure_assertion_count_exceeded" {
+		issue.reason = fmt.Sprintf("native failure detail count=%d exceeds limit=%d", detailCount, runtimecontract.RuntimeValidationFailureDetailLimit)
 	}
 	observation = observation.Normalized()
 	output.ValidationObservation = &observation
@@ -91,13 +112,33 @@ type shellSourceAssertion struct {
 	body   string
 }
 
-func shellSourceBoundAssertions(facts *shellGoTestJSONFacts, failed map[string]struct{}) ([]shellSourceAssertion, bool) {
+type shellFailureDetailIssue struct {
+	code, reason string
+	capacity     bool
+}
+
+func (issue shellFailureDetailIssue) unavailability() runtimecontract.RuntimeValidationDiagnosticUnavailability {
+	if issue.capacity {
+		return runtimecontract.ValidationDiagnosticCapacityExceeded
+	}
+	return runtimecontract.ValidationDiagnosticAssertionsUnavailable
+}
+
+func shellSourceBoundAssertions(facts *shellGoTestJSONFacts, failed map[string]struct{}, exclude func(shellGoTestJSONDiagnosticRecord, string, int) bool) ([]shellSourceAssertion, bool, *shellFailureDetailIssue) {
 	var out []shellSourceAssertion
 	pending := map[string]int{}
+	ignored := map[string]int{}
 	incomplete := false
+	var issue *shellFailureDetailIssue
 	consume := func(record shellGoTestJSONDiagnosticRecord, line string) {
 		key := record.Package + "\x00" + record.Test
 		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if level, ok := ignored[key]; ok {
+			if strings.TrimSpace(line) == "" || indent > level {
+				return
+			}
+			delete(ignored, key)
+		}
 		// Native testing decoration owns its indented continuation, including
 		// source-looking text printed by a nested command. It must not be
 		// re-attributed to the enclosing test as a new assertion location.
@@ -105,6 +146,9 @@ func shellSourceBoundAssertions(facts *shellGoTestJSONFacts, failed map[string]s
 			if strings.TrimSpace(line) == "" || indent > out[idx].indent {
 				if len(out[idx].body)+1+len(line) > runtimecontract.RuntimeValidationAssertionMaxBytes {
 					incomplete = true
+					if issue == nil {
+						issue = &shellFailureDetailIssue{code: "validation_failure_assertion_body_exceeded", reason: fmt.Sprintf("native assertion body reached bytes=%d above limit=%d", len(out[idx].body)+1+len(line), runtimecontract.RuntimeValidationAssertionMaxBytes), capacity: true}
+					}
 					delete(pending, key)
 				} else {
 					out[idx].body += "\n" + line
@@ -126,6 +170,17 @@ func shellSourceBoundAssertions(facts *shellGoTestJSONFacts, failed map[string]s
 				incomplete = true
 				delete(pending, key)
 				return
+			}
+			if exclude != nil && exclude(record, match[1], n) {
+				delete(pending, key)
+				ignored[key] = indent
+				return
+			}
+			if len(match[3]) > runtimecontract.RuntimeValidationAssertionMaxBytes {
+				incomplete = true
+				if issue == nil {
+					issue = &shellFailureDetailIssue{code: "validation_failure_assertion_body_exceeded", reason: fmt.Sprintf("native assertion body reached bytes=%d above limit=%d", len(match[3]), runtimecontract.RuntimeValidationAssertionMaxBytes), capacity: true}
+				}
 			}
 			out = append(out, shellSourceAssertion{record: record, target: match[1], line: n, indent: indent, body: match[3]})
 			pending[key] = len(out) - 1
@@ -177,5 +232,8 @@ func shellSourceBoundAssertions(facts *shellGoTestJSONFacts, failed map[string]s
 			consume(records[key], fragments[key])
 		}
 	}
-	return out, incomplete
+	if incomplete && issue == nil {
+		issue = &shellFailureDetailIssue{code: "validation_failure_assertion_frames_incomplete", reason: "native source frame or continuation is incomplete or ambiguous"}
+	}
+	return out, incomplete, issue
 }

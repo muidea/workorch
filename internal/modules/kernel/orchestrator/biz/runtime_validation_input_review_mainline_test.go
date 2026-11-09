@@ -77,6 +77,8 @@ type validationInputReviewMainlineOptions struct {
 	DependencyScopeErrorOnce           bool
 	ExecutionUncertaintyOnce           string
 	LargeProjectOutput                 bool
+	DynamicProjectObservations         bool
+	SequentialProjectFailures          bool
 	MultiFileProject                   bool
 }
 
@@ -188,7 +190,7 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 		options.ProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
 	}
 	projectAdapter := options.Adapter == shellcommon.ValidationRecipeAdapterProjectConjunction || options.Adapter == shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic
-	projectBehaviorRepair := mode == "project_behavior_failure"
+	projectBehaviorRepair := mode == "project_behavior_failure" || options.SequentialProjectFailures
 	projectChecksumRepair := strings.HasPrefix(mode, "project_checksum_")
 	projectRepair := projectBehaviorRepair || projectChecksumRepair
 	if projectBehaviorRepair && options.Adapter != shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
@@ -224,6 +226,15 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 		route.RepairOperationKinds, route.RepairTargetPolicy = []string{runtimecontract.StepKindFileEdit}, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope
 		route.RepairTargetRole, route.RepairOperationTargetSelectorRef = "deliverable_implementation", "workspace-relative-existing-file-target"
 		convergence.Routes = []runtimecontract.RuntimeValidationFailureRepairRoute{route}
+		if options.SequentialProjectFailures {
+			// This fixture declares three repairs before startup, without changing
+			// the live/default policy or extending any operation deadline.
+			convergence.MaxAttempts = 3
+			build := route.Clone()
+			build.ID = "source-compile-to-confirmed-file-edit"
+			build.TriggerDiagnosticClass, build.TriggerEvidenceTargetType, build.TriggerOwnerDiagnosticCode = runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface, "source_compile_failed"
+			convergence.Routes = append(convergence.Routes, build)
+		}
 		bootstrap.DefinitionFocuses[1].ValidationFailureRepairConvergence = &convergence
 		bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[1].ValidationFailureRepairConvergence = &convergence
 	}
@@ -276,7 +287,9 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 		}
 	}
 	bootstrap = runtimeTestBootstrapWithBindings(bootstrap)
-	if projectRepair {
+	if options.SequentialProjectFailures {
+		bootstrap = sequentialProjectPurposeBootstrap(t, bootstrap)
+	} else if projectRepair {
 		bootstrap = runtimeTestWithHistoricalPurposeMapping(t, bootstrap, "cwi-1", "cwi-2")
 	}
 	if options.SourceObligations {
@@ -356,6 +369,10 @@ func TestHistorical(t *testing.T) {
 	if options.MultiFileProject {
 		initialFiles["historical_test.go"] = strings.ReplaceAll(initialFiles["historical_test.go"], "DeliveredValue()!=4", "DeliveredValue()+RepairOffset()!=4")
 	}
+	if options.SequentialProjectFailures {
+		initialFiles["historical_test.go"] = strings.Replace(initialFiles["historical_test.go"], `t.Fatal("WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3")`, `t.Fatalf("expected=4 actual=%d", DeliveredValue())`, 1)
+		projectExecutionCount = strings.Repeat("executed\n", 8)
+	}
 
 	inputTargets := map[common.CoverageWorkItemID]string{}
 	for _, requirement := range requirements {
@@ -386,8 +403,17 @@ func %s(t *testing.T) {
 			initialFiles[inputTarget] = strings.Replace(initialFiles[inputTarget], " bin:=", ` for range 600 {t.Log(strings.Repeat("x",4096))}
  bin:=`, 1)
 		}
+		if options.DynamicProjectObservations {
+			initialFiles[inputTarget] = strings.Replace(initialFiles[inputTarget], "import (", `import ("time";`, 1)
+			initialFiles[inputTarget] = strings.Replace(initialFiles[inputTarget], " bin:=", ` for range 80 { t.Logf("ordinary elapsed=%d",time.Now().UnixNano()) }
+ bin:=`, 1)
+		}
+
 		if projectBehaviorRepair {
 			initialFiles[inputTarget] = strings.Replace(initialFiles[inputTarget], "wrong delivered behavior", "WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3", 1)
+		}
+		if options.SequentialProjectFailures {
+			initialFiles[inputTarget] = strings.Replace(initialFiles[inputTarget], `t.Fatal("WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3")`, `t.Fatalf("expected=4 actual=%s", strings.TrimSpace(string(out)))`, 1)
 		}
 		if options.SourceObligations || projectRepair {
 			body := initialFiles[inputTarget]
@@ -717,6 +743,11 @@ func %s(t *testing.T) {
 						return
 					}
 					review.DiagnosticSources = append(review.DiagnosticSources, runtimecontract.RuntimeValidationDiagnosticSourceReview{SourceRef: source.SourceRef, Conclusion: conclusion, Reason: "The exact supplied fixture asserts the delivered value or preserves the original independent project constraint, without replacing the original criterion.", InputTargetRefs: []string{source.InputTargetRef}})
+					if options.SequentialProjectFailures && !strings.Contains(body, `!="5"`) {
+						// Only the generated wrong expectation conflicts with the
+						// criterion; the independent historical source is unchanged.
+						review.DiagnosticSources[len(review.DiagnosticSources)-1].Conclusion = runtimecontract.RuntimeValidationInputConsistent
+					}
 					if conclusion == runtimecontract.RuntimeValidationInputInconclusive {
 						review.DiagnosticSources[len(review.DiagnosticSources)-1].UncertaintyKind = runtimecontract.RuntimeValidationSemanticInformationMissing
 					}
@@ -884,6 +915,9 @@ func %s(t *testing.T) {
 					oldText, newText = "return 3", "return 4"
 					behaviorRepairs++
 				}
+			}
+			if options.SequentialProjectFailures && command.Decision.Focus.CoverageWorkItemIDs[0] == "cwi-2" {
+				oldText, newText = sequentialProjectRepairBodies(t, behaviorRepairs)
 			}
 			candidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{ID: "deliver", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{"subject.go"}, CoverageWorkItemIDs: command.Decision.Focus.CoverageWorkItemIDs, Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}}}}}}
 			if options.MultiFileProject && command.Decision.Focus.CoverageWorkItemIDs[0] == "cwi-2" {
@@ -1367,6 +1401,9 @@ func %s(t *testing.T) {
 	if mode == "input_revision_after_failure" {
 		expectedValidations++
 	}
+	if options.SequentialProjectFailures {
+		expectedValidations = 5
+	}
 	if success && validationCalls != expectedValidations || !success && !submissionUnknown && mode != "source_B_failure" && mode != "project_history_failure" && validationCalls != 0 || (mode == "source_B_failure" || submissionUnknown) && validationCalls != 1 {
 		t.Fatalf("unexpected validation calls: %d; state=%s terminal=%+v failure=%+v evidenceRevision=%s observations=%+v", validationCalls, completed.Decision.State, completed.Decision.Terminal, completed.Facts.Failure, completed.Facts.EvidenceRevision, completed.Facts.EvidenceApplicabilityObservations)
 	}
@@ -1471,7 +1508,7 @@ func %s(t *testing.T) {
 	if cut != "" && !deliveryCut && !materialCut && !crash.fired {
 		t.Fatalf("restart cut not reached: %s", cut)
 	}
-	if strings.HasPrefix(mode, "input_revision") {
+	if strings.HasPrefix(mode, "input_revision") && !options.SequentialProjectFailures {
 		if options.InvalidRevisionCandidate && !structureRepository.checked {
 			t.Fatal("input revision never persisted structural owner observation")
 		}
@@ -1506,7 +1543,7 @@ func %s(t *testing.T) {
 			}
 		}
 	}
-	if projectRepair && behaviorRepairs != 1 {
+	if projectRepair && !options.SequentialProjectFailures && behaviorRepairs != 1 {
 		t.Fatal("same-binding implementation repair was missing or repeated")
 	}
 	if options.MultiFileProject {
@@ -1530,10 +1567,10 @@ func %s(t *testing.T) {
 			t.Fatal("multi-file review borrowed an aggregate hash or omitted an effect")
 		}
 	}
-	if mode == "input_revision_after_failure" {
+	if mode == "input_revision_after_failure" && !options.SequentialProjectFailures {
 		assertFailureInputReviewCommittedResult(t, completed, true)
 	}
-	if projectBehaviorRepair {
+	if projectBehaviorRepair && !options.SequentialProjectFailures {
 		assertFailureInputReviewCommittedResult(t, completed, false)
 		assertMultiFailureConfirmedRepairFacts(t, runtimeStateRecordFromAggregate(completed), options.MultiFileProject)
 		if originalRepairReceipt != nil {
@@ -1552,7 +1589,7 @@ func %s(t *testing.T) {
 			}
 		}
 	}
-	if projectAdapter && (success || mode == "project_history_failure") {
+	if projectAdapter && !options.SequentialProjectFailures && (success || mode == "project_history_failure") {
 		if options.TerminalSnapshot && success {
 			projectExecutionCount = runtimeReviewedGitProjectExecutionCount(t, runtimeStateRecordFromAggregate(completed))
 		} else if options.ValidationCount > 1 && success {
@@ -1687,6 +1724,13 @@ func %s(t *testing.T) {
 	stored, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || stored.RuntimeState == nil || !runtimeTerminalDeliveryFullyAcknowledged(runtimeAggregateFromRecord(*stored.RuntimeState)) {
 		t.Fatalf("terminal owner delivery incomplete: %v", err)
+	}
+	if options.SequentialProjectFailures {
+		assertSequentialProjectFailureClosure(t, *stored.RuntimeState, behaviorRepairs, reviewCalls)
+		counter, err := os.ReadFile(projectExecutionCounter)
+		if err != nil || string(counter) != projectExecutionCount {
+			t.Fatalf("sequence recovery repeated or omitted project executions: %q / %v", counter, err)
+		}
 	}
 	if (options.DeliveryGuard || options.TerminalMaterialGuards) && success {
 		bindings, err := runtimecontract.RuntimeDeliveryLineageBindingsFromState(*stored.RuntimeState)

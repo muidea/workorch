@@ -72,7 +72,7 @@ func shellProjectConjunctionObservation(fact shellProjectConjunctionFact, expect
 			Stdout: shellProjectOutputIdentity(stage.Stdout), Stderr: shellProjectOutputIdentity(stage.Stderr),
 			SourceBefore: stage.SourceBefore, SourceAfter: stage.SourceAfter, Tests: stage.Tests, PassedTests: stage.PassedTests,
 			TerminalComplete: stage.TerminalComplete, KnownFailure: stage.KnownFailure, FailureCode: stage.FailureCode,
-			DiagnosticSourceRef: stage.DiagnosticSourceRef, BehaviorTargetRefs: slices.Clone(stage.BehaviorTargetRefs),
+			DiagnosticSourceRef: stage.DiagnosticSourceRef, DiagnosticOriginStageID: stage.DiagnosticOriginStageID, DiagnosticIsolationRef: stage.DiagnosticIsolationRef, BehaviorTargetRefs: slices.Clone(stage.BehaviorTargetRefs),
 		})
 	}
 	if err := ret.Validate(); err != nil {

@@ -57,8 +57,12 @@ type RuntimeValidationExecutionStage struct {
 	TerminalComplete    bool
 	KnownFailure        bool
 	FailureCode         string
-	DiagnosticSourceRef string   `json:",omitempty"`
-	BehaviorTargetRefs  []string `json:",omitempty"`
+	DiagnosticSourceRef string `json:",omitempty"`
+	// Paired owner provenance permits overlapping diagnostic copies after an
+	// exact failed original. It never completes or reorders ordinary all-of.
+	DiagnosticOriginStageID string   `json:",omitempty"`
+	DiagnosticIsolationRef  string   `json:",omitempty"`
+	BehaviorTargetRefs      []string `json:",omitempty"`
 }
 
 // 仅传有界实际执行事实和原输出身份，不传原诊断、句柄或第二份 credit。
@@ -154,9 +158,22 @@ func (c RuntimeValidationExecutionConjunction) Validate() error {
 	}
 	seen := make(map[string]bool)
 	diagnosticSources := make(map[string]bool)
+	isolations := map[string]bool{}
+	origins := map[string]RuntimeValidationExecutionStage{}
 	var identities []RuntimeValidationExecutionStageIdentity
 	var previousEnd time.Time
 	for index, stage := range c.Stages {
+		if stage.DiagnosticIsolationRef != "" || stage.DiagnosticOriginStageID != "" {
+			origin, found := origins[stage.DiagnosticOriginStageID]
+			start, e1 := time.Parse(time.RFC3339Nano, stage.StartedAt)
+			end, e2 := time.Parse(time.RFC3339Nano, origin.FinishedAt)
+			finished, e3 := time.Parse(time.RFC3339Nano, stage.FinishedAt)
+			if !boundedValidationExecutionRef(stage.DiagnosticIsolationRef, 512) || isolations[stage.DiagnosticIsolationRef] || !found || !stage.Started || origin.DiagnosticOriginStageID != "" || origin.DiagnosticSourceRef != "" || origin.BehaviorTargetRefs != nil || !origin.KnownFailure || !origin.Started || !origin.TerminalComplete || origin.CleanupFailed || !origin.Stdout.Complete || !origin.Stderr.Complete || origin.SourceBefore == "" || origin.SourceBefore != origin.SourceAfter || origin.ExitCode == 0 || origin.TimedOut || origin.SourceAfter != stage.SourceBefore || e1 != nil || e2 != nil || e3 != nil || finished.Before(start) || start.Before(end) || c.Complete {
+				return fmt.Errorf("isolated diagnostic requires a unique copy after the exact original failure")
+			}
+			isolations[stage.DiagnosticIsolationRef] = true
+		}
+		origins[stage.Identity.ID] = stage
 		if stage.DiagnosticSourceRef != "" || stage.BehaviorTargetRefs != nil {
 			if c.Complete || !stage.Started || stage.ExitCode == 0 || !stage.KnownFailure || stage.TimedOut || stage.CleanupFailed || !stage.TerminalComplete || !stage.Stdout.Complete || !stage.Stderr.Complete || stage.SourceBefore == "" || stage.SourceBefore != stage.SourceAfter || !boundedValidationExecutionRef(stage.DiagnosticSourceRef, 512) || len(stage.BehaviorTargetRefs) == 0 || len(stage.BehaviorTargetRefs) > 64 || !reflect.DeepEqual(stage.BehaviorTargetRefs, normalizeStrings(stage.BehaviorTargetRefs)) {
 				return fmt.Errorf("diagnostic execution requires bounded source-specific behavior, never complete proof")
@@ -173,7 +190,7 @@ func (c RuntimeValidationExecutionConjunction) Validate() error {
 			}
 			prior := c.Stages[index-1]
 			priorEnd, priorErr := time.Parse(time.RFC3339Nano, prior.FinishedAt)
-			if priorErr != nil || start.Before(priorEnd) || stage.SourceBefore != prior.SourceAfter {
+			if stage.DiagnosticIsolationRef == "" && (priorErr != nil || start.Before(priorEnd) || stage.SourceBefore != prior.SourceAfter) {
 				return fmt.Errorf("diagnostic execution changed original source or stage order")
 			}
 			// Publication may fail after real attribution. Preserve that history

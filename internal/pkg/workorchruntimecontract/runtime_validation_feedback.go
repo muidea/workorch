@@ -13,7 +13,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-const RuntimeValidationFailureDetailLimit = 32
+const RuntimeValidationFailureDetailLimit = 64
 
 const RuntimeValidationFailureDetailProtocol = "validation/check-failure"
 

@@ -13,6 +13,26 @@ import (
 
 const RuntimeSemanticExecutionFeedbackMaxBytes = 64 * 1024
 
+// RuntimeExecutionFeedbackCapacityError preserves the rejected envelope's
+// actual byte count. It is a deterministic input boundary, not missing facts,
+// semantic uncertainty, a model retry or permission to omit an assertion.
+type RuntimeExecutionFeedbackCapacityError struct{ ActualBytes, LimitBytes int }
+
+func (e *RuntimeExecutionFeedbackCapacityError) Error() string {
+	return fmt.Sprintf("semantic execution feedback bytes=%d exceed limit=%d", e.ActualBytes, e.LimitBytes)
+}
+
+func ValidateRuntimeExecutionFeedbackCapacity(values []RuntimeSemanticExecutionFeedback) error {
+	data, err := json.Marshal(values)
+	if err != nil {
+		return err
+	}
+	if len(data) > RuntimeSemanticExecutionFeedbackMaxBytes {
+		return &RuntimeExecutionFeedbackCapacityError{len(data), RuntimeSemanticExecutionFeedbackMaxBytes}
+	}
+	return nil
+}
+
 // RuntimeSemanticExecutionFeedback is a detached factual C4 value, not a
 // second planning ledger. Its authority references come from the sealed repair
 // obligation; execution references come from the matching committed receipt.
@@ -87,9 +107,8 @@ func ValidateRuntimeSemanticExecutionFeedback(c RuntimeSemanticPlanRequestContex
 	if len(c.ExecutionFeedback) != len(expected) {
 		return fmt.Errorf("semantic execution feedback does not cover the exact repair batch")
 	}
-	data, err := json.Marshal(c.ExecutionFeedback)
-	if err != nil || len(data) > RuntimeSemanticExecutionFeedbackMaxBytes {
-		return fmt.Errorf("semantic execution feedback exceeds bounded context capacity")
+	if err := ValidateRuntimeExecutionFeedbackCapacity(c.ExecutionFeedback); err != nil {
+		return err
 	}
 	for _, f := range c.ExecutionFeedback {
 		if m.FailureInputReview != nil {

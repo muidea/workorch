@@ -3,6 +3,8 @@ package shell
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -72,7 +74,7 @@ func TestProjectMultiFailureSourcePublicationIsExactAndProtectsOriginalTests(t *
 }
 
 func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
-	for _, scenario := range []string{"interleaved-output", "large-output", "exact", "disjoint", "unobserved", "partial-unobserved", "missing-assertion", "over-capacity", "skip", "drift", "missing-source", "changed-assertion", "additive-input-test", "legacy"} {
+	for _, scenario := range []string{"interleaved-output", "large-output", "dynamic-observation", "isolated-overlap", "cancel-overlap", "diagnostic-capacity", "exact", "disjoint", "unobserved", "partial-unobserved", "missing-assertion", "over-capacity", "skip", "drift", "missing-source", "changed-assertion", "additive-input-test", "legacy"} {
 		t.Run(scenario, func(t *testing.T) {
 			root, internal := t.TempDir(), t.TempDir()
 			recipe := isolatedInputRecipe()
@@ -85,6 +87,46 @@ func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
 			}
 			target := shellValidationNativeCheckTargetRef(requirement, checks...)
 			files := map[string]string{"go.mod": "module fixture\ngo 1.26\n", "delivery/value.go": "package delivery\nfunc Value() int{return 3}\n", target: fmt.Sprintf("package checks\nimport(\"testing\"; delivery \"fixture/delivery\")\nfunc %s(t *testing.T){if delivery.Value()!=4{t.Fatal(\"WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3\")}}\n", checks[0].NativeCheckRef), "delivery/value_test.go": "package delivery\nimport \"testing\"\nfunc TestProduction(t *testing.T){if Value()!=4{t.Fatal(\"WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3\")}}\n"}
+			if scenario == "dynamic-observation" {
+				files["delivery/value_test.go"] = `package delivery
+import("testing";"time")
+func TestProduction(t *testing.T){
+ for i:=0;i<80;i++ { t.Logf("ordinary observation elapsed=%d",time.Now().UnixNano()) }
+ if Value()!=4 { t.Fatal("stable expected=4 actual=3") }
+}
+`
+			}
+			barrier := ""
+			if scenario == "isolated-overlap" || scenario == "cancel-overlap" {
+				barrier = t.TempDir()
+				files["delivery/value_test.go"] = fmt.Sprintf(`package delivery
+import("testing";"os";"path/filepath";"time")
+func exercise(t *testing.T,name,other string){
+ f,err:=os.OpenFile("source.lock",os.O_CREATE|os.O_EXCL|os.O_WRONLY,0600)
+ if err!=nil {t.Fatal("diagnostic workspace was shared")};f.Close();defer os.Remove("source.lock")
+ if testing.CoverMode()!="" {
+  root:=%q
+  if err:=os.WriteFile(filepath.Join(root,name),[]byte("ready"),0600);err!=nil {t.Fatal(err)}
+  until:=time.Now().Add(5*time.Second)
+  for {if _,err:=os.Stat(filepath.Join(root,other));err==nil {break};if time.Now().After(until){t.Fatal("independent diagnostics did not overlap")};time.Sleep(time.Millisecond)}
+ }
+ if %t && testing.CoverMode()!="" {for {time.Sleep(time.Millisecond)}}
+ if Value()!=4 {t.Fatal("stable original failure")}
+}
+func TestProduction(t *testing.T){exercise(t,"first","second")}
+func TestOther(t *testing.T){exercise(t,"second","first")}
+`, barrier, scenario == "cancel-overlap")
+			}
+
+			if scenario == "diagnostic-capacity" {
+				files["delivery/value_test.go"] = `package delivery
+import "testing"
+func TestProduction(t *testing.T){
+ if testing.CoverMode()!="" {for n:=0;n<80;n++ {t.Errorf("independent failure %d",n)}}
+ if Value()!=4 {t.Fatal("stable original failure")}
+}
+`
+			}
 			if scenario == "missing-assertion" {
 				files["delivery/value_test.go"] = "package delivery\nimport \"testing\"\nfunc TestProduction(t *testing.T){if Value()!=4{t.Fail()}}\n"
 			}
@@ -162,17 +204,69 @@ func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
 			if err := instrumentManagedValidationNativeChecks(&request); err != nil {
 				t.Fatal(err)
 			}
-			result, err := NewRuntimeAdapter().executeShellProjectScope(context.Background(), request, shellProjectRawScope{WorkspaceID: "ws", RunID: "run", ExecutionKey: "multi-failure/" + scenario})
+			executionContext := context.Background()
+			var joined chan bool
+			if scenario == "cancel-overlap" {
+				child, cancel := context.WithCancel(executionContext)
+				defer cancel()
+				executionContext = child
+				joined = make(chan bool, 1)
+				go func() {
+					timer := time.NewTimer(15 * time.Second)
+					defer timer.Stop()
+					ticker := time.NewTicker(time.Millisecond)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-timer.C:
+							cancel()
+							joined <- false
+							return
+						case <-ticker.C:
+							_, a := os.Stat(filepath.Join(barrier, "first"))
+							_, b := os.Stat(filepath.Join(barrier, "second"))
+							if a == nil && b == nil {
+								cancel()
+								joined <- true
+								return
+							}
+						}
+					}
+				}()
+			}
+			result, err := NewRuntimeAdapter().executeShellProjectScope(executionContext, request, shellProjectRawScope{WorkspaceID: "ws", RunID: "run", ExecutionKey: "multi-failure/" + scenario})
+			if joined != nil {
+				if result.Conjunction == nil {
+					t.Fatal("cancelled diagnostic stage history missing")
+				}
+				if !<-joined {
+					t.Fatal("cancellation did not observe both independently running diagnostics")
+				}
+				isolated := 0
+				for _, stage := range result.Conjunction.Stages {
+					if stage.DiagnosticIsolationRef != "" {
+						isolated++
+					}
+				}
+				if isolated < 2 || result.Result.ValidationFailureDiagnostic != nil {
+					t.Fatal("cancelled independent jobs lost joined history or published attribution without complete output storage")
+				}
+				for _, resource := range result.Result.ValidationResources {
+					if resource.Status != "released" {
+						t.Fatal("cancelled workspace/process lifetime was not drained")
+					}
+				}
+			}
 			if err == nil || result.Conjunction == nil || result.Conjunction.Complete || result.Result.Evidence.Quality == common.EvidenceQualityValid || result.Conjunction.Validate() != nil {
 				t.Fatalf("failed project credited or lost: err=%v conjunction=%+v", err, result.Conjunction)
 			}
-			wantDiagnostic := scenario == "interleaved-output" || scenario == "large-output" || scenario == "exact" || scenario == "disjoint" || scenario == "additive-input-test"
+			wantDiagnostic := scenario == "dynamic-observation" || scenario == "isolated-overlap" || scenario == "interleaved-output" || scenario == "large-output" || scenario == "exact" || scenario == "disjoint" || scenario == "additive-input-test"
 			diagnostic := result.Result.ValidationFailureDiagnostic
 			if wantDiagnostic {
 				if diagnostic == nil || diagnostic.Unavailability != "" {
 					t.Fatalf("%s lost complete attribution: %+v", scenario, diagnostic)
 				}
-			} else if scenario != "legacy" {
+			} else if scenario != "legacy" && scenario != "cancel-overlap" {
 				if diagnostic == nil || diagnostic.Unavailability == "" || len(diagnostic.TargetRefs) != 0 || diagnostic.Class != runtimecontract.ValidationDiagnosticOutputInconclusive || result.Result.Evidence.Validation == nil {
 					t.Fatalf("%s lost explicit diagnostic rejection: %+v", scenario, diagnostic)
 				}
@@ -180,8 +274,13 @@ func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
 					"unobserved": runtimecontract.ValidationDiagnosticBehaviorUnobserved, "partial-unobserved": runtimecontract.ValidationDiagnosticBehaviorUnobserved,
 					"missing-assertion": runtimecontract.ValidationDiagnosticAssertionsUnavailable, "over-capacity": runtimecontract.ValidationDiagnosticCapacityExceeded,
 					"skip": runtimecontract.ValidationDiagnosticSourcesUnavailable, "drift": runtimecontract.ValidationDiagnosticInputChanged, "missing-source": runtimecontract.ValidationDiagnosticInputChanged,
-					"changed-assertion": runtimecontract.ValidationDiagnosticReproductionUnavailable,
+					"changed-assertion":   runtimecontract.ValidationDiagnosticReproductionUnavailable,
+					"diagnostic-capacity": runtimecontract.ValidationDiagnosticCapacityExceeded,
+					"cancel-overlap":      runtimecontract.ValidationDiagnosticExecutionUnavailable,
 				}[scenario]
+				if scenario == "diagnostic-capacity" && diagnostic.OwnerCode != "validation_failure_assertion_count_exceeded" {
+					t.Fatalf("independent capacity lost exact owner cause: %+v", diagnostic)
+				}
 				if diagnostic.Unavailability != expected {
 					t.Fatalf("%s misclassified cause: got=%s want=%s", scenario, diagnostic.Unavailability, expected)
 				}
@@ -211,7 +310,7 @@ func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
 					t.Fatal("receipt projection dropped source-specific conjunction or downgraded protocol")
 				}
 				wantStages := 4
-				if scenario == "additive-input-test" {
+				if scenario == "additive-input-test" || scenario == "isolated-overlap" {
 					wantStages = 5
 				}
 				if len(result.Conjunction.Stages) != wantStages || !reflect.DeepEqual(result.Result.ValidationFailureDiagnostic.TargetRefs, wantTargets) || !reflect.DeepEqual(result.Conjunction.BehaviorTargetRefs, wantTargets) {
@@ -226,7 +325,7 @@ func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
 							}
 						}
 					}
-					if stage.DiagnosticSourceRef == "" || !reflect.DeepEqual(stage.BehaviorTargetRefs, wantSourceTargets) || stage.Stdout.Storage == nil || stage.Stdout.Storage.Reference == "" {
+					if stage.DiagnosticSourceRef == "" || stage.DiagnosticIsolationRef == "" || stage.DiagnosticOriginStageID != "project-test" || !reflect.DeepEqual(stage.BehaviorTargetRefs, wantSourceTargets) || stage.Stdout.Storage == nil || stage.Stdout.Storage.Reference == "" {
 						t.Fatal("source-specific real behavior/raw fact missing")
 					}
 				}
