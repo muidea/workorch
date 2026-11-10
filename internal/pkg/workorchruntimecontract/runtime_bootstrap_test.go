@@ -363,3 +363,20 @@ func TestRuntimeDefinitionFocusRejectsAcquisitionSelectorDrift(t *testing.T) {
 		t.Fatal("definition/acquisition selector drift was accepted before Run activation")
 	}
 }
+
+func TestRuntimeBootstrapClonePreservesUnacceptedRawValues(t *testing.T) {
+	b := RuntimeBootstrap{Definition: RuntimeDefinitionContext{Revision: " padded ", CapabilityContract: []string{"z", "a", "a"}}, Activation: RuntimeActivationContext{DialogLanguage: " padded ", MCPServerIDs: []common.MCPServerID{"z", "a", "a"}}, Slices: []RuntimeAcceptanceSlice{{ID: " padded "}}}
+	cloned := b.Clone()
+	if !reflect.DeepEqual(b, cloned) {
+		t.Fatal("Clone normalized raw authority")
+	}
+	cloned.Definition.CapabilityContract[0] = "changed"
+	cloned.Activation.MCPServerIDs[0] = "changed"
+	cloned.Slices[0].ID = "changed"
+	if b.Definition.CapabilityContract[0] != "z" || b.Activation.MCPServerIDs[0] != "z" || b.Slices[0].ID != " padded " {
+		t.Fatal("Clone shares mutable source")
+	}
+	if cloned.Validate() == nil {
+		t.Fatal("detachment granted admission to raw input")
+	}
+}

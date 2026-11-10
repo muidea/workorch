@@ -243,27 +243,15 @@ func coverageWorkItemIDsContain(container, contained []common.CoverageWorkItemID
 	return true
 }
 
+// Clone detaches the sealed value without normalizing or re-admitting it.
 func (b RuntimeBootstrap) Clone() RuntimeBootstrap {
-	rawEvidencePolicies := CloneRuntimeEvidencePolicies(b.Activation.EvidencePolicies)
-	b = b.Normalized()
-	b.Definition = b.Definition.Clone()
-	b.Activation = b.Activation.Clone()
-	b.Activation.EvidencePolicies = rawEvidencePolicies
-	b.DefinitionSeed = b.DefinitionSeed.Clone()
-	b.DefinitionFocuses = CloneRuntimeDefinitionFocuses(b.DefinitionFocuses)
-	b.Slices = append([]RuntimeAcceptanceSlice(nil), b.Slices...)
-	for idx := range b.Slices {
-		b.Slices[idx] = b.Slices[idx].Normalized()
-	}
-	b.CoverageItems = append([]RuntimeCoverageItem(nil), b.CoverageItems...)
-	for idx := range b.CoverageItems {
-		b.CoverageItems[idx].PrerequisiteCoverageWorkItemIDs = cloneRuntimeCoveragePrerequisiteIDs(b.CoverageItems[idx].PrerequisiteCoverageWorkItemIDs)
-		b.CoverageItems[idx].ReopenDependencies = cloneRuntimeCoverageReopenDependencies(b.CoverageItems[idx].ReopenDependencies)
-	}
-	b.Requirements = append([]RuntimeRequirement(nil), b.Requirements...)
-	for idx := range b.Requirements {
-		b.Requirements[idx].RequiredCapabilities = append([]string(nil), b.Requirements[idx].RequiredCapabilities...)
-	}
+	b.Definition = cloneRuntimeDefinitionContextRaw(b.Definition)
+	b.Activation = cloneRuntimeActivationContextRaw(b.Activation)
+	b.DefinitionSeed = cloneRuntimeDefinitionSeedRaw(b.DefinitionSeed)
+	b.DefinitionFocuses = cloneRuntimeStateRawSlice(b.DefinitionFocuses, cloneRuntimeDefinitionFocusRaw)
+	b.Slices = cloneRuntimeStateRawSlice(b.Slices, cloneRuntimeAcceptanceSliceRaw)
+	b.CoverageItems = cloneRuntimeStateRawSlice(b.CoverageItems, cloneRuntimeCoverageItemRaw)
+	b.Requirements = cloneRuntimeStateRawSlice(b.Requirements, cloneRuntimeRequirementRaw)
 	return b
 }
 

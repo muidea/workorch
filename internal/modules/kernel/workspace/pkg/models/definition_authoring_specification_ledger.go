@@ -452,7 +452,7 @@ func (r DefinitionAuthoringRecord) completedSpecificationProposal(derivationPerm
 }
 
 func (r DefinitionAuthoringRecord) ReserveSpecification(request DefinitionAuthoringSpecificationRequest) (DefinitionAuthoringRecord, DefinitionAuthoringSpecificationRequest, bool, error) {
-	if err := r.Validate(); err != nil {
+	if err := r.ReadCommittedRecord(); err != nil {
 		return DefinitionAuthoringRecord{}, request, false, err
 	}
 	request.PermitID = request.ExpectedPermitID()
@@ -513,6 +513,24 @@ func (r DefinitionAuthoringRecord) CompleteSpecification(permitID string, propos
 	return r.completeSpecification(permitID, proposal, review, failureCode, diagnostics, nil, nil, "")
 }
 func (r DefinitionAuthoringRecord) CompleteSpecificationMapping(permitID string, mapping DefinitionAuthoringMapping, audit DefinitionAuthoringSuccessByteAudit) (DefinitionAuthoringRecord, error) {
+	if err := r.ReadCommittedRecord(); err != nil {
+		return DefinitionAuthoringRecord{}, err
+	}
+	// An exact duplicate consumes the committed outcome before any compiler runs.
+	for _, prior := range r.SpecificationRequests {
+		if prior.PermitID == permitID && (prior.Proposal != nil || prior.FailureCode != "" || prior.Review != nil) {
+			if audit.Validate() != nil || prior.CompletionIdentity != MappingCompletionIdentity(permitID, mapping, audit) {
+				return DefinitionAuthoringRecord{}, fmt.Errorf("authoring mapping completion conflict")
+			}
+			if prior.Proposal != nil && (prior.Mapping == nil || prior.SuccessAudit == nil || !reflect.DeepEqual(*prior.Mapping, mapping) || !reflect.DeepEqual(*prior.SuccessAudit, audit)) {
+				return DefinitionAuthoringRecord{}, fmt.Errorf("authoring mapping original differs")
+			}
+			if prior.FailureCode != "" && (prior.Diagnostic == nil || prior.Diagnostic.ProviderDocument == nil || prior.Diagnostic.ProviderWire == nil || !reflect.DeepEqual(*prior.Diagnostic.ProviderDocument, audit.Document) || !reflect.DeepEqual(*prior.Diagnostic.ProviderWire, audit.Wire)) {
+				return DefinitionAuthoringRecord{}, fmt.Errorf("authoring mapping failure source differs")
+			}
+			return r.Clone(), nil
+		}
+	}
 	if audit.Validate() != nil {
 		return DefinitionAuthoringRecord{}, fmt.Errorf("authoring mapping completion audit invalid")
 	}
@@ -532,13 +550,16 @@ func (r DefinitionAuthoringRecord) CompleteSpecificationMapping(permitID string,
 		return DefinitionAuthoringRecord{}, fmt.Errorf("authoring mapping completion raw mismatch")
 	}
 	proposal, err := CompileDefinitionAuthoringMapping(derivation, mapping)
+	if err == nil {
+		err = r.ValidateSpecificationRevisionCandidate(permitID, mapping, proposal)
+	}
 	if err != nil {
-		return DefinitionAuthoringRecord{}, err
+		return DefinitionAuthoringRecord{}, &DefinitionAuthoringMappingRejection{Cause: err}
 	}
 	return r.completeSpecification(permitID, &proposal, nil, "", nil, &mapping, &audit, MappingCompletionIdentity(permitID, mapping, audit))
 }
 func (r DefinitionAuthoringRecord) completeSpecification(permitID string, proposal *GoalSpecification, review *GoalSpecificationCompletenessReview, failureCode string, diagnostics []*DefinitionAuthoringDiagnostic, mapping *DefinitionAuthoringMapping, audit *DefinitionAuthoringSuccessByteAudit, completionIdentity string) (DefinitionAuthoringRecord, error) {
-	if err := r.Validate(); err != nil {
+	if err := r.ReadCommittedRecord(); err != nil {
 		return DefinitionAuthoringRecord{}, err
 	}
 	if len(diagnostics) > 1 {
@@ -577,18 +598,37 @@ func (r DefinitionAuthoringRecord) completeSpecification(permitID string, propos
 		if outcomes != 1 {
 			return DefinitionAuthoringRecord{}, fmt.Errorf("authoring specification completion requires one outcome")
 		}
-		if err := completed.Validate(); err != nil {
-			return DefinitionAuthoringRecord{}, err
-		}
 		if previous.Proposal != nil || previous.Review != nil || previous.FailureCode != "" {
 			if !reflect.DeepEqual(previous, completed) {
 				return DefinitionAuthoringRecord{}, fmt.Errorf("authoring specification completion conflict")
 			}
 			return r.Clone(), nil
 		}
+		if err := completed.Validate(); err != nil {
+			return DefinitionAuthoringRecord{}, err
+		}
 		next := r.Clone()
 		next.SpecificationRequests[n] = completed
-		if err := next.Validate(); err != nil {
+		// Only the newly accepted outcome needs semantic admission. Earlier
+		// outcomes remain their owner's committed results.
+		derivation, err := r.derivationForSpecification(completed.DerivationPermitID)
+		if err != nil {
+			return DefinitionAuthoringRecord{}, err
+		}
+		if completed.Review != nil {
+			original := r.completedSpecificationProposal(completed.DerivationPermitID, completed.ProposalHash)
+			if original == nil {
+				return DefinitionAuthoringRecord{}, fmt.Errorf("review lacks original committed proposal")
+			}
+			context, err := newAuthoringSpecificationContext(derivation.Input, &derivation.Template, *derivation.Proposal, derivation.Resources)
+			if err != nil {
+				return DefinitionAuthoringRecord{}, err
+			}
+			if err := authoringProposalReviewContext(context, *original, completed.ProposalHash).validate(*completed.Review); err != nil {
+				return DefinitionAuthoringRecord{}, err
+			}
+		}
+		if err := next.ReadCommittedRecord(); err != nil {
 			return DefinitionAuthoringRecord{}, err
 		}
 		return next, nil
@@ -599,3 +639,10 @@ func (r DefinitionAuthoringRecord) completeSpecification(permitID string, propos
 func (r DefinitionAuthoringRecord) CompleteReviewDocument(permit string, review GoalSpecificationCompletenessReview, audit DefinitionAuthoringSuccessByteAudit) (DefinitionAuthoringRecord, error) {
 	return r.completeSpecification(permit, nil, &review, "", nil, nil, &audit, "")
 }
+
+// DefinitionAuthoringMappingRejection is a known semantic outcome of the sole
+// mapping admission, distinct from missing/corrupt source refusal.
+type DefinitionAuthoringMappingRejection struct{ Cause error }
+
+func (e *DefinitionAuthoringMappingRejection) Error() string { return e.Cause.Error() }
+func (e *DefinitionAuthoringMappingRejection) Unwrap() error { return e.Cause }

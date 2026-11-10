@@ -219,7 +219,7 @@ func (m *Biz) handleRuntimeRecoveryInventory(ev magicevent.Event, result magicev
 	// cross the retired visibility linearization point in this process.
 	m.workspaceExecutionMu.Lock()
 	defer m.workspaceExecutionMu.Unlock()
-	runs, err := m.runs.List(ev.Context())
+	runs, err := m.runs.ListInventory(ev.Context(), "")
 	if err != nil {
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return
@@ -238,16 +238,13 @@ func (m *Biz) handleRuntimeRecoveryInventory(ev magicevent.Event, result magicev
 			draining[fence.WorkspaceID] = struct{}{}
 		}
 	}
-	filtered := make([]*runmodel.Run, 0, len(runs))
+	filtered := make([]runmodel.RunInventoryItem, 0, len(runs))
 	for _, item := range runs {
-		if item == nil {
-			continue
-		}
 		if _, fenced := retired[item.WorkspaceID]; !fenced {
 			filtered = append(filtered, item)
 		}
 	}
-	result.Set(buildRuntimeRecoveryInventoryWithDraining(filtered, cmd, draining), nil)
+	result.Set(buildRuntimeRecoveryFacts(filtered, cmd, draining), nil)
 }
 
 func (m *Biz) handleWorkspaceRetirementInventory(ev magicevent.Event, result magicevent.Result) {
@@ -387,6 +384,16 @@ func buildRuntimeRecoveryInventory(runs []*runmodel.Run, cmd runevents.QueryRunt
 }
 
 func buildRuntimeRecoveryInventoryWithDraining(runs []*runmodel.Run, cmd runevents.QueryRuntimeRecoveryInventoryCommand, draining map[common.WorkspaceID]struct{}) runevents.QueryRuntimeRecoveryInventoryResult {
+	facts := make([]runmodel.RunInventoryItem, 0, len(runs))
+	for _, item := range runs {
+		if item != nil {
+			facts = append(facts, runmodel.InventoryFromRun(item))
+		}
+	}
+	return buildRuntimeRecoveryFacts(facts, cmd, draining)
+}
+
+func buildRuntimeRecoveryFacts(runs []runmodel.RunInventoryItem, cmd runevents.QueryRuntimeRecoveryInventoryCommand, draining map[common.WorkspaceID]struct{}) runevents.QueryRuntimeRecoveryInventoryResult {
 	limit := cmd.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -394,9 +401,6 @@ func buildRuntimeRecoveryInventoryWithDraining(runs []*runmodel.Run, cmd runeven
 	cursor := strings.TrimSpace(cmd.Cursor)
 	items := make([]runevents.RuntimeRecoveryInventoryItem, 0)
 	for _, run := range runs {
-		if run == nil {
-			continue
-		}
 		// Pending belongs to Run-owner activation/replacement recovery and is
 		// never an SM-4 Runtime aggregate. Configure activates a valid root cut
 		// and retains a validated linked successor; this defensive filter keeps
@@ -412,19 +416,19 @@ func buildRuntimeRecoveryInventoryWithDraining(runs []*runmodel.Run, cmd runeven
 		// opaque persistence record. It must not inspect Decision, dispatch,
 		// governance, delivery, or recovery semantics owned by Orchestrator.
 		_, retirementDraining := draining[run.WorkspaceID]
-		if run.RuntimeBootstrap == nil || (runStateIsTerminal(run.State) && (!retirementDraining || run.RuntimeState == nil)) {
+		if !run.HasRuntimeBootstrap || (runStateIsTerminal(run.State) && (!retirementDraining || !run.HasRuntimeState)) {
 			continue
 		}
 		item := runevents.RuntimeRecoveryInventoryItem{
 			WorkspaceID:         run.WorkspaceID,
 			RunID:               run.ID,
 			State:               run.State,
-			HasRuntimeBootstrap: run.RuntimeBootstrap != nil,
-			HasRuntimeState:     run.RuntimeState != nil,
+			HasRuntimeBootstrap: run.HasRuntimeBootstrap,
+			HasRuntimeState:     run.HasRuntimeState,
 		}
-		if run.RuntimeState != nil {
-			item.RuntimeStateRevision = run.RuntimeState.StateRevision
-			item.RuntimeStateRef = runevents.RuntimeStateRef(run.WorkspaceID, run.ID, run.RuntimeState.StateRevision)
+		if run.HasRuntimeState {
+			item.RuntimeStateRevision = run.RuntimeStateRevision
+			item.RuntimeStateRef = runevents.RuntimeStateRef(run.WorkspaceID, run.ID, run.RuntimeStateRevision)
 		}
 		items = append(items, item)
 	}

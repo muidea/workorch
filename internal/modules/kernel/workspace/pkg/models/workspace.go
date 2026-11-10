@@ -50,6 +50,9 @@ type Workspace struct {
 	// DefinitionAdmissionCandidates is immutable owner history. The current
 	// candidate is the highest revision in one CandidateID lineage.
 	DefinitionAdmissionCandidates []DefinitionAdmissionCandidate
+	// DefinitionAdmissionResults retains the actual verdict of each new owner
+	// admission transaction; consumers never recompile clarification history.
+	DefinitionAdmissionResults []DefinitionAdmissionResult
 	// DefinitionSpecificationLedger is Workspace-private pre-seal request history.
 	// It neither promotes a Definition nor authorizes Runtime execution.
 	DefinitionAuthoringCreation     *DefinitionAuthoringCreation

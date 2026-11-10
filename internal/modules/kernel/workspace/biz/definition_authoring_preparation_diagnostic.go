@@ -13,10 +13,10 @@ func preparationDiagnosticInWorkspace(w *workspace.Workspace, id string) (worksp
 	if w == nil || w.DefinitionAuthoring == nil {
 		return workspace.DefinitionAuthoringPreparationDiagnostic{}, false, common.ErrNotFound
 	}
-	if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
+	if err := readWorkspaceAuthoringCommitted(w); err != nil {
 		return workspace.DefinitionAuthoringPreparationDiagnostic{}, false, err
 	}
-	if w.DefinitionAuthoring.Input.WorkspaceID != w.ID || w.DefinitionAuthoring.Validate() != nil || w.ValidateDefinitionAuthoringHistory() != nil {
+	if w.DefinitionAuthoring.Input.WorkspaceID != w.ID || w.DefinitionAuthoring.ReadCommittedRecord() != nil || w.ReadCommittedAuthoring() != nil {
 		return workspace.DefinitionAuthoringPreparationDiagnostic{}, false, common.ErrConflict
 	}
 	records := []*workspace.DefinitionAuthoringRecord{w.DefinitionAuthoring}

@@ -40,13 +40,13 @@ func (m *Biz) submitDefinitionAuthoringAdmissionWithProof(ctx context.Context, c
 }
 
 func (m *Biz) verifyConfirmedAuthoringAdmission(ctx context.Context, current *workspacemodel.Workspace, candidate workspacemodel.DefinitionAdmissionCandidate, command workspaceevents.AdmitDefinitionAuthoringCommand, proof *verifiedAuthoringResources) error {
-	if current == nil || current.DefinitionAuthoring == nil || current.DefinitionChangeCandidate != nil || current.DefinitionAuthoringConfirmation == nil || current.DefinitionAuthoringConfirmation.Phase != workspacemodel.DefinitionAuthoringConfirmationMaterialized || current.ActiveRunID != "" || current.DefinitionSpecificationLedger != nil || candidate.AuthoringRef == nil || candidate.CompilationRef != nil || candidate.BaseDefinitionRevision != "" || candidate.BaseStartupInputHash != "" || candidate.CandidateRevision != uint64(len(current.DefinitionAuthoringHistory)+1) || current.ValidateDefinitionAuthoringHistory() != nil {
+	if current == nil || current.DefinitionAuthoring == nil || current.DefinitionChangeCandidate != nil || current.DefinitionAuthoringConfirmation == nil || current.DefinitionAuthoringConfirmation.Phase != workspacemodel.DefinitionAuthoringConfirmationMaterialized || current.ActiveRunID != "" || current.DefinitionSpecificationLedger != nil || candidate.AuthoringRef == nil || candidate.CompilationRef != nil || candidate.BaseDefinitionRevision != "" || candidate.BaseStartupInputHash != "" || candidate.CandidateRevision != uint64(len(current.DefinitionAuthoringHistory)+1) || current.ReadCommittedAuthoring() != nil {
 		return common.ErrConflict
 	}
-	if err := validateWorkspaceAuthoringMappingOutcomes(current); err != nil {
+	if err := readWorkspaceAuthoringCommitted(current); err != nil {
 		return err
 	}
-	if _, _, err := current.ValidateActivationAdmissionPersistence(); err != nil {
+	if _, _, err := current.ReadCommittedActivation(); err != nil {
 		return common.ErrConflict
 	}
 	if len(current.DefinitionAuthoringHistory) == 0 {
@@ -57,14 +57,14 @@ func (m *Biz) verifyConfirmedAuthoringAdmission(ctx context.Context, current *wo
 		return common.ErrConflict
 	}
 	journal := *current.DefinitionAuthoringConfirmation
-	if journal.Validate(current.DefinitionAuthoring, current.ID) != nil || candidate.AuthoringRef.InputHash != journal.InputHash || candidate.AuthoringRef.DerivationPermitID != journal.DerivationPermitID || candidate.AuthoringRef.ProposalHash != journal.ProposalHash || candidate.AuthoringRef.SpecificationHash != journal.SpecificationHash || command.ExpectedConfigurationHash != journal.ConfigurationHash || workspacemodel.WorkspaceConfigurationHash(current) != journal.ConfigurationHash {
+	if journal.ReadCommitted(current.DefinitionAuthoring, current.ID) != nil || candidate.AuthoringRef.InputHash != journal.InputHash || candidate.AuthoringRef.DerivationPermitID != journal.DerivationPermitID || candidate.AuthoringRef.ProposalHash != journal.ProposalHash || candidate.AuthoringRef.SpecificationHash != journal.SpecificationHash || command.ExpectedConfigurationHash != journal.ConfigurationHash || workspacemodel.WorkspaceConfigurationHash(current) != journal.ConfigurationHash {
 		return common.ErrConflict
 	}
-	derivation, _, err := current.DefinitionAuthoring.ConfirmableSpecification(journal.DerivationPermitID, journal.ProposalHash)
+	derivation, err := current.DefinitionAuthoring.CommittedDerivation(journal.DerivationPermitID)
 	if err != nil || journal.ResourceSnapshotHash != derivation.ResourceSnapshotHash || (len(derivation.Resources) != 0 && (proof == nil || !proof.matches(current, derivation))) {
 		return fmt.Errorf("%w: resource-bound admission requires current File verification", common.ErrConflict)
 	}
-	goal, dod, spec, err := workspacemodel.ConfirmedAuthoringCandidateInputs(current.DefinitionAuthoring, journal, current.ID)
+	goal, dod, spec, _, err := journal.ReadCommittedAdmissionSource(current.DefinitionAuthoring, current.ID)
 	if err != nil || candidate.Specification == nil || candidate.GoalInput != goal || !reflect.DeepEqual(candidate.DoDInputs, workspacemodel.DefinitionAdmissionCandidate{DoDInputs: dod}.Normalized().DoDInputs) || !reflect.DeepEqual(candidate.Specification.Normalized(), spec.Normalized()) {
 		return fmt.Errorf("%w: candidate differs from original six reviews", common.ErrConflict)
 	}

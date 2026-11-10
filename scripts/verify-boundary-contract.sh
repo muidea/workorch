@@ -1952,6 +1952,7 @@ definition_compiler_test="internal/modules/kernel/workspace/pkg/definitionadmiss
 definition_intent_command_shape="$(sed -n '/^type DefinitionAdmissionIntentCommand struct {/,/^}/p' internal/modules/kernel/workspace/pkg/events/messages.go)"
 definition_intent_result_shape="$(sed -n '/^type DefinitionAdmissionIntentResult struct {/,/^}/p' internal/modules/kernel/workspace/pkg/events/messages.go)"
 definition_intent_reducer="$(sed -n '/^func reduceDefinitionAdmissionIntent(/,/^}/p' internal/modules/kernel/workspace/biz/definition_admission_internal_event.go)"
+definition_admission_gate="$(sed -n '/^func admitOrReadDefinitionCandidate(/,/^}/p' internal/modules/kernel/workspace/biz/definition_admission_internal_event.go)"
 definition_legacy_target_commands="$(source_matches 'SubmitDefinitionAdmissionCandidate(Command|Result)|PromoteDefinitionAdmissionCandidate(Command|Result)|AcknowledgeWorkspaceDefinitionClarificationResolution(Command|Result)|TopicWorkspaceCommandSubmitDefinitionAdmissionCandidate|TopicWorkspaceCommandPromoteDefinitionAdmissionCandidate|TopicWorkspaceCommandAcknowledgeDefinitionClarification|/workspace/definition-admission/command/(submit-candidate|promote-candidate|acknowledge-clarification)' internal/modules || true)"
 if [[ -f internal/modules/application/workorchd/biz/appservice/definitionadmissioncore/compiler.go ]] ||
 	[[ ! -f "$definition_compiler" ]] ||
@@ -1960,7 +1961,10 @@ if [[ -f internal/modules/application/workorchd/biz/appservice/definitionadmissi
 	! grep -q -F -- 'ClarificationResolution' <<<"$definition_intent_command_shape" ||
 	grep -q -E -- 'TargetState|RequestedState|PromotionState' <<<"$definition_intent_command_shape" ||
 	[[ -n "$definition_legacy_target_commands" ]] ||
-	! grep -q -F -- 'definitionadmission.Compile(candidate)' <<<"$definition_intent_reducer" ||
+	! grep -q -F -- 'admitOrReadDefinitionCandidate(current, candidate)' <<<"$definition_intent_reducer" ||
+ ! grep -q -F -- 'definitionadmission.Compile(candidate)' <<<"$definition_admission_gate" ||
+ ! grep -q -F -- 'current.ReadDefinitionAdmissionResult(stored)' <<<"$definition_admission_gate" ||
+ ! grep -q -F -- 'TestDefinitionAdmissionReplayRequiresOriginalVerdict' internal/modules/kernel/workspace/biz/definition_admission_test.go ||
 	grep -q -F -- 'candidate = candidate.WithHash()' "$definition_compiler" ||
 	grep -q -F -- 'command.Candidate = command.Candidate.WithHash()' internal/modules/kernel/workspace/biz/definition_admission_internal_event.go ||
 	! grep -q -F -- 'TestCompileRejectsCandidateHashDriftInsteadOfResealingCallerInput' "$definition_compiler_test" ||

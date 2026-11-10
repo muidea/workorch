@@ -19,6 +19,7 @@ type runtimeActivationMemoryRecall struct {
 	RunID            common.RunID
 	WorkspaceID      common.WorkspaceID
 	RuntimeBootstrap *runtimecontract.RuntimeBootstrap
+	Selection        *workorchmemorycontract.RecallSelectionEvidence
 }
 
 // publishRuntimeActivationMemoryRecall records the memory selection sealed
@@ -27,10 +28,14 @@ type runtimeActivationMemoryRecall struct {
 // The operation is intentionally idempotent and best-effort because the Run
 // record is already durable when this cross-owner observability fact is sent.
 func (m *Biz) publishRuntimeActivationMemoryRecall(ctx context.Context, command runtimeActivationMemoryRecall, occurredAt string) {
-	if m == nil || m.EventHub() == nil || command.RuntimeBootstrap == nil {
+	if m == nil || m.EventHub() == nil || command.RuntimeBootstrap == nil && command.Selection == nil {
 		return
 	}
-	trace := runtimeActivationMemoryRecallTrace(command.RunID, command.WorkspaceID, command.RuntimeBootstrap, occurredAt)
+	selection := command.Selection
+	if selection == nil && command.RuntimeBootstrap != nil {
+		selection = command.RuntimeBootstrap.Activation.MemorySelection
+	}
+	trace := runtimeActivationMemoryRecallSelectionTrace(command.RunID, command.WorkspaceID, selection, occurredAt)
 	if trace == nil {
 		return
 	}
@@ -71,11 +76,15 @@ func runtimeActivationMemoryRecallTrace(runID common.RunID, workspaceID common.W
 	if runID == "" || workspaceID == "" || bootstrap == nil {
 		return nil
 	}
-	activation := bootstrap.Activation.Normalized()
-	if activation.MemorySelection == nil {
+
+	return runtimeActivationMemoryRecallSelectionTrace(runID, workspaceID, bootstrap.Activation.MemorySelection, occurredAt)
+}
+func runtimeActivationMemoryRecallSelectionTrace(runID common.RunID, workspaceID common.WorkspaceID, input *workorchmemorycontract.RecallSelectionEvidence, occurredAt string) *memorymodel.MemoryRecallTrace {
+	if runID == "" || workspaceID == "" || input == nil {
 		return nil
 	}
-	selection := activation.MemorySelection.Normalized()
+	selection := input.Normalized()
+
 	traceID := common.MemoryRecallTraceID(fmt.Sprintf("%s/memory-recall/activation", runID))
 	return &memorymodel.MemoryRecallTrace{
 		ID: traceID, WorkspaceID: workspaceID, RunID: runID, Stage: "planning", Source: "activation",

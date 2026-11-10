@@ -211,13 +211,7 @@ func (c RuntimeActivationContext) Validate() error {
 }
 
 func (c RuntimeActivationContext) Clone() RuntimeActivationContext {
-	rawEvidencePolicies := CloneRuntimeEvidencePolicies(c.EvidencePolicies)
-	c = c.Normalized()
-	// Clone must detach data without laundering malformed authority. Valid
-	// policies are already canonical; invalid raw fields remain visible to the
-	// next ingress or persistence validator.
-	c.EvidencePolicies = rawEvidencePolicies
-	return c
+	return cloneRuntimeActivationContextRaw(c)
 }
 
 func SameRuntimeActivationContext(left RuntimeActivationContext, right RuntimeActivationContext) bool {

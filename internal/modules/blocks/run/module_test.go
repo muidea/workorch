@@ -70,6 +70,7 @@ func TestBuildRuntimeRecoveryInventoryContainsOnlyRunOwnedOpaqueFacts(t *testing
 type runTestCommandResult struct {
 	Run        *runmodel.Run
 	Runs       []*runmodel.Run
+	Inventory  []runmodel.RunInventoryItem
 	Step       *runmodel.Step
 	Checkpoint *runmodel.RuntimeCheckpoint
 }
@@ -101,9 +102,9 @@ func sendRunTestCommand[Command any](ctx context.Context, rawHub magicevent.Hub,
 	case runevents.GetRunResult:
 		return runTestCommandResult{Run: response.Run}, nil
 	case runevents.ListRunsResult:
-		return runTestCommandResult{Runs: response.Runs}, nil
+		return runTestCommandResult{Runs: response.Runs, Inventory: response.Inventory}, nil
 	case runevents.ListRunsByWorkspaceResult:
-		return runTestCommandResult{Runs: response.Runs}, nil
+		return runTestCommandResult{Runs: response.Runs, Inventory: response.Inventory}, nil
 	case runevents.GetStepResult:
 		return runTestCommandResult{Step: response.Step}, nil
 	case runevents.GetRuntimeCheckpointResult:
@@ -509,7 +510,7 @@ func TestRunCommandListSupportsCompactStateFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list err = %v, want response", err)
 	}
-	items := response.Runs
+	items := response.Inventory
 	if len(items) != 1 || items[0].ID != "run-compact-running" {
 		t.Fatalf("items = %+v, want only running run", items)
 	}

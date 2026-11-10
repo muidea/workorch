@@ -26,6 +26,8 @@ type DoDReader interface {
 }
 
 type RunReader interface {
+	ListCompact(context.Context) ([]runmodel.RunInventoryItem, error)
+	ListCompactByWorkspaceID(context.Context, common.WorkspaceID) ([]runmodel.RunInventoryItem, error)
 	Get(context.Context, common.RunID) (*runmodel.Run, error)
 	GetByWorkspaceID(context.Context, common.WorkspaceID, common.RunID) (*runmodel.Run, error)
 	List(context.Context) ([]*runmodel.Run, error)

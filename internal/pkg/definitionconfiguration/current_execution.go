@@ -21,7 +21,7 @@ func ValidateExecutionPolicy(w *workspace.Workspace, t *workspace.WorkspaceTempl
 	if !reflect.DeepEqual(rc.NormalizeRuntimeProfileContracts(current.ProfileContracts), rc.NormalizeRuntimeProfileContracts(execution.ProfileContracts)) {
 		return fmt.Errorf("%w: execution Profile differs from current owner declaration", common.ErrConflict)
 	}
-	candidate, present, err := w.ValidateActivationAdmissionPersistence()
+	candidate, present, err := w.ReadCommittedActivation()
 	if err != nil {
 		return err
 	}
@@ -70,7 +70,7 @@ func ValidateExecutionBootstrap(w *workspace.Workspace, t *workspace.WorkspaceTe
 	if err := ValidateExecutionActivation(w, t, bootstrap.Activation); err != nil {
 		return err
 	}
-	candidate, present, err := w.ValidateActivationAdmissionPersistence()
+	candidate, present, err := w.ReadCommittedActivation()
 	if err != nil || !present {
 		return err
 	}

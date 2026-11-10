@@ -72,7 +72,7 @@ func (m *Biz) prepareDefinitionAuthoringConfirmationWithProof(ctx context.Contex
 		return workspace.DefinitionAuthoringConfirmation{}, common.ErrConflict
 	}
 	record := current.DefinitionAuthoring
-	if err := validateWorkspaceAuthoringMappingOutcomes(current); err != nil || record.InputHash != cmd.InputHash {
+	if err := readWorkspaceAuthoringCommitted(current); err != nil || record.InputHash != cmd.InputHash {
 		return workspace.DefinitionAuthoringConfirmation{}, common.ErrConflict
 	}
 	derivation, specification, err := record.ConfirmableSpecification(cmd.DerivationPermitID, cmd.ProposalHash)
@@ -166,7 +166,7 @@ func (m *Biz) driveDefinitionAuthoringConfirmation(ctx context.Context, cmd work
 		return workspaceevents.ConfirmDefinitionAuthoringResult{}, common.ErrConflict
 	}
 	journal := initial.DefinitionAuthoringConfirmation.Clone()
-	if journal.InputHash != cmd.InputHash || journal.DerivationPermitID != cmd.DerivationPermitID || journal.ProposalHash != cmd.ProposalHash || journal.SpecificationHash != cmd.SpecificationHash || journal.Validate(initial.DefinitionAuthoring, initial.ID) != nil || journal.Phase == workspace.DefinitionAuthoringConfirmationPrepared && workspace.WorkspaceConfigurationHash(initial) != journal.ConfigurationHash {
+	if journal.InputHash != cmd.InputHash || journal.DerivationPermitID != cmd.DerivationPermitID || journal.ProposalHash != cmd.ProposalHash || journal.SpecificationHash != cmd.SpecificationHash || journal.ReadCommitted(initial.DefinitionAuthoring, initial.ID) != nil || journal.Phase == workspace.DefinitionAuthoringConfirmationPrepared && workspace.WorkspaceConfigurationHash(initial) != journal.ConfigurationHash {
 		return workspaceevents.ConfirmDefinitionAuthoringResult{}, common.ErrConflict
 	}
 	if err := validateConfirmationAdmissionReplay(initial, journal); err != nil {
@@ -174,19 +174,6 @@ func (m *Biz) driveDefinitionAuthoringConfirmation(ctx context.Context, cmd work
 	}
 	if len(initial.DefinitionAuthoringHistory) > 0 && journal.ValidateSuccessor(initial.DefinitionAuthoringHistory[len(initial.DefinitionAuthoringHistory)-1].Confirmation) != nil {
 		return workspaceevents.ConfirmDefinitionAuthoringResult{}, common.ErrConflict
-	}
-	if journal.Phase == workspace.DefinitionAuthoringConfirmationPrepared {
-		template := &initial.DefinitionAuthoring.TemplateSnapshot
-		if workspace.WorkspaceTemplateSnapshotHash(template) != journal.TemplateSnapshotHash {
-			return workspaceevents.ConfirmDefinitionAuthoringResult{}, common.ErrConflict
-		}
-		derivation, specification, err := initial.DefinitionAuthoring.ConfirmableSpecification(journal.DerivationPermitID, journal.ProposalHash)
-		if err != nil {
-			return workspaceevents.ConfirmDefinitionAuthoringResult{}, err
-		}
-		if err := validateAuthoringVerificationAgainstSealedTemplate(journal.TemplateSnapshotHash, derivation, specification); err != nil {
-			return workspaceevents.ConfirmDefinitionAuthoringResult{}, err
-		}
 	}
 	if err := m.ensureConfirmationGoal(ctx, journal.Goal); err != nil {
 		return workspaceevents.ConfirmDefinitionAuthoringResult{}, err
@@ -201,7 +188,7 @@ func (m *Biz) driveDefinitionAuthoringConfirmation(ctx context.Context, cmd work
 	if err := workspaceDeletionRejectsMutation(current); err != nil {
 		return workspaceevents.ConfirmDefinitionAuthoringResult{}, err
 	}
-	if err := validateWorkspaceAuthoringMappingOutcomes(current); err != nil {
+	if err := readWorkspaceAuthoringCommitted(current); err != nil {
 		return workspaceevents.ConfirmDefinitionAuthoringResult{}, err
 	}
 	if journal.Phase == workspace.DefinitionAuthoringConfirmationPrepared {
@@ -222,10 +209,10 @@ func (m *Biz) driveDefinitionAuthoringConfirmation(ctx context.Context, cmd work
 }
 
 func validateConfirmationAdmissionReplay(current *workspace.Workspace, journal workspace.DefinitionAuthoringConfirmation) error {
-	if err := validateWorkspaceAuthoringMappingOutcomes(current); err != nil {
+	if err := readWorkspaceAuthoringCommitted(current); err != nil {
 		return err
 	}
-	if current == nil || current.ValidateDefinitionAuthoringHistory() != nil || len(current.DefinitionAdmissionCandidates) > len(current.DefinitionAuthoringHistory)+1 {
+	if current == nil || current.ReadCommittedAuthoring() != nil || len(current.DefinitionAdmissionCandidates) > len(current.DefinitionAuthoringHistory)+1 {
 		return common.ErrConflict
 	}
 	if len(current.DefinitionAuthoringHistory) > 0 {
@@ -241,7 +228,7 @@ func validateConfirmationAdmissionReplay(current *workspace.Workspace, journal w
 		if journal.Phase != workspace.DefinitionAuthoringConfirmationMaterialized || current.ActiveRunID != "" {
 			return common.ErrConflict
 		}
-		_, _, err := current.ValidateActivationAdmissionPersistence()
+		_, _, err := current.ReadCommittedActivation()
 		return err
 	}
 	if current.StartupInput == nil && current.ActivationAdmission == nil && len(current.DefinitionAdmissionCandidates) <= 1 {
@@ -252,10 +239,10 @@ func validateConfirmationAdmissionReplay(current *workspace.Workspace, journal w
 			return nil
 		}
 		candidate := current.DefinitionAdmissionCandidates[0]
-		if _, _, err := current.ValidateActivationAdmissionPersistence(); err != nil {
+		if _, _, err := current.ReadCommittedActivation(); err != nil {
 			return common.ErrConflict
 		}
-		ref, err := workspace.ConfirmedAuthoringAdmissionRef(current.DefinitionAuthoring, journal, current.ID)
+		ref, err := journal.CommittedAdmissionRef(current.DefinitionAuthoring, current.ID)
 		if journal.Phase != workspace.DefinitionAuthoringConfirmationMaterialized || err != nil || candidate.AuthoringRef == nil || *candidate.AuthoringRef != ref || candidate.Validate() != nil {
 			return common.ErrConflict
 		}
@@ -264,11 +251,11 @@ func validateConfirmationAdmissionReplay(current *workspace.Workspace, journal w
 	if journal.Phase != workspace.DefinitionAuthoringConfirmationMaterialized || len(current.DefinitionAdmissionCandidates) != 1 {
 		return common.ErrConflict
 	}
-	candidate, present, err := current.ValidateActivationAdmissionPersistence()
+	candidate, present, err := current.ReadCommittedActivation()
 	if err != nil || !present || candidate.AuthoringRef == nil || current.ActivationAdmission.State != workspace.WorkspaceActivationEligible {
 		return common.ErrConflict
 	}
-	ref, err := workspace.ConfirmedAuthoringAdmissionRef(current.DefinitionAuthoring, journal, current.ID)
+	ref, err := journal.CommittedAdmissionRef(current.DefinitionAuthoring, current.ID)
 	if err != nil || ref != *candidate.AuthoringRef {
 		return common.ErrConflict
 	}

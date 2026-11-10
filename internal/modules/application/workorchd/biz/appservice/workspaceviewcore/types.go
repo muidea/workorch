@@ -70,6 +70,7 @@ type Scheduler func(name string, fn func(context.Context)) bool
 // EventPorts are owned by the application Biz. They keep EventHub activity
 // outside the projection read-model manager.
 type EventPorts struct {
+	ReadWorkspaceIDs   func(context.Context) ([]common.WorkspaceID, error)
 	ReadHighWatermarks func(context.Context, []common.WorkspaceID) ([]eventstreamevents.WorkspaceHighWatermark, error)
 	PublishChanged     func(context.Context, workorchdevents.WorkspaceProjectionChangedData)
 }

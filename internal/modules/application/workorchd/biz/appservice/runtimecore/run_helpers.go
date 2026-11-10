@@ -94,3 +94,14 @@ func MapRun(item *runmodel.Run) appmodelcore.Run {
 	}
 	return ret
 }
+
+// MapRunInventory preserves all Run list fields, including the historical
+// provider selection, without synthesizing an execution Bootstrap.
+func MapRunInventory(item runmodel.RunInventoryItem) appmodelcore.Run {
+	ret := MapRun(item.ListItem())
+	if item.SealedLLMSelection != nil {
+		selection := *item.SealedLLMSelection
+		ret.SealedLLMSelection = &selection
+	}
+	return ret
+}

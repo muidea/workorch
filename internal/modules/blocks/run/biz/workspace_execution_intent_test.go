@@ -43,6 +43,24 @@ func (r *fixedRunInventoryRepository) List(context.Context) ([]*runmodel.Run, er
 	return runmodel.CloneRuns(r.items), nil
 }
 
+func (r *fixedRunInventoryRepository) ListInventory(_ context.Context, workspaceID common.WorkspaceID) ([]runmodel.RunInventoryItem, error) {
+	ret := make([]runmodel.RunInventoryItem, 0, len(r.items))
+	for _, r := range r.items {
+		if r != nil && (workspaceID == "" || r.WorkspaceID == workspaceID) {
+			ret = append(ret, runmodel.InventoryFromRun(r))
+		}
+	}
+	return ret, nil
+}
+func (r *fixedRunInventoryRepository) GetByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
+	for _, r := range r.items {
+		if r != nil && r.WorkspaceID == workspaceID && r.ID == id {
+			return runmodel.CloneRun(r), nil
+		}
+	}
+	return nil, common.ErrNotFound
+}
+
 func (r *fixedRunInventoryRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*runmodel.Run, error) {
 	items := make([]*runmodel.Run, 0, len(r.items))
 	for _, item := range r.items {

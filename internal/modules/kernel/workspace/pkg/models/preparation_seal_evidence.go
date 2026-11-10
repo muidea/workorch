@@ -16,8 +16,8 @@ const PreparationSealEvidenceVersion = "workorch-preparation-seal-evidence/v1"
 const PreparationSealRefPrefix = "seal-observation:"
 
 // The complete detached sealed input, not a validation token. The preparation
-// package retains its independent all_of compiler; this value only shares the
-// exact storage/hash shape so repository readback need not trust a hash hit.
+// package consumes the committed all_of result; this value shares the exact
+// storage/hash shape so repository readback can verify original source links.
 type PreparationSealSnapshot struct {
 	SchemaVersion              string
 	WorkspaceID                common.WorkspaceID
@@ -103,6 +103,10 @@ func (e WorkspacePreparationSealEvidence) Hash() string {
 // A later definition may retire these formal rows; the immutable historical
 // observation remains tied to the exact original confirmed source.
 func (e WorkspacePreparationSealEvidence) validateFor(w *Workspace, a WorkspacePreparationAttempt) error {
+	return e.validateSourceFor(w, a)
+}
+
+func (e WorkspacePreparationSealEvidence) validateSourceFor(w *Workspace, a WorkspacePreparationAttempt) error {
 	if r := e.FinalOwners; r != nil && (w == nil || a.OwnerRevalidationVersion != PreparationOwnerRevalidationVersion || r.Validate() != nil || r.WorkspaceID != w.ID || r.RequestID != a.RequestID || r.PayloadHash != a.PayloadHash || a.ExpectedWorkspaceRevision == ^uint64(0) || r.WorkspaceRevision != a.ExpectedWorkspaceRevision+1 || r.StartedAt.Before(a.StartedAt) || r.CompletedAt.After(e.CompletedAt)) {
 		return common.ErrConflict
 	}
@@ -173,19 +177,31 @@ func (e WorkspacePreparationSealEvidence) validateFor(w *Workspace, a WorkspaceP
 	source.DefinitionAuthoring, source.DefinitionAuthoringConfirmation = record, journal
 	source.DefinitionAuthoringHistory = w.DefinitionAuthoringHistory[:index]
 	source.DefinitionAdmissionCandidates = w.DefinitionAdmissionCandidates[:index+1]
+	source.DefinitionAdmissionResults = nil
+	for _, result := range w.DefinitionAdmissionResults {
+		for _, candidate := range source.DefinitionAdmissionCandidates {
+			if result.CandidateID == candidate.CandidateID && result.CandidateRevision == candidate.CandidateRevision {
+				source.DefinitionAdmissionResults = append(source.DefinitionAdmissionResults, result)
+				break
+			}
+		}
+	}
 	source.StartupInput, source.ActivationAdmission = &s.StartupInput, &s.ActivationAdmission
-	_, present, compiledSource, err := source.compileActivationAdmissionPersistence(false)
-	if err != nil || !present {
+
+	candidate, present, err := source.ReadCommittedActivation()
+	if err != nil || !present || candidate.AuthoringRef == nil || *candidate.AuthoringRef != s.AuthoringRef {
 		return common.ErrConflict
 	}
-	if compiledSource == nil || compiledSource.ref != s.AuthoringRef || len(compiledSource.items) != len(s.FormalDoDItemRefs) {
+	items, err := journal.ReadCommittedItems(record, w.ID)
+	if err != nil || len(items) != len(s.FormalDoDItemRefs) {
 		return common.ErrConflict
 	}
-	for i := range compiledSource.items {
-		if compiledSource.items[i].CandidateItemRef != s.FormalDoDItemRefs[i] {
+	for i, item := range items {
+		if item.CandidateItemRef != s.FormalDoDItemRefs[i] {
 			return common.ErrConflict
 		}
 	}
+
 	return nil
 }
 
@@ -225,6 +241,9 @@ func evaluatePreparationSealChecks(a WorkspacePreparationAttempt, complete bool)
 }
 
 func validatePreparationSealEvidencePersistence(w *Workspace) error {
+	return validatePreparationSealEvidenceMode(w, true)
+}
+func validatePreparationSealEvidenceMode(w *Workspace, admit bool) error {
 	if w == nil || len(w.PreparationSealEvidence) > WorkspacePreparationAttemptLimit {
 		return common.ErrConflict
 	}
@@ -247,7 +266,7 @@ func validatePreparationSealEvidencePersistence(w *Workspace) error {
 	}
 	for _, e := range w.PreparationSealEvidence {
 		a, ok := refs[e.Ref]
-		if !ok || e.validateFor(w, a) != nil || !reflect.DeepEqual(a.Checks, evaluatePreparationSealChecks(a, true)) {
+		if !ok || e.validateSourceFor(w, a) != nil || admit && !reflect.DeepEqual(a.Checks, evaluatePreparationSealChecks(a, true)) {
 			return common.ErrConflict
 		}
 		delete(refs, e.Ref)

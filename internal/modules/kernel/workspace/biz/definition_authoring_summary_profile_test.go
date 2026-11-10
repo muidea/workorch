@@ -8,7 +8,7 @@ import (
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 )
 
-func TestAuthoringSummaryRechecksSealedProfileWithoutMutatingLedger(t *testing.T) {
+func TestAuthoringSummaryConsumesCommittedProfileWithoutMutatingLedger(t *testing.T) {
 	ctx := context.Background()
 	owners := openFileDefinitionAdmissionOwners(t, t.TempDir())
 	defer owners.close()
@@ -54,16 +54,22 @@ func TestAuthoringSummaryRechecksSealedProfileWithoutMutatingLedger(t *testing.T
 			if _, _, err := record.ConfirmableSpecification(cmd.DerivationPermitID, proposal.ContentHash()); err != nil {
 				t.Fatalf("反例必须到达独立 Profile 检查：%v", err)
 			}
-			for attempt := 0; attempt < 2; attempt++ {
-				item := *current
-				item.DefinitionAuthoring = &record
-				snapshot := record.Clone()
-				projected := workspaceDTOsWithAuthoringSummary([]*workspace.Workspace{&item})
-				if len(projected) != 1 || projected[0].AuthoringSummary == nil || projected[0].AuthoringSummary.State != "review_blocked" || projected[0].AuthoringSummary.ReviewCount != 6 {
-					t.Fatalf("非法自报声明被列表摘要认可：%+v", projected)
+			attempted := *current
+			attempted.DefinitionAuthoring = &record
+			if err := owners.repositories.Workspaces.CompareAndSwap(ctx, &attempted, current.Revision); err == nil {
+				t.Fatal("completed result rewrite reached summary")
+			}
+			if validateAuthoringMappingOutcomes(record) == nil {
+				t.Fatal("offline audit missed invented profile")
+			}
+			for range 2 {
+				actual, err := owners.repositories.Workspaces.Get(ctx, current.ID)
+				if err != nil {
+					t.Fatal(err)
 				}
-				if !reflect.DeepEqual(snapshot, record) || item.StartupInput != nil || item.ActivationAdmission != nil || item.ActiveRunID != "" {
-					t.Fatal("只读摘要产生或改写 authority")
+				projected := workspaceDTOsWithAuthoringSummary([]*workspace.Workspace{actual})
+				if len(projected) != 1 || projected[0].AuthoringSummary == nil || projected[0].AuthoringSummary.State != "reviewed" || !reflect.DeepEqual(before, *actual.DefinitionAuthoring) {
+					t.Fatal("summary altered or rejudged original result")
 				}
 			}
 		})

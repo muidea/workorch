@@ -17,25 +17,14 @@ import (
 func reserveAuthoringProposalForCompletion(t *testing.T, owners *fileDefinitionAdmissionOwners, id common.WorkspaceID) (workspace.Workspace, workspaceevents.CompleteAuthoringSpecificationCommand) {
 	t.Helper()
 	ctx := context.Background()
-	confirmation := seedReviewedAuthoringConfirmationWithProof(t, owners, id, true)
-	current, err := owners.repositories.Workspaces.Get(ctx, id)
-	if err != nil {
-		t.Fatal(err)
-	}
 	var proposal workspace.GoalSpecification
-	for _, request := range current.DefinitionAuthoring.SpecificationRequests {
-		if request.Proposal != nil {
-			proposal = request.Proposal.Clone()
-			break
-		}
-	}
-	resetUnreservedSpecificationFixture(t, owners, current, "")
+	confirmation := seedReviewedAuthoringConfirmationWithTemplate(t, owners, id, true, true, "*", "dodItem", nil, unreservedSpecificationFixture("", &proposal))
 	reserve := workspaceevents.ReserveAuthoringSpecificationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "proposal"), WorkspaceID: id, InputHash: confirmation.InputHash, DerivationPermitID: confirmation.DerivationPermitID, RequestID: "independent-completion", ProviderBindingHash: "provider"}
 	reserved, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecReserve: &reserve})
 	if err != nil || reserved.AuthoringSpecification == nil || reserved.AuthoringSpecification.FreshPermitID == "" {
 		t.Fatalf("reserve completion: %+v %v", reserved, err)
 	}
-	current, err = owners.repositories.Workspaces.Get(ctx, id)
+	current, err := owners.repositories.Workspaces.Get(ctx, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,20 +201,17 @@ func TestAuthoringMappingFailureCannotBeForgedOrDowngradedOnOwnerReload(t *testi
 			if err := validateAuthoringMappingOutcomes(next); err == nil {
 				t.Fatal("forged failure passed owner semantic re-evaluation")
 			}
-			updated := before
-			updated.DefinitionAuthoring = &next
-			if err := owners.repositories.Workspaces.CompareAndSwap(ctx, &updated, before.Revision); err != nil {
-				t.Fatal(err)
+			command.Mapping, command.SuccessAudit, command.Proposal = nil, nil, nil
+			command.FailureCode, command.Diagnostic = r.FailureCode, r.Diagnostic
+			if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: before.ID, AuthoringSpecComplete: &command}); err == nil {
+				t.Fatal("unaccepted forged failure entered owner completion")
+			}
+			actual, err := owners.repositories.Workspaces.Get(ctx, before.ID)
+			if err != nil || !reflect.DeepEqual(before, *actual) {
+				t.Fatal("rejected failure altered reserved source")
 			}
 			owners.close()
-			owners = openFileDefinitionAdmissionOwners(t, root)
-			defer owners.close()
-			if _, err := owners.workspace.queryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: before.ID}); err == nil {
-				t.Fatal("ordinary query accepted persisted forged outcome after reopen")
-			}
-			if _, err := owners.workspace.queryAuthoringDiagnostic(ctx, workspaceevents.QueryAuthoringDiagnosticCommand{WorkspaceID: before.ID, PermitID: command.PermitID}); err == nil {
-				t.Fatal("restricted diagnostic query accepted persisted forged outcome after reopen")
-			}
+
 		})
 	}
 }

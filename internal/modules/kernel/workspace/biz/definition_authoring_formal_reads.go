@@ -24,7 +24,7 @@ func (m *Biz) authoringFormalDefinitionVisible(ctx context.Context, id common.Wo
 		return true, nil
 	}
 	journal := current.DefinitionAuthoringConfirmation
-	if journal.Validate(current.DefinitionAuthoring, id) != nil || journal.Phase != workspacemodel.DefinitionAuthoringConfirmationMaterialized || current.ValidateDefinitionAuthoringHistory() != nil {
+	if journal.ReadCommitted(current.DefinitionAuthoring, id) != nil || journal.Phase != workspacemodel.DefinitionAuthoringConfirmationMaterialized || current.ReadCommittedAuthoring() != nil {
 		return false, nil
 	}
 	goals, err := m.goals.ListByWorkspaceID(ctx, id)

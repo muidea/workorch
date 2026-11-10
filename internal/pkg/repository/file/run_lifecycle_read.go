@@ -4,6 +4,7 @@ import (
 	"context"
 	run "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"sort"
 )
 
 func (r *RunRepository) GetRuntimeLifecycle(_ context.Context, workspaceID common.WorkspaceID, id common.RunID) (run.RuntimeLifecycleState, error) {
@@ -12,15 +13,11 @@ func (r *RunRepository) GetRuntimeLifecycle(_ context.Context, workspaceID commo
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	items, err := loadRunMap(r.path)
+	item, err := loadRunOriginalByID(r.path, workspaceID, id)
 	if err != nil {
 		return run.RuntimeLifecycleState{}, err
 	}
-	item, found := items[id]
-	if !found || item.WorkspaceID != workspaceID {
-		return run.RuntimeLifecycleState{}, common.ErrNotFound
-	}
-	return run.RuntimeLifecycleFromRun(&item)
+	return run.RuntimeLifecycleFromRun(item)
 }
 
 func (r *RunRepository) GetRuntimeStateWriteBase(_ context.Context, workspaceID common.WorkspaceID, id common.RunID) (run.RuntimeStateWriteBase, error) {
@@ -29,13 +26,32 @@ func (r *RunRepository) GetRuntimeStateWriteBase(_ context.Context, workspaceID 
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	items, err := loadRunMap(r.path)
+	item, err := loadRunOriginalByID(r.path, workspaceID, id)
 	if err != nil {
 		return run.RuntimeStateWriteBase{}, err
 	}
-	item, found := items[id]
-	if !found || item.WorkspaceID != workspaceID {
-		return run.RuntimeStateWriteBase{}, common.ErrNotFound
+	return run.RuntimeStateWriteBaseFromRun(item)
+}
+
+func (r *RunRepository) ListInventory(_ context.Context, workspaceID common.WorkspaceID) ([]run.RunInventoryItem, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items, err := loadRunInventory(r.path)
+	if err != nil {
+		return nil, err
 	}
-	return run.RuntimeStateWriteBaseFromRun(&item)
+	ret := make([]run.RunInventoryItem, 0, len(items))
+	for _, item := range items {
+		if workspaceID != "" && item.WorkspaceID != workspaceID {
+			continue
+		}
+		ret = append(ret, item)
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		if ret[i].WorkspaceID != ret[j].WorkspaceID {
+			return ret[i].WorkspaceID < ret[j].WorkspaceID
+		}
+		return ret[i].ID < ret[j].ID
+	})
+	return ret, nil
 }

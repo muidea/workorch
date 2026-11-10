@@ -60,7 +60,7 @@ func (m *Biz) queryExactConfirmedStartupSnapshot(ctx context.Context, command wo
 	}
 	reads, _ := ctx.Value(preparationExactReadsKey{}).(*preparationExactReads)
 	if reads == nil || !reflect.DeepEqual(reads.workspace, w) {
-		if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
+		if err := readWorkspaceAuthoringCommitted(w); err != nil {
 			return workspaceevents.QueryExactConfirmedStartupSnapshotResult{}, common.ErrConflict
 		}
 	}

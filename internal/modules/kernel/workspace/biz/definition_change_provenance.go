@@ -121,7 +121,7 @@ func (m *Biz) queryDefinitionChange(ctx context.Context, cmd workspaceevents.Que
 	if err := workspaceDeletionRejectsMutation(w); err != nil {
 		return workspaceevents.QueryDefinitionChangeResult{}, err
 	}
-	if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
+	if err := readWorkspaceAuthoringCommitted(w); err != nil {
 		return workspaceevents.QueryDefinitionChangeResult{}, err
 	}
 	result := workspaceevents.QueryDefinitionChangeResult{WorkspaceID: w.ID, WorkspaceRevision: w.Revision}

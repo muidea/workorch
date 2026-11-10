@@ -19,7 +19,7 @@ type WorkspaceListWorkspaceReader interface {
 }
 
 type WorkspaceListRunReader interface {
-	List(ctx context.Context) ([]*runmodel.Run, error)
+	ListCompact(ctx context.Context) ([]runmodel.RunInventoryItem, error)
 }
 
 type WorkspaceListResultReader interface {
@@ -48,7 +48,8 @@ func ListProjectedWorkspaces(
 		},
 		func() error {
 			var err error
-			runItems, err = runs.List(ctx)
+			inventory, readErr := runs.ListCompact(ctx)
+			runItems, err = runmodel.InventoryListItems(inventory), readErr
 			return err
 		},
 		func() error {

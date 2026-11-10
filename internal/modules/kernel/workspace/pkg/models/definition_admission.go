@@ -379,11 +379,15 @@ func (r DefinitionAdmissionResult) Normalized() DefinitionAdmissionResult {
 }
 
 func (r DefinitionAdmissionResult) ValidateFor(candidate DefinitionAdmissionCandidate) error {
-	r = r.Normalized()
-	candidate = candidate.Normalized()
 	if err := candidate.Validate(); err != nil {
 		return err
 	}
+	return r.ValidateBinding(candidate)
+}
+
+// ValidateBinding is a consumer's identity/integrity gate, not candidate admission.
+func (r DefinitionAdmissionResult) ValidateBinding(candidate DefinitionAdmissionCandidate) error {
+
 	if r.WorkspaceID != candidate.WorkspaceID || r.CandidateID != candidate.CandidateID || r.CandidateRevision != candidate.CandidateRevision || r.CandidateHash != candidate.CandidateHash || r.AdmissionCompilerVersion != candidate.AdmissionCompilerVersion {
 		return fmt.Errorf("definition admission result does not bind the exact candidate")
 	}
@@ -603,7 +607,8 @@ func (a WorkspaceActivationAdmission) ValidateCandidate(startup WorkspaceStartup
 	return nil
 }
 
-// ValidateActivationAdmissionPersistence returns the exact candidate bound by
+// ValidateActivationAdmissionPersistence is a full offline audit entry, not a
+// production read/recovery gate. It returns the exact candidate bound by
 // the current Workspace startup admission. The boolean is false only when the
 // Workspace has not persisted either fact yet. Partial, duplicated, stale-shape
 // or mismatched persistence fails closed.
@@ -885,4 +890,42 @@ func writeDefinitionHash(h definitionHashWriter, values ...string) {
 		_, _ = h.Write([]byte(fmt.Sprintf("%08x", len(value))))
 		_, _ = h.Write([]byte(value))
 	}
+}
+
+func (r DefinitionAdmissionResult) Clone() DefinitionAdmissionResult {
+	r.OffendingRefs = slices.Clone(r.OffendingRefs)
+	return r
+}
+
+// AdmittedDefinitionResult projects the identity of an all-of admission. Only
+// the private reducer can grant admission; this pure constructor grants none.
+func AdmittedDefinitionResult(c DefinitionAdmissionCandidate) DefinitionAdmissionResult {
+	h := sha256.New()
+	for _, p := range []string{"admitted_all_of", c.CandidateHash, c.AdmissionCompilerVersion} {
+		fmt.Fprintf(h, "%08x%s", len(p), p)
+	}
+	return (DefinitionAdmissionResult{WorkspaceID: c.WorkspaceID, CandidateID: c.CandidateID, CandidateRevision: c.CandidateRevision, CandidateHash: c.CandidateHash, Disposition: DefinitionAdmissionAdmittedAllOf, AdmissionCompilerVersion: c.AdmissionCompilerVersion, CanonicalAdmittedInputHash: "sha256:" + hex.EncodeToString(h.Sum(nil))}).WithHash()
+}
+
+// ReadDefinitionAdmissionResult reads the saved owner verdict. An existing
+// StartupInput/ActivationAdmission is itself a formal all-of product, so its
+// presentation identity can be projected without repeating business judgment.
+func (w *Workspace) ReadDefinitionAdmissionResult(c DefinitionAdmissionCandidate) (DefinitionAdmissionResult, error) {
+	var found *DefinitionAdmissionResult
+	for i := range w.DefinitionAdmissionResults {
+		r := &w.DefinitionAdmissionResults[i]
+		if r.CandidateID == c.CandidateID && r.CandidateRevision == c.CandidateRevision {
+			if found != nil || r.ValidateBinding(c) != nil {
+				return DefinitionAdmissionResult{}, common.ErrConflict
+			}
+			found = r
+		}
+	}
+	if found != nil {
+		return found.Clone(), nil
+	}
+	if a := w.ActivationAdmission; a != nil && w.StartupInput != nil && a.WorkspaceID == w.ID && a.CandidateID == c.CandidateID && a.CandidateRevision == c.CandidateRevision && a.CandidateHash == c.CandidateHash && a.StartupInputHash == w.StartupInput.StartupInputHash {
+		return AdmittedDefinitionResult(c), nil
+	}
+	return DefinitionAdmissionResult{}, fmt.Errorf("%w: original admission verdict unavailable", common.ErrConflict)
 }

@@ -3,8 +3,6 @@ package workspace
 import (
 	"context"
 
-	definitionadmission "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/definitionadmission"
-
 	workspaceeventmapping "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/eventmapping"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -30,7 +28,7 @@ func (m *Biz) queryDefinitionAuthoring(ctx context.Context, cmd workspaceevents.
 	if err := workspaceDeletionRejectsMutation(w); err != nil {
 		return workspaceevents.QueryDefinitionAuthoringResult{}, err
 	}
-	if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
+	if err := w.ReadCommittedAuthoring(); err != nil {
 		return workspaceevents.QueryDefinitionAuthoringResult{}, err
 	}
 	result := workspaceevents.QueryDefinitionAuthoringResult{WorkspaceID: cmd.WorkspaceID, WorkspaceRevision: w.Revision, Title: w.Title, Description: w.Description, DeliverableDirectory: w.DeliverableDirectory}
@@ -73,7 +71,7 @@ func (m *Biz) queryDefinitionAuthoring(ctx context.Context, cmd workspaceevents.
 		// 输入查询不是原 confirmation/admission 的副本，也不表明可批准。
 		return result, result.ValidateFor(cmd)
 	}
-	candidate, present, err := w.ValidateActivationAdmissionPersistence()
+	candidate, present, err := w.ReadCommittedActivation()
 	if err != nil {
 		return workspaceevents.QueryDefinitionAuthoringResult{}, err
 	}
@@ -87,7 +85,7 @@ func (m *Biz) queryDefinitionAuthoring(ctx context.Context, cmd workspaceevents.
 			candidate = w.DefinitionAdmissionCandidates[len(w.DefinitionAdmissionCandidates)-1].Clone()
 		}
 		if present || len(w.DefinitionAdmissionCandidates) != len(w.DefinitionAuthoringHistory) {
-			admission, err := definitionadmission.Compile(candidate)
+			admission, err := w.ReadDefinitionAdmissionResult(candidate)
 			if err != nil {
 				return workspaceevents.QueryDefinitionAuthoringResult{}, err
 			}

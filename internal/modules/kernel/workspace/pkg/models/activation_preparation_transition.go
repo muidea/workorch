@@ -9,6 +9,12 @@ import (
 // All preparation mutations require
 // CAS, immutable original identities and append-only completed history.
 func ValidatePreparationRecordTransition(current, next *Workspace, cas bool) error {
+	if err := ValidateCommittedAuthoringTransition(current, next); err != nil {
+		return err
+	}
+	if err := ValidateDefinitionAdmissionResultTransition(current, next); err != nil {
+		return err
+	}
 	if err := validatePreparationCompletionTransition(current, next, cas); err != nil {
 		return err
 	}

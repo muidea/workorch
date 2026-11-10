@@ -51,7 +51,7 @@ func reduceWorkspaceExecutionInternalEvent(current *workspacemodel.Workspace, ev
 	if err := workspaceDeletionRejectsMutation(current); err != nil {
 		return workspaceExecutionTransition{}, err
 	}
-	_, present, err := current.ValidateActivationAdmissionPersistence()
+	_, present, err := current.ReadCommittedActivation()
 	if err != nil || !present || current.StartupInput == nil || current.ActivationAdmission == nil {
 		return workspaceExecutionTransition{}, common.ErrConflict
 	}

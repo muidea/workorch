@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -609,5 +610,44 @@ func TestOutstandingDefinitionClarificationIgnoresClosedEligibleBaseline(t *test
 	current = current.WithHash()
 	if binding := outstandingDefinitionClarification(workspace, current); binding != nil {
 		t.Fatalf("closed invalid baseline was reopened: %+v", binding)
+	}
+}
+
+func TestDefinitionAdmissionReplayRequiresOriginalVerdict(t *testing.T) {
+	candidate := testAdmissionCandidate()
+	candidate.ProposedRelationInputs[0].RelationKind = "one_of"
+	candidate = candidate.WithHash()
+	verdict, err := definitionadmission.Compile(candidate)
+	if err != nil || verdict.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired {
+		t.Fatalf("fixture=%v", err)
+	}
+	owner := &workspacemodel.Workspace{ID: candidate.WorkspaceID, DefinitionAdmissionCandidates: []workspacemodel.DefinitionAdmissionCandidate{candidate}, DefinitionAdmissionResults: []workspacemodel.DefinitionAdmissionResult{verdict}}
+	for range 3 {
+		got, err := admitOrReadDefinitionCandidate(owner, candidate)
+		if err != nil || !reflect.DeepEqual(got, verdict) {
+			t.Fatalf("replay=%+v %v", got, err)
+		}
+	}
+	missing := *owner
+	missing.DefinitionAdmissionResults = nil
+	if _, err := admitOrReadDefinitionCandidate(&missing, candidate); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("missing original was reclassified: %v", err)
+	}
+	changed := candidate.Clone()
+	changed.GoalInput.Text += "changed"
+	changed = changed.WithHash()
+	if _, err := admitOrReadDefinitionCandidate(owner, changed); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("same revision borrowed verdict: %v", err)
+	}
+	newer := candidate.Clone()
+	newer.CandidateRevision++
+	newer.ProposedRelationInputs[0].RelationKind = "all_of"
+	newer = newer.WithHash()
+	fresh, err := admitOrReadDefinitionCandidate(owner, newer)
+	if err != nil || fresh.CandidateRevision != newer.CandidateRevision || fresh.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf {
+		t.Fatalf("new input did not receive its own judgment: %+v %v", fresh, err)
+	}
+	if len(owner.DefinitionAdmissionResults) != 1 || !reflect.DeepEqual(owner.DefinitionAdmissionResults[0], verdict) {
+		t.Fatal("read rewrote historical verdict")
 	}
 }

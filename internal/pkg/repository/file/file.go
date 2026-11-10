@@ -2084,7 +2084,7 @@ func (item *workspacePersistenceValue) UnmarshalJSON(data []byte) error {
 	decoded.PreparationMCPRegistryEvidence = wire.PreparationMCPRegistryEvidence
 	decoded.PreparationResourceInitializations = wire.PreparationResourceInitializations
 	decoded.PreparationSkillHubEffects = wire.PreparationSkillHubEffects
-	if err := preparationcompiler.ValidatePreparedPersistence(&decoded); err != nil {
+	if err := preparationcompiler.ReadCommittedPersistence(&decoded); err != nil {
 		return err
 	}
 	if err := decodePersistencePayload(wire.ContextHints, &decoded.ContextHints); err != nil {
@@ -2891,18 +2891,50 @@ func (r *RunRepository) workspaceGenerationPath() string {
 }
 
 func loadRunMap(path string) (map[common.RunID]run.Run, error) {
-	return loadMapChecked(path, func(items map[common.RunID]run.Run) error {
-		for id, item := range items {
-			current := item
-			if err := run.ValidateRunRuntimeBootstrapsRaw(&current); err != nil {
-				return fmt.Errorf("load Run %q: %w", id, err)
+	cache := mapCacheEntry(path)
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if !cache.loaded {
+		data, err := os.ReadFile(path)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+		items := map[common.RunID]run.Run{}
+		if err == nil {
+			if err := decodeCurrentJSON(data, &items); err != nil {
+				return nil, err
 			}
-			if err := run.ValidateStoredRuntimeStateIntegrity(&current); err != nil {
-				return fmt.Errorf("load Run %q: %w", id, err)
+			if err := validateRunMapIntegrity(items); err != nil {
+				return nil, err
 			}
 		}
-		return nil
-	})
+		cache.items, cache.loaded = items, true
+	}
+	if images, ok := cache.items.(runInventoryPhysicalMap); ok {
+		items, err := materializeRunInventoryImages(images)
+		if err != nil {
+			return nil, err
+		}
+		cache.items = items
+	}
+	items, ok := cache.items.(map[common.RunID]run.Run)
+	if !ok {
+		return nil, fmt.Errorf("file repository cache type mismatch for %s", path)
+	}
+	return cloneStoredMap(items), nil
+}
+
+func validateRunMapIntegrity(items map[common.RunID]run.Run) error {
+	for id, item := range items {
+		current := item
+		if err := run.ValidateRunRuntimeBootstrapsRaw(&current); err != nil {
+			return fmt.Errorf("load Run %q: %w", id, err)
+		}
+		if err := run.ValidateStoredRuntimeStateIntegrity(&current); err != nil {
+			return fmt.Errorf("load Run %q: %w", id, err)
+		}
+	}
+	return nil
 }
 
 func validatePersistedRunGenerationWatermarks(items map[common.RunID]run.Run, heads map[common.WorkspaceID]runWorkspacePersistenceHead) error {
@@ -2938,16 +2970,7 @@ func validatePersistedRunGenerationWatermarks(items map[common.RunID]run.Run, he
 func (r *RunRepository) Get(_ context.Context, id common.RunID) (*run.Run, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-
-	items, err := loadRunMap(r.path)
-	if err != nil {
-		return nil, err
-	}
-	item, ok := items[id]
-	if !ok {
-		return nil, common.ErrNotFound
-	}
-	return cloneRun(&item), nil
+	return loadRunByID(r.path, "", id)
 }
 
 func (r *RunRepository) GetByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID, id common.RunID) (*run.Run, error) {
@@ -2956,16 +2979,7 @@ func (r *RunRepository) GetByWorkspaceID(_ context.Context, workspaceID common.W
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-
-	items, err := loadRunMap(r.path)
-	if err != nil {
-		return nil, err
-	}
-	item, ok := items[id]
-	if !ok || item.WorkspaceID != workspaceID {
-		return nil, common.ErrNotFound
-	}
-	return cloneRun(&item), nil
+	return loadRunByID(r.path, workspaceID, id)
 }
 
 func (r *RunRepository) List(_ context.Context) ([]*run.Run, error) {
@@ -4814,6 +4828,13 @@ func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 			cloned.DefinitionAdmissionCandidates[idx] = item.DefinitionAdmissionCandidates[idx].Clone()
 		}
 	}
+	if item.DefinitionAdmissionResults != nil {
+		cloned.DefinitionAdmissionResults = make([]workspace.DefinitionAdmissionResult, len(item.DefinitionAdmissionResults))
+		for i := range item.DefinitionAdmissionResults {
+			cloned.DefinitionAdmissionResults[i] = item.DefinitionAdmissionResults[i].Clone()
+		}
+	}
+
 	if item.DefinitionAuthoringCreation != nil {
 		creation := item.DefinitionAuthoringCreation.Clone()
 		cloned.DefinitionAuthoringCreation = &creation

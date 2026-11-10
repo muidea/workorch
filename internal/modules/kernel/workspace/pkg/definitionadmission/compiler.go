@@ -95,12 +95,7 @@ func Compile(candidate workspacemodel.DefinitionAdmissionCandidate) (workspacemo
 	if _, err := bootstrapcompiler.CompileCapacity(candidate.GoalInput.Text, texts, candidate.RuntimeProfileContracts, runtimecontract.RuntimeAcceptanceFocusMaxCount); err != nil {
 		return clarification(candidate, workspacemodel.DefinitionAdmissionProfileContractInvalid, []string{candidate.GoalInput.CandidateItemRef}, "coverage_capacity_exceeded"), nil
 	}
-	result := workspacemodel.DefinitionAdmissionResult{
-		WorkspaceID: candidate.WorkspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision,
-		CandidateHash: candidate.CandidateHash, Disposition: workspacemodel.DefinitionAdmissionAdmittedAllOf,
-		AdmissionCompilerVersion:   candidate.AdmissionCompilerVersion,
-		CanonicalAdmittedInputHash: stableHash("admitted_all_of", candidate.CandidateHash, candidate.AdmissionCompilerVersion),
-	}.WithHash()
+	result := workspacemodel.AdmittedDefinitionResult(candidate)
 	return result, result.ValidateFor(candidate)
 }
 

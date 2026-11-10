@@ -12,6 +12,7 @@ import (
 	"github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistryports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	executionusecase "github.com/muidea/workorch/internal/modules/application/workorchd/biz/execution"
 	projectioncomponent "github.com/muidea/workorch/internal/modules/application/workorchd/biz/projection"
@@ -76,7 +77,9 @@ func (b *Biz) Setup(ctx context.Context, commandHub magicevent.Hub, backgroundRo
 		// 保留部分启动取得的 session/service，由检查式停机统一排空和清理。
 		return err
 	}
-	b.projection = projectioncomponent.New(applicationProjectionLoader{config: config, ports: applicationPorts.Workspace}, b.BackgroundRoutine(), workspaceviewcore.EventPorts{
+	b.projection = projectioncomponent.New(applicationProjectionLoader{config: config, ports: applicationPorts.Workspace}, b.BackgroundRoutine(), workspaceviewcore.EventPorts{ReadWorkspaceIDs: func(ctx context.Context) ([]common.WorkspaceID, error) {
+		return ownerreadports.ListWorkspaceIDsByOwnerCommand(ctx, b.EventHub())
+	},
 		ReadHighWatermarks: b.readWorkspaceProjectionHighWatermarks,
 		PublishChanged:     b.publishWorkspaceProjectionChanged,
 	})

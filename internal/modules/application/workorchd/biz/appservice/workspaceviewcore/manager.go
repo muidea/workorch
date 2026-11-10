@@ -133,22 +133,22 @@ func (m *Manager) Status() projectioncontract.ProjectionStatus {
 // own stale counters. Both owner workspace identity and EventStream revisions
 // are read through typed EventHub/owner ports.
 func (m *Manager) ReconcileSourceHighWatermarks(ctx context.Context) error {
-	if m == nil || m.loader == nil || m.store == nil || m.eventPorts.ReadHighWatermarks == nil {
+	if m == nil || m.loader == nil || m.store == nil || m.eventPorts.ReadHighWatermarks == nil || m.eventPorts.ReadWorkspaceIDs == nil {
 		return common.ErrInvalidArgument
 	}
-	workspaces, err := m.loader.ListWorkspaces(ctx)
+
+	workspaceIDs, err := m.eventPorts.ReadWorkspaceIDs(ctx)
 	if err != nil {
 		return err
 	}
-	workspaceIDs := make([]common.WorkspaceID, 0, len(workspaces))
-	ownerIDs := make([]string, 0, len(workspaces))
-	for _, workspace := range workspaces {
-		workspaceID := strings.TrimSpace(workspace.ID)
-		if workspaceID == "" {
-			continue
+	ownerIDs := make([]string, 0, len(workspaceIDs))
+	seen := map[common.WorkspaceID]bool{}
+	for _, id := range workspaceIDs {
+		if strings.TrimSpace(string(id)) == "" || seen[id] {
+			return common.ErrConflict
 		}
-		workspaceIDs = append(workspaceIDs, common.WorkspaceID(workspaceID))
-		ownerIDs = append(ownerIDs, workspaceID)
+		seen[id] = true
+		ownerIDs = append(ownerIDs, string(id))
 	}
 	sort.Strings(ownerIDs)
 	if !equalProjectionWorkspaceIDs(ownerIDs, m.store.WorkspaceIDs()) {

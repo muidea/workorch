@@ -54,6 +54,10 @@ func (r RunReader) List(ctx context.Context) ([]*runmodel.Run, error) {
 	return ownerreadports.ListRunsByOwnerCommand(ctx, r.Hub)
 }
 
+func (r RunReader) ListCompact(ctx context.Context) ([]runmodel.RunInventoryItem, error) {
+	return ownerreadports.ListCompactRunsByOwnerCommand(ctx, r.Hub)
+}
+
 func (r RunReader) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*runmodel.Run, error) {
 	return ownerreadports.ListRunsByWorkspaceOwnerCommand(ctx, r.Hub, workspaceID)
 }
@@ -72,4 +76,8 @@ type RuntimeCheckpointReader struct {
 
 func (r RuntimeCheckpointReader) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.RuntimeCheckpoint, error) {
 	return ownerreadports.ListRuntimeCheckpointsByRunOwnerCommand(ctx, r.Hub, runID)
+}
+
+func (r RunReader) ListCompactByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]runmodel.RunInventoryItem, error) {
+	return ownerreadports.ListCompactRunsByWorkspaceOwnerCommand(ctx, r.Hub, workspaceID)
 }

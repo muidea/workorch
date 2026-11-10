@@ -23,6 +23,13 @@ func runtimeInputViolation(path, actual, required, message string) error {
 }
 
 func runtimeInputViolationAt(path string, err error) error {
+	if joined, ok := err.(*runtimeInputViolations); ok {
+		items := make([]error, 0, len(joined.Items))
+		for _, item := range joined.Items {
+			items = append(items, runtimeInputViolationAt(path, item))
+		}
+		return joinRuntimeInputViolations(items)
+	}
 	var violation *runtimeValidationInputViolation
 	if !errors.As(err, &violation) {
 		return err // Owner-subject defects are not provider-editable rules.
@@ -34,6 +41,13 @@ func runtimeInputViolationAt(path string, err error) error {
 }
 
 func runtimeSemanticInputReviewViolation(proposal RuntimeSemanticProofProposal, index int, err error) error {
+	if joined, ok := err.(*runtimeInputViolations); ok {
+		items := make([]error, 0, len(joined.Items))
+		for _, item := range joined.Items {
+			items = append(items, runtimeSemanticInputReviewViolation(proposal, index, item))
+		}
+		return errors.Join(items...)
+	}
 	var violation *runtimeValidationInputViolation
 	if errors.As(err, &violation) {
 		return runtimeSemanticProposalViolation(proposal, index, "validationInputReview"+violation.Path,
@@ -41,4 +55,21 @@ func runtimeSemanticInputReviewViolation(proposal RuntimeSemanticProofProposal, 
 	}
 	// Owner-authored subject validation is not repaired by changing a report.
 	return fmt.Errorf("runtime input review owner binding: %w", err)
+}
+
+// Complete decodable independent wire constraints are reported together within
+// the existing correction bound. Oversized feedback fails explicitly rather
+// than silently claiming to have returned the complete set.
+type runtimeInputViolations struct{ Items []error }
+
+func (e *runtimeInputViolations) Error() string   { return errors.Join(e.Items...).Error() }
+func (e *runtimeInputViolations) Unwrap() []error { return e.Items }
+func joinRuntimeInputViolations(items []error) error {
+	if len(items) == 0 {
+		return nil
+	}
+	if len(items) == 1 {
+		return items[0]
+	}
+	return &runtimeInputViolations{Items: items}
 }

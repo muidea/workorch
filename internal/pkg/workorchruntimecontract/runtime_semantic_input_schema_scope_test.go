@@ -14,6 +14,7 @@ func TestSemanticInputReviewSchemaUsesExactRequestMembers(t *testing.T) {
 	m, document, _, binding := semanticInputReviewFixture(t)
 	m.CoverageItems = append(m.CoverageItems, RuntimeCoverageItem{ID: "cwi-002", SourceScope: "dodItem", SourceID: "dod-002", TargetText: "another original obligation", Order: 2})
 	var otherHashes []string
+	var otherRefs []string
 	for i := range m.OwnerCatalogs {
 		if m.OwnerCatalogs[i].OwnerModuleID != RuntimeModuleShell {
 			continue
@@ -27,6 +28,8 @@ func TestSemanticInputReviewSchemaUsesExactRequestMembers(t *testing.T) {
 			for j := range other.CheckAttestations {
 				other.CheckAttestations[j].NativeCheckRef = string(id) + "/" + other.CheckAttestations[j].NativeCheckRef
 			}
+			other.InputReview.Files[0].TargetRef = string(id) + "/input.go"
+			otherRefs = append(otherRefs, other.InputReview.Files[0].TargetRef)
 			other.InputReview.Hash = StableRuntimeValidationInputReviewSubjectHash(*other.InputReview, other)
 			otherHashes = append(otherHashes, other.InputReview.Hash)
 			m.OwnerCatalogs[i].ValidationSurfaces[0].ProofRequirementBindings = append(m.OwnerCatalogs[i].ValidationSurfaces[0].ProofRequirementBindings, other)
@@ -39,20 +42,20 @@ func TestSemanticInputReviewSchemaUsesExactRequestMembers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(raw, binding.InputReview.Hash) {
+	if !strings.Contains(raw, binding.InputReview.Files[0].TargetRef) || strings.Contains(raw, `"subjectHash"`) {
 		t.Fatal("current request lost its complete original review rule")
 	}
-	for _, hash := range otherHashes {
+	for _, hash := range otherRefs {
 		if strings.Contains(raw, hash) {
 			t.Fatal("request schema expanded another current or historical CWI review")
 		}
 	}
 	full, err := RuntimeSemanticPlanJSONSchema(m)
-	if err != nil || !strings.Contains(full, otherHashes[0]) || strings.Contains(full, otherHashes[1]) {
+	if err != nil || !strings.Contains(full, otherRefs[0]) || strings.Contains(full, otherRefs[1]) {
 		t.Fatal("full schema does not match complete current manifest membership", err)
 	}
 	otherRequest, err := RuntimeSemanticPlanJSONSchemaForRequest(m, document.PlanStep, "other-batch", 1, []common.CoverageWorkItemID{"cwi-002"})
-	if err != nil || !strings.Contains(otherRequest, otherHashes[0]) || strings.Contains(otherRequest, binding.InputReview.Hash) || strings.Contains(otherRequest, otherHashes[1]) {
+	if err != nil || !strings.Contains(otherRequest, otherRefs[0]) || strings.Contains(otherRequest, binding.InputReview.Files[0].TargetRef) || strings.Contains(otherRequest, otherRefs[1]) {
 		t.Fatal("next request did not select its own complete original review", err)
 	}
 	order, err := RuntimeSemanticPlanJSONSchemaForRequest(m, RuntimeSemanticPlanStepCoverageOrder, "", 0, nil)

@@ -28,10 +28,10 @@ func (m *Biz) queryAuthoringSuccessAudit(ctx context.Context, c workspaceevents.
 	if err := workspaceDeletionRejectsMutation(w); err != nil {
 		return workspaceevents.QueryAuthoringSuccessAuditResult{}, err
 	}
-	if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
+	if err := readWorkspaceAuthoringCommitted(w); err != nil {
 		return workspaceevents.QueryAuthoringSuccessAuditResult{}, err
 	}
-	if w.ID != c.WorkspaceID || w.DefinitionAuthoring == nil || w.DefinitionAuthoring.Validate() != nil || w.ValidateDefinitionAuthoringHistory() != nil {
+	if w.ID != c.WorkspaceID || w.DefinitionAuthoring == nil || w.DefinitionAuthoring.ReadCommittedRecord() != nil || w.ReadCommittedAuthoring() != nil {
 		return workspaceevents.QueryAuthoringSuccessAuditResult{}, common.ErrConflict
 	}
 	records := []*workspace.DefinitionAuthoringRecord{w.DefinitionAuthoring}

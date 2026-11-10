@@ -233,6 +233,19 @@ func (r *blockingRunListRepository) GetRuntimeStateWriteBase(ctx context.Context
 	return r.base.GetRuntimeStateWriteBase(ctx, workspaceID, id)
 }
 
+func (r *blockingRunListRepository) ListInventory(ctx context.Context, workspaceID common.WorkspaceID) ([]runmodel.RunInventoryItem, error) {
+	select {
+	case r.started <- string(workspaceID):
+	default:
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-r.release:
+	}
+	return r.base.ListInventory(ctx, workspaceID)
+}
+
 func (r *blockingRunListRepository) List(ctx context.Context) ([]*runmodel.Run, error) {
 	return r.base.List(ctx)
 }
@@ -1155,12 +1168,12 @@ func TestReadRunSnapshotReadsWorkspaceAndRunScopedEvidenceConcurrently(t *testin
 	release := make(chan struct{})
 	deps := readModelDependencies{
 		workspaces: &blockingWorkspaceRepository{base: baseWorkspaces, started: workspaceStarted, release: release},
-		runs: func() repository.RunRepository {
+		runs: func() readmodelcore.RunReader {
 			repo := memory.NewRunRepository()
 			if err := repo.Create(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); err != nil {
 				t.Fatalf("create run: %v", err)
 			}
-			return repo
+			return runRepositoryTestReader{repo}
 		}(),
 		steps:                 &blockingStepRepository{base: baseSteps, started: stepStarted, release: release},
 		results:               memory.NewResultRepository(),
@@ -1242,7 +1255,7 @@ func TestReadRunSnapshotScopesMemoryRecallTracesByWorkspace(t *testing.T) {
 
 	snapshot, err := readRunSnapshot(ctx, readModelDependencies{
 		workspaces:            workspaceRepo,
-		runs:                  runRepo,
+		runs:                  runRepositoryTestReader{runRepo},
 		steps:                 memory.NewStepRepository(),
 		results:               memory.NewResultRepository(),
 		artifacts:             memory.NewArtifactRepository(),
@@ -1753,7 +1766,7 @@ func TestReadRunSnapshotLoadsCapabilityCatalogOnce(t *testing.T) {
 
 	snapshot, err := readRunSnapshot(ctx, readModelDependencies{
 		workspaces:            workspaceRepo,
-		runs:                  runRepo,
+		runs:                  runRepositoryTestReader{runRepo},
 		steps:                 stepRepo,
 		results:               memory.NewResultRepository(),
 		artifacts:             memory.NewArtifactRepository(),
@@ -4165,7 +4178,7 @@ func TestReadWorkspaceSnapshotIncludesWorkspaceGoalsAndDoDs(t *testing.T) {
 		workspaces:            workspaceRepo,
 		goals:                 goalRepo,
 		dods:                  dodRepo,
-		runs:                  memory.NewRunRepository(),
+		runs:                  runRepositoryTestReader{memory.NewRunRepository()},
 		steps:                 memory.NewStepRepository(),
 		results:               memory.NewResultRepository(),
 		artifacts:             memory.NewArtifactRepository(),
@@ -4217,7 +4230,7 @@ func TestReadWorkspaceSnapshotReadsWorkspaceAndWorkspaceScopedItemsConcurrently(
 	release := make(chan struct{})
 	deps := readModelDependencies{
 		workspaces:            &blockingWorkspaceRepository{base: baseWorkspaces, started: workspaceStarted, release: release},
-		runs:                  &blockingRunListRepository{base: baseRuns, started: runListStarted, release: release},
+		runs:                  runRepositoryTestReader{&blockingRunListRepository{base: baseRuns, started: runListStarted, release: release}},
 		steps:                 memory.NewStepRepository(),
 		results:               memory.NewResultRepository(),
 		artifacts:             memory.NewArtifactRepository(),
@@ -5154,4 +5167,18 @@ func TestMapWorkspaceOutcomeUsesNewerTerminalResultOverStaleRunEvents(t *testing
 	if outcome.Summary != "current rejected result" || outcome.State != "failed" || outcome.Accepted {
 		t.Fatalf("outcome = %+v, want current failed rejected result", outcome)
 	}
+}
+
+func (r *blockingWorkspaceRepository) ListIDs(ctx context.Context) ([]common.WorkspaceID, error) {
+	return r.base.ListIDs(ctx)
+}
+
+type runRepositoryTestReader struct{ repository.RunRepository }
+
+func (r runRepositoryTestReader) ListCompact(ctx context.Context) ([]runmodel.RunInventoryItem, error) {
+	return r.ListCompactByWorkspaceID(ctx, "")
+}
+
+func (r runRepositoryTestReader) ListCompactByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]runmodel.RunInventoryItem, error) {
+	return r.ListInventory(ctx, workspaceID)
 }

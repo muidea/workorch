@@ -254,7 +254,7 @@ type GetWorkspaceCommand struct {
 	WorkspaceID common.WorkspaceID
 }
 
-type ListWorkspacesCommand struct{}
+type ListWorkspacesCommand struct{ IdentityOnly bool }
 
 type GetGoalCommand struct {
 	WorkspaceID common.WorkspaceID

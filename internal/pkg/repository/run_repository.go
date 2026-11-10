@@ -17,6 +17,8 @@ type RunRepository interface {
 	GetByWorkspaceID(context.Context, common.WorkspaceID, common.RunID) (*run.Run, error)
 	GetRuntimeLifecycle(context.Context, common.WorkspaceID, common.RunID) (run.RuntimeLifecycleState, error)
 	GetRuntimeStateWriteBase(context.Context, common.WorkspaceID, common.RunID) (run.RuntimeStateWriteBase, error)
+	// ListInventory projects detached lifecycle facts without cloning execution graphs.
+	ListInventory(context.Context, common.WorkspaceID) ([]run.RunInventoryItem, error)
 	List(context.Context) ([]*run.Run, error)
 	ListByWorkspaceID(context.Context, common.WorkspaceID) ([]*run.Run, error)
 	Update(context.Context, *run.Run) error

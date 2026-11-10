@@ -30,10 +30,24 @@ func ReadWorkspaceByOwnerCommand(ctx context.Context, hub magicevent.Hub, worksp
 }
 
 func ListWorkspacesByOwnerCommand(ctx context.Context, hub magicevent.Hub) ([]*workspacemodel.Workspace, error) {
+	return listWorkspacesByOwnerCommand(ctx, hub, false)
+}
+func ListWorkspaceIDsByOwnerCommand(ctx context.Context, hub magicevent.Hub) ([]common.WorkspaceID, error) {
+	items, err := listWorkspacesByOwnerCommand(ctx, hub, true)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]common.WorkspaceID, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.ID)
+	}
+	return ids, nil
+}
+func listWorkspacesByOwnerCommand(ctx context.Context, hub magicevent.Hub, identityOnly bool) ([]*workspacemodel.Workspace, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	command := workspaceevents.ListWorkspacesCommand{}
+	command := workspaceevents.ListWorkspacesCommand{IdentityOnly: identityOnly}
 	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandList, sourceModule, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	ownerevent.BindLane(event, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceCommandList, "workspace", "all", "", "", "")
 	response, err := ownerevent.WorkspaceOwner[workspaceevents.WorkspaceListResult](hub.Send(event), workspaceevents.TopicWorkspaceCommandList)

@@ -115,3 +115,23 @@ func TestGetRunFromReaderReturnsNotFoundWhenScopedRunMissing(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
+
+func (r *fakeRunReader) ListCompact(ctx context.Context) ([]runmodel.RunInventoryItem, error) {
+	items, err := r.List(ctx)
+	return testRunInventory(items), err
+}
+
+func (r *fakeRunReader) ListCompactByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]runmodel.RunInventoryItem, error) {
+	items, err := r.ListByWorkspaceID(ctx, workspaceID)
+	return testRunInventory(items), err
+}
+
+func testRunInventory(items []*runmodel.Run) []runmodel.RunInventoryItem {
+	ret := make([]runmodel.RunInventoryItem, 0, len(items))
+	for _, item := range items {
+		if item != nil {
+			ret = append(ret, runmodel.InventoryFromRun(item))
+		}
+	}
+	return ret
+}

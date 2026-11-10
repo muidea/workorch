@@ -27,7 +27,7 @@ func configurationDoDItems(w *workspace.Workspace, t *workspace.WorkspaceTemplat
 	}
 	if w.DefinitionAuthoring != nil && w.DefinitionAuthoringConfirmation != nil {
 		record := w.DefinitionAuthoring.Metadata()
-		_, items, _, _, err := workspace.ConfirmedAuthoringAdmissionSourceView(&record, *w.DefinitionAuthoringConfirmation, w.ID)
+		items, err := w.DefinitionAuthoringConfirmation.ReadCommittedItems(&record, w.ID)
 		return items, err
 	}
 	if w.DefinitionAuthoring != nil {

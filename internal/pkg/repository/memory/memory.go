@@ -1858,7 +1858,7 @@ func (r *WorkspaceRepository) Get(_ context.Context, id common.WorkspaceID) (*wo
 	if !ok {
 		return nil, common.ErrNotFound
 	}
-	if err := preparationcompiler.ValidatePreparedPersistence(item); err != nil {
+	if err := preparationcompiler.ReadCommittedPersistence(item); err != nil {
 		return nil, err
 	}
 	return cloneWorkspace(item), nil
@@ -1876,7 +1876,7 @@ func (r *WorkspaceRepository) List(_ context.Context) ([]*workspace.Workspace, e
 
 	ret := make([]*workspace.Workspace, 0, len(ids))
 	for _, id := range ids {
-		if err := preparationcompiler.ValidatePreparedPersistence(r.items[common.WorkspaceID(id)]); err != nil {
+		if err := preparationcompiler.ReadCommittedPersistence(r.items[common.WorkspaceID(id)]); err != nil {
 			return nil, err
 		}
 		ret = append(ret, cloneWorkspace(r.items[common.WorkspaceID(id)]))
@@ -1987,6 +1987,13 @@ func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 			cloned.DefinitionAdmissionCandidates[idx] = item.DefinitionAdmissionCandidates[idx].Clone()
 		}
 	}
+	if item.DefinitionAdmissionResults != nil {
+		cloned.DefinitionAdmissionResults = make([]workspace.DefinitionAdmissionResult, len(item.DefinitionAdmissionResults))
+		for i := range item.DefinitionAdmissionResults {
+			cloned.DefinitionAdmissionResults[i] = item.DefinitionAdmissionResults[i].Clone()
+		}
+	}
+
 	if item.DefinitionAuthoringCreation != nil {
 		creation := item.DefinitionAuthoringCreation.Clone()
 		cloned.DefinitionAuthoringCreation = &creation

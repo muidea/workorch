@@ -183,7 +183,7 @@ func TestValidationInputReviewPayloadHasNoAuthorityEscape(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, payload := range []string{"null", `{}`, `{"subjectHash":"id","checks":null}`,
-		strings.Replace(string(raw), `"subjectHash":`, `"approved":true,"subjectHash":`, 1),
+		strings.Replace(string(raw), `"checks":`, `"approved":true,"checks":`, 1),
 		strings.Replace(string(raw), `"conclusion":`, `"replacementDoD":"pass","conclusion":`, 1)} {
 		if err := validateRuntimeValidationInputReviewPayload("$.validationInputReview", []byte(payload)); err == nil {
 			t.Fatalf("authority field or empty report accepted: %s", payload)

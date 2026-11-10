@@ -11,8 +11,9 @@ import (
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 )
 
-// 同步伪造 raw、mapping、canonical 和审查身份，排除仅由结构/hash 漂移拒绝的假阳性。
-func TestAuthoringReceivingOwnerFencesRecheckCurrentAndHistoryBeforeMutation(t *testing.T) {
+// Completed owner results are immutable at CAS. Coordinated source edits are
+// rejected before publication; subsequent reads consume the original result.
+func TestAuthoringCompletedCurrentAndHistoryRejectRewriteBeforePublication(t *testing.T) {
 	for _, scope := range []string{"current", "history"} {
 		t.Run(scope, func(t *testing.T) {
 			ctx, root := context.Background(), t.TempDir()
@@ -58,53 +59,26 @@ func TestAuthoringReceivingOwnerFencesRecheckCurrentAndHistoryBeforeMutation(t *
 			if err := record.Validate(); err != nil {
 				t.Fatalf("反例必须到达独立封存 Profile 门禁：%v", err)
 			}
-			if err := owners.repositories.Workspaces.CompareAndSwap(ctx, current, current.Revision); err != nil {
-				t.Fatal(err)
-			}
-			owners.close()
-			owners = openFileDefinitionAdmissionOwners(t, root)
-			before, err := owners.repositories.Workspaces.Get(ctx, current.ID)
+			persisted, err := owners.repositories.Workspaces.Get(ctx, current.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			save.ExpectedWorkspaceRevision = before.Revision
-			diagnostic := workspace.NewDefinitionAuthoringPreparationDiagnostic(workspace.DefinitionAuthoringPreparationDiagnostic{WorkspaceID: before.ID, InputHash: before.DefinitionAuthoring.InputHash, TemplateSnapshotHash: before.DefinitionAuthoring.TemplateSnapshotHash, ObservedWorkspaceRevision: before.Revision, Stage: workspace.DefinitionAuthoringPreparationDerivation, TargetRequestID: "derive-preparation-fence", PhaseCode: "render", ProviderBindingHash: "provider"}, []byte("保留原始准备失败\r\n"))
-			prepare := workspaceevents.RecordPreparationDiagnosticCommand{Diagnostic: diagnostic}
-			if save.Validate() != nil || reserve.Validate() != nil || prepare.Validate() != nil {
-				t.Fatal("命令自身必须合法")
+			if validateAuthoringMappingOutcomes(*record) == nil {
+				t.Fatal("offline audit did not expose unaccepted semantic drift")
 			}
-			failing := &failPreparationDiagnosticCASRepository{WorkspaceRepository: owners.workspace.workspaces}
-			owners.workspace.workspaces = failing
-			observation = definitionSpecificationObservation{workspace: before, template: &before.DefinitionAuthoring.TemplateSnapshot}
-			for _, event := range []definitionSpecificationInternalEvent{{WorkspaceID: before.ID, Authoring: &save}, {WorkspaceID: before.ID, DeriveReserve: &reserve}, {WorkspaceID: before.ID, PreparationDiagnostic: &prepare}} {
-				if _, err := reduceDefinitionSpecificationInternalEvent(observation, event); err == nil {
-					t.Fatal("私有 reducer 接受了协调伪造的持久来源")
+			if err := owners.repositories.Workspaces.CompareAndSwap(ctx, current, current.Revision); err == nil {
+				t.Fatal("completed owner result rewritten at CAS")
+			}
+			after, err := owners.repositories.Workspaces.Get(ctx, current.ID)
+			if err != nil || !reflect.DeepEqual(persisted, after) {
+				t.Fatalf("rejected rewrite changed original: %v", err)
+			}
+			owners.close()
+			owners = openFileDefinitionAdmissionOwners(t, root)
+			for range 3 {
+				if _, err := owners.workspace.queryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: current.ID}); err != nil {
+					t.Fatal(err)
 				}
-				if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, event); err == nil {
-					t.Fatal("dispatcher 接受了协调伪造的持久来源")
-				}
-			}
-			if _, _, err := replayDefinitionAuthoringSave(before, save); err == nil {
-				t.Fatal("save 快速重放绕过来源反证")
-			}
-			if _, _, err := replayPreparationDiagnostic(before, prepare); err == nil {
-				t.Fatal("preparation 快速重放绕过来源反证")
-			}
-			if _, err := reduceDefinitionAuthoring(observation, save); err == nil {
-				t.Fatal("直接 save/archive reducer 绕过来源反证")
-			}
-			if _, err := reduceDefinitionDerivation(observation, definitionSpecificationInternalEvent{WorkspaceID: before.ID, DeriveReserve: &reserve}); err == nil {
-				t.Fatal("直接 derivation reducer 绕过来源反证")
-			}
-			if _, err := owners.workspace.observeDefinitionAuthoring(ctx, before.ID); err == nil {
-				t.Fatal("owner load 接受了伪造来源")
-			}
-			if _, err := owners.workspace.queryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: before.ID}); err == nil {
-				t.Fatal("普通查询接受了伪造来源")
-			}
-			after, err := owners.repositories.Workspaces.Get(ctx, before.ID)
-			if err != nil || failing.calls != 0 || !reflect.DeepEqual(before, after) {
-				t.Fatalf("来源拒绝产生 CAS 或改变预算/原文：calls=%d %v", failing.calls, err)
 			}
 		})
 	}

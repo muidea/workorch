@@ -9,7 +9,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
-	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/definitionadmission"
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -28,7 +27,7 @@ func FromOwnerPersistence(w *workspace.Workspace, goal *workspace.Goal, dod *wor
 	if w == nil || goal == nil || dod == nil || w.Revision == 0 || w.DefinitionAuthoringConfirmation == nil || w.DefinitionChangeCandidate != nil || w.Deletion != nil {
 		return ExactConfirmedStartupSnapshot{}, common.ErrConflict
 	}
-	candidate, present, err := w.ValidateActivationAdmissionPersistence()
+	candidate, present, err := w.ReadCommittedActivation()
 	if err != nil || !present || candidate.AuthoringRef == nil || w.ActivationAdmission.State != workspace.WorkspaceActivationEligible {
 		return ExactConfirmedStartupSnapshot{}, common.ErrConflict
 	}
@@ -47,7 +46,7 @@ func FromOwnerPersistence(w *workspace.Workspace, goal *workspace.Goal, dod *wor
 		InternalDirectory: w.InternalDirectory, Candidate: candidate.Clone(), StartupInput: w.StartupInput.Clone(),
 		ActivationAdmission: *w.ActivationAdmission, Goal: *goal, DoD: *workspace.CloneDoD(dod),
 	}
-	_, items, _, _, err := workspace.ConfirmedAuthoringAdmissionSource(w.DefinitionAuthoring, *journal, w.ID)
+	items, err := journal.ReadCommittedItems(w.DefinitionAuthoring, w.ID)
 	if err != nil {
 		return ExactConfirmedStartupSnapshot{}, common.ErrConflict
 	}
@@ -110,12 +109,8 @@ func (s ExactConfirmedStartupSnapshot) Validate() error {
 	if s.Candidate.GoalInput.SourceIdentity != "goal:"+string(s.Goal.ID)+"@"+s.Goal.DefinitionRevision {
 		return fmt.Errorf("%w: exact startup snapshot Goal source mismatch", common.ErrConflict)
 	}
-	// Compile only the already sealed declaration. This pure compiler cannot
-	// create an admission, a ticket, an owner fact or a Run.
-	result, err := definitionadmission.Compile(s.Candidate)
-	if err != nil || result.Disposition != workspace.DefinitionAdmissionAdmittedAllOf {
-		return fmt.Errorf("%w: exact startup snapshot is not complete all_of", common.ErrConflict)
-	}
+	// Admission has already committed all_of. This transport checks source,
+	// content and identity; it must not compile that business conclusion again.
 	if s.SnapshotHash == "" || s.SnapshotHash != s.contentHash() {
 		return fmt.Errorf("%w: exact startup snapshot content hash mismatch", common.ErrConflict)
 	}

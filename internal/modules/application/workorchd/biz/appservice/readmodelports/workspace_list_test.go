@@ -24,8 +24,9 @@ func (fn workspaceListWorkspaceReaderFunc) List(ctx context.Context) ([]*workspa
 
 type workspaceListRunReaderFunc func(context.Context) ([]*runmodel.Run, error)
 
-func (fn workspaceListRunReaderFunc) List(ctx context.Context) ([]*runmodel.Run, error) {
-	return fn(ctx)
+func (fn workspaceListRunReaderFunc) ListCompact(ctx context.Context) ([]runmodel.RunInventoryItem, error) {
+	items, err := fn(ctx)
+	return testRunInventory(items), err
 }
 
 type workspaceListResultReaderFunc func(context.Context, common.WorkspaceID) ([]*resultmodel.Result, error)
@@ -98,4 +99,14 @@ func TestListProjectedWorkspacesUsesLatestRunProjection(t *testing.T) {
 	if _, ok := reflect.TypeOf(items[0]).FieldByName("BlockingTicketID"); ok {
 		t.Fatal("workspace list projection must not expose a Run-owned blocker")
 	}
+}
+
+func testRunInventory(items []*runmodel.Run) []runmodel.RunInventoryItem {
+	ret := make([]runmodel.RunInventoryItem, 0, len(items))
+	for _, item := range items {
+		if item != nil {
+			ret = append(ret, runmodel.InventoryFromRun(item))
+		}
+	}
+	return ret
 }

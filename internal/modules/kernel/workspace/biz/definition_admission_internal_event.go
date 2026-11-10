@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 
 	definitionadmission "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/definitionadmission"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
@@ -98,7 +99,7 @@ func reduceDefinitionAdmissionInternalEvent(current *workspacemodel.Workspace, e
 		if event.Intent.ExpectedConfigurationHash == "" || event.Intent.ExpectedConfigurationHash != workspacemodel.WorkspaceConfigurationHash(current) {
 			return definitionAdmissionTransition{}, fmt.Errorf("%w: Workspace configuration changed during admission", common.ErrConflict)
 		}
-	} else if _, _, err := current.ValidateActivationAdmissionPersistence(); err != nil {
+	} else if _, _, err := current.ReadCommittedActivation(); err != nil {
 		return definitionAdmissionTransition{}, fmt.Errorf("%w: invalid current definition admission: %v", common.ErrConflict, err)
 	}
 	transition, err := reduceDefinitionAdmissionIntent(current, *event.Intent)
@@ -115,14 +116,14 @@ func reduceDefinitionAdmissionInternalEvent(current *workspacemodel.Workspace, e
 
 func reduceConfirmedAuthoringAdmission(current *workspacemodel.Workspace, command workspaceevents.AdmitDefinitionAuthoringCommand) (definitionAdmissionTransition, error) {
 	candidate := command.Candidate.Clone()
-	admission, err := definitionadmission.Compile(candidate)
+	admission, err := admitOrReadDefinitionCandidate(current, candidate)
 	if err != nil {
 		return definitionAdmissionTransition{}, err
 	}
-	if current.ValidateDefinitionAuthoringHistory() != nil || len(current.DefinitionAdmissionCandidates) > len(current.DefinitionAuthoringHistory)+1 || candidate.CandidateRevision != uint64(len(current.DefinitionAuthoringHistory)+1) {
+	if current.ReadCommittedAuthoring() != nil || len(current.DefinitionAdmissionCandidates) > len(current.DefinitionAuthoringHistory)+1 || candidate.CandidateRevision != uint64(len(current.DefinitionAuthoringHistory)+1) {
 		return definitionAdmissionTransition{}, common.ErrConflict
 	}
-	if _, _, err := current.ValidateActivationAdmissionPersistence(); err != nil {
+	if _, _, err := current.ReadCommittedActivation(); err != nil {
 		return definitionAdmissionTransition{}, common.ErrConflict
 	}
 	prior := outstandingPreSealDefinitionClarification(current, candidate)
@@ -145,6 +146,7 @@ func reduceConfirmedAuthoringAdmission(current *workspacemodel.Workspace, comman
 	changed := !stored
 	if changed {
 		next.DefinitionAdmissionCandidates = append(cloneDefinitionAdmissionCandidates(current.DefinitionAdmissionCandidates), candidate.Clone())
+		next.DefinitionAdmissionResults = appendDefinitionAdmissionResult(current.DefinitionAdmissionResults, admission)
 	}
 	if admission.Disposition == workspacemodel.DefinitionAdmissionClarificationRequired {
 		if index > 0 && prior == nil || command.ClarificationTicket != nil || command.ClarificationResolution != nil || current.StartupInput != nil || current.ActivationAdmission != nil {
@@ -264,7 +266,7 @@ func validateArchivedAdmissionIdentity(current *workspacemodel.Workspace) error 
 	if a.State != workspacemodel.WorkspaceActivationEligible {
 		// An unresolved ticket remains an active owner obligation. It cannot be
 		// treated as settled archive or silently cleared by a configuration edit.
-		if _, _, err := current.ValidateActivationAdmissionPersistence(); err != nil {
+		if _, _, err := current.ReadCommittedActivation(); err != nil {
 			return common.ErrConflict
 		}
 	}
@@ -273,14 +275,18 @@ func validateArchivedAdmissionIdentity(current *workspacemodel.Workspace) error 
 
 func reduceDefinitionAdmissionIntent(current *workspacemodel.Workspace, command workspaceevents.DefinitionAdmissionIntentCommand) (definitionAdmissionTransition, error) {
 	candidate := command.Candidate
-	admissionResult, err := definitionadmission.Compile(candidate)
+	admissionResult, err := admitOrReadDefinitionCandidate(current, candidate)
 	if err != nil {
-		return definitionAdmissionTransition{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
+		return definitionAdmissionTransition{}, err
 	}
 	next, candidateDisposition, candidateChanged, err := persistDefinitionAdmissionCandidate(current, command)
 	if err != nil {
 		return definitionAdmissionTransition{}, err
 	}
+	if candidateChanged {
+		next.DefinitionAdmissionResults = appendDefinitionAdmissionResult(current.DefinitionAdmissionResults, admissionResult)
+	}
+
 	stored, isCurrent := currentDefinitionAdmissionCandidate(next.DefinitionAdmissionCandidates, candidate.CandidateID)
 	if stored == nil || !isCurrent || stored.CandidateRevision != candidate.CandidateRevision || stored.CandidateHash != candidate.CandidateHash {
 		return definitionAdmissionTransition{}, common.ErrConflict
@@ -471,7 +477,7 @@ func definitionClarificationAfterBaseline(current *workspacemodel.Workspace, can
 		if existing.CandidateID != candidate.CandidateID || existing.CandidateRevision <= eligibleBaseline || existing.CandidateRevision >= candidate.CandidateRevision || (selected != nil && existing.CandidateRevision <= selected.Candidate.CandidateRevision) {
 			continue
 		}
-		admission, err := definitionadmission.Compile(existing)
+		admission, err := current.ReadDefinitionAdmissionResult(existing)
 		if err != nil || admission.Disposition != workspacemodel.DefinitionAdmissionClarificationRequired {
 			continue
 		}
@@ -620,4 +626,29 @@ func (m *Biz) submitDefinitionAdmissionInternalEvent(ctx context.Context, event 
 		return transition, nil
 	}
 	return definitionAdmissionTransition{}, common.ErrConflict
+}
+
+func appendDefinitionAdmissionResult(prior []workspacemodel.DefinitionAdmissionResult, r workspacemodel.DefinitionAdmissionResult) []workspacemodel.DefinitionAdmissionResult {
+	out := make([]workspacemodel.DefinitionAdmissionResult, 0, len(prior)+1)
+	for _, v := range prior {
+		out = append(out, v.Clone())
+	}
+	return append(out, r.Clone())
+}
+
+// Only a new candidate is adjudicated. Reconciliation, ticket delivery and
+// duplicate admission consume the original owner result with the same source.
+func admitOrReadDefinitionCandidate(current *workspacemodel.Workspace, candidate workspacemodel.DefinitionAdmissionCandidate) (workspacemodel.DefinitionAdmissionResult, error) {
+	if current == nil {
+		return workspacemodel.DefinitionAdmissionResult{}, common.ErrConflict
+	}
+	for _, stored := range current.DefinitionAdmissionCandidates {
+		if stored.CandidateID == candidate.CandidateID && stored.CandidateRevision == candidate.CandidateRevision {
+			if !reflect.DeepEqual(stored, candidate) {
+				return workspacemodel.DefinitionAdmissionResult{}, common.ErrConflict
+			}
+			return current.ReadDefinitionAdmissionResult(stored)
+		}
+	}
+	return definitionadmission.Compile(candidate)
 }

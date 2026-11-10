@@ -2,7 +2,6 @@ package events
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
 
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -131,6 +130,9 @@ func (r QueryDefinitionAuthoringResult) ValidateFor(c QueryDefinitionAuthoringCo
 			return err
 		}
 		record = &model
+		if record.ReadCommittedView() != nil {
+			return common.ErrConflict
+		}
 	}
 	history, err := AuthoringHistoryModels(r.History)
 	if err != nil {
@@ -139,9 +141,6 @@ func (r QueryDefinitionAuthoringResult) ValidateFor(c QueryDefinitionAuthoringCo
 	if (&workspace.Workspace{ID: c.WorkspaceID, Revision: r.WorkspaceRevision, DefinitionAuthoring: record, DefinitionAuthoringHistory: history}).ValidatePreparationDiagnosticHistoryView() != nil {
 		return common.ErrConflict
 	}
-	var goal workspace.DefinitionCandidateItem
-	var dod []workspace.DefinitionCandidateItem
-	var spec workspace.GoalSpecification
 	var ref workspace.DefinitionAuthoringAdmissionRef
 	if r.Confirmation != nil {
 		sequence := r.Confirmation.FormalSequence
@@ -151,17 +150,13 @@ func (r QueryDefinitionAuthoringResult) ValidateFor(c QueryDefinitionAuthoringCo
 		if sequence != uint64(len(r.History)+1) {
 			return fmt.Errorf("authoring query confirmation lacks exact history sequence")
 		}
-		if r.AdmissionCandidate != nil {
-			var err error
-			goal, dod, spec, ref, err = workspace.ConfirmedAuthoringAdmissionSourceView(record, *r.Confirmation, c.WorkspaceID)
-			if err != nil {
-				return fmt.Errorf("authoring query confirmation lacks exact record: %w", err)
-			}
-		} else if r.Confirmation.ValidateView(record, c.WorkspaceID) != nil {
-			return fmt.Errorf("authoring query confirmation lacks exact record")
+
+		if r.Confirmation.ReadCommitted(record, c.WorkspaceID) != nil {
+			return fmt.Errorf("authoring query confirmation lacks exact committed source")
 		}
+		ref = workspace.DefinitionAuthoringAdmissionRef{InputHash: r.Confirmation.InputHash, DerivationPermitID: r.Confirmation.DerivationPermitID, ProposalHash: r.Confirmation.ProposalHash, SpecificationHash: r.Confirmation.SpecificationHash}
 	} else if r.Record != nil {
-		if err := record.ValidateView(); err != nil {
+		if err := record.ReadCommittedView(); err != nil {
 			return err
 		}
 	}
@@ -171,7 +166,10 @@ func (r QueryDefinitionAuthoringResult) ValidateFor(c QueryDefinitionAuthoringCo
 		}
 		previousRevision := uint64(0)
 		for index, archived := range history {
-			if archived.Record.Input.Revision <= previousRevision || archived.Confirmation.Phase != workspace.DefinitionAuthoringConfirmationMaterialized || archived.Confirmation.ValidateView(&archived.Record, c.WorkspaceID) != nil {
+			if archived.Record.ReadCommittedView() != nil {
+				return common.ErrConflict
+			}
+			if archived.Record.Input.Revision <= previousRevision || archived.Confirmation.Phase != workspace.DefinitionAuthoringConfirmationMaterialized || archived.Confirmation.ReadCommitted(&archived.Record, c.WorkspaceID) != nil {
 				return fmt.Errorf("authoring query history is invalid")
 			}
 			previousRevision = archived.Record.Input.Revision
@@ -192,7 +190,7 @@ func (r QueryDefinitionAuthoringResult) ValidateFor(c QueryDefinitionAuthoringCo
 		}
 	}
 	if r.AdmissionCandidate != nil {
-		if r.Confirmation == nil || r.Confirmation.Phase != workspace.DefinitionAuthoringConfirmationMaterialized || r.AdmissionCandidate.Validate() != nil || r.AdmissionCandidate.AuthoringRef == nil || r.AdmissionCandidate.WorkspaceID != c.WorkspaceID || r.AdmissionResult == nil || r.AdmissionResult.ValidateFor(*r.AdmissionCandidate) != nil {
+		if r.Confirmation == nil || r.Confirmation.Phase != workspace.DefinitionAuthoringConfirmationMaterialized || r.AdmissionCandidate.AuthoringRef == nil || r.AdmissionCandidate.WorkspaceID != c.WorkspaceID || r.AdmissionResult == nil || r.AdmissionResult.ValidateBinding(*r.AdmissionCandidate) != nil {
 			return fmt.Errorf("authoring query admission lacks reviewed source")
 		}
 		if r.ActivationAdmission == nil && r.AdmissionResult.Disposition != workspace.DefinitionAdmissionClarificationRequired && r.PriorClarification == nil {
@@ -207,8 +205,9 @@ func (r QueryDefinitionAuthoringResult) ValidateFor(c QueryDefinitionAuthoringCo
 		if *r.AdmissionCandidate.AuthoringRef != ref {
 			return fmt.Errorf("authoring query admission source mismatch")
 		}
-		if r.AdmissionCandidate.GoalInput != goal || !reflect.DeepEqual(r.AdmissionCandidate.DoDInputs, workspace.DefinitionAdmissionCandidate{DoDInputs: dod}.Normalized().DoDInputs) || r.AdmissionCandidate.Specification == nil || !reflect.DeepEqual(r.AdmissionCandidate.Specification.Normalized(), spec.Normalized()) {
-			return fmt.Errorf("authoring query admission reviews mismatch")
+
+		if r.AdmissionCandidate.GoalInput.Text != r.Confirmation.Goal.Text || r.AdmissionCandidate.Specification == nil || r.AdmissionCandidate.Specification.AdmissionHash() != r.Confirmation.SpecificationHash {
+			return fmt.Errorf("authoring query admission differs from committed definition")
 		}
 		if r.ActivationAdmission != nil && (r.AdmissionResult.Disposition != workspace.DefinitionAdmissionAdmittedAllOf || r.ActivationAdmission.CandidateHash != r.AdmissionCandidate.CandidateHash || r.ActivationAdmission.State != workspace.WorkspaceActivationEligible && r.ActivationAdmission.State != workspace.WorkspaceActivationPendingClarificationResolution || r.ActivationAdmission.State == workspace.WorkspaceActivationPendingClarificationResolution && r.PriorClarification == nil) {
 			return fmt.Errorf("authoring query admission has invalid activation")

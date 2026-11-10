@@ -46,6 +46,11 @@ func (p DefinitionDerivedAcceptance) CandidateItems(input DefinitionAuthoringInp
 	if err := p.ValidateFor(input, template); err != nil {
 		return nil, err
 	}
+	return p.candidateItems(input, template), nil
+}
+
+// Pure representation projection shared by new admission and committed consumers.
+func (p DefinitionDerivedAcceptance) candidateItems(input DefinitionAuthoringInput, template *WorkspaceTemplate) []DefinitionCandidateItem {
 	items := make([]DefinitionCandidateItem, 0, len(input.AcceptanceRequirements)+len(template.DoDItems)+len(p.AdditionalItems))
 	appendItems := func(kind, source string, texts []string) {
 		for n, text := range texts {
@@ -55,7 +60,7 @@ func (p DefinitionDerivedAcceptance) CandidateItems(input DefinitionAuthoringInp
 	appendItems("user", input.InputHash(), input.AcceptanceRequirements)
 	appendItems("template", p.TemplateSnapshotHash, template.DoDItems)
 	appendItems("generated", p.ContentHash(), p.AdditionalItems)
-	return items, nil
+	return items
 }
 
 func (p DefinitionDerivedAcceptance) ContentHash() string {

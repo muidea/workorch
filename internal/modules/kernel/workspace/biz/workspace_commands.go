@@ -68,8 +68,20 @@ func (m *Biz) getWorkspace(ctx context.Context, ev magicevent.Event) (workspaceC
 }
 
 func (m *Biz) listWorkspaces(ctx context.Context, ev magicevent.Event) (workspaceCommandResponse, error) {
-	if _, ok := ev.Data().(workspaceevents.ListWorkspacesCommand); !ok || m.workspaces == nil {
+	cmd, ok := ev.Data().(workspaceevents.ListWorkspacesCommand)
+	if !ok || m.workspaces == nil {
 		return workspaceCommandResponse{}, common.ErrInvalidArgument
+	}
+	if cmd.IdentityOnly {
+		ids, err := m.workspaces.ListIDs(ctx)
+		if err != nil {
+			return workspaceCommandResponse{}, err
+		}
+		items := make([]*workspaceevents.Workspace, 0, len(ids))
+		for _, id := range ids {
+			items = append(items, &workspaceevents.Workspace{ID: id})
+		}
+		return workspaceCommandResponse{Workspaces: items}, nil
 	}
 	items, err := m.workspaces.List(ctx)
 	if err != nil {
@@ -93,23 +105,6 @@ func workspaceDTOWithAuthoringSummary(item *workspacemodel.Workspace) *workspace
 		return dto
 	}
 	state, failurePhase, failureCode, reviewCount := item.DefinitionAuthoring.CurrentAuthoringSummary()
-	if state == "reviewed" {
-		// 列表与详情使用同一封存 Profile 边界；六审 PASS 不证明自报绑定适用。
-		state = "review_blocked"
-		for _, request := range item.DefinitionAuthoring.SpecificationRequests {
-			if request.Proposal == nil {
-				continue
-			}
-			derivation, specification, err := item.DefinitionAuthoring.ConfirmableSpecification(request.DerivationPermitID, request.Proposal.ContentHash())
-			if err != nil {
-				continue
-			}
-			if validateAuthoringVerificationAgainstSealedTemplate(item.DefinitionAuthoring.TemplateSnapshotHash, derivation, specification) == nil {
-				state = "reviewed"
-			}
-			break
-		}
-	}
 	if state == "" {
 		return dto
 	}

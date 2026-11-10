@@ -138,12 +138,7 @@ func TestAuthoringSpecificationConcurrentReserveUsesOneFreshPermit(t *testing.T)
 			ctx := context.Background()
 			owners := openFileDefinitionAdmissionOwners(t, t.TempDir())
 			defer owners.close()
-			confirmation := seedReviewedAuthoringConfirmation(t, owners, "ws-reserve-competition")
-			fixture, fixtureErr := owners.repositories.Workspaces.Get(ctx, confirmation.WorkspaceID)
-			if fixtureErr != nil {
-				t.Fatal(fixtureErr)
-			}
-			resetUnreservedSpecificationFixture(t, owners, fixture, kind)
+			confirmation := seedReviewedAuthoringConfirmationWithTemplate(t, owners, "ws-reserve-competition", true, true, "*", "dodItem", nil, unreservedSpecificationFixture(kind, nil))
 			cmd := workspaceevents.ReserveAuthoringSpecificationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, func() string {
 				if kind == "" {
 					return "proposal"
@@ -218,19 +213,12 @@ func TestAuthoringRevisionFencesHistoricalSpecificationCompletion(t *testing.T) 
 			ctx := context.Background()
 			owners := openFileDefinitionAdmissionOwners(t, t.TempDir())
 			defer owners.close()
-			reviewed := seedReviewedAuthoringConfirmation(t, owners, "ws-spec-completion")
+			var proposal workspace.GoalSpecification
+			reviewed := seedReviewedAuthoringConfirmationWithTemplate(t, owners, "ws-spec-completion", true, true, "*", "dodItem", nil, unreservedSpecificationFixture(kind, &proposal))
 			current, err := owners.repositories.Workspaces.Get(ctx, reviewed.WorkspaceID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			var proposal workspace.GoalSpecification
-			for _, item := range current.DefinitionAuthoring.SpecificationRequests {
-				if item.Proposal != nil {
-					proposal = item.Proposal.Clone()
-					break
-				}
-			}
-			resetUnreservedSpecificationFixture(t, owners, current, kind)
 			cmd := workspaceevents.ReserveAuthoringSpecificationCommand{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, func() string {
 				if kind == "" {
 					return "proposal"

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -216,4 +217,94 @@ func inputReviewProposalIndex(t *testing.T, document RuntimeSemanticPlanDocument
 	}
 	t.Fatal("fixture lacks review")
 	return -1
+}
+
+func TestInputReviewWireDerivesFrozenIdentityAndOrdersDetachedSets(t *testing.T) {
+	binding, report := diagnosticSourceReviewFixture(t)
+	// Select two exact files in opposite wire order. The provider selects a set;
+	// the compiler alone owns canonical internal representation.
+	extra := RuntimeValidationInputReviewFile{TargetRef: "zz-second-input", Content: "original body", ContentHash: RuntimeValidationInputContentHash("original body")}
+	binding.InputReview.Files = append(binding.InputReview.Files, extra)
+	binding.InputReview.Hash = StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, binding)
+	report.SubjectHash = binding.InputReview.Hash
+	for i := range report.Checks {
+		report.Checks[i].Obligations[0].InputTargetRefs = []string{binding.InputReview.Files[0].TargetRef, extra.TargetRef}
+		report.Checks[i].InputTargetRefs = slices.Clone(report.Checks[i].Obligations[0].InputTargetRefs)
+	}
+	p := RuntimeSemanticProofProposal{OwnerModuleID: "owner", OperationKind: "operation", CoverageWorkItemID: binding.CoverageWorkItemID, DeclarationRef: binding.DeclarationRef, ValidationRecipeID: binding.ValidationRecipeID, RequiredEvidenceKinds: []string{EvidenceKindValidation}}
+	catalogs := []RuntimeOperationAdmissibility{{OwnerModuleID: p.OwnerModuleID, ValidationSurfaces: []RuntimeValidationSurface{{ID: p.ValidationRecipeID, OperationKind: p.OperationKind, ProofRequirementBindings: []RuntimeValidationProofRequirementBinding{binding}}}}}
+	wire, err := runtimeValidationInputReviewToWire(&report, p, catalogs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range wire.Checks {
+		slices.Reverse(wire.Checks[i].Obligations[0].InputTargetRefs)
+	}
+	before, _ := json.Marshal(wire)
+	compiled, err := wire.compile(p, catalogs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := compiled.ValidateAgainstBinding(binding); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(report, *compiled) {
+		t.Fatalf("compiler did not derive exact frozen identity and set order: want=%#v got=%#v", report, *compiled)
+	}
+	after, _ := json.Marshal(wire)
+	if string(before) != string(after) {
+		t.Fatal("compiler changed original provider projection")
+	}
+	if strings.Contains(string(before), "subjectHash") || strings.Contains(string(before), "sourceRef") {
+		t.Fatal("provider redundantly copies owner identity")
+	}
+	foreign := binding.Clone()
+	foreign.InputReview.Files[0].Content += "changed"
+	foreign.InputReview.Files[0].ContentHash = RuntimeValidationInputContentHash(foreign.InputReview.Files[0].Content)
+	foreign.InputReview.Hash = StableRuntimeValidationInputReviewSubjectHash(*foreign.InputReview, foreign)
+	if compiled.ValidateAgainstBinding(foreign) == nil {
+		t.Fatal("report crossed frozen subject")
+	}
+	for _, conclusion := range []string{RuntimeValidationInputConflict, RuntimeValidationInputInconclusive} {
+		changed := compiled.Clone()
+		changed.DiagnosticSources[0].Conclusion = conclusion
+		if changed.ValidateAgainstBinding(binding) != nil || RuntimeValidationInputReviewConclusion(changed) != conclusion {
+			t.Fatal("structural compilation upgraded semantic result")
+		}
+	}
+}
+
+func TestInputReviewWireReportsIndependentMalformedSetsAndSourceIndexes(t *testing.T) {
+	binding, report := diagnosticSourceReviewFixture(t)
+	wire := inputReviewWireForBinding(t, binding, report)
+	// Convert through the same strict typed wire used by provider admission.
+	raw, _ := json.Marshal(wire)
+	var payload runtimeValidationInputReviewPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	payload.Checks[0].Obligations[0].InputTargetRefs = []string{"duplicate", "duplicate"}
+	payload.Checks[0].Obligations[0].ProofConsumerRefs = []string{" padded "}
+	badIndex := 99
+	payload.DiagnosticSources[0].SourceIndex = &badIndex
+	p := RuntimeSemanticProofProposal{OwnerModuleID: "owner", OperationKind: "operation", CoverageWorkItemID: binding.CoverageWorkItemID, DeclarationRef: binding.DeclarationRef, ValidationRecipeID: binding.ValidationRecipeID, RequiredEvidenceKinds: []string{EvidenceKindValidation}}
+	catalogs := []RuntimeOperationAdmissibility{{OwnerModuleID: p.OwnerModuleID, ValidationSurfaces: []RuntimeValidationSurface{{ID: p.ValidationRecipeID, OperationKind: p.OperationKind, ProofRequirementBindings: []RuntimeValidationProofRequirementBinding{binding}}}}}
+	_, err := payload.compile(p, catalogs)
+	violations, ok := err.(*runtimeInputViolations)
+	if !ok || len(violations.Items) != 3 {
+		t.Fatalf("independent violations = %v", err)
+	}
+	paths := []string{}
+	for _, item := range violations.Items {
+		paths = append(paths, item.(*runtimeValidationInputViolation).Path)
+	}
+	for _, suffix := range []string{".inputTargetRefs", ".proofConsumerRefs", ".sourceIndex"} {
+		found := false
+		for _, path := range paths {
+			found = found || strings.HasSuffix(path, suffix)
+		}
+		if !found {
+			t.Fatalf("missing correction for %s: %v", suffix, paths)
+		}
+	}
 }

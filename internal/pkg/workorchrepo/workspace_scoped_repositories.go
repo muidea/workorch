@@ -1517,7 +1517,7 @@ func (r *workspaceScopedWorkspaceRepository) Get(ctx context.Context, id common.
 	return r.completeCreationPersistence(ctx, path, item)
 }
 
-func (r *workspaceScopedWorkspaceRepository) List(ctx context.Context) ([]*workspacemodel.Workspace, error) {
+func (r *workspaceScopedWorkspaceRepository) readWorkspaceIndex(ctx context.Context) ([]workspaceIndexEntry, error) {
 	entries, err := r.store.listWorkspaceIndexEntries()
 	if err != nil {
 		return nil, err
@@ -1553,6 +1553,42 @@ func (r *workspaceScopedWorkspaceRepository) List(ctx context.Context) ([]*works
 		}
 	}
 	entries, err = r.store.listWorkspaceIndexEntries()
+	if err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func (r *workspaceScopedWorkspaceRepository) ListIDs(ctx context.Context) ([]common.WorkspaceID, error) {
+	entries, err := r.readWorkspaceIndex(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]common.WorkspaceID, 0, len(entries))
+	for _, entry := range entries {
+		if entry.WorkspaceID == "" {
+			continue
+		}
+		ids, err := r.store.workspaceRepo(filepath.Join(r.store.workspaceRoot(entry.WorkspaceID), workspaceScopedWorkspaceFile)).ListIDs(ctx)
+		if errors.Is(err, common.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range ids {
+			if id != entry.WorkspaceID {
+				return nil, common.ErrConflict
+			}
+			ret = append(ret, id)
+		}
+	}
+	sort.Slice(ret, func(i, j int) bool { return ret[i] < ret[j] })
+	return ret, nil
+}
+
+func (r *workspaceScopedWorkspaceRepository) List(ctx context.Context) ([]*workspacemodel.Workspace, error) {
+	entries, err := r.readWorkspaceIndex(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2278,6 +2314,28 @@ func (r *workspaceScopedRunRepository) GetByWorkspaceID(ctx context.Context, wor
 		return nil, common.ErrInvalidArgument
 	}
 	return r.store.runRepo(r.store.runPath(r.store.runRoot(workspaceID, id), workspaceScopedRunFile)).GetByWorkspaceID(ctx, workspaceID, id)
+}
+
+func (r *workspaceScopedRunRepository) ListInventory(ctx context.Context, workspaceID common.WorkspaceID) ([]runmodel.RunInventoryItem, error) {
+	ret := []runmodel.RunInventoryItem{}
+	roots := r.store.allRunRoots()
+	if workspaceID != "" {
+		roots = r.store.workspaceRunRoots(workspaceID)
+	}
+	for _, root := range roots {
+		items, err := r.store.runRepo(r.store.runPath(root, workspaceScopedRunFile)).ListInventory(ctx, workspaceID)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, items...)
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		if ret[i].WorkspaceID != ret[j].WorkspaceID {
+			return ret[i].WorkspaceID < ret[j].WorkspaceID
+		}
+		return ret[i].ID < ret[j].ID
+	})
+	return ret, nil
 }
 
 func (r *workspaceScopedRunRepository) List(ctx context.Context) ([]*runmodel.Run, error) {

@@ -312,11 +312,12 @@ func (r RuntimeValidationInputReview) ValidateAgainstBinding(b RuntimeValidation
 	if err := b.InputReview.ValidateAgainstBinding(b); err != nil {
 		return err
 	}
+	var violations []error
 	if err := validateRuntimeDiagnosticSourceReview(r, *b.InputReview); err != nil {
-		return err
+		violations = append(violations, err)
 	}
 	if len(r.Checks) != len(b.RequiredCheckRefs) {
-		return runtimeInputViolation(".checks", "incomplete_check_set", "exactly one check for every selected binding.requiredCheckRefs", "validation input review must cover every original required check")
+		violations = append(violations, runtimeInputViolation(".checks", "incomplete_check_set", "exactly one check for every selected binding.requiredCheckRefs", "validation input review must cover every original required check"))
 	}
 	seen := make(map[string]bool, len(r.Checks))
 	for index, check := range r.Checks {
@@ -324,26 +325,26 @@ func (r RuntimeValidationInputReview) ValidateAgainstBinding(b RuntimeValidation
 		if !containsString(b.RequiredCheckRefs, check.RequiredCheckRef) || seen[check.RequiredCheckRef] ||
 			check.Reason != strings.TrimSpace(check.Reason) || check.Reason == "" || !utf8.ValidString(check.Reason) ||
 			len(check.Reason) > RuntimeValidationInputReviewMaxReasonBytes {
-			return runtimeInputViolation(path, "invalid_check_identity_or_reason", "unique declared requiredCheckRef and nonempty bounded UTF-8 reason without surrounding whitespace", "validation input review has missing, duplicate or invalid per-check reasoning")
+			violations = append(violations, runtimeInputViolation(path, "invalid_check_identity_or_reason", "unique declared requiredCheckRef and nonempty bounded UTF-8 reason without surrounding whitespace", "validation input review has missing, duplicate or invalid per-check reasoning"))
 		}
 		seen[check.RequiredCheckRef] = true
 		switch check.Conclusion {
 		case RuntimeValidationInputConsistent, RuntimeValidationInputConflict, RuntimeValidationInputInconclusive:
 		default:
-			return runtimeInputViolation(path+".conclusion", "unsupported_conclusion", "consistent | conflict | inconclusive", "validation input review has an unsupported conclusion")
+			violations = append(violations, runtimeInputViolation(path+".conclusion", "unsupported_conclusion", "consistent | conflict | inconclusive", "validation input review has an unsupported conclusion"))
 		}
 		if err := validateRuntimeInputReviewUncertainty(path, check.Conclusion, check.UncertaintyKind, *b.InputReview); err != nil {
-			return err
+			violations = append(violations, err)
 		}
 		if err := validateRuntimeInputDependencies(check); err != nil {
-			return runtimeInputViolationAt(path, err)
+			violations = append(violations, runtimeInputViolationAt(path, err))
 		}
 		if err := validateRuntimeValidationInputObligations(check); err != nil {
-			return runtimeInputViolationAt(path, err)
+			violations = append(violations, runtimeInputViolationAt(path, err))
 		}
 		refs := normalizeStrings(check.InputTargetRefs)
 		if len(refs) == 0 || !reflect.DeepEqual(refs, check.InputTargetRefs) {
-			return runtimeInputViolation(path+".inputTargetRefs", "noncanonical_input_refs", "nonempty sorted unique owner-observed input refs", "validation input review requires canonical exact input references for every check")
+			violations = append(violations, runtimeInputViolation(path+".inputTargetRefs", "noncanonical_input_refs", "nonempty sorted unique owner-observed input refs", "validation input review requires canonical exact input references for every check"))
 		}
 		for _, ref := range refs {
 			idx := sort.Search(len(b.InputReview.Files), func(i int) bool { return b.InputReview.Files[i].TargetRef >= ref })
@@ -357,12 +358,12 @@ func (r RuntimeValidationInputReview) ValidateAgainstBinding(b RuntimeValidation
 						break
 					}
 				}
-				return runtimeInputViolation(fieldPath, "unobserved_input_ref", "target refs from selected input-review subject.files only", "validation input review references an unobserved input")
+				violations = append(violations, runtimeInputViolation(fieldPath, "unobserved_input_ref", "target refs from selected input-review subject.files only", "validation input review references an unobserved input"))
 			}
 		}
 
 		if err := validateRuntimeValidationCompositionCheck(check, *b.InputReview); err != nil {
-			return runtimeInputViolationAt(path, err)
+			violations = append(violations, runtimeInputViolationAt(path, err))
 		}
 	}
 	// Every current report observes the same explicit capacity bound.
@@ -370,10 +371,10 @@ func (r RuntimeValidationInputReview) ValidateAgainstBinding(b RuntimeValidation
 	encoded, err := json.Marshal(r)
 	_, _, maxReport := RuntimeValidationInputReviewBounds(*b.InputReview)
 	if err != nil || len(encoded) > maxReport {
-		return runtimeInputViolation("", "report_capacity_exceeded", fmt.Sprintf("complete report within %d bytes", maxReport), "validation input review report capacity exceeded")
+		violations = append(violations, runtimeInputViolation("", "report_capacity_exceeded", fmt.Sprintf("complete report within %d bytes", maxReport), "validation input review report capacity exceeded"))
 	}
 
-	return nil
+	return joinRuntimeInputViolations(violations)
 }
 
 // RuntimeValidationInputReviewConclusion only summarizes already validated

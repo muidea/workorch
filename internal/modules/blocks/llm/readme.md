@@ -166,7 +166,7 @@ miss/fresh/TTL/LKG、未完 refresh、配置轮换、完整性/隔离、生命�
   subject 可声明有界 `ScopeContractRef + ScopeRequirements`，描述 owner 实际执行/观测范围；它随 subject hash 封存并
   完整放入 C3，不能由 recipe 名推测更广的验证范围。缺省保持旧请求；范围变动不能复用旧报告。
   显式 `validation/diagnostic-source-review/v1` 在当前 subject 的 C3 额外完整投影逐 native source identity 与输入来源；
-  provider 必须对每个 `sourceRef` 独立报告结论、reason/input refs。它是与原准则一致的附加项目约束评审，
+  provider 必须按 frozen diagnosticSources 中每个 sourceIndex 独立报告结论、reason 和适用 supporting input refs。它是与原准则一致的附加项目约束评审，
   不是另一个 CWI 的普通检查覆盖、failure-to-target 猜测、执行 credit 或 repair 权。缺项、未知、duplicate、
   来源/hash 漂移及完整输入/报告超界均 fail-closed；schema 和 local decoder 共同验收，不影响 C0-C2。
   具体有限 envelope、共享原 CWI 信息预算及 owner 边界见组合证明合同；旧 subject/wire 不引入该扩展。
@@ -490,7 +490,14 @@ Orchestrator 原 scope 与依赖成员继续完整保留：selected work body �
 
 输入重审当前 wire 只让模型选择逐 obligation 的 canonical observed `inputTargetRefs`，check scope 由
 Orchestrator compiler 取其并集，禁止回显 `checks[].inputTargetRefs`。diagnostic source 的 exact source
-input 由已声明 sourceRef 绑定；模型仅可额外选择其它 observed helper/fixture 的
+input 由 frozen diagnosticSources 中的 sourceIndex 解析到原 sourceRef 后绑定；模型仅可额外选择其它 observed helper/fixture 的
 `supportingInputTargetRefs`，禁止回显 source `inputTargetRefs`。完整 check/source 的语义判断、原准则、
 全部义务和消费者仍必需；内部持久化 report 保留完整引用。schema、指令与 local strict admission 使用同一当前
 形状；JSONSchemaResponse 开关不改变准入。C3 表达该输出合同，纠正/恢复不改变冻结 C0～C3 或原请求预算。
+
+当前 validation-input-review provider wire 不回显 subjectHash，subject 身份由当前 sealed validation subject 绑定。
+`sourceIndex` 为本次 frozen source array 的零基下标，schema 封闭可用值并要求完整覆盖；sourceRef／固定 input ref
+由 compiler 取回原值。模型仍逐项提供独立语义结论，不把索引选择当成验证 credit。
+无顺序语义的 input/proof-consumer/dependency/supporting ref 集合先拒绝空白、外来值及重复，再在 detached typed
+投影中规范排序；原 provider 文档保全。独立 wire／review 问题按现有32项上限一并反馈，超界显式报告，
+不新增请求尝试或改变 frozen transaction。该协议收口不证明 native cached tokens、费用或真实模型稳定性收益。

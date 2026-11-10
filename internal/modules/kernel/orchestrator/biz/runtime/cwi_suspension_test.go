@@ -277,3 +277,57 @@ func TestCWISuspensionAdmissionRejectsIncompleteConsumerSet(t *testing.T) {
 		t.Fatal("only first consumer admitted as complete set")
 	}
 }
+
+func TestCWISuspensionReopenedConsumerRequiresNewProofWithoutRewritingPriorProof(t *testing.T) {
+	a := runtimeSuspensionProjectionFixture(t)
+	runtimeSecondSuspensionConsumer(&a)
+	if changed, err := suspendRuntimeSuccessorForStalePredecessor(&a); err != nil || !changed {
+		t.Fatal(err)
+	}
+	a.StateRevision++
+	firstID := a.Facts.Focus.CoverageWorkItemIDs[0]
+	first := runtimeCWICoverageIndex(a.Facts.Coverage, firstID)
+	ref := runtimecontract.RuntimeCWIBindingRef{BindingID: "first-new-proof", BindingHash: "first-new-hash", FocusID: a.Facts.Focus.ID, SemanticManifestHash: "new-generation"}
+	a.Facts.Coverage[first].State = runtimecontract.RuntimeCoverageItemStateSatisfied
+	a.Facts.Coverage[first].CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStateSettled
+	a.Facts.Coverage[first].CurrentBindingRef = &ref
+	a.Facts.Coverage[first].LastAssessmentID = "first-assessment"
+	facts, resumed, err := resumeRuntimeSuspendedSuccessor(a.Facts)
+	if err != nil || !resumed {
+		t.Fatalf("first consumer proof: %v", err)
+	}
+	a.Facts = facts
+	prior := a.Facts.CWISuspensions[0].Consumers[0]
+	// A genuinely new owner reconciliation observes the first consumer stale
+	// again while the second still has independent outstanding proof.
+	cause := runtimecontract.RuntimeCWIReopenLineage{PreviousBindingRef: ref, TriggerRef: "second-real-stale-source", Reason: "dependency changed after fresh proof"}
+	row := &a.Facts.Coverage[first]
+	row.State, row.CWIConvergenceState, row.CurrentBindingRef = runtimecontract.RuntimeCoverageItemStateOpen, runtimecontract.RuntimeCWIConvergenceStateReopened, nil
+	row.ReopenLineage = append(row.ReopenLineage, cause)
+	a.Reconciliation.Request.Bindings = append(a.Reconciliation.Request.Bindings, runtimecontract.RuntimeCWIReconciliationBindingRef{CoverageWorkItemID: firstID, BindingID: ref.BindingID, BindingHash: ref.BindingHash})
+	original := a.Reconciliation.Reopened[0]
+	original.CoverageWorkItemID, original.BindingID, original.ObservationRef = firstID, ref.BindingID, cause.TriggerRef
+	a.Reconciliation.Reopened = append(a.Reconciliation.Reopened, original)
+	result := a.Reconciliation.Results[0]
+	result.CoverageItemID, result.BindingID, result.ObservationRef = firstID, ref.BindingID, cause.TriggerRef
+	a.Reconciliation.Results = append(a.Reconciliation.Results, result)
+	before := a.CloneRaw()
+	if changed, err := suspendRuntimeSuccessorForStalePredecessor(&a); err != nil || !changed {
+		t.Fatalf("second invalidation: %v", err)
+	}
+	a.StateRevision++
+	if err := validateRuntimeCWISuspensionTransition(before, a); err != nil {
+		t.Fatal(err)
+	}
+	consumers := a.Facts.CWISuspensions[0].Consumers
+	if len(consumers) != 3 || !reflect.DeepEqual(consumers[0], prior) || consumers[2].PredecessorID != firstID || consumers[2].ResumeBinding != nil || !reflect.DeepEqual(consumers[2].ReopenSource, cause) {
+		t.Fatal("new source borrowed or rewrote previous proof")
+	}
+	if !reflect.DeepEqual(a.ExecutionBudget, before.ExecutionBudget) || !reflect.DeepEqual(a.OperationReceipts, before.OperationReceipts) || !reflect.DeepEqual(a.CompletedDispatches, before.CompletedDispatches) {
+		t.Fatal("new dependency changed effects or budget")
+	}
+	saved := a.CloneRaw()
+	if changed, err := suspendRuntimeSuccessorForStalePredecessor(&a); err != nil || changed || !reflect.DeepEqual(saved, a) {
+		t.Fatal("duplicate new source was not idempotent")
+	}
+}

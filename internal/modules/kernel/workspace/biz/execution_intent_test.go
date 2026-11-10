@@ -395,31 +395,28 @@ func TestWorkspaceExecutionRestartRequiresCurrentAdmissionCandidateBeforeRunOwne
 		}
 	})
 
-	t.Run("non-current persisted candidate is rejected without owner mutation", func(t *testing.T) {
+	t.Run("non-current candidate overwrite and original read are rejected", func(t *testing.T) {
 		fixture := newWorkspaceExecutionIntentFixture(t, response)
-		bootstrap := fixture.seedWorkspace(t, "workspace-invalid", "prior-run", true)
-		workspace, err := fixture.workspaces.Get(context.Background(), "workspace-invalid")
+		fixture.seedWorkspace(t, "workspace-invalid", "prior-run", true)
+		stored, err := fixture.workspaces.Get(context.Background(), "workspace-invalid")
 		if err != nil {
 			t.Fatal(err)
 		}
-		workspace.DefinitionAdmissionCandidates[0].SchemaVersion--
-		if err := fixture.workspaces.Update(context.Background(), workspace); err != nil {
-			t.Fatal(err)
+		revision := stored.Revision
+		stored.DefinitionAdmissionCandidates[0].SchemaVersion--
+		if err := fixture.workspaces.Update(context.Background(), stored); !errors.Is(err, common.ErrConflict) {
+			t.Fatalf("committed candidate overwrite=%v", err)
 		}
-		before, err := fixture.workspaces.Get(context.Background(), "workspace-invalid")
-		if err != nil {
-			t.Fatal(err)
+		// A physical/source boundary also refuses this corrupt original without
+		// using a normal write to manufacture an impossible committed state.
+		if _, _, err := stored.ReadCommittedActivation(); err == nil {
+			t.Fatal("corrupt original entered execution")
 		}
-		_, err = fixture.execute(context.Background(), workspaceevents.WorkspaceExecutionIntentCommand{
-			WorkspaceID: "workspace-invalid", RequestID: "restart-invalid", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: &bootstrap,
-		})
-		after, readErr := fixture.workspaces.Get(context.Background(), "workspace-invalid")
-		if readErr != nil {
-			t.Fatal(readErr)
+		after, err := fixture.workspaces.Get(context.Background(), "workspace-invalid")
+		if err != nil || after.Revision != revision || fixture.received != 0 {
+			t.Fatalf("overwrite mutated owner: %v", err)
 		}
-		if !errors.Is(err, common.ErrConflict) || fixture.received != 0 || after.Revision != before.Revision {
-			t.Fatalf("invalid restart err=%v received=%d revision=%d want=%d", err, fixture.received, after.Revision, before.Revision)
-		}
+
 	})
 }
 

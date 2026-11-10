@@ -12,7 +12,7 @@ import (
 
 func (r DefinitionAuthoringRecord) CurrentAuthoringSummary() (state, failurePhase, failureCode string, reviewCount int) {
 	input := r.Input.Normalized()
-	if r.Validate() != nil || input.InputHash() != r.InputHash {
+	if r.ReadCommittedRecord() != nil || input.InputHash() != r.InputHash {
 		return "", "", "", 0
 	}
 	state = "draft"
@@ -90,10 +90,13 @@ func (r DefinitionAuthoringRecord) CurrentAuthoringSummary() (state, failurePhas
 					}
 				default:
 					if !hasCurrentPreparationDiagnostic(r, derivation) {
-						if _, _, err := r.ConfirmableSpecification(derivation.PermitID, proposalHash); err == nil {
+						if reviewCount == len(goalReviewKinds) {
 							state = "reviewed"
-						} else if reviewCount == len(goalReviewKinds) {
-							state = "review_blocked"
+							for _, verification := range proposal.Verifications {
+								if verification.Status == GoalVerificationUnverified {
+									state = "review_blocked"
+								}
+							}
 						}
 					}
 				}

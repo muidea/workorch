@@ -80,6 +80,12 @@ func ClonePreparationDirectoryEvidence(items []WorkspacePreparationDirectoryEvid
 }
 
 func ValidatePreparationEvidencePersistence(w *Workspace) error {
+	return validatePreparationEvidencePersistence(w, true)
+}
+func ReadCommittedPreparationEvidence(w *Workspace) error {
+	return validatePreparationEvidencePersistence(w, false)
+}
+func validatePreparationEvidencePersistence(w *Workspace, admit bool) error {
 	if err := ValidatePreparationInitializations(w); err != nil {
 		return err
 	}
@@ -89,7 +95,7 @@ func ValidatePreparationEvidencePersistence(w *Workspace) error {
 	if err := validatePreparationRunHistoryEvidencePersistence(w); err != nil {
 		return err
 	}
-	if err := validatePreparationSealEvidencePersistence(w); err != nil {
+	if err := validatePreparationSealEvidenceMode(w, admit); err != nil {
 		return err
 	}
 	if err := validatePreparationMCPRegistryEvidencePersistence(w); err != nil {

@@ -26,7 +26,7 @@ Last Verified: 2026-08-30
 | Result/Memory/Decision/Approval/Eventstream owners | concrete seal/purge command/result | Workspace 排序协调删除；各资源 owner 独自执行自身 fence、purge 与证明。 |
 | projection consumers | `WorkspaceChangedData`、`WorkspaceDeletedData`、`GoalDefinedData`、`DoDDefinedData` | 提交后通知，不是 authority。 |
 
-公开 EventHub 合同均位于 `pkg/events`，每个 topic 使用具体 command/result；创作 record、派生 request 与历史回执使用 concrete DTO，嵌套 Template 的 Soul binding 为有序 typed slice；转换到同 owner model 前拒绝空／重复 binding，不允许 map 覆盖隐藏原 cardinality。显式转换不更改持久 schema 或 hash，也不授予已校验身份；查询、确认与准入仍完整反证 ledger。派生 reserve／complete、authoring 保存／查询／规格 reserve／complete／确认／准入均登记 delivery 与 typed message 合同。既有 pre-seal 规格 ledger 保留 begin／reserve／complete 三个受控写入口；无生产调用方的单请求 query 不注册 EventHub，owner-private 查询 helper 只作内部校验与测试。跨 owner 不暴露 repository/service。`biz.New` 只接收 backend factory 生成的 `WorkspaceOwnerRepositories` aggregate；Workspace、Goal、DoD、Template repository 与 deletion cleaner 必须携带同一个 opaque owner binding，独立构造、跨 backend 或跨 factory 混装在 owner 启动前拒绝。
+公开 EventHub 合同均位于 `pkg/events`，每个 topic 使用具体 command/result；创作 record、派生 request 与历史回执使用 concrete DTO，嵌套 Template 的 Soul binding 为有序 typed slice；转换到同 owner model 前拒绝空／重复 binding，不允许 map 覆盖隐藏原 cardinality。显式转换不更改持久 schema 或 hash，也不授予已校验身份；新输入在 owner 接纳入口完成判定；已提交结果的查询和恢复仅核对身份、原文完整性、来源与事务关联。派生 reserve／complete、authoring 保存／查询／规格 reserve／complete／确认／准入均登记 delivery 与 typed message 合同。既有 pre-seal 规格 ledger 保留 begin／reserve／complete 三个受控写入口；无生产调用方的单请求 query 不注册 EventHub，owner-private 查询 helper 只作内部校验与测试。跨 owner 不暴露 repository/service。`biz.New` 只接收 backend factory 生成的 `WorkspaceOwnerRepositories` aggregate；Workspace、Goal、DoD、Template repository 与 deletion cleaner 必须携带同一个 opaque owner binding，独立构造、跨 backend 或跨 factory 混装在 owner 启动前拒绝。
 
 ### 内置模板与自定义模板来源
 
@@ -729,3 +729,26 @@ Get/List 从当前未确认创作 record 派生有界 `AuthoringSummary`，仅�
 | Run projection lost/duplicate/stale/restart/public notification | `biz/run_projection_reconciliation_test.go::TestWorkspaceRunProjectionFreshOwnerRecoversWithoutHistoricalNotification`、`biz/run_projection_reconciliation_test.go::TestWorkspaceRunProjectionRevisionFenceRejectsStaleAndConflictingFacts`、`biz/lifecycle_reducer_test.go::TestReduceRunProjectionFactDuplicateIsNoop`、`biz/run_projection_notification_test.go` | 已覆盖 cursor 持久化、真实公开字段变化通知与 cursor-only 零通知 |
 | deletion normal/negative/idempotency/restart | `biz/deletion_coordinator_test.go::TestWorkspaceDeletionCoordinatorUsesExactRetainAndPurgeOrder`、`biz/deletion_internal_event_test.go::TestWorkspaceDeletionRejectsOutOfOrderAndMismatchedOwnerAcknowledgements`、`biz/deletion_coordinator_test.go::TestWorkspaceDeletionResponseLossResumesFromPersistedPhaseOnExactDeleteRetry`、`biz/deletion_coordinator_test.go::TestWorkspaceDeletionFreshOwnerStartRecoversPersistedFileFinalization` | 已覆盖 coordinated delete 正向路径与恢复 |
 | file-backed admission/clarification cutpoints | `biz/definition_admission_file_recovery_test.go::TestDefinitionAdmissionFileBackedCutpointsRecoverThroughClarificationPromotion`、`internal/pkg/workorchrepo/workspace_scoped_repositories_test.go::TestWorkspaceScopedPreSealDecisionPathSupportsWorkspaceCRUDAndReopen` | 已覆盖 unsupported candidate、corrected candidate、无 RunID 的 Decision ticket、pending promotion、Decision resolution、eligible CAS 各 durable cut 后 fresh-owner reopen与 duplicate/response-loss replay；同时覆盖该 Workspace-scoped Decision file path 的 list/update/delete/reopen及 Decision-owner workspace purge。单次 repository atomic write 内部的 OS kill/fsync/rename crash atomicity 属于 host/filesystem deployment 边界，由 [`Service Acceptance / Persistence And Restart`](../../../../docs/50-product-interface/service-acceptance.md#persistence-and-restart) 验收，不由 Workspace reducer 推导 |
+
+### 已提交创作结果的生产与消费
+
+新 mapping／review／parser failure 在私有 completion reducer 对本次许可与原始 document 接纳；普通查询、诊断读取、
+摘要和确认 journal 恢复使用 `ReadCommittedAuthoring`／`ReadCommittedRecord`／`ReadCommittedActivation`。
+这些读取检查原 input/template/permit、document bytes/hash、review/proposal 及 confirmation/admission 来源关联，
+不再次 CompileDefinitionAuthoringMapping 或推导历史 DoD。完整语义重放保留在离线 audit regression。
+新完成只验证当前 outcome，旧 request 的语义结果不随新 completion 重编；新确认仍保留完整六审和 all-of 门禁。
+
+已完成 request 及其 source/audit、归档记录在现有 repository CAS 的 `ValidateCommittedAuthoringTransition` 中不可改写；
+未决 request 仅允许原身份的完成字段变化。DefinitionAdmissionResult 随 admitted／blocked 结算同 CAS 保存，
+后续按 candidate/workspace/source binding 消费；已存在 sealed startup/admission 可提供已提交 admitted 事实的展示身份，
+缺少原 blocked result 时明确拒绝，不能在查询时重新做 admission 来补齐。
+上述结果不授权执行、不复活终态、不修改业务 Goal/DoD、权限、预算或原始历史。
+
+确认重放、后继草稿、启动 snapshot、preparation seal 和当前执行配置均消费原 confirmation/admission 的正式来源。
+新候选由私有准入入口裁决；已保存 candidate 的重复准入和 ticket/recovery 读取原 DefinitionAdmissionResult，
+不再次编译 all_of。`ValidateActivationAdmissionPersistence`、`ValidateDefinitionAuthoringHistory` 的全图重放仅用于离线审计回归，
+生产消费者使用 `ReadCommitted*`。旧缺失的 blocked result 明确拒绝，不在查询中补判。
+
+同一 mapping completion 只执行一次 common compiler／revision 判定；template applicability 单独履责。
+重复 completion 在编译前核对原 document/wire/mapping 与 outcome 身份，消费原成功或失败。
+原件、完成 request、confirmation 后像和 admission candidate 在既有 CAS 边界不可覆盖；prepared→materialized 和新 revision 的合法归档仍按原事务恢复。

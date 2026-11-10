@@ -319,9 +319,7 @@ func (c RuntimeDefinitionContext) Validate() error {
 }
 
 func (c RuntimeDefinitionContext) Clone() RuntimeDefinitionContext {
-	c = c.Normalized()
-	c.CapabilityContract = append([]string(nil), c.CapabilityContract...)
-	return c
+	return cloneRuntimeDefinitionContextRaw(c)
 }
 
 func SameRuntimeDefinitionContext(left RuntimeDefinitionContext, right RuntimeDefinitionContext) bool {

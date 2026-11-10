@@ -89,7 +89,7 @@ func TestDiagnosticSourceReviewHashReloadAndDetachedCopies(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, replace := range []string{`"diagnosticSources":null,"ignored":1,`, `"diagnosticSources":[],"ignored":1,`} {
-		changed := strings.Replace(string(raw), `"subjectHash":`, replace+`"subjectHash":`, 1)
+		changed := strings.Replace(string(raw), `"checks":`, replace+`"checks":`, 1)
 		if validateRuntimeValidationInputReviewPayload("review", []byte(changed)) == nil {
 			t.Fatal("invalid source wire accepted")
 		}

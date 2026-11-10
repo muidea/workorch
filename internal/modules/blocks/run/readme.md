@@ -138,3 +138,17 @@ reserve-before-forward；Workspace 使用本查询反查原回执，再经私有
 
 Runtime 查询直接移交本次 repository 返回的 detached Runtime 原件；不再次复制整图。repository 的读取隔离复制、
 完整性门禁与写端 CAS 保持不变，memory/file 双后端回归核对嵌套修改不会污染存储或其它查询。
+
+### 生命周期库存与历史读取
+
+Run repository 的 `ListInventory` 在持有原存储锁时投影 detached 生命周期、generation、replacement/recovery 和
+activation memory selection；它不是 Runtime aggregate。启动恢复先按这些事实筛选，再用 Workspace/Run 精确身份
+读取待处理 Run 及其真实前驱。终态历史不会因库存查询重新解码或 Clone Runtime 证明图。
+Compact list 和 Workspace snapshot 的选中 Run 查询沿用 typed EventHub；compact DTO 包含原 generation、revision 和
+TerminalResultID 和封存 provider/model 选择；compact EventHub 结果使用独立的 `Inventory` typed DTO，
+不为展示字段构造不完整 Bootstrap。需要 Runtime 原件的详情／恢复读取仍使用 exact Get，不从 compact DTO 重建执行状态。
+
+File backend 在现有 file-map cache 中保留原始物理 image，库存读取不展开 Bootstrap、旧 replacement/receipt 或 Runtime
+正文；opaque Runtime 按原 persisted encoder 字段顺序的无空白 JSON fingerprint 检查完整性。
+精确 Get、RuntimeLifecycle 和 RuntimeStateWriteBase 只物化选中的原 image，并执行原完整 shape／来源／hash 门禁；显式全量读取或写入仍须物化所属文件。
+这没有新增持久索引、业务结果缓存或第二份权威；冷读取仍扫描完整物理文件，不能据此宣称启动 CPU 已完全收口。

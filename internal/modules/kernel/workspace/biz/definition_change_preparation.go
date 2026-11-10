@@ -18,10 +18,10 @@ func reduceDefinitionChangePreparation(o definitionSpecificationObservation, cmd
 		proposal.Hash() != cmd.ProposalHash || w.DefinitionAuthoring == nil || w.ActiveRunID != "" || w.DefinitionSpecificationLedger != nil {
 		return definitionSpecificationTransition{}, common.ErrConflict
 	}
-	if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
+	if err := readWorkspaceAuthoringCommitted(w); err != nil {
 		return definitionSpecificationTransition{}, err
 	}
-	if _, _, err := w.ValidateActivationAdmissionPersistence(); err != nil {
+	if _, _, err := w.ReadCommittedActivation(); err != nil {
 		return definitionSpecificationTransition{}, err
 	}
 	if current := w.DefinitionChangeCandidate; current != nil {

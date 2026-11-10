@@ -49,6 +49,9 @@ func ReadRunByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hub, wor
 }
 
 func ListRunsByOwnerCommand(ctx context.Context, hub magicevent.Hub) ([]*runmodel.Run, error) {
+	return listRunsByOwnerCommand(ctx, hub)
+}
+func listRunsByOwnerCommand(ctx context.Context, hub magicevent.Hub) ([]*runmodel.Run, error) {
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
@@ -62,6 +65,10 @@ func ListRunsByOwnerCommand(ctx context.Context, hub magicevent.Hub) ([]*runmode
 }
 
 func ListRunsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]*runmodel.Run, error) {
+	return listRunsByWorkspaceOwnerCommand(ctx, hub, workspaceID)
+}
+
+func listRunsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]*runmodel.Run, error) {
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -73,4 +80,24 @@ func ListRunsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hub, wo
 		return nil, err
 	}
 	return response.Runs, nil
+}
+
+func ListCompactRunsByOwnerCommand(ctx context.Context, hub magicevent.Hub) ([]runmodel.RunInventoryItem, error) {
+	if hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandList, sourceModule, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.ListRunsCommand{Compact: true})
+	ownerevent.BindLane(event, runevents.Contracts(), runevents.TopicRunCommandList, "run", "all", "", "", "")
+	response, err := ownerevent.Run[runevents.ListRunsResult](hub.Send(event), runevents.TopicRunCommandList)
+	return response.Inventory, err
+}
+func ListCompactRunsByWorkspaceOwnerCommand(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID) ([]runmodel.RunInventoryItem, error) {
+	if hub == nil || workspaceID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	event := magicevent.NewEventWithContext(runevents.TopicRunCommandListByWorkspace, sourceModule, runevents.CommandDestination, magicevent.NewHeader(), ctx, runevents.ListRunsByWorkspaceCommand{WorkspaceID: workspaceID, Compact: true})
+	ownerevent.BindLane(event, runevents.Contracts(), runevents.TopicRunCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "")
+	response, err := ownerevent.Run[runevents.ListRunsByWorkspaceResult](hub.Send(event), runevents.TopicRunCommandListByWorkspace)
+	return response.Inventory, err
 }

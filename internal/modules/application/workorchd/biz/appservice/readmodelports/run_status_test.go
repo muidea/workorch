@@ -143,3 +143,37 @@ func (f fakeRunStatusCheckpointReader) ListByRun(_ context.Context, runID common
 	}
 	return ret, nil
 }
+
+func (f fakeRunStatusRunReader) ListCompact(ctx context.Context) ([]runmodel.RunInventoryItem, error) {
+	items, err := f.List(ctx)
+	return testRunInventory(items), err
+}
+
+func (f fakeRunStatusRunReader) ListCompactByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]runmodel.RunInventoryItem, error) {
+	items, err := f.ListByWorkspaceID(ctx, workspaceID)
+	return testRunInventory(items), err
+}
+
+type snapshotInventoryOnlyRunReader struct {
+	fakeRunStatusRunReader
+	calls int
+}
+
+func (r *snapshotInventoryOnlyRunReader) ListByWorkspaceID(context.Context, common.WorkspaceID) ([]*runmodel.Run, error) {
+	panic("snapshot base must not read historical Runtime aggregates")
+}
+func (r *snapshotInventoryOnlyRunReader) ListCompactByWorkspaceID(_ context.Context, id common.WorkspaceID) ([]runmodel.RunInventoryItem, error) {
+	r.calls++
+	return []runmodel.RunInventoryItem{{ID: "selected", WorkspaceID: id, WorkspaceRunGeneration: 3, TerminalResultID: "result", State: common.RunStateFailed}}, nil
+}
+func TestWorkspaceSnapshotBaseUsesScopedRunInventory(t *testing.T) {
+	r := &snapshotInventoryOnlyRunReader{}
+	var models workspaceSnapshotModels
+	tasks := workspaceSnapshotBaseLoadTasks(context.Background(), WorkspaceSnapshotReaders{Runs: r}, "ws", nil, workspaceSnapshotLoadOptions{}, &models)
+	if err := tasks[0](); err != nil {
+		t.Fatal(err)
+	}
+	if r.calls != 1 || len(models.Runs) != 1 || models.Runs[0].WorkspaceID != "ws" || models.Runs[0].TerminalResultID != "result" || models.Runs[0].WorkspaceRunGeneration != 3 {
+		t.Fatalf("snapshot inventory: %+v", models.Runs)
+	}
+}

@@ -200,7 +200,7 @@ func (m *Biz) prepareWorkspaceExecutionIntent(ev magicevent.Event) (preparedWork
 }
 
 func validateWorkspaceExecutionAdmissionPersistence(workspace *workspacemodel.Workspace) error {
-	_, _, err := workspace.ValidateActivationAdmissionPersistence()
+	_, _, err := workspace.ReadCommittedActivation()
 	return err
 }
 

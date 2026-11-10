@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -13,7 +14,8 @@ func workspaceSnapshotBaseLoadTasks(ctx context.Context, readers WorkspaceSnapsh
 	tasks := []func() error{
 		namedLoadTask("workspaceSnapshot.runs", func() error {
 			var err error
-			models.Runs, err = readers.Runs.ListByWorkspaceID(ctx, workspaceID)
+			inventory, readErr := readers.Runs.ListCompactByWorkspaceID(ctx, workspaceID)
+			models.Runs, err = runmodel.InventoryListItems(inventory), readErr
 			return err
 		}),
 		namedLoadTask("workspaceSnapshot.results", func() error {

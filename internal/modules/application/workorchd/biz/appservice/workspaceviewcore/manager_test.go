@@ -1055,9 +1055,11 @@ func TestManagerReconcilesMissedEventFromOwnerHighWatermark(t *testing.T) {
 	})
 	t.Cleanup(func() { observer.Unsubscribe(eventstreamevents.TopicEventStreamCommandHighWatermarks) })
 	scheduled := map[string]int{}
+	ports := managerTestEventPorts(commandHub)
+	ports.ReadWorkspaceIDs = func(context.Context) ([]common.WorkspaceID, error) { return []common.WorkspaceID{"ws-a"}, nil }
 	manager := NewManager(ManagerOptions{
-		Loader:     fakeProjectionLoader{workspaces: []appmodelcore.Workspace{{ID: "ws-a", State: "active"}}},
-		EventPorts: managerTestEventPorts(commandHub),
+		Loader:     failOnIdentityProjectionLoader{t: t},
+		EventPorts: ports,
 		Schedule: func(name string, _ func(context.Context)) bool {
 			scheduled[name]++
 			return true
@@ -2460,4 +2462,20 @@ func TestManagerMetricsDoNotDriveProjectionHealth(t *testing.T) {
 	if manager.Metrics().FullRebuildFailedTotal != 99 {
 		t.Fatalf("metrics cleared unexpectedly: %+v", manager.Metrics())
 	}
+}
+
+// Readiness must use the identity owner port, never build a business list.
+type failOnIdentityProjectionLoader struct{ t *testing.T }
+
+func (l failOnIdentityProjectionLoader) ListWorkspaces(context.Context) ([]appmodelcore.Workspace, error) {
+	l.t.Fatal("readiness loaded full workspace projection")
+	return nil, nil
+}
+func (l failOnIdentityProjectionLoader) ReadWorkspace(context.Context, string) (appmodelcore.Workspace, error) {
+	l.t.Fatal("readiness loaded workspace detail")
+	return appmodelcore.Workspace{}, nil
+}
+func (l failOnIdentityProjectionLoader) ReadWorkspaceSnapshot(context.Context, string) (readmodelcore.WorkspaceSnapshotState, error) {
+	l.t.Fatal("readiness loaded workspace snapshot")
+	return readmodelcore.WorkspaceSnapshotState{}, nil
 }

@@ -320,6 +320,16 @@ func RunStateChangedDataFromModel(run *runmodel.Run) RunStateChangedData {
 	return ret
 }
 
+// RunStateChangedDataFromInventory consumes only Run-owned lifecycle facts.
+func RunStateChangedDataFromInventory(v runmodel.RunInventoryItem) RunStateChangedData {
+	ret := RunStateChangedData{RunID: v.ID, WorkspaceID: v.WorkspaceID, WorkspaceRunGeneration: v.WorkspaceRunGeneration, RunRevision: v.Revision, GoalID: v.GoalID, DoDID: v.DoDID, State: v.State, BlockingTicketID: v.BlockingTicketID, BlockingApprovalID: v.BlockingApprovalID, FailureReason: v.FailureReason, RuntimeStateRevision: v.RuntimeStateRevision, ReconciliationRequestID: v.ReconciliationRequestID}
+	if v.HasRuntimeState {
+		ret.RuntimeStateRef = RuntimeStateRef(v.WorkspaceID, v.ID, v.RuntimeStateRevision)
+	}
+	ret.CausationID = RunStateChangedCausationID(v.ID, v.WorkspaceRunGeneration, v.Revision, v.RuntimeStateRevision)
+	return ret
+}
+
 // RunStateChangedCausationID is derived only from Run-owner persisted
 // revisions. A lifecycle transition with the same Runtime revision still has
 // a distinct identity because the Run model revision advances.
@@ -374,8 +384,14 @@ func (d RunStateChangedData) Validate() error {
 // these results distinct prevents an unrelated topic from being accepted just
 // because it populated another field in a shared union envelope.
 type GetRunResult struct{ Run *runmodel.Run }
-type ListRunsResult struct{ Runs []*runmodel.Run }
-type ListRunsByWorkspaceResult struct{ Runs []*runmodel.Run }
+type ListRunsResult struct {
+	Runs      []*runmodel.Run
+	Inventory []runmodel.RunInventoryItem
+}
+type ListRunsByWorkspaceResult struct {
+	Runs      []*runmodel.Run
+	Inventory []runmodel.RunInventoryItem
+}
 type GetStepResult struct{ Step *runmodel.Step }
 type ListStepsByRunResult struct{ Steps []*runmodel.Step }
 type ListStepSummariesByRunResult struct{ Steps []*runmodel.Step }
@@ -394,11 +410,11 @@ func (r GetRunResult) Clone() GetRunResult {
 }
 
 func (r ListRunsResult) Clone() ListRunsResult {
-	return ListRunsResult{Runs: runmodel.CloneRuns(r.Runs)}
+	return ListRunsResult{Runs: runmodel.CloneRuns(r.Runs), Inventory: runmodel.CloneRunInventory(r.Inventory)}
 }
 
 func (r ListRunsByWorkspaceResult) Clone() ListRunsByWorkspaceResult {
-	return ListRunsByWorkspaceResult{Runs: runmodel.CloneRuns(r.Runs)}
+	return ListRunsByWorkspaceResult{Runs: runmodel.CloneRuns(r.Runs), Inventory: runmodel.CloneRunInventory(r.Inventory)}
 }
 
 func (r GetStepResult) Clone() GetStepResult {

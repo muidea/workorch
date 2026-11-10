@@ -88,10 +88,24 @@ func compileCompletionWithBootstrap(w *workspace.Workspace, a workspace.Workspac
 	return c, c.ValidateFor(a)
 }
 func ValidatePreparedPersistence(w *workspace.Workspace) error {
+	return validatePreparedPersistence(w, true)
+}
+
+// ReadCommittedPersistence authenticates stored products and original sources;
+// it does not repeat the admission compiler used by a new write transaction.
+func ReadCommittedPersistence(w *workspace.Workspace) error {
+	return validatePreparedPersistence(w, false)
+}
+
+func validatePreparedPersistence(w *workspace.Workspace, admit bool) error {
 	if w == nil {
 		return common.ErrInvalidArgument
 	}
-	if err := workspace.ValidatePreparationEvidencePersistence(w); err != nil {
+	if admit {
+		if err := workspace.ValidatePreparationEvidencePersistence(w); err != nil {
+			return err
+		}
+	} else if err := workspace.ReadCommittedPreparationEvidence(w); err != nil {
 		return err
 	}
 	if err := w.PreparationFence.Validate(w.ID); err != nil {
@@ -105,6 +119,12 @@ func ValidatePreparedPersistence(w *workspace.Workspace) error {
 		}
 		for _, a := range w.StartupPreparation.Attempts {
 			if a.DefinitionCompilation == nil {
+				continue
+			}
+			if !admit {
+				if err := workspace.ValidateCommittedPreparationDefinition(w, a); err != nil {
+					return err
+				}
 				continue
 			}
 			source, err := compileOriginalPreparedDefinitionSource(w, a)

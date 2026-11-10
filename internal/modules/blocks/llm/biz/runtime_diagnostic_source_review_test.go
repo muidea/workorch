@@ -36,7 +36,7 @@ func TestRuntimeDiagnosticSourcesAreIndependentProtectedC3AndSchemaOnly(t *testi
 	if input.DiagnosticSourceContractRef != runtimecontract.RuntimeValidationDiagnosticSourceReviewV1 || !reflect.DeepEqual(input.DiagnosticSources, binding.InputReview.DiagnosticSources) || !strings.Contains(projection.OutputInstruction, "one independent report for EVERY exact sourceRef") {
 		t.Fatal("source inventory/instruction omitted")
 	}
-	for _, field := range []string{"diagnosticSources", "sourceRef", "owner-source-a", "owner-source-b"} {
+	for _, field := range []string{"diagnosticSources", "sourceIndex", `"const":0`, `"const":1`} {
 		if !strings.Contains(before.Schema, field) {
 			t.Fatal("exact source schema missing", field)
 		}

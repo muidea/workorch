@@ -1244,7 +1244,7 @@ Orchestrator 独占 SM-2～SM-4；恢复、重复结果及重复 ticket 请求�
 既有 request recovery、document admission 和预算合同。ordinary Definition gap/repair 路径也不得猜测评审结论。
 生产接线复用 `semantic_plan/proof_batch`，不新增请求种类或状态机。capability owner 的 proof binding 可声明
 `InputReview`，封存 activation 选择的 唯一当前 `validation/input-consistency`、完整输入字节/hash、原 required checks/native mapping；LLM
-只返回 `validationInputReview` 的 exact subjectHash、逐 check 的 `consistent|conflict|inconclusive`、reason 和逐 obligation 的 input refs。
+只返回 `validationInputReview` 的逐 check 的 `consistent|conflict|inconclusive`、reason 和逐 obligation 的 input refs。
 缺项、重复项、未知字段/结论或身份漂移仍是 document admission error。完整报告持久化后，SM-2 的
 `SemanticFeasibilityRequired` 私有事件在 proposal feasibility probe 前分类：一致才进入既有 feasibility/binding seal；冲突走已声明的原准则保留维护路径，或明确失败。
 
@@ -2284,7 +2284,7 @@ File/Shell/Run/Result/Workspace owners，从输入冲突维护到不同实施/�
 新 semantic proof-batch 的唯一 provider wire 不含 `checks[].inputTargetRefs` 或
 `diagnosticSources[].inputTargetRefs`。模型保留完整原准则摘录、逐义务 finding/reason、精确 observed
 `inputTargetRefs` 与全部适用 proof consumers；SM-3 strict compiler 从义务引用并集派生 check scope，
-从本次 exact owner/recipe/CWI/declaration binding 的 sourceRef 派生 source input。
+从本次 frozen sourceIndex 解析本次 exact owner/recipe/CWI/declaration binding 的 sourceRef 并派生 source input。
 可选 `supportingInputTargetRefs` 仅选择其它已观测 helper/fixture，不得重复 source anchor。
 未知/过期/外来引用、缺项、非 canonical 集合与被替代字段明确拒绝；完整 typed report 仍持久化，
 报告 hash、scope、容量和 SM-2 consistent/conflict/inconclusive 分流不变。派生身份关系不给语义判断或验收 credit。
@@ -2299,3 +2299,15 @@ SM-4 immutable seal、文件 Result read-back 到 Result→Workspace→Run 有�
 
 当前 owner transition 的历史定位索引只在一次同步 compiler 内存在，并保存原 typed 值；每次命中仍完整 raw 比较，
 不保存校验结果、不跨事务复用。历史保全比较使用已有 DeepEqual 等价纯比较器；CAS、当前 joins 和新输入准入不变。
+
+### 权威结果消费与当前 wire 收口
+
+SM-1 的 lifecycle/recovery inventory 与 SM-4 的 projection/high-watermark 读取只消费必要 owner 元数据；
+不因为启动、查询或恢复重新建立历史 authority 图。精确 aggregate 恢复仍消费 Run owner 原件，request/effect 前置持久化、
+receipt/CAS/fence 及 Result→Workspace→Run 三 ACK 边界不合并。
+SM-3 的 validation input review wire 不包含模型生成 subjectHash；由 compiler 绑定本次 exact subject。
+diagnostic source 使用 frozen sourceIndex，内部恢复原 sourceRef 和固定 input ref；集合引用允许排列变化，
+但空白、重复、越界及真实缺项继续拒绝。原文、冻结输入、same-contract correction 和 unknown 恢复身份不变。
+SM-2 的当前依赖失效只撤销受影响 consumer credit；旧普通 proof 仍作为原历史事实保全，重新开启的 consumer 需要新的
+普通验证和独立 assessment。测试覆盖同一 consumer 完成 proof 后再被新的 owner 观察失效，其他 consumer 仍未完成，
+及重复新来源不改变 effect/receipt/预算。离线结构与局部回归不覆盖公开全流程或在线验收失败。

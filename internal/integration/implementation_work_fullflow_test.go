@@ -1023,7 +1023,7 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 					}
 					// The synthetic provider emits the current minimal wire, not the
 					// persisted owner report with derived membership fields.
-					wireReview := map[string]any{"subjectHash": review.SubjectHash}
+					wireReview := map[string]any{}
 					var wireChecks []any
 					for _, check := range review.Checks {
 						item := map[string]any{"requiredCheckRef": check.RequiredCheckRef, "conclusion": check.Conclusion, "reason": check.Reason, "obligations": check.Obligations}
@@ -1039,16 +1039,16 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 					if len(review.DiagnosticSources) > 0 {
 						var wireSources []any
 						for _, sourceReview := range review.DiagnosticSources {
-							fixed := ""
-							for _, source := range input.DiagnosticSources {
+							fixed, sourceIndex := "", -1
+							for index, source := range input.DiagnosticSources {
 								if source.SourceRef == sourceReview.SourceRef {
-									fixed = source.InputTargetRef
+									fixed, sourceIndex = source.InputTargetRef, index
 								}
 							}
 							if fixed == "" || !slices.Contains(sourceReview.InputTargetRefs, fixed) {
 								return nil, kind, fmt.Errorf("source review lost owner-bound input")
 							}
-							source := map[string]any{"sourceRef": sourceReview.SourceRef, "conclusion": sourceReview.Conclusion, "reason": sourceReview.Reason}
+							source := map[string]any{"sourceIndex": sourceIndex, "conclusion": sourceReview.Conclusion, "reason": sourceReview.Reason}
 							var supporting []string
 							for _, ref := range sourceReview.InputTargetRefs {
 								if ref != fixed {

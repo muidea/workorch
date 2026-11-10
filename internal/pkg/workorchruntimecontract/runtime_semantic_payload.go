@@ -164,6 +164,29 @@ func DecodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 }
 
 func runtimeSemanticPayloadAdmissionDiagnostic(err error) error {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		var facts []RuntimeSemanticContractViolation
+		var first *RuntimeCandidatePayloadDiagnostic
+		for _, item := range joined.Unwrap() {
+			diagnostic := runtimeSemanticPayloadAdmissionDiagnostic(item)
+			var value *RuntimeCandidatePayloadDiagnostic
+			if !errors.As(diagnostic, &value) || len(value.SemanticViolations) == 0 {
+				return diagnostic
+			}
+			if first == nil {
+				first = value
+			}
+			facts = append(facts, value.SemanticViolations...)
+		}
+		if len(facts) > 32 {
+			return &RuntimeCandidatePayloadDiagnostic{Path: "$.proposals", Actual: "independent_violation_capacity_exceeded", Required: []string{"at most 32 independently attributable correction violations"}, Cause: err}
+		}
+		if first != nil {
+			first.SemanticViolations = facts
+			first.Cause = err
+			return first
+		}
+	}
 	var dependencyOrder *RuntimeSemanticDependencyOrderError
 	if errors.As(err, &dependencyOrder) {
 		violation := dependencyOrder.Violation()

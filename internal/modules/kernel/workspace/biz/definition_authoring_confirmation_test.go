@@ -44,7 +44,7 @@ func seedReviewedAuthoringConfirmationWithDeclaration(t *testing.T, owners *file
 	return seedReviewedAuthoringConfirmationWithTemplate(t, owners, id, templateDeclared, proposalDeclared, declarationID, declarationScope, nil)
 }
 
-func seedReviewedAuthoringConfirmationWithTemplate(t *testing.T, owners *fileDefinitionAdmissionOwners, id common.WorkspaceID, templateDeclared, proposalDeclared bool, declarationID, declarationScope string, decorate func(*workspace.WorkspaceTemplate)) workspaceevents.ConfirmDefinitionAuthoringCommand {
+func seedReviewedAuthoringConfirmationWithTemplate(t *testing.T, owners *fileDefinitionAdmissionOwners, id common.WorkspaceID, templateDeclared, proposalDeclared bool, declarationID, declarationScope string, decorate func(*workspace.WorkspaceTemplate), beforePersist ...func(*workspace.DefinitionAuthoringRecord)) workspaceevents.ConfirmDefinitionAuthoringCommand {
 	t.Helper()
 	ctx := context.Background()
 	input := workspace.DefinitionAuthoringInput{Version: 1, WorkspaceID: id, Revision: 1, GoalText: "交付目标", TemplateID: "template", AcceptanceRequirements: []string{"用户验收"}}
@@ -117,6 +117,10 @@ func seedReviewedAuthoringConfirmationWithTemplate(t *testing.T, owners *fileDef
 			t.Fatal(err)
 		}
 	}
+	command := authoringConfirmationCommandFromPersistedLedger(t, &workspace.Workspace{ID: id, DefinitionAuthoring: &record})
+	for _, prepare := range beforePersist {
+		prepare(&record)
+	}
 	if err := owners.repositories.Workspaces.Create(ctx, &workspace.Workspace{ID: id, TemplateID: input.TemplateID, DeliverableDirectory: "delivery", DefinitionAuthoring: &record,
 		PreparationFence: &workspace.WorkspacePreparationFence{Version: workspace.WorkspacePreparationFenceVersion, WorkspaceID: id, CreationEpoch: strings.Repeat("a", 32)},
 	}); err != nil {
@@ -126,7 +130,8 @@ func seedReviewedAuthoringConfirmationWithTemplate(t *testing.T, owners *fileDef
 	if err != nil {
 		t.Fatal(err)
 	}
-	return authoringConfirmationCommandFromPersistedLedger(t, w)
+	command.ExpectedWorkspaceRevision = w.Revision
+	return command
 }
 
 // 构造客户端提交身份而不调用确认门禁，负例才能证明 receiving owner 独立拒绝。

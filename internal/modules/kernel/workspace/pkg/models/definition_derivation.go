@@ -125,7 +125,7 @@ func validateDerivationRequestsMode(records []DefinitionDerivationRequest, input
 
 // ReserveDerivation 仅计算下一份记录；调用方必须 CAS 成功后才能使用 fresh=true。
 func (r DefinitionAuthoringRecord) ReserveDerivation(requestID, providerBindingHash string, resources []DefinitionAuthoringResourceSnapshot) (next DefinitionAuthoringRecord, request DefinitionDerivationRequest, fresh bool, err error) {
-	if err = r.Validate(); err != nil {
+	if err = r.ReadCommittedRecord(); err != nil {
 		return
 	}
 	if err = ValidateDefinitionAuthoringResources(r.Input, resources); err != nil {
@@ -175,7 +175,7 @@ func (r DefinitionAuthoringRecord) CompleteDerivationDocument(permitID string, p
 	return r.completeDerivationDocument(permitID, proposal, failureCode, audit, diagnostic)
 }
 func (r DefinitionAuthoringRecord) completeDerivationDocument(permitID string, proposal *DefinitionDerivedAcceptance, failureCode string, audit *DefinitionAuthoringSuccessByteAudit, diagnostics ...*DefinitionAuthoringDiagnostic) (DefinitionAuthoringRecord, error) {
-	if err := r.Validate(); err != nil {
+	if err := r.ReadCommittedRecord(); err != nil {
 		return DefinitionAuthoringRecord{}, err
 	}
 	if len(diagnostics) > 1 {
@@ -196,14 +196,14 @@ func (r DefinitionAuthoringRecord) completeDerivationDocument(permitID string, p
 		if proposal == nil && failureCode == "" {
 			return DefinitionAuthoringRecord{}, fmt.Errorf("derivation completion requires outcome")
 		}
-		if err := completed.Validate(); err != nil {
-			return DefinitionAuthoringRecord{}, err
-		}
 		if previous.Proposal != nil || previous.FailureCode != "" {
 			if !reflect.DeepEqual(previous, completed) {
 				return DefinitionAuthoringRecord{}, fmt.Errorf("derivation completion conflict")
 			}
 			return r.Clone(), nil
+		}
+		if err := completed.Validate(); err != nil {
+			return DefinitionAuthoringRecord{}, err
 		}
 		// 旧版本回执只能封存其原请求结果，不能改写当前草稿或授予准入。
 		next := r.Clone()

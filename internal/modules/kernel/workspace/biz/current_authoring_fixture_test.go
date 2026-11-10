@@ -1,7 +1,6 @@
 package workspace
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -99,15 +98,17 @@ func reviewTestAudit(t *testing.T, review *workspace.GoalSpecificationCompletene
 	return &workspace.DefinitionAuthoringSuccessByteAudit{Document: o, Wire: o.Clone()}
 }
 
-// Construct a synthetic unreserved stage; never used by production recovery.
-func resetUnreservedSpecificationFixture(t *testing.T, owners *fileDefinitionAdmissionOwners, current *workspace.Workspace, kind string) {
-	t.Helper()
-	if kind == "" {
-		current.DefinitionAuthoring.SpecificationRequests = nil
-	} else {
-		current.DefinitionAuthoring.SpecificationRequests = current.DefinitionAuthoring.SpecificationRequests[:1]
-	}
-	if err := owners.repositories.Workspaces.CompareAndSwap(context.Background(), current, current.Revision); err != nil {
-		t.Fatal(err)
+// Construct the desired unreserved stage before its first persistence. Tests
+// never erase a completed owner outcome through the production CAS path.
+func unreservedSpecificationFixture(kind string, proposal *workspace.GoalSpecification) func(*workspace.DefinitionAuthoringRecord) {
+	return func(record *workspace.DefinitionAuthoringRecord) {
+		if proposal != nil {
+			*proposal = record.SpecificationRequests[0].Proposal.Clone()
+		}
+		if kind == "" {
+			record.SpecificationRequests = nil
+		} else {
+			record.SpecificationRequests = record.SpecificationRequests[:1]
+		}
 	}
 }

@@ -1,19 +1,18 @@
 package workspace
 
 import (
-	definitionadmission "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/definitionadmission"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 )
 
 func authoringSuccessorDraft(w *workspacemodel.Workspace) bool {
-	if w == nil || w.DefinitionAuthoring == nil || w.DefinitionAuthoringConfirmation != nil || len(w.DefinitionAuthoringHistory) == 0 || len(w.DefinitionAdmissionCandidates) != len(w.DefinitionAuthoringHistory) || w.StartupInput != nil || w.ActivationAdmission != nil || w.ActiveRunID != "" || w.ValidateDefinitionAuthoringHistory() != nil {
+	if w == nil || w.DefinitionAuthoring == nil || w.DefinitionAuthoringConfirmation != nil || len(w.DefinitionAuthoringHistory) == 0 || len(w.DefinitionAdmissionCandidates) != len(w.DefinitionAuthoringHistory) || w.StartupInput != nil || w.ActivationAdmission != nil || w.ActiveRunID != "" || w.ReadCommittedAuthoring() != nil {
 		return false
 	}
-	if _, present, err := w.ValidateActivationAdmissionPersistence(); err != nil || present {
+	if _, present, err := w.ReadCommittedActivation(); err != nil || present {
 		return false
 	}
 	candidate := w.DefinitionAdmissionCandidates[len(w.DefinitionAdmissionCandidates)-1]
-	outcome, err := definitionadmission.Compile(candidate)
+	outcome, err := w.ReadDefinitionAdmissionResult(candidate)
 	return err == nil && outcome.Disposition == workspacemodel.DefinitionAdmissionClarificationRequired
 }
 
@@ -21,10 +20,10 @@ func authoringSuccessorDraft(w *workspacemodel.Workspace) bool {
 // candidate to be revised. It never treats a pending or eligible startup as a
 // draft, and an invalid history cannot open a new provider budget.
 func blockedAuthoringSuccessor(w *workspacemodel.Workspace) bool {
-	if w == nil || w.DefinitionAuthoring == nil || w.DefinitionAuthoringConfirmation == nil || w.DefinitionAuthoringConfirmation.Phase != workspacemodel.DefinitionAuthoringConfirmationMaterialized || w.StartupInput != nil || w.ActivationAdmission != nil || w.ActiveRunID != "" || len(w.DefinitionAdmissionCandidates) != len(w.DefinitionAuthoringHistory)+1 || w.ValidateDefinitionAuthoringHistory() != nil {
+	if w == nil || w.DefinitionAuthoring == nil || w.DefinitionAuthoringConfirmation == nil || w.DefinitionAuthoringConfirmation.Phase != workspacemodel.DefinitionAuthoringConfirmationMaterialized || w.StartupInput != nil || w.ActivationAdmission != nil || w.ActiveRunID != "" || len(w.DefinitionAdmissionCandidates) != len(w.DefinitionAuthoringHistory)+1 || w.ReadCommittedAuthoring() != nil {
 		return false
 	}
-	if w.DefinitionAuthoringConfirmation.Validate(w.DefinitionAuthoring, w.ID) != nil {
+	if w.DefinitionAuthoringConfirmation.ReadCommitted(w.DefinitionAuthoring, w.ID) != nil {
 		return false
 	}
 	candidate := w.DefinitionAdmissionCandidates[len(w.DefinitionAdmissionCandidates)-1]
@@ -37,13 +36,13 @@ func blockedAuthoringSuccessor(w *workspacemodel.Workspace) bool {
 			return false
 		}
 	}
-	ref, err := workspacemodel.ConfirmedAuthoringAdmissionRef(w.DefinitionAuthoring, *w.DefinitionAuthoringConfirmation, w.ID)
+	ref, err := w.DefinitionAuthoringConfirmation.CommittedAdmissionRef(w.DefinitionAuthoring, w.ID)
 	if err != nil || *candidate.AuthoringRef != ref {
 		return false
 	}
-	if _, present, err := w.ValidateActivationAdmissionPersistence(); err != nil || present {
+	if _, present, err := w.ReadCommittedActivation(); err != nil || present {
 		return false
 	}
-	outcome, err := definitionadmission.Compile(candidate)
+	outcome, err := w.ReadDefinitionAdmissionResult(candidate)
 	return err == nil && outcome.Disposition == workspacemodel.DefinitionAdmissionClarificationRequired
 }

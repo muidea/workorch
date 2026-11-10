@@ -568,10 +568,46 @@ func (m *Biz) recoverPendingWorkspaceActivations() error {
 	}
 	m.workspaceExecutionMu.Lock()
 	defer m.workspaceExecutionMu.Unlock()
-	items, err := m.runs.List(context.Background())
+
+	facts, err := m.runs.ListInventory(context.Background(), "")
 	if err != nil {
 		return err
 	}
+	// Check uniqueness across all current lifecycle facts before loading or
+	// mutating the selected incomplete activation transactions.
+	currentFacts := map[common.WorkspaceID]common.RunID{}
+	for _, v := range facts {
+		if !runStateIsTerminal(v.State) {
+			if old := currentFacts[v.WorkspaceID]; old != "" && old != v.ID {
+				return fmt.Errorf("%w: multiple current Runs", common.ErrConflict)
+			}
+			currentFacts[v.WorkspaceID] = v.ID
+		}
+	}
+	items := make([]*runmodel.Run, 0)
+	loaded := map[workspaceRunInventoryKey]bool{}
+	for _, v := range facts {
+		if v.State != common.RunStatePending {
+			continue
+		}
+		ids := []common.RunID{v.ID}
+		if v.Lineage.PredecessorRunID != "" {
+			ids = append(ids, v.Lineage.PredecessorRunID)
+		}
+		for _, id := range ids {
+			key := workspaceRunInventoryKey{workspaceID: v.WorkspaceID, runID: id}
+			if loaded[key] {
+				continue
+			}
+			item, err := m.runs.GetByWorkspaceID(context.Background(), v.WorkspaceID, id)
+			if err != nil {
+				return err
+			}
+			items = append(items, item)
+			loaded[key] = true
+		}
+	}
+
 	inventory := runInventoryByWorkspaceAndID(items)
 	// Validate the complete owner inventory before the first CAS. Startup must
 	// not partially activate one Workspace and only then discover corrupt
@@ -982,21 +1018,23 @@ func (m *Biz) recoverPendingWorkspaceExecutionSuccessors() {
 	}
 	defer leave()
 	runs := m.runs
-	items, err := runs.List(context.Background())
+
+	facts, err := runs.ListInventory(context.Background(), "")
 	if err != nil {
 		return
 	}
-	for _, item := range items {
-		if item == nil {
+	for _, fact := range facts {
+		// Retain the create-once audit handoff using its exact bounded source,
+		// without loading a historical Bootstrap or opaque Runtime graph.
+		m.publishRuntimeActivationMemoryRecall(context.Background(), runtimeActivationMemoryRecall{RunID: fact.ID, WorkspaceID: fact.WorkspaceID, Selection: fact.ActivationMemorySelection}, fact.CreatedAt)
+		if fact.ReplacementState == "" || fact.ReplacementState == runmodel.ReplacementIntentCompleted || fact.ReplacementState == runmodel.ReplacementIntentClarificationResolutionRejected {
 			continue
 		}
-		// The Run record is the durable source for activation selection. Re-drive
-		// the create-once Memory fact on startup so a crash between Run commit and
-		// the cross-owner handoff cannot permanently lose the recall trace. Exact
-		// replay is zero-write at the Memory owner and never becomes SM authority.
-		m.publishRuntimeActivationMemoryRecall(context.Background(), runtimeActivationMemoryRecall{
-			RunID: item.ID, WorkspaceID: item.WorkspaceID, RuntimeBootstrap: item.RuntimeBootstrap,
-		}, item.CreatedAt)
+		item, err := runs.GetByWorkspaceID(context.Background(), fact.WorkspaceID, fact.ID)
+		if err != nil {
+			continue
+		}
+
 		if item.ReplacementIntent == nil || !item.ReplacementIntent.ValidFor(item) {
 			continue
 		}

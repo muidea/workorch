@@ -19,7 +19,7 @@ func (m *Biz) observeDefinitionAuthoring(ctx context.Context, id common.Workspac
 	if err := workspaceDeletionRejectsMutation(w); err != nil {
 		return definitionSpecificationObservation{}, err
 	}
-	if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
+	if err := readWorkspaceAuthoringCommitted(w); err != nil {
 		return definitionSpecificationObservation{}, err
 	}
 	goals, err := m.goals.ListByWorkspaceID(ctx, id)
@@ -58,7 +58,7 @@ func reduceDefinitionAuthoring(o definitionSpecificationObservation, cmd workspa
 	}
 	input := cmd.Input.Normalized()
 	w := o.workspace
-	if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
+	if err := readWorkspaceAuthoringCommitted(w); err != nil {
 		return definitionSpecificationTransition{}, err
 	}
 	if replay, matched, err := replayDefinitionAuthoringSave(w, cmd); matched || err != nil {
@@ -76,7 +76,7 @@ func reduceDefinitionAuthoring(o definitionSpecificationObservation, cmd workspa
 			return definitionSpecificationTransition{}, common.ErrConflict
 		}
 	}
-	if err := w.ValidateDefinitionAuthoringHistory(); err != nil {
+	if err := w.ReadCommittedAuthoring(); err != nil {
 		return definitionSpecificationTransition{}, common.ErrConflict
 	}
 	directory := w.DeliverableDirectory
@@ -93,7 +93,7 @@ func reduceDefinitionAuthoring(o definitionSpecificationObservation, cmd workspa
 		return definitionSpecificationTransition{}, common.ErrConflict
 	}
 	if previous != nil {
-		if previous.Validate() != nil || previous.Input.WorkspaceID != w.ID {
+		if previous.ReadCommittedRecord() != nil || previous.Input.WorkspaceID != w.ID {
 			return definitionSpecificationTransition{}, common.ErrConflict
 		}
 		if len(previous.SaveReceipts) >= workspacemodel.DefinitionAuthoringSaveReceiptLimit {
@@ -123,7 +123,7 @@ func reduceDefinitionAuthoring(o definitionSpecificationObservation, cmd workspa
 		}
 		record.SaveReceipts = []workspacemodel.DefinitionAuthoringSaveReceipt{receipt}
 	}
-	if err := record.Validate(); err != nil {
+	if err := record.ReadCommittedRecord(); err != nil {
 		return definitionSpecificationTransition{}, common.ErrConflict
 	}
 	if w.DefinitionAuthoringConfirmation != nil && len(w.DefinitionAdmissionCandidates) > 0 && previous != nil && previous.InputHash == w.DefinitionAuthoringConfirmation.InputHash {
@@ -135,7 +135,7 @@ func reduceDefinitionAuthoring(o definitionSpecificationObservation, cmd workspa
 		next.DefinitionAuthoringHistory = append(append([]workspacemodel.DefinitionAuthoringConfirmedRevision(nil), w.DefinitionAuthoringHistory...), archived)
 		next.DefinitionAuthoring = &record
 		next.DefinitionAuthoringConfirmation = nil
-		if next.ValidateDefinitionAuthoringHistory() != nil {
+		if next.ReadCommittedAuthoring() != nil {
 			return definitionSpecificationTransition{}, common.ErrConflict
 		}
 		return definitionSpecificationTransition{Next: &next, Authoring: &workspaceevents.SaveDefinitionAuthoringResult{Record: workspaceeventmapping.DefinitionAuthoringRecordDTO(record), Receipt: receipt}}, nil
@@ -173,7 +173,7 @@ func replayDefinitionAuthoringSave(w *workspacemodel.Workspace, cmd workspaceeve
 	if w == nil || w.ID != cmd.Input.WorkspaceID {
 		return definitionSpecificationTransition{}, false, common.ErrConflict
 	}
-	if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
+	if err := readWorkspaceAuthoringCommitted(w); err != nil {
 		return definitionSpecificationTransition{}, false, err
 	}
 	if w.DefinitionAuthoring == nil {

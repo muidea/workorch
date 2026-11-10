@@ -21,6 +21,8 @@ func (r DefinitionAuthoringConfirmedRevision) Clone() DefinitionAuthoringConfirm
 	return r
 }
 
+// ValidateDefinitionAuthoringHistory is the full offline semantic replay.
+// Production consumers use ReadCommittedAuthoring at the owner read boundary.
 func (w *Workspace) ValidateDefinitionAuthoringHistory() error {
 	return w.validateDefinitionAuthoringHistory(false)
 }

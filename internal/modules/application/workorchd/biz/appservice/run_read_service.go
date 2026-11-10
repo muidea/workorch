@@ -49,20 +49,20 @@ func ListRunsFromEnv(ctx context.Context, workspaceID string) ([]appmodelcore.Ru
 }
 
 func listRunViews(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID) ([]appmodelcore.Run, error) {
-	var items []*runmodel.Run
+	var items []runmodel.RunInventoryItem
 	var err error
 	if workspaceID == "" {
-		items, err = deps.runs.List(ctx)
+		items, err = deps.runs.ListCompact(ctx)
 	} else {
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
-		items, err = deps.runs.ListByWorkspaceID(ctx, workspaceID)
+		items, err = deps.runs.ListCompactByWorkspaceID(ctx, workspaceID)
 	}
 	if err != nil {
 		return nil, err
 	}
 	ret := make([]appmodelcore.Run, 0, len(items))
 	for _, item := range items {
-		view := runtimecore.MapRun(item)
+		view := runtimecore.MapRunInventory(item)
 		hydrated, err := hydrateRunCurrentStep(ctx, deps, view)
 		if err != nil {
 			return nil, err

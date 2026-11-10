@@ -30,10 +30,10 @@ func (m *Biz) queryAuthoringDiagnostic(ctx context.Context, command workspaceeve
 	if w.DefinitionAuthoring == nil {
 		return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrNotFound
 	}
-	if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
+	if err := readWorkspaceAuthoringCommitted(w); err != nil {
 		return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrConflict
 	}
-	if w.ID != command.WorkspaceID || w.ValidateDefinitionAuthoringHistory() != nil {
+	if w.ID != command.WorkspaceID || w.ReadCommittedAuthoring() != nil {
 		return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrConflict
 	}
 	if w.DefinitionAuthoring.Input.WorkspaceID != command.WorkspaceID {

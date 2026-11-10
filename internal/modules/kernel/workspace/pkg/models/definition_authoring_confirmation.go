@@ -9,14 +9,14 @@ import (
 // persisted requests. A caller's copy of a proposal or review is never an
 // authority for confirmation.
 func (r DefinitionAuthoringRecord) ConfirmableSpecificationView(derivationPermitID, proposalHash string) (DefinitionDerivationRequest, GoalSpecification, error) {
-	if err := r.ValidateView(); err != nil {
+	if err := r.ReadCommittedView(); err != nil {
 		return DefinitionDerivationRequest{}, GoalSpecification{}, err
 	}
 	return r.confirmableSpecification(derivationPermitID, proposalHash)
 }
 
 func (r DefinitionAuthoringRecord) ConfirmableSpecification(derivationPermitID, proposalHash string) (DefinitionDerivationRequest, GoalSpecification, error) {
-	if err := r.Validate(); err != nil {
+	if err := r.ReadCommittedRecord(); err != nil {
 		return DefinitionDerivationRequest{}, GoalSpecification{}, err
 	}
 	return r.confirmableSpecification(derivationPermitID, proposalHash)

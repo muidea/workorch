@@ -76,7 +76,7 @@ func EnsureWorkspaceDefinitionAdmission(ctx context.Context, hub magicevent.Hub,
 		break
 	}
 	if workspace.DefinitionAuthoring != nil || workspace.DefinitionAuthoringConfirmation != nil {
-		candidate, present, err := workspace.ValidateActivationAdmissionView()
+		candidate, present, err := workspace.ReadCommittedActivationView()
 		journal := workspace.DefinitionAuthoringConfirmation
 		// The journal authenticates the confirmed business source. Its configuration
 		// hash fences confirmation writes, not later execution: defaults may have
@@ -256,7 +256,7 @@ func validateDefinitionAdmissionOwnerSnapshot(workspace *workspacemodel.Workspac
 	if err := validateCurrentWorkspaceDefinitionAdmission(workspace); err != nil {
 		return invalidCurrentWorkspaceStartupInput(err)
 	}
-	candidate, present, err := workspace.ValidateActivationAdmissionView()
+	candidate, present, err := workspace.ReadCommittedActivationView()
 	if err != nil || !present || candidate.CandidateHash != result.Candidate.CandidateHash || workspace.StartupInput.StartupInputHash != result.StartupInput.StartupInputHash || workspace.ActivationAdmission.State != workspacemodel.WorkspaceActivationEligible {
 		return common.ErrConflict
 	}
@@ -340,7 +340,7 @@ func definitionAdmissionProfileBindings(workspace *workspacemodel.Workspace, tem
 }
 
 func AuthoringAdmissionCandidate(workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate) (workspacemodel.DefinitionAdmissionCandidate, error) {
-	if workspace == nil || template == nil || workspace.DefinitionAuthoring == nil || workspace.DefinitionAuthoringConfirmation == nil || workspace.ID == "" || template.ID != workspace.TemplateID || workspace.StartupInput != nil || workspace.ActivationAdmission != nil || len(workspace.DefinitionAdmissionCandidates) != len(workspace.DefinitionAuthoringHistory) || workspace.ValidateDefinitionAuthoringHistoryView() != nil || workspace.DefinitionSpecificationLedger != nil {
+	if workspace == nil || template == nil || workspace.DefinitionAuthoring == nil || workspace.DefinitionAuthoringConfirmation == nil || workspace.ID == "" || template.ID != workspace.TemplateID || workspace.StartupInput != nil || workspace.ActivationAdmission != nil || len(workspace.DefinitionAdmissionCandidates) != len(workspace.DefinitionAuthoringHistory) || workspace.ReadCommittedAuthoringView() != nil || workspace.DefinitionSpecificationLedger != nil {
 		return workspacemodel.DefinitionAdmissionCandidate{}, common.ErrConflict
 	}
 	if len(workspace.DefinitionAuthoringHistory) > 0 && workspace.DefinitionAuthoringConfirmation.ValidateSuccessor(workspace.DefinitionAuthoringHistory[len(workspace.DefinitionAuthoringHistory)-1].Confirmation) != nil {
@@ -351,7 +351,7 @@ func AuthoringAdmissionCandidate(workspace *workspacemodel.Workspace, template *
 		return workspacemodel.DefinitionAdmissionCandidate{}, common.ErrConflict
 	}
 	template = &workspace.DefinitionAuthoring.TemplateSnapshot
-	goal, dod, spec, ref, err := workspacemodel.ConfirmedAuthoringAdmissionSourceView(workspace.DefinitionAuthoring, journal, workspace.ID)
+	goal, dod, spec, ref, err := journal.ReadCommittedAdmissionSource(workspace.DefinitionAuthoring, workspace.ID)
 	if err != nil {
 		return workspacemodel.DefinitionAdmissionCandidate{}, err
 	}
@@ -386,7 +386,7 @@ func AuthoringAdmissionCandidate(workspace *workspacemodel.Workspace, template *
 }
 
 func validateCurrentWorkspaceDefinitionAdmission(workspace *workspacemodel.Workspace) error {
-	candidate, present, err := workspace.ValidateActivationAdmissionView()
+	candidate, present, err := workspace.ReadCommittedActivationView()
 	if err != nil {
 		return err
 	}

@@ -9,7 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func TestAuthoringConfirmationRechecksProfileAtPrepareAndPreparedRecovery(t *testing.T) {
+func TestAuthoringConfirmationRejectsCompletedSourceRewriteBeforePrepareAndRecovery(t *testing.T) {
 	for _, phase := range []string{"before-prepare", "prepared"} {
 		for _, field := range []string{"profile", "declaration", "scope"} {
 			t.Run(phase+"/"+field, func(t *testing.T) {
@@ -62,31 +62,24 @@ func TestAuthoringConfirmationRechecksProfileAtPrepareAndPreparedRecovery(t *tes
 					}
 					current.DefinitionAuthoringConfirmation = &journal
 				}
-				if err := owners.repositories.Workspaces.CompareAndSwap(ctx, current, current.Revision); err != nil {
-					t.Fatal(err)
-				}
-				cmd.ExpectedWorkspaceRevision = current.Revision
-				before, err := owners.repositories.Workspaces.Get(ctx, current.ID)
+				persisted, err := owners.repositories.Workspaces.Get(ctx, current.ID)
 				if err != nil {
 					t.Fatal(err)
 				}
+				if err := owners.repositories.Workspaces.CompareAndSwap(ctx, current, current.Revision); err == nil {
+					t.Fatal("rewrote committed source before confirmation recovery")
+				}
+				actual, err := owners.repositories.Workspaces.Get(ctx, current.ID)
+				if err != nil || !reflect.DeepEqual(persisted, actual) {
+					t.Fatal("rejected source rewrite changed original")
+				}
 				owners.close()
 				owners = openFileDefinitionAdmissionOwners(t, root)
-				for attempt := 0; attempt < 2; attempt++ {
-					if _, err := owners.workspace.submitDefinitionAuthoringConfirmationInternalEvent(ctx, definitionAuthoringConfirmationInternalEvent{Command: cmd}); err == nil {
-						t.Fatal("自报声明绕过封存 Profile 适用性")
-					}
-					stored, err := owners.repositories.Workspaces.Get(ctx, current.ID)
-					if err != nil || !reflect.DeepEqual(before, stored) {
-						t.Fatalf("拒绝恢复改写已知事实：%+v %v", stored, err)
-					}
-					goals, goalErr := owners.repositories.Goals.ListByWorkspaceID(ctx, current.ID)
-					dods, dodErr := owners.repositories.DoDs.ListByWorkspaceID(ctx, current.ID)
-					runs, runErr := owners.repositories.Runs.List(ctx)
-					if goalErr != nil || dodErr != nil || runErr != nil || len(goals) != 0 || len(dods) != 0 || len(runs) != 0 || len(stored.DefinitionAdmissionCandidates) != 0 || stored.StartupInput != nil || stored.ActivationAdmission != nil || stored.ActiveRunID != "" {
-						t.Fatalf("非法声明物化了 authority：%d/%d/%d %v/%v/%v", len(goals), len(dods), len(runs), goalErr, dodErr, runErr)
-					}
+				original := authoringConfirmationCommandFromPersistedLedger(t, actual)
+				if _, err := owners.workspace.submitDefinitionAuthoringConfirmationInternalEvent(ctx, definitionAuthoringConfirmationInternalEvent{Command: original}); err != nil {
+					t.Fatal(err)
 				}
+
 			})
 		}
 	}

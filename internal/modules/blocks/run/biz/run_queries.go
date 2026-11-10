@@ -45,6 +45,10 @@ func (m *Biz) executeRunQueryCommand(ctx context.Context, ev magicevent.Event) (
 		if !ok {
 			return nil, common.ErrInvalidArgument
 		}
+		if cmd.Compact {
+			facts, err := m.listRunInventoryForQuery(ctx, "", cmd.States)
+			return runevents.ListRunsResult{Inventory: facts}, err
+		}
 		items, err := m.runs.List(ctx)
 		if err != nil {
 			return nil, err
@@ -53,7 +57,7 @@ func (m *Biz) executeRunQueryCommand(ctx context.Context, ev magicevent.Event) (
 		if err != nil {
 			return nil, err
 		}
-		return runevents.ListRunsResult{Runs: projectRunCommandListItems(items, runStateFilter(cmd.States), cmd.Compact)}, nil
+		return runevents.ListRunsResult{Runs: projectRunCommandListItems(items, runStateFilter(cmd.States))}, nil
 	case runevents.TopicRunCommandListByWorkspace:
 		cmd, ok := ev.Data().(runevents.ListRunsByWorkspaceCommand)
 		if !ok || cmd.WorkspaceID == "" {
@@ -64,21 +68,25 @@ func (m *Biz) executeRunQueryCommand(ctx context.Context, ev magicevent.Event) (
 		} else if retired {
 			return runevents.ListRunsByWorkspaceResult{}, nil
 		}
+		if cmd.Compact {
+			facts, err := m.listRunInventoryForQuery(ctx, cmd.WorkspaceID, cmd.States)
+			return runevents.ListRunsByWorkspaceResult{Inventory: facts}, err
+		}
 		items, err := m.runs.ListByWorkspaceID(ctx, cmd.WorkspaceID)
 		if err != nil {
 			return nil, err
 		}
-		return runevents.ListRunsByWorkspaceResult{Runs: projectRunCommandListItems(items, runStateFilter(cmd.States), cmd.Compact)}, nil
+		return runevents.ListRunsByWorkspaceResult{Runs: projectRunCommandListItems(items, runStateFilter(cmd.States))}, nil
 	case runevents.TopicRunCommandLifecycleFactInventory:
 		cmd, ok := ev.Data().(runevents.QueryRunLifecycleFactInventoryCommand)
 		if !ok {
 			return nil, common.ErrInvalidArgument
 		}
-		items, err := m.runs.List(ctx)
+		items, err := m.runs.ListInventory(ctx, "")
 		if err != nil {
 			return nil, err
 		}
-		response, err := buildRunLifecycleFactInventory(items, cmd)
+		response, err := buildRunLifecycleFacts(items, cmd)
 		if err != nil {
 			return nil, err
 		}
@@ -86,6 +94,37 @@ func (m *Biz) executeRunQueryCommand(ctx context.Context, ev magicevent.Event) (
 	default:
 		return nil, common.ErrInvalidArgument
 	}
+}
+
+func (m *Biz) listRunInventoryForQuery(ctx context.Context, workspaceID common.WorkspaceID, states []common.RunState) ([]runmodel.RunInventoryItem, error) {
+	facts, err := m.runs.ListInventory(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	retirements, err := m.runs.ListWorkspaceRetirements(ctx)
+	if err != nil {
+		return nil, err
+	}
+	retired := map[common.WorkspaceID]bool{}
+	for _, fence := range retirements {
+		if fence.IsRetired() {
+			retired[fence.WorkspaceID] = true
+		}
+	}
+	filter := runStateFilter(states)
+	ret := make([]runmodel.RunInventoryItem, 0, len(facts))
+	for _, fact := range facts {
+		if retired[fact.WorkspaceID] || workspaceID != "" && fact.WorkspaceID != workspaceID {
+			continue
+		}
+		if len(filter) > 0 {
+			if _, ok := filter[fact.State]; !ok {
+				continue
+			}
+		}
+		ret = append(ret, fact.Clone())
+	}
+	return ret, nil
 }
 
 func (m *Biz) workspaceRunsRetired(ctx context.Context, workspaceID common.WorkspaceID) (bool, error) {
@@ -126,6 +165,16 @@ func (m *Biz) filterRetiredWorkspaceRuns(ctx context.Context, items []*runmodel.
 }
 
 func buildRunLifecycleFactInventory(items []*runmodel.Run, cmd runevents.QueryRunLifecycleFactInventoryCommand) (runevents.QueryRunLifecycleFactInventoryResult, error) {
+	facts := make([]runmodel.RunInventoryItem, 0, len(items))
+	for _, item := range items {
+		if item != nil {
+			facts = append(facts, runmodel.InventoryFromRun(item))
+		}
+	}
+	return buildRunLifecycleFacts(facts, cmd)
+}
+
+func buildRunLifecycleFacts(items []runmodel.RunInventoryItem, cmd runevents.QueryRunLifecycleFactInventoryCommand) (runevents.QueryRunLifecycleFactInventoryResult, error) {
 	limit := cmd.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -138,10 +187,10 @@ func buildRunLifecycleFactInventory(items []*runmodel.Run, cmd runevents.QueryRu
 	entries := make([]entry, 0, len(items))
 	activeWorkspace := map[common.WorkspaceID]common.RunID{}
 	for _, item := range items {
-		if item == nil || runStateIsTerminal(item.State) {
+		if runStateIsTerminal(item.State) {
 			continue
 		}
-		fact := runevents.RunStateChangedDataFromModel(item)
+		fact := runevents.RunStateChangedDataFromInventory(item)
 		switch fact.State {
 		case common.RunStatePending, common.RunStateActive, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
 		default:
@@ -195,7 +244,7 @@ func runStateFilter(states []common.RunState) map[common.RunState]struct{} {
 	return ret
 }
 
-func projectRunCommandListItems(items []*runmodel.Run, states map[common.RunState]struct{}, compact bool) []*runmodel.Run {
+func projectRunCommandListItems(items []*runmodel.Run, states map[common.RunState]struct{}) []*runmodel.Run {
 	if len(items) == 0 {
 		return items
 	}
@@ -209,34 +258,7 @@ func projectRunCommandListItems(items []*runmodel.Run, states map[common.RunStat
 				continue
 			}
 		}
-		if compact {
-			ret = append(ret, compactRunListItem(item))
-			continue
-		}
 		ret = append(ret, item)
 	}
 	return ret
-}
-
-func compactRunListItem(item *runmodel.Run) *runmodel.Run {
-	if item == nil {
-		return nil
-	}
-	return &runmodel.Run{
-		ID:                 item.ID,
-		WorkspaceID:        item.WorkspaceID,
-		GoalID:             item.GoalID,
-		DoDID:              item.DoDID,
-		Lineage:            item.Lineage,
-		DefinitionRevision: item.DefinitionRevision,
-		StartupInputHash:   item.StartupInputHash,
-		InitialStepKind:    item.InitialStepKind,
-		State:              item.State,
-		BlockingTicketID:   item.BlockingTicketID,
-		BlockingApprovalID: item.BlockingApprovalID,
-		FailureReason:      item.FailureReason,
-		CreatedAt:          item.CreatedAt,
-		StartedAt:          item.StartedAt,
-		EndedAt:            item.EndedAt,
-	}
 }

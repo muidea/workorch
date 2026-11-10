@@ -73,6 +73,17 @@ func attachTestEventNotifications(state *serverState) {
 		return
 	}
 	observer.SetEventPorts(workspaceviewcore.EventPorts{
+		ReadWorkspaceIDs: func(ctx context.Context) ([]common.WorkspaceID, error) {
+			items, err := state.listWorkspaces(ctx, state.config.Backend, state.config.DataRoot)
+			if err != nil {
+				return nil, err
+			}
+			ids := make([]common.WorkspaceID, len(items))
+			for i, item := range items {
+				ids[i] = common.WorkspaceID(item.ID)
+			}
+			return ids, nil
+		},
 		ReadHighWatermarks: func(_ context.Context, workspaceIDs []common.WorkspaceID) ([]eventstreamevents.WorkspaceHighWatermark, error) {
 			items := make([]eventstreamevents.WorkspaceHighWatermark, 0, len(workspaceIDs))
 			for _, workspaceID := range workspaceIDs {

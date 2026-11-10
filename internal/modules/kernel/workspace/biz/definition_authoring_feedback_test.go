@@ -15,30 +15,23 @@ import (
 func correctiveOwnerFixture(t *testing.T, owners *fileDefinitionAdmissionOwners) (*workspace.Workspace, workspaceevents.ReserveAuthoringSpecificationCommand) {
 	t.Helper()
 	ctx := context.Background()
-	confirmed := seedReviewedAuthoringConfirmationWithProof(t, owners, "ws-feedback-owner", true)
+	confirmed := seedReviewedAuthoringConfirmationWithTemplate(t, owners, "ws-feedback-owner", true, true, "*", "dodItem", nil, func(r *workspace.DefinitionAuthoringRecord) {
+		first := &r.SpecificationRequests[1]
+		review := *first.Review
+		review.Status = workspace.GoalReviewUnknown
+		review.Issues = []workspace.GoalSpecificationReviewIssue{{Class: workspace.AuthoringIssueDesign, Detail: "Independent expected output missing", RequirementIDs: review.RequirementIDs, EvidenceRefs: review.EvidenceRefs}}
+		first.Review, first.ReviewAudit = nil, nil
+		completed, err := r.CompleteReviewDocument(first.PermitID, review, *reviewTestAudit(t, &review))
+		if err != nil {
+			t.Fatal(err)
+		}
+		*r = completed
+	})
 	w, err := owners.repositories.Workspaces.Get(ctx, confirmed.WorkspaceID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := w.DefinitionAuthoring.Clone()
-	// Build a synthetic, settled six-review fixture with one concrete issue.
-	first := &r.SpecificationRequests[1]
-	review := *first.Review
-	review.Status = workspace.GoalReviewUnknown
-	review.Issues = []workspace.GoalSpecificationReviewIssue{{Class: workspace.AuthoringIssueDesign, Detail: "Independent expected output missing", RequirementIDs: review.RequirementIDs, EvidenceRefs: review.EvidenceRefs}}
-	first.Review, first.ReviewAudit = nil, nil
-	r, err = r.CompleteReviewDocument(first.PermitID, review, *reviewTestAudit(t, &review))
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.DefinitionAuthoring = &r
-	if err := owners.repositories.Workspaces.CompareAndSwap(ctx, w, w.Revision); err != nil {
-		t.Fatal(err)
-	}
-	w, err = owners.repositories.Workspaces.Get(ctx, w.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	feedback, err := r.SpecificationFeedback(confirmed.DerivationPermitID, confirmed.ProposalHash)
 	if err != nil {
 		t.Fatal(err)
