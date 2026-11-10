@@ -109,7 +109,7 @@ func shellProjectFailureDetailsComplete(cases []string, details []runtimecontrac
 	return true
 }
 
-func runShellProjectMultiFailureDiagnostic(ctx context.Context, directory string, env []string, request RuntimeCommandRequest, original shellProjectStageFact, prefixCount int, baseline RuntimeCommandResult) ([]shellProjectStageFact, []shellProjectStageSpec, *RuntimeCommandResult) {
+func runShellProjectMultiFailureDiagnostic(ctx context.Context, directory string, env []string, request RuntimeCommandRequest, original *shellProjectStageFact, prefixCount int, baseline RuntimeCommandResult) ([]shellProjectStageFact, []shellProjectStageSpec, *RuntimeCommandResult) {
 	var stages []shellProjectStageFact
 	var specs []shellProjectStageSpec
 	// The runner decoded this exact stage once. Preserve the failed native
@@ -149,10 +149,14 @@ func runShellProjectMultiFailureDiagnostic(ctx context.Context, directory string
 		}
 		return reject(kind, original.NativeSourceFailure, "owner-controlled native source acquisition failed; original known failure and raw output are preserved")
 	}
-	want, eligible := shellProjectMultiFailedCases(original, sources)
+	want, eligible := shellProjectMultiFailedCases(*original, sources)
 	if !eligible {
 		return reject(runtimecontract.ValidationDiagnosticSourcesUnavailable, "validation_failure_sources_unresolved", "complete failed native cases do not resolve uniquely against the sealed source inventory")
 	}
+	for ref := range want {
+		original.FailedSourceRefs = append(original.FailedSourceRefs, ref)
+	}
+	slices.Sort(original.FailedSourceRefs)
 	if len(want) > 5 || prefixCount+len(want) > runtimecontract.RuntimeValidationExecutionMaxStages {
 		return reject(runtimecontract.ValidationDiagnosticCapacityExceeded, "validation_failure_sources_over_capacity", "failed source union exceeds the bounded independent diagnostic execution capacity")
 	}
@@ -191,7 +195,7 @@ func runShellProjectMultiFailureDiagnostic(ctx context.Context, directory string
 		go func(index int) {
 			defer joined.Done()
 			j := &jobs[index]
-			j.result = runShellProjectFailureSourceIsolated(ctx, directory, env, request, original, baseline, j.source, j.cases, coveragePackages)
+			j.result = runShellProjectFailureSourceIsolated(ctx, directory, env, request, *original, baseline, j.source, j.cases, coveragePackages)
 		}(index)
 	}
 	joined.Wait()
@@ -308,9 +312,11 @@ func runShellProjectFailureSourceIsolated(ctx context.Context, directory string,
 		stage.DiagnosticIsolationRef = filepath.Base(request.ValidationScratchDirectory)
 	}
 	result.stage = &stage
-	got, complete := shellProjectMultiFailedCases(stage, sources)
-	if !complete || len(got) != 1 || !slices.Equal(got[source.SourceRef], cases) || stage.SourceBefore != original.SourceAfter || ctx.Err() != nil {
-		return fail(runtimecontract.ValidationDiagnosticReproductionUnavailable, "validation_failure_reproduction_unavailable", "independent execution did not reproduce the exact original failed cases on unchanged sources")
+	// A new complete run may pass or report different values. Preserve that
+	// relation; neither outcome changes the original failure. Grounding still
+	// requires all original cases to execute, exact sources and real behavior.
+	if !shellDiagnosticSourceCasesComplete(stage, cases) || stage.SourceBefore != original.SourceAfter || ctx.Err() != nil {
+		return fail(runtimecontract.ValidationDiagnosticReproductionUnavailable, "validation_failure_reproduction_unavailable", "independent observation did not complete every original case on unchanged sources")
 	}
 	output := shellBaseOutput(request, "go", args, directory, "", "go")
 	output.Status, output.ExitCode = "failed", int64(stage.ExitCode)
@@ -321,16 +327,28 @@ func runShellProjectFailureSourceIsolated(ctx context.Context, directory string,
 	if issue := output.validationFailureDetailIssue; issue != nil {
 		return fail(issue.unavailability(), issue.code, "independent source "+source.SourceRef+": "+issue.reason)
 	}
-	var expected []runtimecontract.RuntimeValidationCheckFailure
-	pkgRef := strings.TrimSuffix(source.NativeCaseRef, "/"+native)
-	for _, detail := range baseline.ValidationObservation.CheckFailures {
-		if detail.PackageRef == pkgRef && detail.CheckRef == native {
-			expected = append(expected, detail)
+	stage.DiagnosticReproduction = runtimecontract.ValidationReproductionAbsent
+	if stage.ExitCode != 0 {
+		got, complete := shellProjectMultiFailedCases(stage, sources)
+		if !complete || len(got) != 1 || len(got[source.SourceRef]) == 0 {
+			return fail(runtimecontract.ValidationDiagnosticReproductionUnavailable, "validation_failure_reproduction_unavailable", "independent failures do not resolve to the exact observed source")
+		}
+		var expected []runtimecontract.RuntimeValidationCheckFailure
+		pkgRef := strings.TrimSuffix(source.NativeCaseRef, "/"+native)
+		for _, detail := range baseline.ValidationObservation.CheckFailures {
+			if detail.PackageRef == pkgRef && detail.CheckRef == native {
+				expected = append(expected, detail)
+			}
+		}
+		if output.ValidationObservation == nil || output.ValidationObservation.ValidateFailureDetails() != nil || output.ValidationObservation.FailureDetailsTruncated || !shellProjectFailureDetailsComplete(got[source.SourceRef], output.ValidationObservation.CheckFailures) {
+			return fail(runtimecontract.ValidationDiagnosticAssertionsUnavailable, "validation_failure_assertions_unavailable", "independent source lacks complete actual assertion bodies")
+		}
+		stage.DiagnosticReproduction = runtimecontract.ValidationReproductionChanged
+		if slices.Equal(got[source.SourceRef], cases) && shellSameFailureAssertions(expected, output.ValidationObservation.CheckFailures) {
+			stage.DiagnosticReproduction = runtimecontract.ValidationReproductionExact
 		}
 	}
-	if output.ValidationObservation == nil || output.ValidationObservation.ValidateFailureDetails() != nil || output.ValidationObservation.FailureDetailsTruncated || !shellSameFailureAssertions(expected, output.ValidationObservation.CheckFailures) || !shellProjectFailureDetailsComplete(cases, output.ValidationObservation.CheckFailures) {
-		return fail(runtimecontract.ValidationDiagnosticReproductionUnavailable, "validation_failure_assertions_changed", "independent execution did not preserve every original source-bound assertion")
-	}
+	result.stage = &stage
 	output.workspaceProcessBehaviorTargetRefs, output.workspaceProcessBehaviorError = shellProcessBehaviorTargets(ctx, "go", directory, processPath, stageEnv, request.ValidationScopeTargetRefs)
 	_ = attachShellWorkspaceBehavior(&output, request, directory, coveragePath)
 	after, sourceErr := shellProjectSourceSetHash(directory)
@@ -342,4 +360,43 @@ func runShellProjectFailureSourceIsolated(ctx context.Context, directory string,
 
 	result.targets = slices.Clone(output.workspaceBehaviorTargetRefs)
 	return result
+}
+
+// The native runner already checked the whole JSON protocol. This additional
+// source-specific join ensures a passing diagnostic actually executed every
+// originally failed subcase, rather than skipping a branch or running no tests.
+func shellDiagnosticSourceCasesComplete(stage shellProjectStageFact, cases []string) bool {
+	if !stage.Started || stage.TimedOut || stage.CleanupFailed || !stage.TerminalComplete || stage.NativeSourceFailure != "" || !shellProjectRawFactValid(stage.Stdout) || !shellProjectRawFactValid(stage.Stderr) || stage.Tests == 0 || stage.SourceBefore == "" || stage.SourceBefore != stage.SourceAfter {
+		return false
+	}
+	_, _, _, terminal, failed, code := shellProjectJSONCompletion(stage.Stdout.Raw, true)
+	if !terminal || (stage.ExitCode == 0 && (failed || code != "")) || (stage.ExitCode != 0 && (!failed || code != "validation_project_test_failed")) {
+		return false
+	}
+	completed := map[string]bool{}
+	scanner := bufio.NewScanner(bytes.NewReader(stage.Stdout.Raw))
+	scanner.Buffer(make([]byte, 4096), shellProjectRawOutputMaxBytes+1)
+	for scanner.Scan() {
+		var event shellGoTestJSONEvent
+		if json.Unmarshal(scanner.Bytes(), &event) != nil {
+			return false
+		}
+		if event.Test != "" {
+			if event.Action == "skip" {
+				return false
+			}
+			if event.Action == "pass" || event.Action == "fail" {
+				completed[event.Package+"\x00"+event.Test] = true
+			}
+		}
+	}
+	if scanner.Err() != nil {
+		return false
+	}
+	for _, key := range cases {
+		if !completed[key] {
+			return false
+		}
+	}
+	return len(cases) > 0
 }

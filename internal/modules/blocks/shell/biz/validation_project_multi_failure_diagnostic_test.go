@@ -26,7 +26,7 @@ func TestProjectMultiFailureSourcePublicationIsExactAndProtectsOriginalTests(t *
 	}
 	root := t.TempDir()
 	target := shellValidationNativeCheckTargetRef(requirement, checks...)
-	files := map[string]string{"go.mod": "module fixture\ngo 1.26\n", target: conjunctiveSourceInput(checks, requirement.SourceObligationChecks[1].CheckRef, `if delivery.Compute(4)!=11 {t.Fatal("B")}`), "delivery/value.go": "package delivery\nfunc Compute(n int) int {return n*2+3}\n", "delivery/production_test.go": "package delivery\nimport \"testing\"\nfunc TestProduction(t *testing.T){if Compute(4)!=11{t.Fatal(\"wrong\")}}\n"}
+	files := map[string]string{"go.mod": "module fixture\ngo 1.26\n", target: conjunctiveSourceInput(checks, requirement.SourceObligationChecks[1].CheckRef, `if delivery.Compute(4)!=11 {t.Fatal("B")}`), "delivery/value.go": "package delivery\nfunc Compute(n int) int {return n+7}\n", "delivery/production_test.go": "package delivery\nimport \"testing\"\nfunc TestProduction(t *testing.T){if Compute(4)!=11{t.Fatal(\"wrong\")}}\n"}
 	var refs []string
 	for ref, body := range files {
 		writeNativeStructureSource(t, root, ref, body)
@@ -59,7 +59,33 @@ func TestProjectMultiFailureSourcePublicationIsExactAndProtectsOriginalTests(t *
 	if !found {
 		t.Fatal("production native source absent")
 	}
-	writeNativeStructureSource(t, root, "delivery/value.go", strings.Replace(files["delivery/value.go"], "n*2+3", "n*2+4", 1))
+	plan := binding.InputReview.ExecutionPlan
+	if plan == nil || len(plan.Stages) != 4 || plan.TimeoutMillis != recipe.TimeoutMillis {
+		t.Fatal("owner publication lost its complete execution method")
+	}
+	request := RuntimeCommandRequest{WorkspaceID: "ws", RunID: "run", StepID: "dispatch/op", WorkspaceDeliverableDirectory: root, WorkspaceInternalDirectory: t.TempDir(), ValidationRecipeID: recipe.ID, ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{recipe}, Command: recipe.Command, Args: recipe.Args, TimeoutMillis: recipe.TimeoutMillis, TargetRefs: []string{target}, ValidationScopeTargetRefs: refs, ValidationCheckAttestations: checks, validationProofBinding: binding, ManagedValidation: runtimecontract.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession}}
+	if err := instrumentManagedValidationNativeChecks(&request); err != nil {
+		t.Fatal(err)
+	}
+	executed, executeErr := NewRuntimeAdapter().executeShellProjectScope(context.Background(), request, shellProjectRawScope{WorkspaceID: "ws", RunID: "run", ExecutionKey: "published-method"})
+	if executeErr != nil || executed.Conjunction == nil || !executed.Conjunction.Complete {
+		t.Fatalf("published method did not actually complete: %v status=%s code=%s", executeErr, executed.Result.Status, executed.Result.FailureCode)
+	}
+	for i, method := range plan.Stages {
+		stage := executed.Conjunction.Stages[i]
+		argv := slices.Clone(stage.Argv[1:])
+		if i == 3 {
+			// The plan declares instrumentation by kind. Only owner-private
+			// scratch path arguments are added when this operation is prepared.
+			argv = slices.DeleteFunc(argv, func(arg string) bool {
+				return strings.HasPrefix(arg, "-coverpkg=") || strings.HasPrefix(arg, "-covermode=") || strings.HasPrefix(arg, "-coverprofile=") || strings.HasPrefix(arg, "-exec=")
+			})
+		}
+		if method.Identity != stage.Identity || stage.Argv[0] != method.Command || !slices.Equal(method.Args, argv) {
+			t.Fatalf("published stage differs from actual OS execution: %+v / %+v", method, stage)
+		}
+	}
+	writeNativeStructureSource(t, root, "delivery/value.go", strings.Replace(files["delivery/value.go"], "n+7", "n+8", 1))
 	current, code := shellInputReview(root, refs, binding)
 	if code != "" || current.Hash != binding.InputReview.Hash {
 		t.Fatal("legitimate implementation repair changed immutable test subject", code)
@@ -74,7 +100,7 @@ func TestProjectMultiFailureSourcePublicationIsExactAndProtectsOriginalTests(t *
 }
 
 func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
-	for _, scenario := range []string{"native-source-channel", "interleaved-output", "large-output", "dynamic-observation", "isolated-overlap", "cancel-overlap", "diagnostic-capacity", "exact", "disjoint", "unobserved", "partial-unobserved", "missing-assertion", "over-capacity", "skip", "drift", "missing-source", "changed-assertion", "additive-input-test", "legacy"} {
+	for _, scenario := range []string{"final-stage-failure", "changed-cases", "diagnostic-pass", "diagnostic-pass-no-behavior", "diagnostic-missing-subcase", "native-source-channel", "interleaved-output", "large-output", "dynamic-observation", "isolated-overlap", "cancel-overlap", "diagnostic-capacity", "exact", "disjoint", "unobserved", "partial-unobserved", "missing-assertion", "over-capacity", "skip", "drift", "missing-source", "changed-assertion", "additive-input-test", "legacy"} {
 		t.Run(scenario, func(t *testing.T) {
 			root, internal := t.TempDir(), t.TempDir()
 			recipe := isolatedInputRecipe()
@@ -87,6 +113,10 @@ func TestProjectMultiFailureDiagnosticActualSourcesAndBehavior(t *testing.T) {
 			}
 			target := shellValidationNativeCheckTargetRef(requirement, checks...)
 			files := map[string]string{"go.mod": "module fixture\ngo 1.26\n", "delivery/value.go": "package delivery\nfunc Value() int{return 3}\n", target: fmt.Sprintf("package checks\nimport(\"testing\"; delivery \"fixture/delivery\")\nfunc %s(t *testing.T){if delivery.Value()!=4{t.Fatal(\"WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3\")}}\n", checks[0].NativeCheckRef), "delivery/value_test.go": "package delivery\nimport \"testing\"\nfunc TestProduction(t *testing.T){if Value()!=4{t.Fatal(\"WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3\")}}\n"}
+			if scenario == "final-stage-failure" {
+				files[target] = strings.Replace(files[target], "if delivery.Value()!=4", `if actual:=delivery.Value(); testing.CoverMode()!="" && actual!=4`, 1)
+				files["delivery/value_test.go"] = "package delivery\nimport \"testing\"\nfunc TestProduction(t *testing.T){if Value()!=3{t.Fatal(\"wrong fixture\")}}\n"
+			}
 			if scenario == "native-source-channel" {
 				for _, ref := range []string{target, "delivery/value_test.go"} {
 					body := strings.Replace(files[ref], `"testing"`, `"testing";"os";"os/exec"`, 1)
@@ -168,6 +198,32 @@ func TestProduction(t *testing.T){
 			}
 			if scenario == "skip" {
 				files["delivery/skip_test.go"] = "package delivery\nimport \"testing\"\nfunc TestSkipped(t *testing.T){t.Skip(\"unfinished\")}\n"
+			}
+			if scenario == "diagnostic-pass" || scenario == "diagnostic-pass-no-behavior" || scenario == "diagnostic-missing-subcase" {
+				files["delivery/value_test.go"] = `package delivery
+import "testing"
+func TestProduction(t *testing.T){
+ t.Run("measured",func(t *testing.T){
+  actual:=Value()
+  if testing.CoverMode()=="" && actual!=4 {t.Fatalf("expected=4 actual=%d",actual)}
+ })
+}
+`
+				if scenario == "diagnostic-pass-no-behavior" {
+					files["delivery/value_test.go"] = strings.Replace(files["delivery/value_test.go"], "actual:=Value()", "actual:=3", 1)
+				}
+				if scenario == "diagnostic-missing-subcase" {
+					files["delivery/value_test.go"] = strings.Replace(files["delivery/value_test.go"], " t.Run", " if testing.CoverMode()!=\"\" {return};t.Run", 1)
+				}
+			}
+			if scenario == "changed-cases" {
+				files["delivery/value_test.go"] = `package delivery
+import "testing"
+func TestProduction(t *testing.T){
+ t.Run("first",func(t *testing.T){if Value()!=4 {t.Fatal("first failed")}})
+ t.Run("second",func(t *testing.T){if actual:=Value(); testing.CoverMode()=="" && actual!=4 {t.Fatal("second failed")}})
+}
+`
 			}
 			if scenario == "changed-assertion" {
 				files["delivery/value_test.go"] = "package delivery\nimport(\"testing\";\"os\";\"strings\")\nfunc TestProduction(t *testing.T){if Value()!=4{if strings.Contains(os.Getenv(\"GOFLAGS\"),\"-cover\"){t.Fatal(\"changed assertion\")};t.Fatal(\"original assertion\")}}\n"
@@ -271,7 +327,7 @@ func TestProduction(t *testing.T){
 			if err == nil || result.Conjunction == nil || result.Conjunction.Complete || result.Result.Evidence.Quality == common.EvidenceQualityValid || result.Conjunction.Validate() != nil {
 				t.Fatalf("failed project credited or lost: err=%v conjunction=%+v", err, result.Conjunction)
 			}
-			wantDiagnostic := scenario == "native-source-channel" || scenario == "dynamic-observation" || scenario == "isolated-overlap" || scenario == "interleaved-output" || scenario == "large-output" || scenario == "exact" || scenario == "disjoint" || scenario == "additive-input-test"
+			wantDiagnostic := scenario == "final-stage-failure" || scenario == "diagnostic-pass" || scenario == "changed-assertion" || scenario == "changed-cases" || scenario == "native-source-channel" || scenario == "dynamic-observation" || scenario == "isolated-overlap" || scenario == "interleaved-output" || scenario == "large-output" || scenario == "exact" || scenario == "disjoint" || scenario == "additive-input-test"
 			diagnostic := result.Result.ValidationFailureDiagnostic
 			if wantDiagnostic {
 				if diagnostic == nil || diagnostic.Unavailability != "" {
@@ -285,9 +341,10 @@ func TestProduction(t *testing.T){
 					"unobserved": runtimecontract.ValidationDiagnosticBehaviorUnobserved, "partial-unobserved": runtimecontract.ValidationDiagnosticBehaviorUnobserved,
 					"missing-assertion": runtimecontract.ValidationDiagnosticAssertionsUnavailable, "over-capacity": runtimecontract.ValidationDiagnosticCapacityExceeded,
 					"skip": runtimecontract.ValidationDiagnosticSourcesUnavailable, "drift": runtimecontract.ValidationDiagnosticInputChanged, "missing-source": runtimecontract.ValidationDiagnosticInputChanged,
-					"changed-assertion":   runtimecontract.ValidationDiagnosticReproductionUnavailable,
-					"diagnostic-capacity": runtimecontract.ValidationDiagnosticCapacityExceeded,
-					"cancel-overlap":      runtimecontract.ValidationDiagnosticExecutionUnavailable,
+					"diagnostic-pass-no-behavior": runtimecontract.ValidationDiagnosticBehaviorUnobserved,
+					"diagnostic-missing-subcase":  runtimecontract.ValidationDiagnosticReproductionUnavailable,
+					"diagnostic-capacity":         runtimecontract.ValidationDiagnosticCapacityExceeded,
+					"cancel-overlap":              runtimecontract.ValidationDiagnosticExecutionUnavailable,
 				}[scenario]
 				if scenario == "diagnostic-capacity" && diagnostic.OwnerCode != "validation_failure_assertion_count_exceeded" {
 					t.Fatalf("independent capacity lost exact owner cause: %+v", diagnostic)
@@ -321,13 +378,32 @@ func TestProduction(t *testing.T){
 					t.Fatal("receipt projection dropped source-specific conjunction or downgraded protocol")
 				}
 				wantStages := 4
+				diagnosticStart, origin := 2, "project-test"
+				if scenario == "final-stage-failure" {
+					wantStages, diagnosticStart, origin = 5, 4, "reviewed-cwi-behavior"
+				}
 				if scenario == "additive-input-test" || scenario == "isolated-overlap" {
 					wantStages = 5
 				}
 				if len(result.Conjunction.Stages) != wantStages || !reflect.DeepEqual(result.Result.ValidationFailureDiagnostic.TargetRefs, wantTargets) || !reflect.DeepEqual(result.Conjunction.BehaviorTargetRefs, wantTargets) {
 					t.Fatal("missing independent source attribution")
 				}
-				for _, stage := range result.Conjunction.Stages[2:] {
+				for _, stage := range result.Conjunction.Stages[diagnosticStart:] {
+					wantRelation := runtimecontract.ValidationReproductionExact
+					for _, source := range binding.InputReview.DiagnosticSources {
+						if source.SourceRef == stage.DiagnosticSourceRef && source.NativeCaseRef == "fixture/delivery/TestProduction" {
+							if scenario == "changed-assertion" || scenario == "changed-cases" {
+								wantRelation = runtimecontract.ValidationReproductionChanged
+							}
+							if scenario == "diagnostic-pass" {
+								wantRelation = runtimecontract.ValidationReproductionAbsent
+							}
+						}
+					}
+					if stage.DiagnosticReproduction != wantRelation {
+						t.Fatalf("diagnostic relation lost: %s != %s", stage.DiagnosticReproduction, wantRelation)
+					}
+
 					wantSourceTargets := []string{"delivery/value.go"}
 					if scenario == "disjoint" {
 						for _, source := range binding.InputReview.DiagnosticSources {
@@ -336,7 +412,7 @@ func TestProduction(t *testing.T){
 							}
 						}
 					}
-					if stage.DiagnosticSourceRef == "" || stage.DiagnosticIsolationRef == "" || stage.DiagnosticOriginStageID != "project-test" || !reflect.DeepEqual(stage.BehaviorTargetRefs, wantSourceTargets) || stage.Stdout.Storage == nil || stage.Stdout.Storage.Reference == "" {
+					if stage.DiagnosticSourceRef == "" || stage.DiagnosticIsolationRef == "" || stage.DiagnosticOriginStageID != origin || !reflect.DeepEqual(stage.BehaviorTargetRefs, wantSourceTargets) || stage.Stdout.Storage == nil || stage.Stdout.Storage.Reference == "" {
 						t.Fatal("source-specific real behavior/raw fact missing")
 					}
 				}
@@ -356,7 +432,16 @@ func TestProduction(t *testing.T){
 					t.Fatal("late assertion lost", err)
 				}
 			}
-			if result.Conjunction.Stages[1].Identity.ID != "project-test" || !result.Conjunction.Stages[1].KnownFailure {
+			failureIndex, failureStage := 1, "project-test"
+			if scenario == "final-stage-failure" {
+				failureIndex, failureStage = 3, "reviewed-cwi-behavior"
+				for _, stage := range result.Conjunction.Stages[:3] {
+					if stage.ExitCode != 0 || stage.KnownFailure || !stage.TerminalComplete {
+						t.Fatal("final-stage fixture failed before the exact instrumented check")
+					}
+				}
+			}
+			if result.Conjunction.Stages[failureIndex].Identity.ID != failureStage || !result.Conjunction.Stages[failureIndex].KnownFailure {
 				t.Fatal("original failure erased")
 			}
 		})
@@ -378,7 +463,7 @@ func TestProjectMultiFailureDiagnosticContextDisposition(t *testing.T) {
 			cancel()
 		}
 		baseline := RuntimeCommandResult{ValidationObservation: &runtimecontract.RuntimeValidationObservation{FailedChecks: []string{"native"}}}
-		stages, _, got := runShellProjectMultiFailureDiagnostic(ctx, t.TempDir(), nil, RuntimeCommandRequest{}, shellProjectStageFact{ID: "project-test", ExitCode: 1}, 2, baseline)
+		stages, _, got := runShellProjectMultiFailureDiagnostic(ctx, t.TempDir(), nil, RuntimeCommandRequest{}, &shellProjectStageFact{ID: "project-test", ExitCode: 1}, 2, baseline)
 		want := runtimecontract.ValidationDiagnosticExecutionUnavailable
 		if timeout {
 			want = runtimecontract.ValidationDiagnosticDeadlineExceeded

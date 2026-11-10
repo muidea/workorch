@@ -79,6 +79,7 @@ type validationInputReviewMainlineOptions struct {
 	LargeProjectOutput                 bool
 	DynamicProjectObservations         bool
 	SequentialProjectFailures          bool
+	NonReproducingProjectFailures      bool
 	NativeProjectSources               bool
 	IncrementalNativeSources           bool
 	MultiFileProject                   bool
@@ -374,6 +375,14 @@ func TestHistorical(t *testing.T) {
 	if options.SequentialProjectFailures {
 		initialFiles["historical_test.go"] = strings.Replace(initialFiles["historical_test.go"], `t.Fatal("WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3")`, `t.Fatalf("expected=4 actual=%d", DeliveredValue())`, 1)
 		projectExecutionCount = strings.Repeat("executed\n", 8)
+	}
+
+	if options.NonReproducingProjectFailures {
+		if mode == "project_history_failure" {
+			initialFiles["historical_test.go"] = strings.Replace(initialFiles["historical_test.go"], `t.Fatal("原工程判据失败")`, `if testing.CoverMode()=="" {t.Fatal("原工程判据失败")}`, 1)
+		} else {
+			initialFiles["historical_test.go"] = strings.Replace(initialFiles["historical_test.go"], "if DeliveredValue()!=4", "if actual:=DeliveredValue(); testing.CoverMode()==\"\" && actual!=4", 1)
+		}
 	}
 
 	inputTargets := map[common.CoverageWorkItemID]string{}
@@ -1792,6 +1801,12 @@ func %s(t *testing.T) {
 		if err != nil || string(counter) != projectExecutionCount {
 			t.Fatalf("sequence recovery repeated or omitted project executions: %q / %v", counter, err)
 		}
+	}
+	if options.NonReproducingProjectFailures && mode != "project_history_failure" {
+		assertNonReproducingFailureClosure(t, *stored.RuntimeState)
+	}
+	if options.NonReproducingProjectFailures && mode == "project_history_failure" {
+		assertUnattributedNonReproducingFailure(t, *stored.RuntimeState)
 	}
 	if options.NativeProjectSources {
 		assertNativeSourceChannelMainlineFacts(t, *stored.RuntimeState)

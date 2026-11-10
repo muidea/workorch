@@ -102,6 +102,7 @@ func TestDiagnosticExecutionReverseProvesOriginalSourceInventory(t *testing.T) {
 	c := observation.ExecutionConjunction
 	observation.RecipeID = binding.ValidationRecipeID
 	c.Stages[1].DiagnosticSourceRef = binding.InputReview.DiagnosticSources[0].SourceRef
+	c.Stages[0].FailedSourceRefs = []string{c.Stages[1].DiagnosticSourceRef}
 	for i := range binding.CheckAttestations {
 		binding.CheckAttestations[i].ObservationProtocolRef = c.ProtocolRef
 		binding.CheckAttestations[i].ExecutionStagesHash = c.RequiredStagesHash
@@ -178,6 +179,7 @@ func TestDiagnosticFailureCannotEraseAttributionOrBorrowRepairTargets(t *testing
 	}
 	original.RecipeID = binding.ValidationRecipeID
 	original.ExecutionConjunction.Stages[1].DiagnosticSourceRef = binding.InputReview.DiagnosticSources[0].SourceRef
+	original.ExecutionConjunction.Stages[0].FailedSourceRefs = []string{original.ExecutionConjunction.Stages[1].DiagnosticSourceRef}
 	for i := range binding.CheckAttestations {
 		binding.CheckAttestations[i].ObservationProtocolRef = original.ObservationProtocolRef
 		binding.CheckAttestations[i].ExecutionStagesHash = original.ExecutionConjunction.RequiredStagesHash
@@ -249,6 +251,7 @@ func TestPrerequisiteDiagnosticUsesOriginalToolFailureWithoutBehaviorCredit(t *t
 	c := original.ExecutionConjunction
 	c.Stages, c.BehaviorTargetRefs = c.Stages[:1], nil
 	c.Stages[0].FailureCode = "owner-prerequisite-failed"
+	c.Stages[0].FailedSourceRefs = nil
 	for i := range binding.CheckAttestations {
 		binding.CheckAttestations[i].ObservationProtocolRef = c.ProtocolRef
 		binding.CheckAttestations[i].ExecutionStagesHash = c.RequiredStagesHash
@@ -341,6 +344,7 @@ func TestDiagnosticStorageOmissionPreservesHistoryButNeverRepairAuthority(t *tes
 	original := diagnosticExecutionFixture()
 	original.RecipeID = binding.ValidationRecipeID
 	original.ExecutionConjunction.Stages[1].DiagnosticSourceRef = binding.InputReview.DiagnosticSources[0].SourceRef
+	original.ExecutionConjunction.Stages[0].FailedSourceRefs = []string{original.ExecutionConjunction.Stages[1].DiagnosticSourceRef}
 	for i := range binding.CheckAttestations {
 		binding.CheckAttestations[i].ObservationProtocolRef = original.ObservationProtocolRef
 		binding.CheckAttestations[i].ExecutionStagesHash = original.ExecutionConjunction.RequiredStagesHash

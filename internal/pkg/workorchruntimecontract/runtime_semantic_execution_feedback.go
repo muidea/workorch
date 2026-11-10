@@ -153,20 +153,31 @@ func ValidateRuntimeSemanticExecutionFeedback(c RuntimeSemanticPlanRequestContex
 // facts. A nil value explicitly means the receipt has no typed observation;
 // locations/hashes alone never imply a complete assertion or an accepted DoD.
 type RuntimeValidationExecutionFeedback struct {
-	RecipeID                 string                          `json:"recipeId,omitempty"`
-	ObservationProtocolRef   string                          `json:"observationProtocolRef,omitempty"`
-	FailureDetailProtocolRef string                          `json:"failureDetailProtocolRef,omitempty"`
-	ExecutedChecks           []string                        `json:"executedChecks,omitempty"`
-	PassedChecks             []string                        `json:"passedChecks,omitempty"`
-	FailedChecks             []string                        `json:"failedChecks,omitempty"`
-	SkippedChecks            []string                        `json:"skippedChecks,omitempty"`
-	IncompleteChecks         []string                        `json:"incompleteChecks,omitempty"`
-	CheckFailures            []RuntimeValidationCheckFailure `json:"checkFailures,omitempty"`
-	FailureDetailsIncomplete bool                            `json:"failureDetailsIncomplete"`
-	ChecksTruncated          bool                            `json:"checksTruncated,omitempty"`
+	// New diagnostic observations never replace the original failed checks.
+	DiagnosticComparisons    []RuntimeValidationDiagnosticComparison `json:"diagnosticComparisons,omitempty"`
+	RecipeID                 string                                  `json:"recipeId,omitempty"`
+	ObservationProtocolRef   string                                  `json:"observationProtocolRef,omitempty"`
+	FailureDetailProtocolRef string                                  `json:"failureDetailProtocolRef,omitempty"`
+	ExecutedChecks           []string                                `json:"executedChecks,omitempty"`
+	PassedChecks             []string                                `json:"passedChecks,omitempty"`
+	FailedChecks             []string                                `json:"failedChecks,omitempty"`
+	SkippedChecks            []string                                `json:"skippedChecks,omitempty"`
+	IncompleteChecks         []string                                `json:"incompleteChecks,omitempty"`
+	CheckFailures            []RuntimeValidationCheckFailure         `json:"checkFailures,omitempty"`
+	FailureDetailsIncomplete bool                                    `json:"failureDetailsIncomplete"`
+	ChecksTruncated          bool                                    `json:"checksTruncated,omitempty"`
+}
+
+type RuntimeValidationDiagnosticComparison struct {
+	StageID       string                                  `json:"stageId"`
+	OriginStageID string                                  `json:"originStageId"`
+	SourceRef     string                                  `json:"sourceRef"`
+	ExitCode      int64                                   `json:"exitCode"`
+	Reproduction  RuntimeValidationDiagnosticReproduction `json:"reproduction"`
 }
 
 func (f RuntimeValidationExecutionFeedback) Clone() RuntimeValidationExecutionFeedback {
+	f.DiagnosticComparisons = slices.Clone(f.DiagnosticComparisons)
 	f.ExecutedChecks = slices.Clone(f.ExecutedChecks)
 	f.PassedChecks = slices.Clone(f.PassedChecks)
 	f.FailedChecks = slices.Clone(f.FailedChecks)
@@ -177,6 +188,16 @@ func (f RuntimeValidationExecutionFeedback) Clone() RuntimeValidationExecutionFe
 }
 
 func (f RuntimeValidationExecutionFeedback) Validate() error {
+	if len(f.DiagnosticComparisons) > RuntimeValidationExecutionMaxStages {
+		return fmt.Errorf("diagnostic comparison capacity exceeded")
+	}
+	seen := map[string]bool{}
+	for _, v := range f.DiagnosticComparisons {
+		if !boundedValidationExecutionRef(v.StageID, 512) || !boundedValidationExecutionRef(v.OriginStageID, 512) || !boundedValidationExecutionRef(v.SourceRef, 512) || seen[v.SourceRef] || v.ExitCode < 0 || v.Reproduction.Validate() != nil || (v.Reproduction == ValidationReproductionAbsent) != (v.ExitCode == 0) {
+			return fmt.Errorf("invalid diagnostic comparison")
+		}
+		seen[v.SourceRef] = true
+	}
 	for _, checks := range [][]string{f.ExecutedChecks, f.PassedChecks, f.FailedChecks, f.SkippedChecks, f.IncompleteChecks} {
 		if len(checks) > RuntimeValidationFailureDetailLimit {
 			return fmt.Errorf("validation feedback check inventory exceeds capacity")
@@ -193,6 +214,7 @@ func (f RuntimeValidationExecutionFeedback) Validate() error {
 		return fmt.Errorf("validation feedback hides incomplete failure details")
 	}
 	canonical.FailureDetailsIncomplete, canonical.ChecksTruncated = f.FailureDetailsIncomplete, f.ChecksTruncated
+	canonical.DiagnosticComparisons = slices.Clone(f.DiagnosticComparisons)
 	if !reflect.DeepEqual(f, *canonical) {
 		return fmt.Errorf("validation feedback is not canonical")
 	}

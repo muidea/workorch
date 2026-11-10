@@ -182,9 +182,10 @@ func runtimeSemanticSourceObligationChecksForProvider(values []runtimecontract.R
 }
 
 type runtimeSemanticInputReviewProjection struct {
-	AllowedProofConsumerRefs []string                                 `json:"allowedProofConsumerRefs"`
-	ProofResponsibilities    []runtimeInputProofResponsibility        `json:"proofResponsibilities"`
-	Recipe                   *runtimecontract.RuntimeValidationRecipe `json:"recipe,omitempty"`
+	AllowedProofConsumerRefs []string                                        `json:"allowedProofConsumerRefs"`
+	ProofResponsibilities    []runtimeInputProofResponsibility               `json:"proofResponsibilities"`
+	Recipe                   *runtimecontract.RuntimeValidationRecipe        `json:"recipe,omitempty"`
+	ExecutionPlan            *runtimecontract.RuntimeValidationExecutionPlan `json:"executionPlan,omitempty"`
 	// Pure requirement projection, not a model conclusion or proof receipt.
 	RequiredProofConsumerRefs   []string                                                  `json:"requiredProofConsumerRefs,omitempty"`
 	OwnerModuleID               string                                                    `json:"ownerModuleId"`

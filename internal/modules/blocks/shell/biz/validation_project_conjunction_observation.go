@@ -24,14 +24,14 @@ func shellProjectConjunctionObservation(fact shellProjectConjunctionFact, expect
 	for index, stage := range fact.Stages {
 		identity, spec := identities[min(index, 3)], expected[min(index, 3)]
 		if strings.HasPrefix(stage.ID, "project-diagnostic-") {
-			if fact.ProtocolRef != shellProjectMultiFailureDiagnosticProtocolRef || fact.Complete || index < 2 || index != 2 && index != 3 && !strings.HasPrefix(fact.Stages[index-1].ID, "project-diagnostic-") {
+			if fact.ProtocolRef != shellProjectMultiFailureDiagnosticProtocolRef || fact.Complete || index < 2 {
 				return runtimecontract.RuntimeValidationExecutionConjunction{}, fmt.Errorf("multi-source diagnostic lacks failed project prefix")
 			}
 			prefix := index
 			for prefix > 0 && strings.HasPrefix(fact.Stages[prefix-1].ID, "project-diagnostic-") {
 				prefix--
 			}
-			if prefix != 2 && prefix != 3 || !fact.Stages[prefix-1].KnownFailure || fact.Stages[prefix-1].ID != "project-test" && fact.Stages[prefix-1].ID != "project-race" {
+			if prefix < 2 || prefix > len(expected) || !expected[prefix-1].JSON || !fact.Stages[prefix-1].KnownFailure || fact.Stages[prefix-1].ID != expected[prefix-1].ID {
 				return runtimecontract.RuntimeValidationExecutionConjunction{}, fmt.Errorf("multi-source diagnostic lacks exact failure")
 			}
 			found := false
@@ -73,7 +73,7 @@ func shellProjectConjunctionObservation(fact shellProjectConjunctionFact, expect
 			SourceBefore: stage.SourceBefore, SourceAfter: stage.SourceAfter, Tests: stage.Tests, PassedTests: stage.PassedTests,
 			TerminalComplete: stage.TerminalComplete, KnownFailure: stage.KnownFailure, FailureCode: stage.FailureCode,
 			DiagnosticSourceRef: stage.DiagnosticSourceRef, DiagnosticOriginStageID: stage.DiagnosticOriginStageID, DiagnosticIsolationRef: stage.DiagnosticIsolationRef, BehaviorTargetRefs: slices.Clone(stage.BehaviorTargetRefs),
-			NativeSourceFailure: stage.NativeSourceFailure,
+			NativeSourceFailure: stage.NativeSourceFailure, FailedSourceRefs: slices.Clone(stage.FailedSourceRefs), DiagnosticReproduction: stage.DiagnosticReproduction,
 		})
 		for _, child := range stage.NativeExecutions {
 			if child.Identity.Stdout != shellProjectOutputIdentity(child.Stdout) || child.Identity.Stderr != shellProjectOutputIdentity(child.Stderr) || !shellProjectRawIdentityConsistent(child.Stdout) || !shellProjectRawIdentityConsistent(child.Stderr) {

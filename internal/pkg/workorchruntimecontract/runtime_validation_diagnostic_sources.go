@@ -155,6 +155,17 @@ func ValidateRuntimeValidationDiagnosticExecution(observation RuntimeValidationO
 	}
 	hasSources := false
 	for _, stage := range c.Stages {
+		for _, ref := range stage.FailedSourceRefs {
+			found := false
+			if binding.InputReview != nil {
+				for _, source := range binding.InputReview.DiagnosticSources {
+					found = found || source.SourceRef == ref
+				}
+			}
+			if !found {
+				return fmt.Errorf("failed source is absent from sealed inventory")
+			}
+		}
 		for _, child := range stage.NativeExecutions {
 			found := false
 			if binding.InputReview != nil {
@@ -198,6 +209,16 @@ func ValidateRuntimeValidationDiagnosticExecution(observation RuntimeValidationO
 		}
 		if !found {
 			return fmt.Errorf("diagnostic execution source is absent from sealed inventory")
+		}
+		if stage.DiagnosticReproduction.Validate() != nil {
+			return fmt.Errorf("source behavior requires its actual reproduction relation")
+		}
+		originFound := false
+		for _, origin := range c.Stages {
+			originFound = originFound || origin.Identity.ID == stage.DiagnosticOriginStageID && slices.Contains(origin.FailedSourceRefs, stage.DiagnosticSourceRef)
+		}
+		if !originFound {
+			return fmt.Errorf("source behavior is not bound to an original failed source")
 		}
 		for _, ref := range stage.BehaviorTargetRefs {
 			if !slices.Contains(scope, ref) {
@@ -246,7 +267,12 @@ func ValidateRuntimeValidationDiagnosticFailureObservation(observation *RuntimeV
 		return fmt.Errorf("diagnostic failure requires original independently attributed source execution")
 	}
 	hasSources := false
+	var requiredSources, observedSources []string
 	for _, stage := range observation.ExecutionConjunction.Stages {
+		requiredSources = append(requiredSources, stage.FailedSourceRefs...)
+		if stage.DiagnosticSourceRef != "" {
+			observedSources = append(observedSources, stage.DiagnosticSourceRef)
+		}
 		if stage.NativeSourceFailure != "" {
 			return fmt.Errorf("native source failure cannot authorize repair")
 		}
@@ -262,6 +288,9 @@ func ValidateRuntimeValidationDiagnosticFailureObservation(observation *RuntimeV
 	}
 	if !hasSources {
 		return fmt.Errorf("diagnostic failure requires original independently attributed source execution")
+	}
+	if len(requiredSources) == 0 || !reflect.DeepEqual(normalizeStrings(requiredSources), normalizeStrings(observedSources)) {
+		return fmt.Errorf("repair requires the complete original failed source union, not partial behavior")
 	}
 	if !reflect.DeepEqual(failure.CandidateTargetRefs, observation.ExecutionConjunction.BehaviorTargetRefs) {
 		return fmt.Errorf("diagnostic failure candidates differ from original independently attributed source union")

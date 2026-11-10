@@ -208,8 +208,13 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 					output.RuntimeDiagnostics.ValidationFailureDiagnostic = diagnostic.ValidationFailureDiagnostic
 				}
 			}
-			if output.ValidationFailureDiagnostic == nil && protocol == shellProjectMultiFailureDiagnosticProtocolRef && (spec.ID == "project-test" || spec.ID == "project-race") {
-				diagnosticStages, diagnosticSpecs, diagnostic := runShellProjectMultiFailureDiagnostic(ctx, directory, env, request, stage, len(stages), stageOutput)
+			// The same source-bound failure transaction applies to the exact
+			// behavior stage too. Its instrumentation can expose a new failure
+			// after both whole-project stages passed; unscoped final-stage
+			// coverage must not bypass the complete failed-source union.
+			if protocol == shellProjectMultiFailureDiagnosticProtocolRef && spec.JSON && stage.KnownFailure && (output.ValidationFailureDiagnostic == nil || output.ValidationFailureDiagnostic.Class == runtimecontract.ValidationDiagnosticTestFailed) {
+				diagnosticStages, diagnosticSpecs, diagnostic := runShellProjectMultiFailureDiagnostic(ctx, directory, env, request, &stage, len(stages), stageOutput)
+				stages[len(stages)-1].FailedSourceRefs = stage.FailedSourceRefs
 				stages = append(stages, diagnosticStages...)
 				output.projectDiagnosticStageSpecs = diagnosticSpecs
 				if diagnostic != nil {

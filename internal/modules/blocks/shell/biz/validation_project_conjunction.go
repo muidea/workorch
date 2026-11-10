@@ -49,12 +49,14 @@ type shellProjectStageFact struct {
 	KnownFailure                 bool
 	FailureCode                  string
 	SourceBefore, SourceAfter    string
-	DiagnosticSourceRef          string                     `json:",omitempty"`
-	DiagnosticOriginStageID      string                     `json:",omitempty"`
-	DiagnosticIsolationRef       string                     `json:",omitempty"`
-	BehaviorTargetRefs           []string                   `json:",omitempty"`
-	NativeExecutions             []shellNativeExecutionFact `json:",omitempty"`
-	NativeSourceFailure          string                     `json:",omitempty"`
+	DiagnosticSourceRef          string                                                  `json:",omitempty"`
+	DiagnosticOriginStageID      string                                                  `json:",omitempty"`
+	DiagnosticIsolationRef       string                                                  `json:",omitempty"`
+	DiagnosticReproduction       runtimecontract.RuntimeValidationDiagnosticReproduction `json:",omitempty"`
+	FailedSourceRefs             []string                                                `json:",omitempty"`
+	BehaviorTargetRefs           []string                                                `json:",omitempty"`
+	NativeExecutions             []shellNativeExecutionFact                              `json:",omitempty"`
+	NativeSourceFailure          string                                                  `json:",omitempty"`
 }
 
 type shellProjectRawFact struct {

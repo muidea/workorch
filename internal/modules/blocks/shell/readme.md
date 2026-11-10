@@ -329,6 +329,10 @@ preparation/supplement 使用实际选中协议的容量和期限说明：multi-
 单个 operation 的准备、全部执行阶段与 cleanup 共用本次封存的 deadline（显式声明范围 1000–600000ms，默认不变），不能重置期限、减样本或跳过原准则。
 普通 mutation 排除全部原 project test 与 validation namespace；来源评审不开放输入维护授权。
 
+Shell 通过同一固定阶段与 native-selector compiler 发布 `InputReview.ExecutionPlan`，绑定每阶段的身份、命令、参数、插桩、
+required checks 和原总期限；仅实际准备时加入私有 scratch 路径。该计划进入 subject hash 和 C3 精确投影，
+供独立评审判断嵌套 suite 与方法是否满足原义务；它不是已执行证据或耗时保证。
+
 原生测试需要独立子执行时，当前生成与完整来源评审统一声明 owner source channel 方法。
 同包 helper 在 `WORKORCH_NATIVE_SOURCE_CHILD == t.Name()` 时执行完整原断言；否则以 `t.Parallel()`
 及继承环境的 `exec.Command(WORKORCH_NATIVE_SOURCE_RUNNER, t.Name()).Run()` 请求执行，并将非零状态报告给
@@ -365,13 +369,18 @@ owner 新生成的计数使用 atomic 模式，允许原输入中继承 instrume
 注入 count 模式使原工程命令失败。完整 count/atomic owner profiles 都按原 exact manifest scope、正计数、非
 test/harness 和原容量门禁读取；set/未知格式、缺失/截断仍拒绝，旧 count 原事实不改写。
 各子执行共享原 context/deadline 与单执行 64MiB 原文总预算；有界 goroutine 全部 join、进程排空及副本 cleanup 后才发布。按封存 source catalog 顺序汇总，不以完成顺序选择结论。
-所有原失败 case/subcase 与 source-bound 失败身份集合必须完整复现，且每源实际触达有限 scope 内非 test/non-harness
-实现；source/输出/cleanup/deadline/storage 任一不完整均不发布修复诊断。阶段保全 `DiagnosticSourceRef`、exact `DiagnosticOriginStageID`、唯一副本 `DiagnosticIsolationRef` 与
+原失败阶段保全完整 `FailedSourceRefs`；独立副本必须实际完成全部原失败 case/subcase，但可得到 PASS 或不同失败。
+`DiagnosticReproduction` 如实记录 `exact_failure`、`changed_assertions` 或 `not_reproduced`，不覆盖原 FAIL。
+每源仍须实际触达有限 scope 内非 test/non-harness 实现；完整原失败 source union 必须与独立归属 union 一致，
+coverage 只给行为候选范围，不证明根因或授予写权限。source/输出/cleanup/deadline/storage 任一不完整均不发布修复诊断。
+阶段保全 `DiagnosticSourceRef`、exact `DiagnosticOriginStageID`、唯一副本 `DiagnosticIsolationRef` 与
 独立 `BehaviorTargetRefs`、实际 argv、原 raw identity/store refs；普通 receipt/hash/reload/duplicate 链仍绑定完整正文。
 若实际归属后原文发布失败，已发生的逐源行为、全部原输出 bytes/hash 身份、已保存流和明确 omission 原因仍保全为
 rejected history；不抹除历史，也不发布 structured repair。`TestProjectDiagnosticPublicationFailureKeepsActualSourceHistory`
 使用真实 runner/raw store 的发布失败与取消边界核验完整原文及零授权；不是公开 fullflow 或 live。
 原工程失败与全部测试不改写，四阶段 conjunction 仍 incomplete、quality invalid、零 CWI credit。
+project-test、project-race 及最后 exact behavior 阶段的真实测试失败共用这一个完整逐源入口；最后阶段的
+coverage 不得跳过 failed-source union 或直接成为修复权限。
 
 原生失败观察在 Shell 内唯一编译：只对 exact sealed input/hash 中静态确认的直接 `*testing.T.Log/Logf` 及闭合参数表达式，
 排除普通观察 frame（含归属其缩进的嵌套 stdout）；完整原 bytes 仍保全。静态类型不完整、helper 调用、用户 Stringer/Formatter、
@@ -381,7 +390,8 @@ builtin len/cap/conversion、time/runtime/strings 值操作；不执行输入、
 
 复现使用唯一 `shellSameFailureAssertions` 比较 check/case/package/target、body ComparisonHash 和 reported shape 的完整集合；
 ComparisonHash 只沿用 owner 已声明的 scratch noise 规则，不清洗耗时/值。helper 装饰行号和同一断言的重复次数不是额外失败身份，
-各自原文/位置/hash 仍留在原 receipt。单源与多源诊断共用该规则；真实 body/value/case/source 改变或缺项仍拒绝。
+各自原文/位置/hash 仍留在原 receipt。单源与多源诊断共用该比较；多源诊断将完整新 body/value/case 变化记录为
+`changed_assertions`，新执行 PASS 记录为 `not_reproduced`；任一原 case 未执行、source 漂移、缺原文或缺行为仍拒绝修复授权。
 断言 count 上限为64，单条16KiB、总正文128KiB不变；count/body/aggregate/frame分别报 exact ownerCode。
 这不意味着64条任意大小都能发送：含旧正式报告及全部metadata的整个 execution feedback JSON 仍受64KiB限制，
 共同 typed compiler 显式测量并报告 actual/limit，不截断、不重试、不扩预算。

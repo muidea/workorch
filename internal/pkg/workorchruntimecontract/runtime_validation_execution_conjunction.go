@@ -60,11 +60,32 @@ type RuntimeValidationExecutionStage struct {
 	DiagnosticSourceRef string `json:",omitempty"`
 	// Paired owner provenance permits overlapping diagnostic copies after an
 	// exact failed original. It never completes or reorders ordinary all-of.
-	DiagnosticOriginStageID string                             `json:",omitempty"`
-	DiagnosticIsolationRef  string                             `json:",omitempty"`
-	BehaviorTargetRefs      []string                           `json:",omitempty"`
-	NativeExecutions        []RuntimeValidationNativeExecution `json:",omitempty"`
-	NativeSourceFailure     string                             `json:",omitempty"`
+	DiagnosticOriginStageID string `json:",omitempty"`
+	DiagnosticIsolationRef  string `json:",omitempty"`
+	// Reproduction describes a new observation, independently of whether its
+	// complete source-bound behavior can nominate a repair surface. Never PASS credit.
+	DiagnosticReproduction RuntimeValidationDiagnosticReproduction `json:",omitempty"`
+	FailedSourceRefs       []string                                `json:",omitempty"`
+	BehaviorTargetRefs     []string                                `json:",omitempty"`
+	NativeExecutions       []RuntimeValidationNativeExecution      `json:",omitempty"`
+	NativeSourceFailure    string                                  `json:",omitempty"`
+}
+
+type RuntimeValidationDiagnosticReproduction string
+
+const (
+	ValidationReproductionExact   RuntimeValidationDiagnosticReproduction = "exact_failure"
+	ValidationReproductionChanged RuntimeValidationDiagnosticReproduction = "changed_assertions"
+	ValidationReproductionAbsent  RuntimeValidationDiagnosticReproduction = "not_reproduced"
+)
+
+func (r RuntimeValidationDiagnosticReproduction) Validate() error {
+	switch r {
+	case ValidationReproductionExact, ValidationReproductionChanged, ValidationReproductionAbsent:
+		return nil
+	default:
+		return fmt.Errorf("invalid diagnostic reproduction relation %q", r)
+	}
 }
 
 // Capability-owner controlled child execution, bound before output is shared.
@@ -145,6 +166,7 @@ func (c RuntimeValidationExecutionConjunction) Clone() RuntimeValidationExecutio
 	if c.Stages != nil {
 		c.Stages = append(make([]RuntimeValidationExecutionStage, 0, len(c.Stages)), c.Stages...)
 		for index := range c.Stages {
+			c.Stages[index].FailedSourceRefs = slices.Clone(c.Stages[index].FailedSourceRefs)
 			c.Stages[index].NativeExecutions = slices.Clone(c.Stages[index].NativeExecutions)
 			for child := range c.Stages[index].NativeExecutions {
 				c.Stages[index].NativeExecutions[child] = c.Stages[index].NativeExecutions[child].Clone()
@@ -209,6 +231,21 @@ func (c RuntimeValidationExecutionConjunction) Validate() error {
 	var identities []RuntimeValidationExecutionStageIdentity
 	var previousEnd time.Time
 	for index, stage := range c.Stages {
+		if len(stage.FailedSourceRefs) > RuntimeValidationDiagnosticSourceLimit || !reflect.DeepEqual(stage.FailedSourceRefs, normalizeStrings(stage.FailedSourceRefs)) || len(stage.FailedSourceRefs) > 0 && (!stage.KnownFailure || stage.ExitCode == 0 || stage.DiagnosticOriginStageID != "" || c.Complete) {
+			return fmt.Errorf("failed sources require the original failed stage")
+		}
+		for _, ref := range stage.FailedSourceRefs {
+			if !boundedValidationExecutionRef(ref, 512) {
+				return fmt.Errorf("invalid failed source")
+			}
+		}
+		if stage.DiagnosticReproduction != "" {
+			if stage.DiagnosticReproduction.Validate() != nil || stage.DiagnosticIsolationRef == "" || stage.DiagnosticOriginStageID == "" ||
+				stage.DiagnosticReproduction == ValidationReproductionAbsent && (stage.ExitCode != 0 || stage.KnownFailure) ||
+				stage.DiagnosticReproduction != ValidationReproductionAbsent && (stage.ExitCode == 0 || !stage.KnownFailure) {
+				return fmt.Errorf("diagnostic reproduction contradicts its actual execution")
+			}
+		}
 		if len(stage.NativeExecutions) > RuntimeValidationDiagnosticSourceLimit || stage.NativeSourceFailure != "" && !boundedValidationExecutionRef(stage.NativeSourceFailure, 512) {
 			return fmt.Errorf("native execution capacity or failure invalid")
 		}
@@ -247,7 +284,7 @@ func (c RuntimeValidationExecutionConjunction) Validate() error {
 		}
 		origins[stage.Identity.ID] = stage
 		if stage.DiagnosticSourceRef != "" || stage.BehaviorTargetRefs != nil {
-			if c.Complete || !stage.Started || stage.ExitCode == 0 || !stage.KnownFailure || stage.TimedOut || stage.CleanupFailed || !stage.TerminalComplete || !stage.Stdout.Complete || !stage.Stderr.Complete || stage.SourceBefore == "" || stage.SourceBefore != stage.SourceAfter || !boundedValidationExecutionRef(stage.DiagnosticSourceRef, 512) || len(stage.BehaviorTargetRefs) == 0 || len(stage.BehaviorTargetRefs) > 64 || !reflect.DeepEqual(stage.BehaviorTargetRefs, normalizeStrings(stage.BehaviorTargetRefs)) {
+			if c.Complete || !stage.Started || stage.DiagnosticReproduction.Validate() != nil || stage.TimedOut || stage.CleanupFailed || !stage.TerminalComplete || !stage.Stdout.Complete || !stage.Stderr.Complete || stage.SourceBefore == "" || stage.SourceBefore != stage.SourceAfter || !boundedValidationExecutionRef(stage.DiagnosticSourceRef, 512) || len(stage.BehaviorTargetRefs) == 0 || len(stage.BehaviorTargetRefs) > 64 || !reflect.DeepEqual(stage.BehaviorTargetRefs, normalizeStrings(stage.BehaviorTargetRefs)) {
 				return fmt.Errorf("diagnostic execution requires bounded source-specific behavior, never complete proof")
 			}
 			for _, ref := range stage.BehaviorTargetRefs {

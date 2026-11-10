@@ -346,8 +346,9 @@ func (m *Biz) handleRuntimeStateRecord(ev magicevent.Event, result magicevent.Re
 	response := runevents.QueryRuntimeStateRecordResult{WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID}
 	if run.RuntimeState != nil {
 		response.StatePresent = true
-		record := run.RuntimeState.Clone()
-		response.RuntimeState = &record
+		// Repository reads already detach the graph from their stored/cache image.
+		// Transfer that private result; no owner reference survives this handler.
+		response.RuntimeState = run.RuntimeState
 		response.RuntimeStateRevision = response.RuntimeState.StateRevision
 		response.RuntimeStateRef = runevents.RuntimeStateRef(cmd.WorkspaceID, cmd.RunID, response.RuntimeStateRevision)
 		if cmd.ExpectedRuntimeStateRevision != 0 &&

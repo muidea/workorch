@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -25,6 +26,7 @@ func TestFailureInputReviewProviderRetainsExactInputsAndReceiptBody(t *testing.T
 	f := rc.RuntimeSemanticExecutionFeedback{WorkspaceID: c.WorkspaceID, RunID: c.RunID, DefinitionRevision: c.Definition.Revision, StartupInputHash: c.Definition.StartupInputHash, ManifestHash: m.Hash, CoverageWorkItemID: m.CoverageItems[0].ID, FailedFocusID: "original-focus", FailureSignature: "failure", OwnerModuleID: rc.RuntimeModuleShell, OperationKind: rc.RuntimeBlockKindManagedValidationSession, EvidenceID: "failure-event", EvidenceRevision: "evidence:1", DispatchID: "dispatch", OperationID: "operation", ReceiptRef: "receipt", ReceiptHash: "receipt-hash",
 		Diagnostic: &rc.RuntimeSemanticExecutionDiagnostic{FeedbackHash: "owner-feedback", OwnerModuleID: rc.RuntimeModuleShell, OriginalClass: "execution_failure", OriginalCode: "validation_failed", Signature: "failure", SummaryOnly: true},
 		Validation: rc.ProjectRuntimeValidationExecutionFeedback(&rc.RuntimeValidationObservation{RecipeID: "review-recipe", FailedChecks: []string{"check"}, FailureDetailProtocolRef: rc.RuntimeValidationFailureDetailProtocol, CheckFailures: []rc.RuntimeValidationCheckFailure{{CheckRef: "check", TargetRef: "checks/input_test.go", Line: 15, DiagnosticHash: hex.EncodeToString(digest[:]), ComparisonHash: hex.EncodeToString(digest[:]), AssertionText: body}}})}
+	f.Validation.DiagnosticComparisons = []rc.RuntimeValidationDiagnosticComparison{{StageID: "independent", OriginStageID: "original", SourceRef: "source", ExitCode: 0, Reproduction: rc.ValidationReproductionAbsent}}
 	// Preserve a real-size failure set through the provider projection, complete
 	// envelope gate, frozen reload and rendered integrity; no hidden count32 cap.
 	for n := 1; n < 39; n++ {
@@ -55,7 +57,7 @@ func TestFailureInputReviewProviderRetainsExactInputsAndReceiptBody(t *testing.T
 		t.Fatal(err)
 	}
 	var projected runtimeSemanticTailProjection
-	if err := json.Unmarshal([]byte(rendered.PromptContext.Sections[4].Content), &projected); err != nil || len(projected.ExecutionFeedback) != 1 || len(projected.ExecutionFeedback[0].Validation.CheckFailures) != 39 {
+	if err := json.Unmarshal([]byte(rendered.PromptContext.Sections[4].Content), &projected); err != nil || len(projected.ExecutionFeedback) != 1 || len(projected.ExecutionFeedback[0].Validation.CheckFailures) != 39 || !reflect.DeepEqual(projected.ExecutionFeedback[0].Validation.DiagnosticComparisons, f.Validation.DiagnosticComparisons) {
 		t.Fatal("39 failures did not reach provider unchanged", err)
 	}
 	for i := 0; i < 3; i++ {
@@ -87,6 +89,9 @@ func TestFailureInputReviewProviderRetainsExactInputsAndReceiptBody(t *testing.T
 		}
 	}
 	for name, mutate := range map[string]func(*runtimeSemanticTailProjection){
+		"diagnostic relation": func(tail *runtimeSemanticTailProjection) {
+			tail.ExecutionFeedback[0].Validation.DiagnosticComparisons[0].Reproduction = rc.ValidationReproductionChanged
+		},
 		"assertion": func(tail *runtimeSemanticTailProjection) {
 			tail.ExecutionFeedback[0].Validation.CheckFailures[0].AssertionText = "another assertion"
 		},

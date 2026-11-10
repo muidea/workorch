@@ -167,7 +167,11 @@ func diagnosticExecutionFixture() RuntimeValidationObservation {
 		stage.Stdout.Storage = &RuntimeValidationOutputStorage{Reference: "owner-output"}
 		stage.Stderr.Storage = &RuntimeValidationOutputStorage{Reference: "owner-error"}
 	}
+	c.Stages[0].FailedSourceRefs = []string{"source-1"}
 	c.Stages[1].DiagnosticSourceRef = "source-1"
+	c.Stages[1].DiagnosticReproduction = ValidationReproductionExact
+	c.Stages[1].DiagnosticOriginStageID = c.Stages[0].Identity.ID
+	c.Stages[1].DiagnosticIsolationRef = "copy-one"
 	c.Stages[1].BehaviorTargetRefs = []string{"implementation"}
 	return observation
 }
@@ -241,6 +245,9 @@ func TestRuntimeValidationExecutionDiagnosticFactsRemainRejectedAndExact(t *test
 	legacy.ExecutionConjunction.Stages[1].DiagnosticSourceRef = ""
 	legacy.ExecutionConjunction.Stages[1].BehaviorTargetRefs = nil
 	legacy.ExecutionConjunction.Stages[1].StartedAt = ""
+	legacy.ExecutionConjunction.Stages[1].DiagnosticReproduction = ""
+	legacy.ExecutionConjunction.Stages[1].DiagnosticOriginStageID = ""
+	legacy.ExecutionConjunction.Stages[1].DiagnosticIsolationRef = ""
 	if err := legacy.ValidateFailureDetails(); err != nil {
 		t.Fatal(err)
 	}

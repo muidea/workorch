@@ -3,7 +3,6 @@ package workorchruntimecontract
 import (
 	"fmt"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"reflect"
 )
 
 // A formal preimage is supplied only by the owner transaction. Preserve its
@@ -15,11 +14,11 @@ func ValidateRuntimeCommittedHistoryTransition(before, after RuntimeStateRecord)
 			err = fmt.Errorf("%w: %v", common.ErrConflict, err)
 		}
 	}()
-	if !reflect.DeepEqual(before.Definition, after.Definition) ||
+	if !runtimeRawEqual(before.Definition, after.Definition) ||
 		before.ResultFeedbackVersion != after.ResultFeedbackVersion ||
 		before.Facts.WorkspaceID != after.Facts.WorkspaceID || before.Facts.RunID != after.Facts.RunID ||
-		!reflect.DeepEqual(before.Facts.DefinitionSeed, after.Facts.DefinitionSeed) ||
-		!reflect.DeepEqual(before.Facts.DefinitionFocuses, after.Facts.DefinitionFocuses) {
+		!runtimeRawEqual(before.Facts.DefinitionSeed, after.Facts.DefinitionSeed) ||
+		!runtimeRawEqual(before.Facts.DefinitionFocuses, after.Facts.DefinitionFocuses) {
 		return fmt.Errorf("runtime transition rewrites sealed definition or scope")
 	}
 	if err := validateCommittedSemanticSources(before.SemanticPlanning, after.SemanticPlanning); err != nil {
@@ -36,7 +35,7 @@ func ValidateRuntimeCommittedHistoryTransition(before, after RuntimeStateRecord)
 		if i >= len(prior) {
 			break
 		}
-		if !reflect.DeepEqual(prior[i], generation) {
+		if !runtimeRawEqual(prior[i], generation) {
 			return fmt.Errorf("runtime transition rewrites committed semantic generation %d", i)
 		}
 	}
@@ -44,7 +43,7 @@ func ValidateRuntimeCommittedHistoryTransition(before, after RuntimeStateRecord)
 		return fmt.Errorf("runtime transition removes committed work purpose")
 	}
 	for i, choice := range before.ImplementationWork.PurposeChoices {
-		if !reflect.DeepEqual(choice, after.ImplementationWork.PurposeChoices[i]) {
+		if !runtimeRawEqual(choice, after.ImplementationWork.PurposeChoices[i]) {
 			return fmt.Errorf("runtime transition rewrites committed work purpose")
 		}
 	}
@@ -54,7 +53,7 @@ func ValidateRuntimeCommittedHistoryTransition(before, after RuntimeStateRecord)
 	for i, round := range before.ImplementationWork.Rounds {
 		// Suspended, unknown and open rounds still have original transactions to
 		// settle. Only successful collective completion is a closed work result.
-		if round.CompletedReceiptSetHash != "" && !reflect.DeepEqual(round, after.ImplementationWork.Rounds[i]) {
+		if round.CompletedReceiptSetHash != "" && !runtimeRawEqual(round, after.ImplementationWork.Rounds[i]) {
 			return fmt.Errorf("runtime transition rewrites completed work round")
 		}
 	}
@@ -63,7 +62,7 @@ func ValidateRuntimeCommittedHistoryTransition(before, after RuntimeStateRecord)
 		for _, fact := range pair[0] {
 			matches := 0
 			for _, next := range pair[1] {
-				if next.ID == fact.ID && reflect.DeepEqual(fact, next) {
+				if next.ID == fact.ID && runtimeRawEqual(fact, next) {
 					matches++
 				}
 			}
@@ -107,7 +106,7 @@ func ValidateRuntimeCommittedHistoryTransition(before, after RuntimeStateRecord)
 		receipts[fmt.Sprintf("%s/%d", receipt.ExecutionKey, receipt.Fence)] = receipt
 	}
 	for _, receipt := range before.OperationReceipts {
-		if !reflect.DeepEqual(receipt, receipts[fmt.Sprintf("%s/%d", receipt.ExecutionKey, receipt.Fence)]) {
+		if !runtimeRawEqual(receipt, receipts[fmt.Sprintf("%s/%d", receipt.ExecutionKey, receipt.Fence)]) {
 			return fmt.Errorf("runtime transition rewrites committed owner receipt")
 		}
 	}
@@ -125,7 +124,7 @@ func ValidateRuntimeCommittedHistoryTransition(before, after RuntimeStateRecord)
 			settled = settled && execution.State == OperationExecutionEvidenceCommitted
 		}
 		if settled {
-			if !reflect.DeepEqual(dispatch, next) {
+			if !runtimeRawEqual(dispatch, next) {
 				return fmt.Errorf("runtime transition rewrites committed dispatch result")
 			}
 		} else if dispatch.DispatchAuthorityHash != next.DispatchAuthorityHash || StableRuntimeDispatchAuthorityHash(dispatch) != StableRuntimeDispatchAuthorityHash(next) {
@@ -139,8 +138,16 @@ func (s *runtimeSemanticValidationSession) committedGeneration(raw RuntimeSemant
 	if s == nil || s.committedPreimage == nil {
 		return false
 	}
-	for _, prior := range s.committedPreimage.SemanticPlanning.AllHistory() {
-		if prior.RetiredAtStateRevision == raw.RetiredAtStateRevision && prior.Reason == raw.Reason && reflect.DeepEqual(prior, raw) {
+	if s.committedGenerations == nil {
+		s.committedGenerations = make(map[runtimeCommittedGenerationIdentity][]RuntimeSemanticPlanningGeneration)
+		for _, prior := range s.committedPreimage.SemanticPlanning.AllHistory() {
+			key := runtimeCommittedGenerationIdentity{prior.RetiredAtStateRevision, prior.Reason}
+			s.committedGenerations[key] = append(s.committedGenerations[key], prior)
+		}
+	}
+	key := runtimeCommittedGenerationIdentity{raw.RetiredAtStateRevision, raw.Reason}
+	for _, prior := range s.committedGenerations[key] {
+		if runtimeRawEqual(prior, raw) {
 			return true
 		}
 	}
@@ -157,10 +164,25 @@ func (s *runtimeSemanticValidationSession) committedWorkRound(round RuntimeImple
 	if s == nil || s.committedPreimage == nil {
 		return false
 	}
-	for _, prior := range s.committedPreimage.ImplementationWork.Rounds {
-		if prior.ScopeRequest.RequestID == round.ScopeRequest.RequestID && reflect.DeepEqual(prior, round) {
+	if s.committedWorkRounds == nil {
+		s.committedWorkRounds = make(map[string][]RuntimeImplementationWorkRound)
+		for _, prior := range s.committedPreimage.ImplementationWork.Rounds {
+			key := prior.ScopeRequest.RequestID
+			s.committedWorkRounds[key] = append(s.committedWorkRounds[key], prior)
+		}
+	}
+	for _, prior := range s.committedWorkRounds[round.ScopeRequest.RequestID] {
+		if runtimeRawEqual(prior, round) {
 			return true
 		}
 	}
 	return false
+}
+
+// An index of original values lives only inside one synchronous compiler call.
+// Membership never establishes reuse: every hit still compares the complete
+// raw original, including all history and nested inputs. No validity survives.
+type runtimeCommittedGenerationIdentity struct {
+	Revision uint64
+	Reason   RuntimeSemanticPlanningRetirementReason
 }

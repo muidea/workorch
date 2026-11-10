@@ -229,6 +229,10 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 						method := recipe
 						method.Args = append([]string(nil), recipe.Args...)
 						ownerBinding.InputReview.Recipe = &method
+						ownerBinding.InputReview.ExecutionPlan, err = shellProjectReviewExecutionPlan(ownerBinding.InputReview, ownerBinding)
+						if err != nil {
+							continue
+						}
 						ownerBinding.InputReview.ProtocolRef = recipe.InputReviewProtocolRef
 						if recipe.InputReviewProtocolRef == runtimemodel.RuntimeValidationInputReviewProtocol {
 							ownerBinding.InputReview.LineageAssertions = append([]runtimemodel.RuntimeLineageAssertion(nil), requirement.LineageAssertions...)

@@ -117,6 +117,11 @@ func shellReadValidationInputSubject(directory string, targets []string, binding
 			return nil, code
 		}
 	}
+	var planErr error
+	subject.ExecutionPlan, planErr = shellProjectReviewExecutionPlan(subject, binding)
+	if planErr != nil {
+		return nil, "validation_input_review_mapping_unsupported"
+	}
 	subject.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*subject, binding)
 	if subject.ValidateAgainstBinding(binding) != nil {
 		return nil, "validation_input_review_source_unavailable"

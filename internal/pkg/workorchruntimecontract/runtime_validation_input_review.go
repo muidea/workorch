@@ -51,7 +51,8 @@ type RuntimeValidationInputReviewSubject struct {
 	EvaluationScope string `json:",omitempty"`
 	// Optional owner-declared method for this exact review transaction. It is
 	// not inferred from current defaults or appended to frozen old subjects.
-	Recipe *RuntimeValidationRecipe `json:",omitempty"`
+	Recipe        *RuntimeValidationRecipe        `json:",omitempty"`
+	ExecutionPlan *RuntimeValidationExecutionPlan `json:",omitempty"`
 	// Optional owner-authored limits on what these inputs execute/observe. A
 	// reviewer must not infer a wider proof scope from recipe names or paths.
 	ScopeContractRef            string                              `json:",omitempty"`
@@ -173,6 +174,10 @@ func writeRuntimeSemanticInputReviewInformationHash(h interface{ Write([]byte) (
 
 func (s RuntimeValidationInputReviewSubject) Clone() RuntimeValidationInputReviewSubject {
 	s.Recipe = cloneRuntimeInputRecipe(s.Recipe)
+	if s.ExecutionPlan != nil {
+		plan := s.ExecutionPlan.Clone()
+		s.ExecutionPlan = &plan
+	}
 	s.Files = slices.Clone(s.Files)
 	s.LineageAssertions = slices.Clone(s.LineageAssertions)
 	s.DiagnosticSources = slices.Clone(s.DiagnosticSources)
@@ -241,6 +246,11 @@ func StableRuntimeValidationInputReviewSubjectHash(s RuntimeValidationInputRevie
 		writeHashString(h, string(payload))
 	}
 	writeRuntimeDiagnosticSourceSubjectHash(h, s)
+	if s.ExecutionPlan != nil {
+		payload, _ := json.Marshal(s.ExecutionPlan)
+		writeHashString(h, "validation-execution-plan")
+		writeHashString(h, string(payload))
+	}
 	if s.Recipe != nil {
 		payload, _ := json.Marshal(s.Recipe)
 		writeHashString(h, "validation-input-declared-method")
@@ -255,6 +265,11 @@ func (s RuntimeValidationInputReviewSubject) ValidateAgainstBinding(b RuntimeVal
 	}
 	if s.Recipe != nil && (s.Recipe.ValidateDeclaration() != nil || s.Recipe.ID != b.ValidationRecipeID) {
 		return fmt.Errorf("validation input review method differs from original binding")
+	}
+	if s.ExecutionPlan != nil {
+		if err := s.ExecutionPlan.validate(b, s.Recipe); err != nil {
+			return err
+		}
 	}
 	if err := validateRuntimeDiagnosticSourceSubject(s); err != nil {
 		return err

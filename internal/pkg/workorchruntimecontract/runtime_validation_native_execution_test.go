@@ -74,6 +74,7 @@ func TestValidationNativeExecutionReverseBindsOwnerSource(t *testing.T) {
 	observation := diagnosticExecutionFixture()
 	stage := &observation.ExecutionConjunction.Stages[0]
 	source := binding.InputReview.DiagnosticSources[0]
+	stage.FailedSourceRefs = []string{source.SourceRef}
 	stage.NativeExecutions = []RuntimeValidationNativeExecution{{SourceRef: source.SourceRef, NativeCaseRef: source.NativeCaseRef, ParentExecutableSHA256: stage.SourceBefore, Argv: []string{"tool"}, StartedAt: stage.StartedAt, FinishedAt: stage.FinishedAt, ExitCode: 1, TerminalComplete: true, Stdout: stage.Stdout, Stderr: stage.Stderr}}
 	// Without attributed repair facts this is still an independently scoped
 	// historical observation. Identity tampering is rejected even here.

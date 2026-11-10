@@ -40,6 +40,29 @@ func TestCommittedHistoryPreservesOriginalsAndAllowsPackingAndCurrentChanges(t *
 	}
 }
 
+func TestCommittedSourceIndexAlwaysComparesCompleteOriginals(t *testing.T) {
+	before := RuntimeStateRecord{SemanticPlanning: RuntimeSemanticPlanningLedger{History: []RuntimeSemanticPlanningGeneration{{RetiredAtStateRevision: 8, Reason: RuntimeSemanticPlanningRetirementResourceInvalidated}}}, ImplementationWork: RuntimeImplementationWorkLedger{Rounds: []RuntimeImplementationWorkRound{{Hash: "original"}}}}
+	session := newRuntimeSemanticValidationSession()
+	session.committedPreimage = &before
+	generation := before.SemanticPlanning.History[0]
+	round := before.ImplementationWork.Rounds[0].Clone()
+	if !session.committedGeneration(generation) || !session.committedWorkRound(round) {
+		t.Fatal("detached exact original not found")
+	}
+	generation.Snapshot.Feasibilities = []RuntimeSemanticProofFeasibility{}
+	round.Hash = "changed body with the same index identity"
+	if session.committedGeneration(generation) || session.committedWorkRound(round) {
+		t.Fatal("index membership hid changed raw body or nil/empty difference")
+	}
+	other := newRuntimeSemanticValidationSession()
+	changed := before.Clone()
+	changed.ImplementationWork.Rounds[0].Hash = round.Hash
+	other.committedPreimage = &changed
+	if !other.committedWorkRound(round) || session.committedWorkRound(round) {
+		t.Fatal("separate owner transactions shared an admitted value")
+	}
+}
+
 func TestCommittedTransitionFixedSnapshotDoesNotReadmitHistoryOrHideNewMissingInput(t *testing.T) {
 	_, _, runs := runtimeStateConsumerArchive(t)
 	for _, run := range runs {

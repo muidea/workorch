@@ -862,7 +862,9 @@ type runtimeSemanticCatalogValidationEntry struct {
 // matching a caller-supplied hash is never sufficient.
 type runtimeSemanticValidationSession struct {
 	// Exact formal preimage for this one owner transition; never retained or serialized.
-	committedPreimage *RuntimeStateRecord
+	committedPreimage    *RuntimeStateRecord
+	committedGenerations map[runtimeCommittedGenerationIdentity][]RuntimeSemanticPlanningGeneration
+	committedWorkRounds  map[string][]RuntimeImplementationWorkRound
 
 	manifests         map[string][]runtimeSemanticManifestValidationEntry
 	catalogs          map[string][]runtimeSemanticCatalogValidationEntry

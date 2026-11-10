@@ -37,6 +37,13 @@ func ProjectRuntimeValidationExecutionFeedback(value *RuntimeValidationObservati
 	ret.FailedChecks, ret.SkippedChecks = bounded(o.FailedChecks), bounded(o.SkippedChecks)
 	ret.IncompleteChecks = bounded(o.IncompleteChecks)
 	if o.ValidateFailureDetails() == nil {
+		if o.ExecutionConjunction != nil {
+			for _, s := range o.ExecutionConjunction.Stages {
+				if s.DiagnosticSourceRef != "" && s.DiagnosticReproduction != "" {
+					ret.DiagnosticComparisons = append(ret.DiagnosticComparisons, RuntimeValidationDiagnosticComparison{StageID: s.Identity.ID, OriginStageID: s.DiagnosticOriginStageID, SourceRef: s.DiagnosticSourceRef, ExitCode: s.ExitCode, Reproduction: s.DiagnosticReproduction})
+				}
+			}
+		}
 		ret.FailureDetailProtocolRef = o.FailureDetailProtocolRef
 		for _, detail := range o.CheckFailures {
 			if !containsString(ret.FailedChecks, detail.CheckRef) {

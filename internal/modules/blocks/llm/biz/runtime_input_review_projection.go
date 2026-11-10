@@ -29,6 +29,7 @@ func runtimeSemanticInputReviewsForRequirement(catalogs []runtimecontract.Runtim
 					SubjectHash: binding.InputReview.Hash, ProtocolRef: binding.InputReview.ProtocolRef,
 					EvaluationScope:           binding.InputReview.EvaluationScope,
 					Recipe:                    method,
+					ExecutionPlan:             binding.InputReview.Clone().ExecutionPlan,
 					RequiredProofConsumerRefs: consumers,
 					AllowedProofConsumerRefs:  runtimecontract.RuntimeValidationAllowedProofConsumerRefs(*binding.InputReview),
 					ProofResponsibilities:     runtimeInputProofResponsibilitiesForSubject(*binding.InputReview),
@@ -64,7 +65,7 @@ func runtimeSemanticOutputInstruction(context runtimecontract.RuntimeSemanticPla
 	}
 	for _, review := range reviews {
 		if review.ScopeContractRef != "" {
-			base += " Evaluate inputs under the supplied owner scopeContractRef/scopeRequirements; do not infer broader execution or proof from a recipe name. Report missing external input context as inconclusive and any known omission of an original criterion as conflict."
+			base += " When executionPlan is supplied, consume its owner-declared stage/check mapping, command selectors, instrumentation and shared deadline; distinguish these independent methods from nested commands in input files. Preserve every original obligation and independent execution; identify contradictory or unnecessary repeated whole-suite work through the existing obligation report, never treating shared results as independent proof. Unknown execution duration is not an input-meaning gap. Evaluate inputs under the supplied owner scopeContractRef/scopeRequirements; do not infer broader execution or proof from a recipe name. Report missing external input context as inconclusive and any known omission of an original criterion as conflict."
 			break
 		}
 	}

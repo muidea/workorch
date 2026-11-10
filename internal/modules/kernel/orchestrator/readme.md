@@ -1300,7 +1300,11 @@ consistent check 隐藏邻接 conflict/unknown。该扩展的未知信息与原 
 rejected receipt writer 与 fresh-load 通过同一中立门禁反查原 dispatch/catalog 的准确来源库存、protocol/stages 和 owner
 scope，并核对独立 behavior union；时间顺序、重复来源和版本漂移均拒绝，原输出保存缺失严格拒绝修复授权。旧 noncomplete stage
 history 不自动升级。原 binding 选择门禁，删除逐源字段、整个合取或 union 不得保留 structured failure 的修复授权；
-failure candidate 必须与逐源归属 union 完全一致。`operation_receipt_diagnostic_source_test.go` 固定 ingress／重载同一反查门禁。
+failure candidate 必须与逐源归属 union 完全一致。原失败 `FailedSourceRefs` 与独立归属来源 union 必须完整相等；
+`DiagnosticReproduction` 区分 exact/changed/not-reproduced，完整诊断 PASS 不覆盖原失败或授 credit。
+证据充分时继续原输入重审→资源 owner 确认→受限修复；来源/原文/行为缺失仍精确停止。
+C4 的 `DiagnosticComparisons` 传递正式关系，冻结/纠正/恢复及 receipt hash 保持绑定，Core 不解析 native 日志。
+`operation_receipt_diagnostic_source_test.go` 固定 ingress／重载同一反查门禁。
 普通执行在后续 deadline/storage 失败前观察到的 behavior 只可保留为 rejected 历史，无逐源归属不得授 structured
 repair；多失败源的部分归属保留真实旧阶段及精确 union，但后一来源未知时仍零修复／验收授权，不借用旧行为补缺。
 真实归属后的原文发布失败也保留逐源历史、原输出 bytes/hash、已保存引用和明确 omission；structured failure
@@ -2243,7 +2247,8 @@ omission 及原 failure code；原 receipt、EvidenceFact、诊断和历史结�
 该确定失败直接终止，不猜 repair target、不打开普通修复生成、不消耗新的候选或操作预算，也不授 credit。
 完整原文与完整归因分开表达。Shell 的 `ValidationFailureDiagnostic.Unavailability` 是闭合 typed 原因，
 包括 assertions/sources/capacity/reproduction/behavior/input/execution/deadline，不依赖 reason 字串推断。
-有完整原生断言和精确来源时，即使缺独立重现或行为归因也先走上述受影响输入重审；输入一致不能补足归因。
+有完整原生断言和精确来源时，即使缺独立重现或行为归因也先走上述受影响输入重审；输入一致不能补足归因。独立诊断实际未复现但已保全完整原失败、所有原 case 的执行及逐源真实行为时，
+继续原受限修复链；此分支不是 Unavailability，也不以 coverage 宣称根因。
 断言、来源、容量或输入版本不满足时，当前 failure 为 `validation_failure_diagnostic_unavailable` 并精确终止。
 原 receipt/failure code/exit/budget 不改写，typed 不可用结果不得携带 repair target/input-maintenance authority。
 失败后的 provider feedback 仅投影适用失败检查和其执行/冲突状态，排除无关通过清单；所有 skipped/incomplete
@@ -2280,3 +2285,6 @@ File/Shell/Run/Result/Workspace owners，从输入冲突维护到不同实施/�
 `biz/runtime_semantic_failure_delivery_test.go` 从真实 strict decoder 拒绝开始，经 SM-2 原额度耗尽、
 SM-4 immutable seal、文件 Result read-back 到 Result→Workspace→Run 有序三 ACK；覆盖三个 owner
 持久化后响应丢失与恢复，模型调用数不增加。SM-1 只消费既有 Run owner 终态交接；失败不授普通验证或 assessment credit。
+
+当前 owner transition 的历史定位索引只在一次同步 compiler 内存在，并保存原 typed 值；每次命中仍完整 raw 比较，
+不保存校验结果、不跨事务复用。历史保全比较使用已有 DeepEqual 等价纯比较器；CAS、当前 joins 和新输入准入不变。

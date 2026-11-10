@@ -55,6 +55,10 @@ func TestDiagnosticReceiptCannotDowngradeOriginalBindingAtIngressOrReload(t *tes
 			Started: true, TerminalComplete: true, KnownFailure: true, ExitCode: 1, Stdout: output, Stderr: output, SourceBefore: stagesHash, SourceAfter: stagesHash,
 		})
 	}
+	conjunction.Stages[0].FailedSourceRefs = []string{"source-a"}
+	conjunction.Stages[1].DiagnosticReproduction = runtimecontract.ValidationReproductionExact
+	conjunction.Stages[1].DiagnosticOriginStageID = conjunction.Stages[0].Identity.ID
+	conjunction.Stages[1].DiagnosticIsolationRef = "copy-one"
 	conjunction.Stages[1].DiagnosticSourceRef, conjunction.Stages[1].BehaviorTargetRefs = "source-a", []string{"implementation.go"}
 	receipt := runtimecontract.RuntimeOperationReceipt{OperationID: operation.ID, Outcome: runtimecontract.RuntimeOperationOutcomeRejected,
 		Feedback: runtimeOperationFeedbackForTest(t, aggregate, operation.ID, runtimecontract.FailureFact{Class: runtimecontract.FailureClassBuildFailure, Code: "owner-failed", Message: "original failure"}),
