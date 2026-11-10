@@ -15,6 +15,12 @@ func inspectShellValidationInputPostimage(r rc.RuntimeValidationInputStructureRe
 	if err := r.Validate(); err != nil {
 		return rc.RuntimeValidationInputStructureObservation{}, err
 	}
+	fact := rc.RuntimeValidationInputStructureObservation{RequestHash: r.Hash(), OwnerModuleID: ModuleID, Proof: r.Proof.Clone(), Postimage: r.Postimage}
+	if !r.Revision.Capacity().PostimageFits(r.Postimage) {
+		fact.Code = "validation_input_review_capacity_exceeded"
+		fact.TargetRefs = []string{r.Postimage.TargetRef}
+		return fact, nil
+	}
 	files := make(map[string]string)
 	var refs []string
 	for _, f := range r.Revision.InputFiles() {
@@ -39,7 +45,8 @@ func inspectShellValidationInputPostimage(r rc.RuntimeValidationInputStructureRe
 		}
 		return []byte(body), nil
 	})
-	return rc.RuntimeValidationInputStructureObservation{RequestHash: r.Hash(), OwnerModuleID: ModuleID, Code: inspection.Code, CheckRef: inspection.CheckRef, TargetRefs: inspection.TargetRefs, Proof: r.Proof.Clone(), Postimage: r.Postimage}, nil
+	fact.Code, fact.CheckRef, fact.TargetRefs = inspection.Code, inspection.CheckRef, inspection.TargetRefs
+	return fact, nil
 }
 
 func (m *Biz) handleRuntimeValidationInputStructure(event magicevent.Event, result magicevent.Result) {

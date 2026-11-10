@@ -672,6 +672,10 @@ File 的现有 patch preview 返回精确后像 bytes/hash 和原 replay proof�
 仅替换该后像，复用 readiness 同一 parser、声明规则及断言遍历，不写文件、不运行进程、不调用模型。
 观察绑定 Workspace/Run、authority transaction、candidate manifest、原 revision、operation 与 File 前后像。
 缺检查、重复、非法签名、runner interception 等结构问题沿原有一次候选纠正，原文不修补。
+完整合法后像使原 corpus 超限时返回 `validation_input_review_capacity_exceeded` owner 观察，
+仍沿同一候选约束纠正；身份、来源、hash、UTF-8 或单体传输超限继续作为请求拒绝，不能降级成可纠正容量事实。
+容量按完整 corpus 的目标替换关系计算，不是目标单文件或增量片段限额；文件数/bytes 上限保持原 owner 合同。
+新请求可从原 InputRevision 派生总量、余量及 exact target 后像上限，零执行或验收 credit。
 此接点只覆盖已有授权的 input-revision File edit/patch，不宣称普通业务源码或首次创建输入都已做写前语言校验。
 具体 operation 未触及原 InputTargetRefs 时不调用该结构 query；普通交付依赖仍由 File 正常 feasibility/权限负责。
 通过仍须执行 File 原 CAS/权限门禁、fresh readiness、新独立 review 和普通 validation；零验收 credit。

@@ -74,6 +74,8 @@ type validationInputReviewMainlineOptions struct {
 	SubmittedSettlementFault           string
 	DuplicateInitialReview             bool
 	InvalidRevisionCandidate           bool
+	NearCapacityRevisionCandidate      bool
+	RepeatInvalidRevisionCandidate     bool
 	DependencyScopeErrorOnce           bool
 	ExecutionUncertaintyOnce           string
 	LargeProjectOutput                 bool
@@ -492,6 +494,44 @@ func %s(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if options.NearCapacityRevisionCandidate {
+		// Fixture construction only: the production Shell owner independently
+		// selects and reads the complete corpus. Keep the edited file small;
+		// pressure comes from another required corpus member, as in run020.
+		total := 0
+		err := filepath.WalkDir(directory, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			ref, err := filepath.Rel(directory, path)
+			if err != nil {
+				return err
+			}
+			ref = filepath.ToSlash(ref)
+			if !strings.HasSuffix(ref, ".go") || strings.HasSuffix(ref, "_test.go") || strings.HasPrefix(ref, "workorch_validation/") {
+				body, err := os.ReadFile(path)
+				if err != nil {
+					return err
+				}
+				total += len(body)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		padding := runtimecontract.RuntimeValidationDiagnosticSourceMaxBytes - 152 - total
+		if padding <= 0 {
+			t.Fatal("capacity fixture already exceeds original limit")
+		}
+		initialFiles["capacity-notes.txt"] = strings.Repeat("x", padding)
+		if err := os.WriteFile(filepath.Join(directory, "capacity-notes.txt"), []byte(initialFiles["capacity-notes.txt"]), 0644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -923,8 +963,15 @@ func %s(t *testing.T) {
 					}
 				}
 				if options.InvalidRevisionCandidate {
-					if command.CandidateAttempt == 0 {
+					if command.CandidateAttempt == 0 || options.RepeatInvalidRevisionCandidate {
 						invalid := "func TestMain(m *testing.M) {}\n"
+						if options.NearCapacityRevisionCandidate {
+							v := command.CandidateManifest.ImplementationWorkingBinding.InputRevision
+							if v == nil || v.Capacity().RemainingBytes != 152 {
+								t.Fatal("near-capacity corpus was not exact")
+							}
+							invalid = *candidate.StateChange.Operations[0].Operation.Parameters[1].String + " /*" + strings.Repeat("x", 3933+command.CandidateAttempt) + "*/"
+						}
 						candidate.StateChange.Operations[0].Operation.Parameters[1].String = &invalid
 					} else {
 						content, err := os.ReadFile(filepath.Join(directory, inputTargets["cwi-2"]))
@@ -1422,7 +1469,7 @@ func %s(t *testing.T) {
 		t.Logf("terminal original diagnostic: %s", diag)
 	}
 	submissionUnknown := cut == "after_assessment_submission"
-	success := (mode == "consistent" || mode == "clarify" || (mode == "input_revision" || mode == "input_revision_growth" || mode == "input_revision_dependency" || mode == "input_revision_omission" || mode == "input_revision_long" || mode == "input_revision_structure" || mode == "input_revision_numeric" || mode == "input_revision_after_failure") || projectRepair) && !submissionUnknown
+	success := (mode == "consistent" || mode == "clarify" || (mode == "input_revision" || mode == "input_revision_growth" || mode == "input_revision_dependency" || mode == "input_revision_omission" || mode == "input_revision_long" || mode == "input_revision_structure" || mode == "input_revision_numeric" || mode == "input_revision_after_failure") || projectRepair) && !submissionUnknown && !options.RepeatInvalidRevisionCandidate
 	if (completed.Decision.State == runtimecontract.ConvergenceStateComplete) != success {
 		if completed.Facts.Failure != nil && completed.Facts.Failure.OriginalDiagnostic != nil {
 			t.Logf("original failure diagnostic: %+v", *completed.Facts.Failure.OriginalDiagnostic)
@@ -1533,7 +1580,7 @@ func %s(t *testing.T) {
 		if projectChecksumRepair && ref == "go.sum" {
 			expectedInput = checksumFixtureFullSum
 		}
-		if strings.HasPrefix(mode, "input_revision") && ref == inputTargets["cwi-2"] {
+		if strings.HasPrefix(mode, "input_revision") && ref == inputTargets["cwi-2"] && !options.RepeatInvalidRevisionCandidate {
 			if mode == "input_revision_long" || mode == "input_revision_budget" {
 				completedRevisions := 0
 				for _, round := range completed.ImplementationWork.Rounds {
@@ -1574,7 +1621,7 @@ func %s(t *testing.T) {
 	if cut != "" && !deliveryCut && !materialCut && !crash.fired {
 		t.Fatalf("restart cut not reached: %s", cut)
 	}
-	if strings.HasPrefix(mode, "input_revision") && !options.SequentialProjectFailures {
+	if strings.HasPrefix(mode, "input_revision") && !options.SequentialProjectFailures && !options.RepeatInvalidRevisionCandidate {
 		if options.InvalidRevisionCandidate && !structureRepository.checked {
 			t.Fatal("input revision never persisted structural owner observation")
 		}
@@ -1790,6 +1837,22 @@ func %s(t *testing.T) {
 	stored, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || stored.RuntimeState == nil || !runtimeTerminalDeliveryFullyAcknowledged(runtimeAggregateFromRecord(*stored.RuntimeState)) {
 		t.Fatalf("terminal owner delivery incomplete: %v", err)
+	}
+	if options.RepeatInvalidRevisionCandidate {
+		if completed.Facts.Failure == nil || completed.Facts.Failure.Code != "candidate_retry_exhausted" || len(completed.GovernanceRequests) != 0 || validationCalls != 0 {
+			t.Fatalf("unsatisfying correction escaped its original bound: failure=%+v", completed.Facts.Failure)
+		}
+		rejected := 0
+		for _, attempt := range completed.CandidateAttempts {
+			for _, fact := range attempt.Feasibilities {
+				if fact.InputStructure != nil && fact.InputStructure.Code == "validation_input_review_capacity_exceeded" {
+					rejected++
+				}
+			}
+		}
+		if rejected != 2 {
+			t.Fatalf("capacity correction did not retain both owner observations: %d", rejected)
+		}
 	}
 	if options.SequentialProjectFailures {
 		if options.IncrementalNativeSources {

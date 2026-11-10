@@ -41,24 +41,58 @@ func (r RuntimeValidationInputStructureRequest) Validate() error {
 	}
 	h := sha256.Sum256([]byte(r.Postimage.Content))
 	if !utf8.ValidString(r.Postimage.Content) || hex.EncodeToString(h[:]) != r.Postimage.ContentHash || len(r.Postimage.Content) > RuntimeValidationDiagnosticSourceMaxBytes {
-		return fmt.Errorf("input structure postimage bytes/hash/capacity invalid")
-	}
-	maxBytes := RuntimeValidationDiagnosticSourceMaxBytes
-	if r.Revision.Binding.InputReview != nil {
-		_, maxBytes, _ = RuntimeValidationInputReviewBounds(*r.Revision.Binding.InputReview)
-	}
-	size := 0
-	for _, f := range r.Revision.InputFiles() {
-		if f.TargetRef == r.Postimage.TargetRef {
-			size += len(r.Postimage.Content)
-		} else {
-			size += len(f.Content)
-		}
-	}
-	if size > maxBytes {
-		return fmt.Errorf("input structure postimage exceeds selected corpus capacity")
+		return fmt.Errorf("input structure postimage bytes/hash/transport capacity invalid")
 	}
 	return nil
+}
+
+// RuntimeValidationInputCapacity is a deterministic projection of the exact
+// owner-selected corpus. It grants neither readiness nor a larger write scope.
+// MaxPostimageBytes describes replacement, not an allowance for additive edits.
+type RuntimeValidationInputCapacity struct {
+	MaxFiles       int
+	MaxBytes       int
+	FileCount      int
+	Bytes          int
+	RemainingBytes int
+	Targets        []RuntimeValidationInputTargetCapacity
+}
+
+type RuntimeValidationInputTargetCapacity struct {
+	TargetRef         string
+	Bytes             int
+	MaxPostimageBytes int
+}
+
+func (v RuntimeValidationInputRevision) Capacity() RuntimeValidationInputCapacity {
+	maxFiles, maxBytes := RuntimeValidationDiagnosticSourceMaxFiles, RuntimeValidationDiagnosticSourceMaxBytes
+	if v.Binding.InputReview != nil {
+		maxFiles, maxBytes, _ = RuntimeValidationInputReviewBounds(*v.Binding.InputReview)
+	}
+	files := v.InputFiles()
+	c := RuntimeValidationInputCapacity{MaxFiles: maxFiles, MaxBytes: maxBytes, FileCount: len(files)}
+	for _, f := range files {
+		c.Bytes += len(f.Content)
+	}
+	c.RemainingBytes = c.MaxBytes - c.Bytes
+	for _, f := range files {
+		if v.TargetsInput([]string{f.TargetRef}) {
+			c.Targets = append(c.Targets, RuntimeValidationInputTargetCapacity{TargetRef: f.TargetRef, Bytes: len(f.Content), MaxPostimageBytes: c.RemainingBytes + len(f.Content)})
+		}
+	}
+	return c
+}
+
+// PostimageFits is used by the input owner before structural inspection. The
+// caller first admits the exact File postimage; consumers do not rejudge this
+// owner outcome when reading its formal observation.
+func (c RuntimeValidationInputCapacity) PostimageFits(post RuntimeValidationInputReviewFile) bool {
+	for _, target := range c.Targets {
+		if target.TargetRef == post.TargetRef {
+			return c.FileCount <= c.MaxFiles && len(post.Content) <= target.MaxPostimageBytes
+		}
+	}
+	return false
 }
 
 func (r RuntimeValidationInputStructureRequest) Hash() string {

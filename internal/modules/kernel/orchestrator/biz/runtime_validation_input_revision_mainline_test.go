@@ -387,6 +387,18 @@ func TestDriveRuntimeInputPostimageRejectsBeforeWriteAndRecoversCorrection(t *te
 	}
 }
 
+func TestDriveRuntimeInputCorpusCapacityCorrectionAndRecovery(t *testing.T) {
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, InvalidRevisionCandidate: true, NearCapacityRevisionCandidate: true}
+	baseline := runValidationInputReviewMainline(t, "input_revision", "", options)
+	for _, cut := range []string{"after_input_structure_rejection", "after_input_revision_receipt"} {
+		t.Run(cut, func(t *testing.T) {
+			if got := runValidationInputReviewMainline(t, "input_revision", cut, options); got != baseline {
+				t.Fatalf("capacity correction recovery repeated provider call: %d != %d", got, baseline)
+			}
+		})
+	}
+}
+
 func assertRuntimeInputStructureFreshLoad(t *testing.T, a runtime.RuntimeAggregate) {
 	t.Helper()
 	found := false
@@ -508,5 +520,13 @@ func assertFailureInputReviewCommittedResult(t *testing.T, a runtime.RuntimeAggr
 	}
 	if matches != 1 {
 		t.Fatalf("failure input was reviewed %d times", matches)
+	}
+}
+
+func TestDriveRuntimeInputCorpusCapacityCorrectionRemainsBounded(t *testing.T) {
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, InvalidRevisionCandidate: true, NearCapacityRevisionCandidate: true, RepeatInvalidRevisionCandidate: true}
+	baseline := runValidationInputReviewMainline(t, "input_revision", "", options)
+	if got := runValidationInputReviewMainline(t, "input_revision", "after_input_structure_rejection", options); got != baseline {
+		t.Fatalf("recovery expanded correction budget: %d != %d", got, baseline)
 	}
 }

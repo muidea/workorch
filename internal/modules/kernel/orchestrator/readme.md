@@ -948,9 +948,11 @@ Result 写后丢回复、冷 owner 恢复 running claim、有界 owner 失败、
 [CWI Suspension](../../../../docs/00-core/runtime/cwi-suspension.md)。SM-2 原 applicability-observation CAS
 或 reconciliation-batch CAS
 封存 `Facts.CWISuspensions` 的完整来源；current bound fence 本身不放宽。失效的历史来源经已声明的
-AcceptanceCoverageWorkItemID 回到普通验收消费者，多条依赖边可归并到同一消费者。当前安全暂停要求唯一
-validation-only ordinary 消费者；多个独立消费者或 state-change-only 无普通来源时，明确
-`cwi_revalidation_source_unavailable`，不继续请求 blocked 后继候选。
+AcceptanceCoverageWorkItemID 回到普通验收消费者，多条依赖边归并到同一消费者；多个独立的
+validation-only ordinary 消费者各自保留 exact reopen 来源、fresh validation/assessment 与 owner 观察。
+选择任务沿 Definition 顺序及原 eligibility；没有声明普通来源时明确
+`cwi_revalidation_source_unavailable`，不继续请求 blocked 后继候选。暂停内后续正式失效观察追加受影响来源，
+不创建嵌套暂停、不覆盖已完成 proof；全部当前依赖恢复后才续接冻结后继。
 后继尚无 effect 时也可安全暂停；暂停时封存 evidence revision，后续真实 effect 不追溯改变暂停前像。
 已有 frozen binding/effect/receipt/budget 和 repair debt 保留；新普通 assessment 与本轮 owner sampling 后才恢复，
 旧 owner qualification 不复用。独立 coordinator 前像／写集与 aggregate/schema reload 双门禁反证来源。
@@ -2078,6 +2080,12 @@ feasibility record；成功封存继续按原规则消费预封存事实，失�
 manifest 声明的 `authorized_input_owner_structure` 不合格时沿原一次候选纠正，
 不伪造成运行失败/语义审查，不产生 File effect。final admission 与 aggregate fresh-load 反查同一
 transaction/manifest/operation/原 revision/前后像；丢失、篡改或跨 Workspace 事实拒绝。
+完整原 corpus 的容量事实由原 InputRevision 确定性派生并投影到新请求 C3：文件数、总 bytes、上限、剩余 bytes
+及每个授权目标的替换后像上限。Shell 对完整合法 File 后像超出 corpus 限制返回
+`validation_input_review_capacity_exceeded` 正式观察，adapter 复用原
+`candidate_owner_constraint_nonconformant`／`correctable_once`，不新增容量 Loop 或治理票。
+坏 hash、来源及传输边界仍拒绝；一次纠正仍超限沿原 `candidate_retry_exhausted` 结束。
+不删除 corpus 成员、不扩容，也不以容量可行授予新后像语义审查或普通验收 credit。
 SM-2 的原义务、权限、预算和后继选择不变；SM-4 重驱原候选记录，不重复已完成 provider 请求；SM-1 不变。
 
 
@@ -2124,6 +2132,9 @@ Shell 成员沿原 request 有界批量只读查询。Core 从 exact completed v
 依赖撤销和后继让位由同一 SM-2 迁移完成。历史来源沿原映射普通消费者重验；安全暂停保留后继原 binding、
 可选的既有 effect、repair debt 和预算。active dispatch、submitted provider、unknown 等不跨越原事务边界。
 恢复要求 fresh ordinary all-of、独立 assessment 和 owner applicability 观察，之后恢复原后继；无合法来源准确失败。
+同一暂停保留完整消费者集合，正式新观察只追加 exact 新来源；原 source 和已完成消费者 proof 不可改写。
+每次只推进现有 eligibility 允许的消费者，保留后继原绑定/effect/repair debt；全部消费者及当前前置满足后恢复。
+多消费者真实 owner 回归覆盖来源逐次到达、暂停/来源归并/消费者完成/恢复切点，独立进程恢复保留同一操作身份和预算。
 同一已冻结请求保持原输入与身份；SM-3 最终 admission 的 typed disposition/code 不再被统一包装为 ErrConflict，
 SM-4 保留准确失败分类而不据此新增自动 retry 或执行 authority。
 

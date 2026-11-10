@@ -19,18 +19,29 @@ type RuntimeCWISuspension struct {
 	FrozenFocus               CoverageFocus
 	FrozenBinding             RuntimeCWIBindingRef
 	EffectEvidenceID          common.EvidenceRecordID
-	PredecessorID             common.CoverageWorkItemID
-	ReopenSource              RuntimeCWIReopenLineage
+	Consumers                 []RuntimeCWISuspendedConsumer
+	ResumedEvidenceRevision   string `json:",omitempty"`
 	Repair                    RuntimeRepairLedger
 	RepairDirective           *RuntimeRepairDirective          `json:",omitempty"`
 	Failure                   *FailureFact                     `json:",omitempty"`
 	FrozenPrerequisites       []RuntimePrerequisite            `json:",omitempty"`
 	FrozenObservations        []RuntimePrerequisiteObservation `json:",omitempty"`
-	ResumeBinding             *RuntimeCWIBindingRef            `json:",omitempty"`
-	ResumeAssessmentID        string                           `json:",omitempty"`
-	ResumeEvidenceRevision    string                           `json:",omitempty"`
-	ResumeObservationCount    int                              `json:",omitempty"`
 }
+
+// Each declared acceptance consumer keeps its own original invalidation and
+// fresh ordinary proof. This is source evidence in the existing pause, not a
+// second scheduler or task queue. Eligibility retains the Definition order.
+type RuntimeCWISuspendedConsumer struct {
+	RecordedAtStateRevision uint64
+	PredecessorID           common.CoverageWorkItemID
+	ReopenSource            RuntimeCWIReopenLineage
+	ResumeBinding           *RuntimeCWIBindingRef `json:",omitempty"`
+	ResumeAssessmentID      string                `json:",omitempty"`
+	ResumeEvidenceRevision  string                `json:",omitempty"`
+	ResumeObservationCount  int                   `json:",omitempty"`
+}
+
+func (s RuntimeCWISuspension) Active() bool { return s.ResumedEvidenceRevision == "" }
 
 func (s RuntimeCWISuspension) CloneRaw() RuntimeCWISuspension {
 	s.FrozenFocus = cloneCoverageFocusRaw(s.FrozenFocus)
@@ -39,7 +50,10 @@ func (s RuntimeCWISuspension) CloneRaw() RuntimeCWISuspension {
 	s.Failure = cloneRuntimeStateRawPointer(s.Failure, cloneFailureFactRaw)
 	s.FrozenPrerequisites = cloneRuntimeStateRawSlice(s.FrozenPrerequisites, cloneRuntimePrerequisiteRaw)
 	s.FrozenObservations = cloneRuntimeStateRawSlice(s.FrozenObservations, cloneRuntimePrerequisiteObservationRaw)
-	s.ResumeBinding = cloneRuntimeStateRawPointer(s.ResumeBinding, func(v RuntimeCWIBindingRef) RuntimeCWIBindingRef { return v })
+	s.Consumers = cloneRuntimeStateRawSlice(s.Consumers, func(c RuntimeCWISuspendedConsumer) RuntimeCWISuspendedConsumer {
+		c.ResumeBinding = cloneRuntimeStateRawPointer(c.ResumeBinding, func(v RuntimeCWIBindingRef) RuntimeCWIBindingRef { return v })
+		return c
+	})
 	return s
 }
 
@@ -146,12 +160,11 @@ func ValidateRuntimeCWISuspensionSources(facts RuntimeFacts, completed []Runtime
 		if s.ProtocolRef != RuntimeCWISuspensionV1 || s.SuspendedAtStateRevision == 0 || s.SuspendedAtStateRevision > revision || s.SuspendedEvidenceRevision == "" || EvidenceRevisionAfter(s.SuspendedEvidenceRevision, facts.EvidenceRevision) {
 			return fmt.Errorf("runtime CWI suspension protocol/revision mismatch")
 		}
-		sourceKey := s.FrozenBinding.BindingID + "\x00" + s.FrozenBinding.SemanticManifestHash + "\x00" + string(s.PredecessorID) + "\x00" + s.ReopenSource.TriggerRef
-		if s.SuspendedAtStateRevision <= previousPauseRevision || seenSources[sourceKey] {
+		if s.SuspendedAtStateRevision <= previousPauseRevision {
 			return fmt.Errorf("runtime CWI suspension duplicates or reorders original pause source")
 		}
-		previousPauseRevision, seenSources[sourceKey] = s.SuspendedAtStateRevision, true
-		if !reflect.DeepEqual(s.FrozenBinding, s.FrozenBinding.Normalized()) || !reflect.DeepEqual(s.ReopenSource, s.ReopenSource.Normalized()) || (s.ResumeBinding != nil && !reflect.DeepEqual(*s.ResumeBinding, s.ResumeBinding.Normalized())) {
+		previousPauseRevision = s.SuspendedAtStateRevision
+		if !reflect.DeepEqual(s.FrozenBinding, s.FrozenBinding.Normalized()) {
 			return fmt.Errorf("runtime CWI suspension source must be raw canonical")
 		}
 		archived := make(map[string]RuntimePrerequisite)
@@ -185,33 +198,6 @@ func ValidateRuntimeCWISuspensionSources(facts RuntimeFacts, completed []Runtime
 		if !SameRuntimeCWIBindingRef(s.FrozenBinding, RuntimeCWIBindingRefForCoverageBinding(binding, s.FrozenBinding.SemanticManifestHash)) {
 			return fmt.Errorf("runtime CWI suspension frozen binding drift")
 		}
-		if err := s.ReopenSource.Validate(); err != nil {
-			return err
-		}
-		frozen, found := rows[binding.CoverageWorkItemID]
-		predecessor, predecessorFound := rows[s.PredecessorID]
-		if !found || !predecessorFound || !RuntimeCWISuspensionOrdinaryPredecessorSupported(facts, s.PredecessorID) {
-			return fmt.Errorf("runtime CWI suspension has no ordinary predecessor declaration")
-		}
-		direct := false
-		for _, id := range frozen.PrerequisiteCoverageWorkItemIDs {
-			dependency := rows[id]
-			target := dependency.ID
-			if dependency.HistoricalBehavior != nil {
-				target = dependency.HistoricalBehavior.Source.AcceptanceCoverageWorkItemID
-			}
-			direct = direct || target == s.PredecessorID
-		}
-		reopened := false
-		for _, source := range predecessor.ReopenLineage {
-			reopened = reopened || reflect.DeepEqual(source, s.ReopenSource)
-		}
-		if !direct || !reopened {
-			return fmt.Errorf("runtime CWI suspension has no exact direct reopen source")
-		}
-		if !RuntimeCWIReopenHasOwnerSource(facts, reconciliation, s.PredecessorID, s.ReopenSource, s.SuspendedAtStateRevision) {
-			return fmt.Errorf("runtime CWI suspension has no original owner invalidation")
-		}
 		effect := false
 		for _, fact := range facts.Evidence.Accepted {
 			if fact.ID != s.EffectEvidenceID || EvidenceRevisionAfter(fact.Revision, s.SuspendedEvidenceRevision) || fact.Kind != EvidenceKindStateChange || !EvidenceAppliesToCoverageWorkItem(s.FrozenFocus, fact, binding.CoverageWorkItemID) {
@@ -241,9 +227,99 @@ func ValidateRuntimeCWISuspensionSources(facts RuntimeFacts, completed []Runtime
 		if s.Repair.FocusID != "" && s.Repair.FocusID != s.FrozenFocus.ID || s.RepairDirective != nil && s.RepairDirective.FocusID != s.FrozenFocus.ID {
 			return fmt.Errorf("runtime CWI suspension repair scope drift")
 		}
-		if s.ResumeBinding == nil {
+
+		frozen, found := rows[binding.CoverageWorkItemID]
+		if !found || len(s.Consumers) == 0 {
+			return fmt.Errorf("runtime CWI suspension lost frozen CWI/consumer set")
+		}
+		seenConsumers := make(map[string]bool)
+		pendingConsumers := make(map[common.CoverageWorkItemID]bool)
+		currentConsumer := false
+		for _, c := range s.Consumers {
+			key := string(c.PredecessorID) + "\x00" + c.ReopenSource.TriggerRef
+			if seenConsumers[key] || c.RecordedAtStateRevision < s.SuspendedAtStateRevision || c.RecordedAtStateRevision > revision || !reflect.DeepEqual(c.ReopenSource, c.ReopenSource.Normalized()) || (c.ResumeBinding != nil && !reflect.DeepEqual(*c.ResumeBinding, c.ResumeBinding.Normalized())) {
+				return fmt.Errorf("runtime CWI suspension consumer duplicated or noncanonical")
+			}
+			seenConsumers[key] = true
+			if err := c.ReopenSource.Validate(); err != nil {
+				return err
+			}
+			predecessor, predecessorFound := rows[c.PredecessorID]
+			if !predecessorFound || !RuntimeCWISuspensionOrdinaryPredecessorSupported(facts, c.PredecessorID) {
+				return fmt.Errorf("runtime CWI suspension has no ordinary predecessor declaration")
+			}
+			direct := false
+			for _, id := range frozen.PrerequisiteCoverageWorkItemIDs {
+				dependency := rows[id]
+				target := dependency.ID
+				if dependency.HistoricalBehavior != nil {
+					target = dependency.HistoricalBehavior.Source.AcceptanceCoverageWorkItemID
+				}
+				direct = direct || target == c.PredecessorID
+			}
+			reopened := false
+			for _, source := range predecessor.ReopenLineage {
+				reopened = reopened || reflect.DeepEqual(source, c.ReopenSource)
+			}
+			if !direct || !reopened {
+				return fmt.Errorf("runtime CWI suspension has no exact direct reopen source")
+			}
+			if !RuntimeCWIReopenHasOwnerSource(facts, reconciliation, c.PredecessorID, c.ReopenSource, c.RecordedAtStateRevision) {
+				return fmt.Errorf("runtime CWI suspension has no original owner invalidation")
+			}
+
+			key = s.FrozenBinding.BindingID + "\x00" + s.FrozenBinding.SemanticManifestHash + "\x00" + string(c.PredecessorID) + "\x00" + c.ReopenSource.TriggerRef
+			if seenSources[key] {
+				return fmt.Errorf("runtime CWI suspension repeats original consumer source")
+			}
+			seenSources[key] = true
+			if c.ResumeBinding == nil {
+				if pendingConsumers[c.PredecessorID] || !s.Active() || c.ResumeAssessmentID != "" || c.ResumeEvidenceRevision != "" || c.ResumeObservationCount != 0 {
+					return fmt.Errorf("runtime CWI suspension dropped ordinary consumer proof")
+				}
+				pendingConsumers[c.PredecessorID] = true
+				currentConsumer = currentConsumer || len(facts.Focus.CoverageWorkItemIDs) == 1 && facts.Focus.CoverageWorkItemIDs[0] == c.PredecessorID
+				continue
+			}
+			if c.ResumeEvidenceRevision == "" || c.ResumeAssessmentID == "" || c.ResumeObservationCount <= 0 || c.ResumeObservationCount > len(facts.EvidenceApplicabilityObservations) || SameRuntimeCWIBindingRef(*c.ResumeBinding, c.ReopenSource.PreviousBindingRef) {
+				return fmt.Errorf("runtime CWI suspension resume proof is incomplete or reused")
+			}
+			assessmentFound := false
+			for _, assessment := range facts.Assessments {
+				if assessment.ID == c.ResumeAssessmentID && assessment.FocusID == c.ResumeBinding.FocusID && assessment.Disposition == AssessmentDispositionSatisfied && !EvidenceRevisionAfter(assessment.Revision, c.ResumeEvidenceRevision) {
+					for _, id := range assessment.CoverageWorkItemIDs {
+						assessmentFound = assessmentFound || id == c.PredecessorID
+					}
+				}
+			}
+			proofFound := false
+			for _, dispatch := range completed {
+				if dispatch.ID != c.ResumeAssessmentID || dispatch.AssessmentAdjudication == nil || dispatch.AssessmentAuthorityInput == nil || dispatch.AssessmentAdjudication.Disposition != AssessmentDispositionSatisfied || dispatch.Transaction.FocusID != c.ResumeBinding.FocusID {
+					continue
+				}
+				for _, b := range dispatch.CoverageBindings {
+					if b.ID != c.ResumeBinding.BindingID || b.Hash != c.ResumeBinding.BindingHash || b.CoverageWorkItemID != c.PredecessorID {
+						continue
+					}
+					for _, fact := range facts.Evidence.Accepted {
+						selected := false
+						for _, proof := range dispatch.AssessmentAdjudication.Proofs {
+							selected = selected || proof.EvidenceFactID == fact.ID && proof.EvidenceFactHash == StableRuntimeEvidenceFactHash(fact) && proof.CoverageWorkItemID == c.PredecessorID
+						}
+						if selected && fact.ApplicabilityDependencies != nil && fact.Kind == EvidenceKindValidation && containsStringValue(fact.BindingRefs, b.ID) && !EvidenceRevisionAfter(fact.Revision, c.ResumeEvidenceRevision) &&
+							RuntimeEvidenceHasFreshApplicability(fact, facts.EvidenceApplicabilityObservations[:c.ResumeObservationCount], c.ResumeEvidenceRevision, facts.EvidenceApplicabilityObservations[c.ResumeObservationCount-1].Request.ReconciliationRequestHash) {
+							proofFound = true
+						}
+					}
+				}
+			}
+			if !assessmentFound || !proofFound {
+				return fmt.Errorf("runtime CWI suspension resume has no fresh ordinary assessment/owner proof: assessment=%t proof=%t", assessmentFound, proofFound)
+			}
+		}
+		if s.Active() {
 			active++
-			if s.ResumeAssessmentID != "" || s.ResumeEvidenceRevision != "" || s.ResumeObservationCount != 0 || frozen.CurrentBindingRef == nil || !SameRuntimeCWIBindingRef(*frozen.CurrentBindingRef, s.FrozenBinding) || frozen.CWIConvergenceState != RuntimeCWIConvergenceStateBound || facts.Focus.ID == s.FrozenFocus.ID {
+			if frozen.CurrentBindingRef == nil || !SameRuntimeCWIBindingRef(*frozen.CurrentBindingRef, s.FrozenBinding) || frozen.CWIConvergenceState != RuntimeCWIConvergenceStateBound || facts.Focus.ID == s.FrozenFocus.ID {
 				return fmt.Errorf("runtime CWI suspension lost its frozen transaction")
 			}
 			matches := 0
@@ -252,46 +328,13 @@ func ValidateRuntimeCWISuspensionSources(facts RuntimeFacts, completed []Runtime
 					matches++
 				}
 			}
-			if matches != 1 || len(facts.Focus.CoverageWorkItemIDs) != 1 || facts.Focus.CoverageWorkItemIDs[0] != s.PredecessorID {
-				return fmt.Errorf("runtime CWI suspension cursor is not its exact predecessor")
+			if matches != 1 || !currentConsumer {
+				return fmt.Errorf("runtime CWI suspension cursor is not an unresolved exact consumer")
 			}
-			continue
+		} else if EvidenceRevisionAfter(s.SuspendedEvidenceRevision, s.ResumedEvidenceRevision) || EvidenceRevisionAfter(s.ResumedEvidenceRevision, facts.EvidenceRevision) {
+			return fmt.Errorf("runtime CWI suspension resume revision is invalid")
 		}
-		if s.ResumeEvidenceRevision == "" || s.ResumeAssessmentID == "" || s.ResumeObservationCount <= 0 || s.ResumeObservationCount > len(facts.EvidenceApplicabilityObservations) || SameRuntimeCWIBindingRef(*s.ResumeBinding, s.ReopenSource.PreviousBindingRef) {
-			return fmt.Errorf("runtime CWI suspension resume proof is incomplete or reused")
-		}
-		assessmentFound := false
-		for _, assessment := range facts.Assessments {
-			if assessment.ID == s.ResumeAssessmentID && assessment.FocusID == s.ResumeBinding.FocusID && assessment.Disposition == AssessmentDispositionSatisfied && !EvidenceRevisionAfter(assessment.Revision, s.ResumeEvidenceRevision) {
-				for _, id := range assessment.CoverageWorkItemIDs {
-					assessmentFound = assessmentFound || id == s.PredecessorID
-				}
-			}
-		}
-		proofFound := false
-		for _, dispatch := range completed {
-			if dispatch.ID != s.ResumeAssessmentID || dispatch.AssessmentAdjudication == nil || dispatch.AssessmentAuthorityInput == nil || dispatch.AssessmentAdjudication.Disposition != AssessmentDispositionSatisfied || dispatch.Transaction.FocusID != s.ResumeBinding.FocusID {
-				continue
-			}
-			for _, b := range dispatch.CoverageBindings {
-				if b.ID != s.ResumeBinding.BindingID || b.Hash != s.ResumeBinding.BindingHash || b.CoverageWorkItemID != s.PredecessorID {
-					continue
-				}
-				for _, fact := range facts.Evidence.Accepted {
-					selected := false
-					for _, proof := range dispatch.AssessmentAdjudication.Proofs {
-						selected = selected || proof.EvidenceFactID == fact.ID && proof.EvidenceFactHash == StableRuntimeEvidenceFactHash(fact) && proof.CoverageWorkItemID == s.PredecessorID
-					}
-					if selected && fact.ApplicabilityDependencies != nil && fact.Kind == EvidenceKindValidation && containsStringValue(fact.BindingRefs, b.ID) && !EvidenceRevisionAfter(fact.Revision, s.ResumeEvidenceRevision) &&
-						RuntimeEvidenceHasFreshApplicability(fact, facts.EvidenceApplicabilityObservations[:s.ResumeObservationCount], s.ResumeEvidenceRevision, facts.EvidenceApplicabilityObservations[s.ResumeObservationCount-1].Request.ReconciliationRequestHash) {
-						proofFound = true
-					}
-				}
-			}
-		}
-		if !assessmentFound || !proofFound {
-			return fmt.Errorf("runtime CWI suspension resume has no fresh ordinary assessment/owner proof: assessment=%t proof=%t", assessmentFound, proofFound)
-		}
+
 	}
 	if active > 1 {
 		return fmt.Errorf("runtime CWI suspension cannot nest frozen transactions")

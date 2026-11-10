@@ -16,6 +16,7 @@ type runtimeInputRevisionProjection struct {
 	SourceDocumentHash     string `json:",omitempty"`
 	OwnerModuleID          string
 	InputTargetRefs        []string
+	Capacity               rc.RuntimeValidationInputCapacity
 	Binding                rc.RuntimeValidationProofRequirementBinding
 	Recipe                 *rc.RuntimeValidationRecipe                `json:",omitempty"`
 	Report                 *rc.RuntimeValidationInputReview           `json:"report,omitempty"`
@@ -34,6 +35,7 @@ func inputRevisionForProvider(v *rc.RuntimeValidationInputRevision) *runtimeInpu
 	}
 	v = v.Clone()
 	p := &runtimeInputRevisionProjection{SourceManifestHash: v.SourceManifestHash, SourceLogicalRequestID: v.SourceLogicalRequestID, SourceDocumentHash: v.SourceDocumentHash, OwnerModuleID: v.OwnerModuleID, InputTargetRefs: slices.Clone(v.InputTargetRefs), Binding: v.Binding.Clone()}
+	p.Capacity = v.Capacity()
 	p.Recipe = v.Recipe
 	if o := v.OwnerObservation; o != nil {
 		p.Observation = &runtimeInputRevisionObservationProjection{ObservationID: o.Observation.ObservationID, CatalogSnapshotID: o.Catalog.SnapshotID, Files: slices.Clone(v.InputFiles())}

@@ -166,3 +166,34 @@ func TestStructuralInputProjectionExcludesUnrelatedAuthorityAndReusesExactConten
 		t.Fatal("projection aliases owner authority")
 	}
 }
+
+func TestInputRevisionCapacityIsExactC3AndTamperingIsRejected(t *testing.T) {
+	for _, purpose := range []bool{true, false} {
+		request := runtimeSemanticWorkProviderRequestForTest(t, purpose, inputRevisionProviderFixture(t))
+		provider, err := runtimeSemanticPlanProviderRequest(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var authority runtimeSemanticAuthorityProjection
+		if err := json.Unmarshal([]byte(provider.PromptContext.Sections[3].Content), &authority); err != nil {
+			t.Fatal(err)
+		}
+		work := authority.Manifest.ImplementationPurpose
+		if !purpose {
+			work = authority.Manifest.ProofObligations[0].ImplementationWork
+		}
+		want := request.SemanticManifest.ProofObligations[0].ImplementationWork.Scope.Request.InputRevision.Capacity()
+		if !reflect.DeepEqual(work.InputRevision.Capacity, want) || len(want.Targets) == 0 || want.Targets[0].MaxPostimageBytes != want.RemainingBytes+want.Targets[0].Bytes {
+			t.Fatal("missing exact owner-selected replacement capacity")
+		}
+		work.InputRevision.Capacity.Targets[0].MaxPostimageBytes++
+		raw, err := json.Marshal(authority)
+		if err != nil {
+			t.Fatal(err)
+		}
+		provider.PromptContext.Sections[3].Content = string(raw)
+		if validateRuntimeSemanticContextIntegrity(request.SemanticContext, request.SemanticManifest, 0, nil, nil, provider.ContextBudget, provider.PromptContext) == nil {
+			t.Fatal("rendered capacity drift passed the sealed C3 gate")
+		}
+	}
+}

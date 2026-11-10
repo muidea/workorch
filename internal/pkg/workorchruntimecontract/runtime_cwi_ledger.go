@@ -639,13 +639,19 @@ func runtimeCWIFocusQueue(facts RuntimeFacts) []CoverageFocus {
 // settled credit. Definition order remains authoritative; slice priority and
 // lexical CWI identity cannot bypass admission.
 func RuntimeCWIsEligibleForPlanning(facts RuntimeFacts) []common.CoverageWorkItemID {
-	var suspendedPredecessor common.CoverageWorkItemID
+	var suspendedConsumers map[common.CoverageWorkItemID]bool
 	for _, pause := range facts.CWISuspensions {
-		if pause.ResumeBinding == nil {
-			if suspendedPredecessor != "" {
-				return nil
-			} // nested/ambiguous state never selects a source
-			suspendedPredecessor = pause.PredecessorID
+		if !pause.Active() {
+			continue
+		}
+		if suspendedConsumers != nil {
+			return nil
+		} // never nest frozen transactions
+		suspendedConsumers = make(map[common.CoverageWorkItemID]bool)
+		for _, consumer := range pause.Consumers {
+			if consumer.ResumeBinding == nil {
+				suspendedConsumers[consumer.PredecessorID] = true
+			}
 		}
 	}
 	byID := make(map[common.CoverageWorkItemID]RuntimeCoverageItemFact, len(facts.Coverage))
@@ -660,7 +666,7 @@ func RuntimeCWIsEligibleForPlanning(facts RuntimeFacts) []common.CoverageWorkIte
 		item.ID = common.CoverageWorkItemID(strings.TrimSpace(string(item.ID)))
 		item.State = RuntimeCoverageItemState(strings.TrimSpace(string(item.State)))
 		item = normalizeRuntimeCoverageItemFact(item)
-		if suspendedPredecessor != "" && item.ID != suspendedPredecessor {
+		if suspendedConsumers != nil && !suspendedConsumers[item.ID] {
 			continue
 		}
 		switch item.CWIConvergenceState {

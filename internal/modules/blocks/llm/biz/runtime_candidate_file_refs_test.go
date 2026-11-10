@@ -277,3 +277,65 @@ func TestCandidateLocalReferencesFreezeCorrectionAndRecovery(t *testing.T) {
 		t.Fatal("correction reference into fresh/foreign source admitted")
 	}
 }
+
+func TestCandidateCorrectionConsumesOriginalFrozenProjection(t *testing.T) {
+	r, p, _ := candidateBodyReferenceFixture(t, false)
+	r.StablePrefixHash = rc.StableRuntimeCandidatePrefixHashWithExecutionContract(r.DefinitionContext, r.CandidateContext.Activation.ExecutionContract)
+	e := rc.RuntimeExpectedDocumentContract{SchemaVersion: rc.RuntimeExpectedDocumentSchemaCurrent, DocumentKind: r.DocumentKind, OperationsContextEncoding: rc.RuntimeOperationsContextEncoding, ManifestHash: r.CandidateManifest.Hash, WireContractHash: "sealed-wire", LogicalRequestID: "request", StablePrefixHash: r.StablePrefixHash, MaxOutputTokens: r.CandidateContext.Resources.ProviderCeiling.EffectiveMaxOutputTokens, MaxRecoveryAttempts: 1}
+	e.Hash = rc.StableRuntimeExpectedDocumentHash(e)
+	r.ExpectedDocument, r.RequestIdentity.LogicalRequestID = &e, e.LogicalRequestID
+	raw, _, err := freezeRuntimeProviderInput(r, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Represent a committed source whose renderer did not include the newly
+	// derived capacity view. No old renderer or alternate protocol is loaded:
+	// recovery/correction must consume exactly this owner-referenced original.
+	var original runtimeFrozenProviderInput
+	if err := json.Unmarshal(raw, &original); err != nil {
+		t.Fatal(err)
+	}
+	var authority map[string]json.RawMessage
+	json.Unmarshal([]byte(original.Request.PromptContext.Sections[3].Content), &authority)
+	var output runtimeCandidateOutputContractProjection
+	json.Unmarshal(authority["outputContract"], &output)
+	encoded, _ := json.Marshal(output)
+	var tree map[string]any
+	json.Unmarshal(encoded, &tree)
+	delete(tree["operationContracts"].([]any)[0].(map[string]any)["inputRevision"].(map[string]any), "Capacity")
+	authority["outputContract"], _ = json.Marshal(tree)
+	body, _ := json.Marshal(authority)
+	original.Request.PromptContext.Sections[3].Content = string(body)
+	var messages []responsesInputMessage
+	json.Unmarshal(original.Messages, &messages)
+	messages[3].Content[0].Text = "### " + original.Request.PromptContext.Sections[3].ID + "\n" + string(body)
+	original.Messages, _ = json.Marshal(messages)
+	raw, _ = json.Marshal(original)
+	ref := &rc.RuntimeProviderInputRef{Hash: rc.RuntimeProviderInputHash(raw), Bytes: len(raw)}
+	r.FrozenInput, r.FrozenInputRef = raw, ref
+	if _, err := runtimeProviderRequestForSubmission(r); err != nil {
+		t.Fatal("original input could not be submitted without rendering", err)
+	}
+	r.BaseFrozenInput, r.BaseFrozenInputRef = raw, ref
+	e = e.Clone()
+	e.CorrectionAttempt, e.LogicalRequestID = 1, "correction"
+	e.Hash = rc.StableRuntimeExpectedDocumentHash(e)
+	r.ExpectedDocument, r.RequestIdentity.LogicalRequestID = &e, e.LogicalRequestID
+	corrected, correctedRef, err := freezeRuntimeProviderInput(r, p)
+	if err != nil {
+		t.Fatal("correction rejudged committed C3 with the current projection", err)
+	}
+	r.FrozenInput, r.FrozenInputRef = corrected, correctedRef
+	restored, err := runtimeProviderRequestForSubmission(r)
+	if err != nil || restored.PromptContext.Sections[3].Content != string(body) {
+		t.Fatal("correction replaced the original prefix", err)
+	}
+	var tail runtimeCandidateExecutionTailProjection
+	json.Unmarshal([]byte(p.PromptContext.Sections[4].Content), &tail)
+	tail.ChangeReview.Current[0].ContentHash = "tampered"
+	broken, _ := json.Marshal(tail)
+	p.PromptContext.Sections[4].Content = string(broken)
+	if _, _, err := freezeRuntimeProviderInput(r, p); err == nil {
+		t.Fatal("new correction tail bypassed original source integrity")
+	}
+}

@@ -48,7 +48,7 @@ func TestCWISuspensionTransitionRejectsPauseWriteSetSmuggling(t *testing.T) {
 			case "budget":
 				after.ExecutionBudget.Policy.PolicyHash += "drift"
 			case "pre_resumed":
-				s.ResumeBinding = &runtimecontract.RuntimeCWIBindingRef{BindingID: "invented"}
+				s.Consumers[0].ResumeBinding = &runtimecontract.RuntimeCWIBindingRef{BindingID: "invented"}
 			case "dispatch":
 				before.ActiveDispatch = &runtimecontract.RuntimeDispatchRecord{ID: "in-flight"}
 			case "submitted":
@@ -79,8 +79,9 @@ func TestCWISuspensionTransitionRejectsResumeRewriteAndUnsafePreimage(t *testing
 	previous.StateRevision++
 	next := previous.CloneRaw()
 	s := &next.Facts.CWISuspensions[0]
-	s.ResumeBinding = &runtimecontract.RuntimeCWIBindingRef{BindingID: "new-ordinary-proof"}
-	s.ResumeAssessmentID, s.ResumeEvidenceRevision, s.ResumeObservationCount = "actual-assessment", "revision-3", 1
+	s.Consumers[0].ResumeBinding = &runtimecontract.RuntimeCWIBindingRef{BindingID: "new-ordinary-proof"}
+	s.Consumers[0].ResumeAssessmentID, s.Consumers[0].ResumeEvidenceRevision, s.Consumers[0].ResumeObservationCount = "actual-assessment", "revision-3", 1
+	s.ResumedEvidenceRevision = next.Facts.EvidenceRevision
 	next.Facts.Focus, next.Facts.Repair = s.FrozenFocus, s.Repair
 	next.Facts.RepairDirective, next.Facts.Failure = s.RepairDirective, s.Failure
 	if err := validateRuntimeCWISuspensionTransition(previous, next); err != nil {
@@ -94,9 +95,9 @@ func TestCWISuspensionTransitionRejectsResumeRewriteAndUnsafePreimage(t *testing
 				after.Facts.CWISuspensions[0].EffectEvidenceID += "drift"
 			case "resume_twice":
 				before = next.CloneRaw()
-				after.Facts.CWISuspensions[0].ResumeAssessmentID += "drift"
+				after.Facts.CWISuspensions[0].Consumers[0].ResumeAssessmentID += "drift"
 			case "binding_missing":
-				after.Facts.CWISuspensions[0].ResumeBinding = nil
+				after.Facts.CWISuspensions[0].Consumers[0].ResumeBinding = nil
 			case "focus_body":
 				after.Facts.Focus.TargetRefs = append(after.Facts.Focus.TargetRefs, "drift")
 			case "repair":

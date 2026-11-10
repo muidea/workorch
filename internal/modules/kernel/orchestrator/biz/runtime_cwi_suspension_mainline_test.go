@@ -44,8 +44,23 @@ func TestDriveRuntimeCWISuspensionRevalidatesOrdinaryPredecessorWithinOriginalBu
 	}
 }
 
+func TestDriveRuntimeCWISuspensionMultipleConsumersAndRecovery(t *testing.T) {
+	var baseline int64
+	for _, cut := range []string{"uninterrupted", "after_suspend", "after_sources", "before_consumer", "after_consumer", "after_resume"} {
+		t.Run(cut, func(t *testing.T) {
+			calls := runRuntimeCWISuspensionMainline(t, cut, false, true)
+			if baseline == 0 {
+				baseline = calls
+			} else if calls != baseline {
+				t.Fatalf("multi-consumer recovery repeated provider work: %d != %d", calls, baseline)
+			}
+		})
+	}
+}
+
 func runRuntimeCWISuspensionMainline(t *testing.T, cut string, historical ...bool) int64 {
 	mapped := len(historical) > 0 && historical[0]
+	multiple := len(historical) > 1 && historical[1]
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -78,6 +93,24 @@ func runRuntimeCWISuspensionMainline(t *testing.T, cut string, historical ...boo
 	bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[1].AcceptedStepKinds = []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[1].ValidationFailureRepairConvergence = nil
 	runtimeTestDeclareExactManagedValidationOwnerFact(&bootstrap, "cwi-1", "behavior-validation", false)
+	if multiple {
+		id := common.CoverageWorkItemID("cwi-extra")
+		focus := bootstrap.DefinitionFocuses[0].Clone()
+		focus.ID, focus.AssessmentID, focus.EvidenceDeclarationRef = "extra-ordinary", string(id), ""
+		focus.CoverageWorkItemIDs = []common.CoverageWorkItemID{id}
+		bootstrap.DefinitionFocuses = append(bootstrap.DefinitionFocuses, focus)
+		declaration := bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[0]
+		declaration.ID = string(id)
+		bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements = append(bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements, declaration)
+		item := bootstrap.CoverageItems[0]
+		item.ID, item.Order = id, 2
+		item.PrerequisiteCoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-1"}
+		bootstrap.CoverageItems[1].Order = 3
+		bootstrap.CoverageItems[1].PrerequisiteCoverageWorkItemIDs = append(bootstrap.CoverageItems[1].PrerequisiteCoverageWorkItemIDs, id)
+		bootstrap.CoverageItems = append(bootstrap.CoverageItems, item)
+		bootstrap.Slices[0].CoverageWorkItemIDs = append(bootstrap.Slices[0].CoverageWorkItemIDs, id)
+		runtimeTestDeclareExactManagedValidationOwnerFact(&bootstrap, id, "behavior-validation", false)
+	}
 	limits := &runtimecontract.RuntimeExecutionLimits{ProtocolRef: runtimecontract.RuntimeExecutionLimitsV1, MaxProviderCalls: 64, MaxCapabilityOperations: 32, MaxDurableDispatchesPerCWI: 2}
 	bootstrap.Activation.ExecutionContract.ExecutionLimits = limits
 	var err error
@@ -259,7 +292,20 @@ func runRuntimeCWISuspensionMainline(t *testing.T, cut string, historical ...boo
 			if len(a.Facts.CWISuspensions) != 1 {
 				return false
 			}
-			resumed := a.Facts.CWISuspensions[0].ResumeBinding != nil
+			resumed := !a.Facts.CWISuspensions[0].Active()
+			if cut == "after_sources" {
+				return len(a.Facts.CWISuspensions[0].Consumers) == 2
+			}
+			if strings.HasSuffix(cut, "consumer") {
+				pause := a.Facts.CWISuspensions[0]
+				completed := 0
+				for _, consumer := range pause.Consumers {
+					if consumer.ResumeBinding != nil {
+						completed++
+					}
+				}
+				return pause.Active() && completed == 1
+			}
 			return strings.HasSuffix(cut, "resume") == resumed
 		}}
 		if err := owner.ConfigureRuntimeRepository(crash); err != nil {
@@ -325,8 +371,19 @@ func runRuntimeCWISuspensionMainline(t *testing.T, cut string, historical ...boo
 	if cut == "before_effect" {
 		wantPauses = 2
 	}
-	if len(a.Facts.CWISuspensions) != wantPauses || a.Facts.CWISuspensions[0].ResumeBinding == nil || !runtimeTerminalDeliveryFullyAcknowledged(a) {
+	if len(a.Facts.CWISuspensions) != wantPauses || a.Facts.CWISuspensions[0].Active() || !runtimeTerminalDeliveryFullyAcknowledged(a) {
 		t.Fatalf("missing exact pause/resume/ACK: %+v", a.Facts.CWISuspensions)
+	}
+	if multiple {
+		pause := a.Facts.CWISuspensions[0]
+		if len(pause.Consumers) != 2 {
+			t.Fatal("independent consumers missing", pause.Consumers)
+		}
+		for _, consumer := range pause.Consumers {
+			if consumer.ResumeBinding == nil || consumer.ResumeAssessmentID == "" || consumer.ResumeObservationCount == 0 {
+				t.Fatal("consumer restored without its own ordinary proof", consumer)
+			}
+		}
 	}
 	changed := 0
 	for _, receipt := range a.OperationReceipts {
@@ -400,22 +457,22 @@ func runtimeAssertCWISuspensionArchiveTamperRejected(t *testing.T, original runt
 			case "effect_source":
 				s.EffectEvidenceID = "missing"
 			case "predecessor_source":
-				s.PredecessorID = "missing"
+				s.Consumers[0].PredecessorID = "missing"
 			case "frozen_binding":
 				s.FrozenBinding.BindingHash = "forged"
 			case "frozen_focus":
 				s.FrozenFocus.TargetRefs = []string{"forged"}
 			case "reopen_source":
-				s.ReopenSource.TriggerRef = "forged"
+				s.Consumers[0].ReopenSource.TriggerRef = "forged"
 			case "missing_resume":
-				s.ResumeBinding = nil
+				s.Consumers[0].ResumeBinding = nil
 			case "old_credit":
-				old := s.ReopenSource.PreviousBindingRef
-				s.ResumeBinding = &old
+				old := s.Consumers[0].ReopenSource.PreviousBindingRef
+				s.Consumers[0].ResumeBinding = &old
 			case "missing_assessment":
-				s.ResumeAssessmentID = "missing"
+				s.Consumers[0].ResumeAssessmentID = "missing"
 			case "missing_reads":
-				s.ResumeObservationCount = 0
+				s.Consumers[0].ResumeObservationCount = 0
 			case "missing_original_reads":
 				a.Facts.EvidenceApplicabilityObservations = nil
 			}

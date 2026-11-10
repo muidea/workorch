@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"reflect"
+	"sort"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -21,30 +22,6 @@ func suspendRuntimeSuccessorForStalePredecessor(a *RuntimeAggregate) (bool, erro
 	if a.ActiveDispatch != nil || runtimeApplicabilityHasUnsettledProvider(*a) || a.Termination != nil || a.TerminalMaterialSeal != nil || isTerminalConvergenceState(a.Decision.State) {
 		return false, nil
 	}
-	for _, s := range a.Facts.CWISuspensions {
-		if s.ResumeBinding == nil {
-			return false, nil
-		}
-	}
-	if len(a.Facts.Focus.CoverageWorkItemIDs) != 1 {
-		return false, nil
-	}
-	currentID := a.Facts.Focus.CoverageWorkItemIDs[0]
-	rows := runtimeCoverageByID(a.Facts.Coverage)
-	current := rows[currentID]
-	var blocked []runtimecontract.RuntimeCoverageItemFact
-	for _, id := range current.PrerequisiteCoverageWorkItemIDs {
-		row, found := rows[id]
-		if !found {
-			return false, fmt.Errorf("%w: suspension prerequisite missing", common.ErrConflict)
-		}
-		if !runtimecontract.RuntimeCWIPrerequisiteReadyForConsumer(a.Facts, row, currentID) {
-			blocked = append(blocked, row)
-		}
-	}
-	if len(blocked) == 0 {
-		return false, nil
-	}
 	unavailable := func(reason string) (bool, error) {
 		failure := runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateInfeasible, Code: runtimeCWIRevalidationSourceUnavailable, Message: reason}
 		if a.Facts.Failure != nil {
@@ -57,35 +34,63 @@ func suspendRuntimeSuccessorForStalePredecessor(a *RuntimeAggregate) (bool, erro
 		a.Facts.Resources.TargetSelection, a.Facts.Resources.TargetSnapshots = nil, nil
 		return true, nil
 	}
-	// Resolve affected dependencies to their declared ordinary acceptance
-	// consumer once, inside the invalidation CAS. Multiple historical edges
-	// may intentionally share that same consumer.
-	var consumers []runtimecontract.RuntimeCoverageItemFact
-	for _, dependency := range blocked {
-		row, supported := runtimecontract.RuntimeCWIRevalidationConsumer(a.Facts, dependency)
-		if !supported {
-			return unavailable(fmt.Sprintf("dependency %q has no reopened declared acceptance consumer", dependency.ID))
-		}
-		cause := row.ReopenLineage[len(row.ReopenLineage)-1]
-		if !runtimecontract.RuntimeCWIReopenHasOwnerSource(a.Facts, a.Reconciliation, row.ID, cause, a.StateRevision+1) {
-			return unavailable(fmt.Sprintf("acceptance consumer %q has no exact owner invalidation source", row.ID))
-		}
-		duplicate := false
-		for _, existing := range consumers {
-			duplicate = duplicate || existing.ID == row.ID
-		}
-		if !duplicate {
-			consumers = append(consumers, row)
+	rows := runtimeCoverageByID(a.Facts.Coverage)
+	currentID := common.CoverageWorkItemID("")
+	active := -1
+	for i, pause := range a.Facts.CWISuspensions {
+		if pause.Active() {
+			if len(pause.FrozenFocus.CoverageWorkItemIDs) != 1 {
+				return false, common.ErrConflict
+			}
+			active = i
+			currentID = pause.FrozenFocus.CoverageWorkItemIDs[0]
+			break
 		}
 	}
-	blocked = consumers
-
-	if len(blocked) != 1 {
-		return unavailable("stale predecessor revalidation requires one exact source; multiple sources cannot be guessed")
+	if active < 0 {
+		if len(a.Facts.Focus.CoverageWorkItemIDs) != 1 {
+			return false, nil
+		}
+		currentID = a.Facts.Focus.CoverageWorkItemIDs[0]
 	}
-	predecessor := blocked[0]
-	if !runtimecontract.RuntimeCWISuspensionOrdinaryPredecessorSupported(a.Facts, predecessor.ID) {
-		return unavailable(fmt.Sprintf("predecessor %q has no declared validation-only current acceptance source; historical state change cannot be replayed or promoted to current proof", predecessor.ID))
+	current := rows[currentID]
+	consumers, err := runtimeSuspensionConsumers(a.Facts, a.Reconciliation, current, a.StateRevision+1)
+	if err != nil {
+		return unavailable(err.Error())
+	}
+	if active >= 0 {
+		pause := &a.Facts.CWISuspensions[active]
+		additions := runtimeSuspensionNewConsumers(pause.Consumers, consumers)
+		if len(additions) == 0 {
+			return false, nil
+		}
+		pause.Consumers = append(pause.Consumers, additions...)
+		// New observations can arrive one at a time. Reuse the ordinary
+		// eligibility projection after joining their exact sources; no nested
+		// pause or second queue is introduced.
+		projected, err := projectRuntimeCWIExecutionFocus(a.Facts, nil, nil)
+		if err != nil {
+			return false, err
+		}
+		a.Facts = projected
+		return true, nil
+	}
+	if len(consumers) == 0 {
+		return false, nil
+	}
+	// Select by the existing Definition/eligibility rule, never dependency
+	// enumeration order or a pause-local scheduler.
+	var predecessor common.CoverageWorkItemID
+	for _, id := range runtimecontract.RuntimeCWIsEligibleForPlanning(a.Facts) {
+		for _, consumer := range consumers {
+			if consumer.PredecessorID == id {
+				predecessor = id
+				break
+			}
+		}
+		if predecessor != "" {
+			break
+		}
 	}
 	if current.CurrentBindingRef == nil || current.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateBound {
 		return unavailable("stale predecessor revalidation cannot freeze a successor without its original current binding")
@@ -95,7 +100,7 @@ func suspendRuntimeSuccessorForStalePredecessor(a *RuntimeAggregate) (bool, erro
 	}
 	eligible := false
 	for _, id := range runtimecontract.RuntimeCWIsEligibleForPlanning(a.Facts) {
-		eligible = eligible || id == predecessor.ID
+		eligible = eligible || id == predecessor
 	}
 	if !eligible {
 		return unavailable("exact stale predecessor is not currently eligible; nested suspension is unavailable")
@@ -133,7 +138,7 @@ func suspendRuntimeSuccessorForStalePredecessor(a *RuntimeAggregate) (bool, erro
 	remaining := make([]runtimecontract.CoverageFocus, 0, len(a.Facts.RemainingFocuses))
 	var next runtimecontract.CoverageFocus
 	for _, focus := range a.Facts.RemainingFocuses {
-		if len(focus.CoverageWorkItemIDs) == 1 && focus.CoverageWorkItemIDs[0] == predecessor.ID {
+		if len(focus.CoverageWorkItemIDs) == 1 && focus.CoverageWorkItemIDs[0] == predecessor {
 			if next.ID != "" {
 				return false, fmt.Errorf("%w: duplicate suspension predecessor cursor", common.ErrConflict)
 			}
@@ -146,8 +151,7 @@ func suspendRuntimeSuccessorForStalePredecessor(a *RuntimeAggregate) (bool, erro
 		return false, fmt.Errorf("%w: missing suspension predecessor cursor", common.ErrConflict)
 	}
 	pause := (runtimecontract.RuntimeCWISuspension{ProtocolRef: runtimecontract.RuntimeCWISuspensionV1, SuspendedAtStateRevision: a.StateRevision + 1, SuspendedEvidenceRevision: a.Facts.EvidenceRevision,
-		FrozenFocus: a.Facts.Focus, FrozenBinding: *current.CurrentBindingRef, EffectEvidenceID: effectID,
-		PredecessorID: predecessor.ID, ReopenSource: predecessor.ReopenLineage[len(predecessor.ReopenLineage)-1],
+		FrozenFocus: a.Facts.Focus, FrozenBinding: *current.CurrentBindingRef, EffectEvidenceID: effectID, Consumers: consumers,
 		Repair: a.Facts.Repair, RepairDirective: a.Facts.RepairDirective, Failure: a.Facts.Failure}).CloneRaw()
 	pause.FrozenPrerequisites, pause.FrozenObservations = runtimeSuspensionFocusPrerequisites(a.Facts)
 	facts := a.Facts.Normalized()
@@ -160,6 +164,55 @@ func suspendRuntimeSuccessorForStalePredecessor(a *RuntimeAggregate) (bool, erro
 	}
 	a.Facts = projected
 	return true, nil
+}
+
+// Resolve only current, affected acceptance edges at the formal observation
+// ingress. A shared consumer is included once; a later genuine reopen appends
+// its new source without rewriting an earlier proof.
+func runtimeSuspensionConsumers(facts runtimecontract.RuntimeFacts, reconciliation runtimecontract.RuntimeCWIReconciliationLedger, current runtimecontract.RuntimeCoverageItemFact, revision uint64) ([]runtimecontract.RuntimeCWISuspendedConsumer, error) {
+	rows := runtimeCoverageByID(facts.Coverage)
+	var consumers []runtimecontract.RuntimeCWISuspendedConsumer
+	seen := make(map[common.CoverageWorkItemID]bool)
+	for _, id := range current.PrerequisiteCoverageWorkItemIDs {
+		dependency, found := rows[id]
+		if !found {
+			return nil, fmt.Errorf("suspension prerequisite %q missing", id)
+		}
+		if runtimecontract.RuntimeCWIPrerequisiteReadyForConsumer(facts, dependency, current.ID) {
+			continue
+		}
+		row, supported := runtimecontract.RuntimeCWIRevalidationConsumer(facts, dependency)
+		if !supported {
+			return nil, fmt.Errorf("dependency %q has no reopened declared acceptance consumer", dependency.ID)
+		}
+		cause := row.ReopenLineage[len(row.ReopenLineage)-1]
+		if !runtimecontract.RuntimeCWIReopenHasOwnerSource(facts, reconciliation, row.ID, cause, revision) {
+			return nil, fmt.Errorf("acceptance consumer %q has no exact owner invalidation source", row.ID)
+		}
+		if !runtimecontract.RuntimeCWISuspensionOrdinaryPredecessorSupported(facts, row.ID) {
+			return nil, fmt.Errorf("consumer %q has no declared validation-only current acceptance source; historical effects cannot be replayed", row.ID)
+		}
+		if !seen[row.ID] {
+			consumers = append(consumers, runtimecontract.RuntimeCWISuspendedConsumer{PredecessorID: row.ID, ReopenSource: cause, RecordedAtStateRevision: revision})
+			seen[row.ID] = true
+		}
+	}
+	sort.Slice(consumers, func(i, j int) bool { return consumers[i].PredecessorID < consumers[j].PredecessorID })
+	return consumers, nil
+}
+
+func runtimeSuspensionNewConsumers(previous, observed []runtimecontract.RuntimeCWISuspendedConsumer) []runtimecontract.RuntimeCWISuspendedConsumer {
+	var additions []runtimecontract.RuntimeCWISuspendedConsumer
+	for _, c := range observed {
+		found := false
+		for _, old := range previous {
+			found = found || old.PredecessorID == c.PredecessorID && reflect.DeepEqual(old.ReopenSource, c.ReopenSource)
+		}
+		if !found {
+			additions = append(additions, c)
+		}
+	}
+	return additions
 }
 
 func clearRuntimeSuspendedFocusAuthority(facts *runtimecontract.RuntimeFacts) {
@@ -175,27 +228,71 @@ func clearRuntimeSuspendedFocusAuthority(facts *runtimecontract.RuntimeFacts) {
 func resumeRuntimeSuspendedSuccessor(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeFacts, bool, error) {
 	facts = facts.Normalized()
 	for index, pause := range facts.CWISuspensions {
-		if pause.ResumeBinding != nil {
+		if !pause.Active() {
 			continue
 		}
 		rows := runtimeCoverageByID(facts.Coverage)
-		predecessor := rows[pause.PredecessorID]
+		if len(facts.Focus.CoverageWorkItemIDs) != 1 {
+			return runtimecontract.RuntimeFacts{}, false, common.ErrConflict
+		}
+		id := facts.Focus.CoverageWorkItemIDs[0]
+		consumerIndex := -1
+		for j, c := range pause.Consumers {
+			if c.PredecessorID == id && c.ResumeBinding == nil {
+				consumerIndex = j
+			}
+		}
+		if consumerIndex < 0 {
+			return runtimecontract.RuntimeFacts{}, false, fmt.Errorf("%w: suspension resume cursor drift", common.ErrConflict)
+		}
+		consumer := pause.Consumers[consumerIndex]
+		predecessor := rows[id]
 		if predecessor.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateSettled || predecessor.State != runtimecontract.RuntimeCoverageItemStateSatisfied || predecessor.CurrentBindingRef == nil || predecessor.LastAssessmentID == "" {
 			return facts, false, nil
 		}
-		if len(facts.Focus.CoverageWorkItemIDs) != 1 || facts.Focus.CoverageWorkItemIDs[0] != pause.PredecessorID {
-			return runtimecontract.RuntimeFacts{}, false, fmt.Errorf("%w: suspension resume cursor drift", common.ErrConflict)
-		}
-		if len(predecessor.ReopenLineage) == 0 || !reflect.DeepEqual(predecessor.ReopenLineage[len(predecessor.ReopenLineage)-1], pause.ReopenSource) || runtimecontract.SameRuntimeCWIBindingRef(*predecessor.CurrentBindingRef, pause.ReopenSource.PreviousBindingRef) {
+		if len(predecessor.ReopenLineage) == 0 || !reflect.DeepEqual(predecessor.ReopenLineage[len(predecessor.ReopenLineage)-1], consumer.ReopenSource) || runtimecontract.SameRuntimeCWIBindingRef(*predecessor.CurrentBindingRef, consumer.ReopenSource.PreviousBindingRef) {
 			return runtimecontract.RuntimeFacts{}, false, fmt.Errorf("%w: suspension resume source drift", common.ErrConflict)
 		}
 		current := rows[pause.FrozenFocus.CoverageWorkItemIDs[0]]
 		if current.CurrentBindingRef == nil || !runtimecontract.SameRuntimeCWIBindingRef(*current.CurrentBindingRef, pause.FrozenBinding) {
 			return runtimecontract.RuntimeFacts{}, false, fmt.Errorf("%w: suspension frozen binding drift", common.ErrConflict)
 		}
-		for _, id := range current.PrerequisiteCoverageWorkItemIDs {
-			if !runtimecontract.RuntimeCWIPrerequisiteReadyForConsumer(facts, rows[id], current.ID) {
-				return facts, false, nil
+		ref := predecessor.CurrentBindingRef.Clone()
+		c := &facts.CWISuspensions[index].Consumers[consumerIndex]
+		c.ResumeBinding, c.ResumeAssessmentID = &ref, predecessor.LastAssessmentID
+		c.ResumeEvidenceRevision, c.ResumeObservationCount = facts.EvidenceRevision, len(facts.EvidenceApplicabilityObservations)
+		pending := false
+		for _, other := range facts.CWISuspensions[index].Consumers {
+			pending = pending || other.ResumeBinding == nil
+		}
+		if pending {
+			eligible := runtimecontract.RuntimeCWIsEligibleForPlanning(facts)
+			if len(eligible) == 0 {
+				return runtimecontract.RuntimeFacts{}, false, fmt.Errorf("%w: suspension has no eligible unresolved consumer", common.ErrConflict)
+			}
+			var next runtimecontract.CoverageFocus
+			var remaining []runtimecontract.CoverageFocus
+			for _, f := range facts.RemainingFocuses {
+				if len(f.CoverageWorkItemIDs) == 1 && f.CoverageWorkItemIDs[0] == eligible[0] {
+					if next.ID != "" {
+						return runtimecontract.RuntimeFacts{}, false, common.ErrConflict
+					}
+					next = f
+				} else {
+					remaining = append(remaining, f)
+				}
+			}
+			if next.ID == "" {
+				return runtimecontract.RuntimeFacts{}, false, common.ErrConflict
+			}
+			completed := append(append([]runtimecontract.CoverageFocus(nil), facts.CompletedFocuses...), facts.Focus)
+			clearRuntimeSuspendedFocusAuthority(&facts)
+			projected, err := installRuntimeCWIFocusProjection(facts, next, remaining, completed)
+			return projected, err == nil, err
+		}
+		for _, prerequisiteID := range current.PrerequisiteCoverageWorkItemIDs {
+			if !runtimecontract.RuntimeCWIPrerequisiteReadyForConsumer(facts, rows[prerequisiteID], current.ID) {
+				return runtimecontract.RuntimeFacts{}, false, fmt.Errorf("%w: completed suspension consumers have new unresolved prerequisite facts", common.ErrConflict)
 			}
 		}
 		remaining := make([]runtimecontract.CoverageFocus, 0, len(facts.RemainingFocuses))
@@ -236,11 +333,7 @@ func resumeRuntimeSuspendedSuccessor(facts runtimecontract.RuntimeFacts) (runtim
 			}
 		}
 		facts.Resources.RetiredPrerequisiteObservations = observations
-		ref := predecessor.CurrentBindingRef.Clone()
-		facts.CWISuspensions[index].ResumeBinding = &ref
-		facts.CWISuspensions[index].ResumeAssessmentID = predecessor.LastAssessmentID
-		facts.CWISuspensions[index].ResumeEvidenceRevision = facts.EvidenceRevision
-		facts.CWISuspensions[index].ResumeObservationCount = len(facts.EvidenceApplicabilityObservations)
+		facts.CWISuspensions[index].ResumedEvidenceRevision = facts.EvidenceRevision
 		projected, err := installRuntimeCWIFocusProjection(facts, pause.FrozenFocus, remaining, completed)
 		if err != nil {
 			return runtimecontract.RuntimeFacts{}, false, err
@@ -260,28 +353,84 @@ func validateRuntimeCWISuspensionTransition(previous, next RuntimeAggregate) err
 		if reflect.DeepEqual(original, after[i]) {
 			continue
 		}
-		if original.ResumeBinding != nil || after[i].ResumeBinding == nil {
+		if !original.Active() || len(original.Consumers) > len(after[i].Consumers) {
 			return fmt.Errorf("%w: CWI suspension source cannot be rewritten", common.ErrConflict)
 		}
+		if previous.ActiveDispatch != nil || runtimeApplicabilityHasUnsettledProvider(previous) || previous.Termination != nil || previous.TerminalMaterialSeal != nil || isTerminalConvergenceState(previous.Decision.State) {
+			return fmt.Errorf("%w: CWI suspension change crossed in-flight responsibility", common.ErrConflict)
+		}
+		if len(original.Consumers) < len(after[i].Consumers) {
+			rows := runtimeCoverageByID(next.Facts.Coverage)
+			observed, err := runtimeSuspensionConsumers(next.Facts, next.Reconciliation, rows[original.FrozenFocus.CoverageWorkItemIDs[0]], next.StateRevision)
+			if err != nil {
+				return err
+			}
+			copy := after[i].CloneRaw()
+			additions := runtimeSuspensionNewConsumers(original.Consumers, observed)
+			copy.Consumers = copy.Consumers[:len(original.Consumers)]
+			if !reflect.DeepEqual(copy, original) || !reflect.DeepEqual(after[i].Consumers[len(original.Consumers):], additions) {
+				return fmt.Errorf("%w: suspension consumer append has no exact current owner source", common.ErrConflict)
+			}
+			if !reflect.DeepEqual(previous.CompletedDispatches, next.CompletedDispatches) || !reflect.DeepEqual(previous.OperationReceipts, next.OperationReceipts) || !reflect.DeepEqual(previous.ExecutionBudget, next.ExecutionBudget) {
+				return fmt.Errorf("%w: consumer append cannot change effects/receipts/budget", common.ErrConflict)
+			}
+			continue
+		}
 		copy := after[i].CloneRaw()
-		copy.ResumeBinding, copy.ResumeAssessmentID, copy.ResumeEvidenceRevision, copy.ResumeObservationCount = nil, "", "", 0
-		if !reflect.DeepEqual(copy, original) {
-			return fmt.Errorf("%w: CWI suspension resume rewrote original source", common.ErrConflict)
+		copy.ResumedEvidenceRevision = original.ResumedEvidenceRevision
+		changed := 0
+		for j, old := range original.Consumers {
+			current := after[i].Consumers[j]
+			if reflect.DeepEqual(old, current) {
+				continue
+			}
+			if old.ResumeBinding != nil || current.ResumeBinding == nil || len(previous.Facts.Focus.CoverageWorkItemIDs) != 1 || previous.Facts.Focus.CoverageWorkItemIDs[0] != old.PredecessorID {
+				return fmt.Errorf("%w: CWI consumer proof may be committed once for the exact current consumer", common.ErrConflict)
+			}
+			copy.Consumers[j].ResumeBinding, copy.Consumers[j].ResumeAssessmentID, copy.Consumers[j].ResumeEvidenceRevision, copy.Consumers[j].ResumeObservationCount = nil, "", "", 0
+			changed++
+		}
+		if changed != 1 || !reflect.DeepEqual(copy, original) {
+			return fmt.Errorf("%w: CWI resume rewrote original source", common.ErrConflict)
 		}
 		if previous.ActiveDispatch != nil || runtimeApplicabilityHasUnsettledProvider(previous) || previous.Termination != nil || previous.TerminalMaterialSeal != nil || isTerminalConvergenceState(previous.Decision.State) {
 			return fmt.Errorf("%w: CWI resume crossed in-flight responsibility", common.ErrConflict)
 		}
-		if !reflect.DeepEqual(next.Facts.Focus, original.FrozenFocus) || !reflect.DeepEqual(next.Facts.Repair, original.Repair) || !reflect.DeepEqual(next.Facts.RepairDirective, original.RepairDirective) || !reflect.DeepEqual(next.Facts.Failure, original.Failure) {
-			return fmt.Errorf("%w: CWI resume lost frozen focus/repair budget", common.ErrConflict)
+		if !after[i].Active() {
+			if after[i].ResumedEvidenceRevision != next.Facts.EvidenceRevision || !reflect.DeepEqual(next.Facts.Focus, original.FrozenFocus) || !reflect.DeepEqual(next.Facts.Repair, original.Repair) || !reflect.DeepEqual(next.Facts.RepairDirective, original.RepairDirective) || !reflect.DeepEqual(next.Facts.Failure, original.Failure) {
+				return fmt.Errorf("%w: CWI resume lost frozen focus/repair budget", common.ErrConflict)
+			}
+		} else {
+			projection := previous.Facts.Normalized()
+			projection.CWISuspensions[i] = after[i].CloneRaw()
+			eligible := runtimecontract.RuntimeCWIsEligibleForPlanning(projection)
+			allowed := len(eligible) != 0 && len(next.Facts.Focus.CoverageWorkItemIDs) == 1 && next.Facts.Focus.CoverageWorkItemIDs[0] == eligible[0]
+			if !allowed {
+				return fmt.Errorf("%w: CWI continuation did not use canonical eligibility", common.ErrConflict)
+			}
 		}
+
 	}
 	if len(after) != len(before) {
 		if previous.ActiveDispatch != nil || runtimeApplicabilityHasUnsettledProvider(previous) || previous.Termination != nil || previous.TerminalMaterialSeal != nil || isTerminalConvergenceState(previous.Decision.State) {
 			return fmt.Errorf("%w: CWI suspension crossed original unsafe window", common.ErrConflict)
 		}
 		added := after[len(before)]
-		if added.ResumeBinding != nil || added.ResumeAssessmentID != "" || added.ResumeEvidenceRevision != "" || added.ResumeObservationCount != 0 {
+		if !added.Active() {
 			return fmt.Errorf("%w: CWI suspension cannot append a pre-resumed source", common.ErrConflict)
+		}
+		for _, consumer := range added.Consumers {
+			if consumer.ResumeBinding != nil || consumer.ResumeAssessmentID != "" || consumer.ResumeEvidenceRevision != "" || consumer.ResumeObservationCount != 0 {
+				return fmt.Errorf("%w: appended consumer is already completed", common.ErrConflict)
+			}
+		}
+		rows := runtimeCoverageByID(next.Facts.Coverage)
+		expected, err := runtimeSuspensionConsumers(next.Facts, next.Reconciliation, rows[added.FrozenFocus.CoverageWorkItemIDs[0]], next.StateRevision)
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(added.Consumers, expected) {
+			return fmt.Errorf("%w: suspension omitted or changed an affected consumer", common.ErrConflict)
 		}
 		prerequisites, observations := runtimeSuspensionFocusPrerequisites(previous.Facts)
 		if !reflect.DeepEqual(added.FrozenPrerequisites, prerequisites) || !reflect.DeepEqual(added.FrozenObservations, observations) {

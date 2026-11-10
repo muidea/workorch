@@ -16,10 +16,22 @@ import (
 )
 
 func TestDriveRuntimeCWISuspensionProcessRecovery(t *testing.T) {
-	for _, cut := range []string{"after_suspend", "after_resume"} {
+	runCWISuspensionProcessRecovery(t, false)
+}
+
+func TestDriveRuntimeMultipleConsumerSuspensionProcessRecovery(t *testing.T) {
+	runCWISuspensionProcessRecovery(t, true)
+}
+
+func runCWISuspensionProcessRecovery(t *testing.T, multiple bool) {
+	cuts := []string{"after_suspend", "after_resume"}
+	if multiple {
+		cuts = []string{"after_sources", "after_consumer"}
+	}
+	for _, cut := range cuts {
 		t.Run(cut, func(t *testing.T) {
 			root := t.TempDir()
-			runCWISuspensionProcess(t, root, "seed", cut, crossCWIProcessCutExit)
+			runCWISuspensionProcess(t, root, "seed", cut, crossCWIProcessCutExit, multiple)
 			// Separate path avoids an in-process repository cache masking the
 			// second child's changes to the original durable path.
 			body, err := os.ReadFile(filepath.Join(root, "runs.json"))
@@ -39,10 +51,10 @@ func TestDriveRuntimeCWISuspensionProcessRecovery(t *testing.T) {
 				t.Fatalf("invalid suspension process preimage: %v", err)
 			}
 			pause := before.Facts.CWISuspensions[0]
-			if (pause.ResumeBinding != nil) != (cut == "after_resume") {
+			if (!pause.Active()) != (cut == "after_resume") {
 				t.Fatal("process did not exit at exact requested CAS")
 			}
-			runCWISuspensionProcess(t, root, "resume", cut, 0)
+			runCWISuspensionProcess(t, root, "resume", cut, 0, multiple)
 			second, err := filerepository.NewRunRepository(filepath.Join(root, "runs.json")).GetByWorkspaceID(context.Background(), "ws-v2", "run-v2")
 			if err != nil || second.RuntimeState == nil || second.State != common.RunStateCompleted {
 				t.Fatalf("fresh process did not complete original Run: %v", err)
@@ -55,8 +67,14 @@ func TestDriveRuntimeCWISuspensionProcessRecovery(t *testing.T) {
 				t.Fatal("fresh process changed original sealed startup")
 			}
 			resumed := after.Facts.CWISuspensions[0].CloneRaw()
-			if pause.ResumeBinding == nil {
-				resumed.ResumeBinding, resumed.ResumeAssessmentID, resumed.ResumeEvidenceRevision, resumed.ResumeObservationCount = nil, "", "", 0
+			if pause.Active() {
+				resumed.ResumedEvidenceRevision = ""
+				resumed.Consumers = resumed.Consumers[:len(pause.Consumers)]
+				for i, original := range pause.Consumers {
+					if original.ResumeBinding == nil {
+						resumed.Consumers[i].ResumeBinding, resumed.Consumers[i].ResumeAssessmentID, resumed.Consumers[i].ResumeEvidenceRevision, resumed.Consumers[i].ResumeObservationCount = nil, "", "", 0
+					}
+				}
 			}
 			if !reflect.DeepEqual(pause, resumed) {
 				t.Fatal("fresh process rewrote original pause/resume source")
@@ -96,7 +114,7 @@ func TestDriveRuntimeCWISuspensionProcessRecovery(t *testing.T) {
 	}
 }
 
-func runCWISuspensionProcess(t *testing.T, root, stage, cut string, expectedExit int) {
+func runCWISuspensionProcess(t *testing.T, root, stage, cut string, expectedExit int, multiple bool) {
 	t.Helper()
 	binary, err := os.Executable()
 	if err != nil {
@@ -105,7 +123,11 @@ func runCWISuspensionProcess(t *testing.T, root, stage, cut string, expectedExit
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	command := exec.CommandContext(ctx, binary, "-test.run=^TestCWISuspensionProcessChild$", "-test.timeout=110s", "-test.v")
-	command.Env = append(os.Environ(), "WORKORCH_CWI_SUSPENSION_STAGE="+stage, "WORKORCH_CWI_SUSPENSION_ROOT="+root, "WORKORCH_CWI_SUSPENSION_CUT="+cut)
+	multi := "false"
+	if multiple {
+		multi = "true"
+	}
+	command.Env = append(os.Environ(), "WORKORCH_CWI_SUSPENSION_MULTIPLE="+multi, "WORKORCH_CWI_SUSPENSION_STAGE="+stage, "WORKORCH_CWI_SUSPENSION_ROOT="+root, "WORKORCH_CWI_SUSPENSION_CUT="+cut)
 	output, err := command.CombinedOutput()
 	if writeErr := os.WriteFile(filepath.Join(root, stage+".log"), output, 0o600); writeErr != nil {
 		t.Fatal(writeErr)
@@ -127,5 +149,5 @@ func TestCWISuspensionProcessChild(t *testing.T) {
 	if os.Getenv("WORKORCH_CWI_SUSPENSION_STAGE") == "" {
 		return
 	}
-	runRuntimeCWISuspensionMainline(t, os.Getenv("WORKORCH_CWI_SUSPENSION_CUT"))
+	runRuntimeCWISuspensionMainline(t, os.Getenv("WORKORCH_CWI_SUSPENSION_CUT"), false, os.Getenv("WORKORCH_CWI_SUSPENSION_MULTIPLE") == "true")
 }

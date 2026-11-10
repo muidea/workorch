@@ -79,7 +79,11 @@ func freezeRuntimeProviderInput(r models.RuntimeCandidateRequest, p models.Provi
 		if err := validateRuntimeCandidateWorkIntentIntegrity(r.CandidateManifest, p.PromptContext); err != nil {
 			return nil, nil, err
 		}
-		if err := validateRuntimeCandidateContextIntegrity(r.DefinitionContext, r.CandidateContext, r.CandidateManifest, r.CandidateAttempt, r.CandidateCorrectionObservation, p.ContextBudget, p.PromptContext); err != nil {
+		if baseMessages == nil {
+			if err := validateRuntimeCandidateContextIntegrity(r.DefinitionContext, r.CandidateContext, r.CandidateManifest, r.CandidateAttempt, r.CandidateCorrectionObservation, p.ContextBudget, p.PromptContext); err != nil {
+				return nil, nil, err
+			}
+		} else if err := validateRuntimeCandidateExecutionTail(r.CandidateContext, r.CandidateManifest, p.PromptContext); err != nil {
 			return nil, nil, err
 		}
 	}

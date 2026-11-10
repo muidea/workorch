@@ -347,18 +347,8 @@ func validateRuntimeCandidateContextIntegrity(
 			missing = append(missing, "P4.input_revision_sources")
 		}
 	}
-	{
-		tail, err := runtimeCandidateExecutionTailForIntegrity(context, manifest, prompt)
-		if err != nil {
-			missing = append(missing, err.Error())
-		}
-		if err != nil ||
-			!reflect.DeepEqual(tail.ChangeReview, context.ChangeReview) || tail.ChangeReviewResponsibility != runtimeChangeReviewInstruction(context.ChangeReview) ||
-			!reflect.DeepEqual(tail.AcceptedEvidence, runtimeProviderSafeEvidence(runtimeCandidateRelevantEvidence(context, context.Evidence.Accepted))) ||
-			!reflect.DeepEqual(tail.RejectedEvidence, runtimeProviderSafeEvidence(runtimeCandidateRelevantEvidence(context, context.Evidence.Rejected))) ||
-			!reflect.DeepEqual(tail.Assessments, runtimeProviderSafeAssessments(runtimeCandidateRelevantAssessments(context))) {
-			missing = append(missing, "P4.causal_execution_tail")
-		}
+	if err := validateRuntimeCandidateExecutionTail(context, manifest, prompt); err != nil {
+		missing = append(missing, err.Error())
 	}
 	{
 		var actual struct {
@@ -403,6 +393,23 @@ func validateRuntimeCandidateContextIntegrity(
 	}
 	budget.IntegrityWarnings = uniqueStrings(append(budget.IntegrityWarnings, missing...))
 	return fmt.Errorf("runtime candidate context integrity missing or conflicted: %s", strings.Join(missing, ", "))
+}
+
+// A correction composes a new tail with an already committed C0-C3 source.
+// Verify new content and its exact references without rendering that source
+// again through the current projection implementation.
+func validateRuntimeCandidateExecutionTail(context runtimecontract.RuntimeCandidateContext, manifest runtimecontract.RuntimeCandidateContractManifest, prompt *llmmodels.PromptContext) error {
+	tail, err := runtimeCandidateExecutionTailForIntegrity(context, manifest, prompt)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(tail.ChangeReview, context.ChangeReview) || tail.ChangeReviewResponsibility != runtimeChangeReviewInstruction(context.ChangeReview) ||
+		!reflect.DeepEqual(tail.AcceptedEvidence, runtimeProviderSafeEvidence(runtimeCandidateRelevantEvidence(context, context.Evidence.Accepted))) ||
+		!reflect.DeepEqual(tail.RejectedEvidence, runtimeProviderSafeEvidence(runtimeCandidateRelevantEvidence(context, context.Evidence.Rejected))) ||
+		!reflect.DeepEqual(tail.Assessments, runtimeProviderSafeAssessments(runtimeCandidateRelevantAssessments(context))) {
+		return fmt.Errorf("P4.causal_execution_tail")
+	}
+	return nil
 }
 
 func populateRuntimeCandidateContextBudget(budget *llmmodels.ProviderContextBudget, prompt *llmmodels.PromptContext) {

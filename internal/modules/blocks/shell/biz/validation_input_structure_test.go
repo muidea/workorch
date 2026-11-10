@@ -2,6 +2,7 @@ package shell
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,7 +14,7 @@ import (
 	rc "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func shellPostimageFixture(t *testing.T) (string, rc.RuntimeValidationInputStructureRequest, string) {
+func shellPostimageFixture(t *testing.T, corpusBytes ...int) (string, rc.RuntimeValidationInputStructureRequest, string) {
 	t.Helper()
 	recipe, requirement, _ := conjunctiveSourceRequirement(t)
 	recipe.AdapterRef = modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic
@@ -28,6 +29,11 @@ func shellPostimageFixture(t *testing.T) (string, rc.RuntimeValidationInputStruc
 	writeNativeStructureSource(t, root, "go.mod", "module fixture\ngo 1.26\n")
 	writeNativeStructureSource(t, root, target, bad)
 	refs := []string{"go.mod", target}
+	if len(corpusBytes) != 0 {
+		padding := corpusBytes[0] - len(bad) - len("module fixture\ngo 1.26\n")
+		writeNativeStructureSource(t, root, "notes.txt", strings.Repeat("x", padding))
+		refs = append(refs, "notes.txt")
+	}
 	manifest := shellTestWorkspaceManifestBinding("postimage", refs)
 	surfaces := shellValidationSurfaces([]rc.RuntimeValidationRecipe{recipe}, []rc.RuntimeValidationRecipe{recipe}, []rc.RuntimeValidationRecipe{recipe}, []rc.RuntimeValidationProofRequirement{requirement}, manifest, "tree", root)
 	catalog := rc.RuntimeOperationAdmissibility{PrerequisiteID: "catalog", OwnerModuleID: ModuleID, ObservedRevision: "tree", OperationKinds: []string{rc.RuntimeBlockKindManagedValidationSession}, ValidationSurfaces: surfaces}
@@ -52,6 +58,56 @@ func shellPostimageFixture(t *testing.T) (string, rc.RuntimeValidationInputStruc
 		t.Fatal(err)
 	}
 	return root, request, good
+}
+
+func TestInputPostimageCorpusCapacityIsOwnerConstraintNotIntegrityFailure(t *testing.T) {
+	root, request, good := shellPostimageFixture(t, rc.RuntimeValidationDiagnosticSourceMaxBytes-152)
+	capacity := request.Revision.Capacity()
+	if capacity.Bytes != 262144-152 || capacity.RemainingBytes != 152 || capacity.FileCount != 3 || len(capacity.Targets) != 1 {
+		t.Fatalf("lost exact complete corpus capacity: %+v", capacity)
+	}
+	before, err := os.ReadFile(filepath.Join(root, request.Postimage.TargetRef))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, delta := range []int{-1, 0, 1, 3786} {
+		t.Run(fmt.Sprint(delta), func(t *testing.T) {
+			r := request
+			size := capacity.Targets[0].MaxPostimageBytes + delta
+			// UTF-8 bytes, not characters or estimated tokens.
+			r.Postimage.Content = good + "/*字" + strings.Repeat("x", size-len(good)-7) + "*/"
+			r.Postimage.ContentHash = rc.RuntimeValidationInputContentHash(r.Postimage.Content)
+			r.Proof.AfterHash = r.Postimage.ContentHash
+			if err := r.Validate(); err != nil {
+				t.Fatal("complete transport rejected before owner observation", err)
+			}
+			fact, err := inspectShellValidationInputPostimage(r)
+			if err != nil || fact.ValidateForRequest(r) != nil {
+				t.Fatal("lost formal exact owner fact", err)
+			}
+			if delta > 0 && fact.Code != "validation_input_review_capacity_exceeded" || delta <= 0 && fact.Code != "" {
+				t.Fatalf("wrong capacity classification delta=%d code=%s", delta, fact.Code)
+			}
+			raw, _ := json.Marshal(r)
+			var restored rc.RuntimeValidationInputStructureRequest
+			if err := json.Unmarshal(raw, &restored); err != nil {
+				t.Fatal(err)
+			}
+			again, err := inspectShellValidationInputPostimage(restored)
+			if err != nil || !reflect.DeepEqual(fact, again) {
+				t.Fatal("recovery changed owner outcome", err)
+			}
+			bad := r
+			bad.Postimage.Content += "tamper"
+			if _, err := inspectShellValidationInputPostimage(bad); err == nil {
+				t.Fatal("integrity failure became correctable constraint")
+			}
+		})
+	}
+	after, _ := os.ReadFile(filepath.Join(root, request.Postimage.TargetRef))
+	if string(before) != string(after) {
+		t.Fatal("constraint inspection executed a write")
+	}
 }
 
 func TestInputPostimageUsesSameRulesWithoutWriting(t *testing.T) {

@@ -427,7 +427,14 @@ purpose 与 proof 请求的完整 C3 经同请求引用展开后仍与生产投�
 input-only 编辑任务。原 owner subject 的 ScopeRequirements/Recipe 同时约束后续合法观察方法和 deadline；当前编辑
 targets 不决定将来进程观察权限。purpose、proof batch 与 operations 表达同一规则，原前像/结构要求只适用被修订输入。
 原完整 catalog、其它 CWI authority 与不适用的 request/report 字段不发给模型；owner 仍保留并反查完整来源。
+InputRevision 的 `Capacity` 从同一完整原 corpus 确定性投影文件数、bytes、上限、余量和各授权目标的替换后像上限，
+与正文一起留在 C3。模型不再求和猜限额；渲染后门禁逐值反查，篡改拒绝。该事实不改变原权限、容量或预算，
+不保证语义完整候选存在；已冻结请求与同合同纠正/恢复保持原 C0–C3，不重新渲染。
 与本请求当前内容完全相等的文件复用已有 C3 局部引用，逐值展开后通过同一完整性门禁；不跨请求借用 PASS、正文或缓存权威。
+同合同纠正先核对原冻结 ref/完整 bytes、expected contract、scope、manifest 与 ceiling，消费原 C0–C3 和物理消息。
+拼接后只接纳新增 C4 的完整 scope、因果事实和同请求引用，不用当前投影实现重判已封存 C3；新请求仍走完整投影门禁。
+`TestCandidateCorrectionConsumesOriginalFrozenProjection` 固定新增派生字段前的原正文，验证提交/纠正/恢复保持原 prefix，
+新增反馈及错引用仍拒绝；不加载旧实现、不改原件、不引入兼容协议或额外模型调用。
 
 
 输入审查及 input-revision 的 C3 投影保留原 owner 显式声明的 `Recipe`（含总 TimeoutMillis）；结构来源随原观察保留。

@@ -3,9 +3,11 @@ package integration_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -22,7 +24,10 @@ func implementationWorkFullflowPreparationEnvironment(t *testing.T) (string, str
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := "/tmp/workorch-validation"
+	base, err := implementationWorkFullflowArtifactRoot(os.Getenv("WORKORCH_PUBLIC_WORK_TEST_ARTIFACT_ROOT"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(base, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +69,34 @@ func implementationWorkFullflowPreparationEnvironment(t *testing.T) (string, str
 	t.Setenv("WORKORCH_STEP04_DROP_REGISTRATION_REPLY", "0")
 	t.Chdir(root)
 	return filepath.Join(root, "data"), filepath.Join(root, "project"), filepath.Join(source, "step04-mcp-protocol.py")
+}
+
+// Diagnostic placement only. Explicit runs keep complete owner stores and raw
+// streams together without changing execution, deadlines or assertions.
+func implementationWorkFullflowArtifactRoot(requested string) (string, error) {
+	base := "/tmp/workorch-validation"
+	if requested == "" {
+		return base, nil
+	}
+	clean := filepath.Clean(requested)
+	rel, err := filepath.Rel(base, clean)
+	if err != nil || !filepath.IsAbs(requested) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("fullflow artifacts require an explicit validation temporary directory")
+	}
+	return clean, nil
+}
+
+func TestImplementationWorkFullflowArtifactRoot(t *testing.T) {
+	for _, requested := range []string{"", "/tmp/workorch-validation", "/tmp/workorch-validation/ai-proxy-live-20261105-01"} {
+		if _, err := implementationWorkFullflowArtifactRoot(requested); err != nil {
+			t.Fatal(requested, err)
+		}
+	}
+	for _, requested := range []string{"relative", "/tmp/other", "/tmp/workorch-validation-other", "/tmp/workorch-validation/../other"} {
+		if _, err := implementationWorkFullflowArtifactRoot(requested); err == nil {
+			t.Fatal("accepted invalid artifact boundary", requested)
+		}
+	}
 }
 
 func implementationWorkFullflowPreparationMCP(t *testing.T, client *http.Client, base string, fixture string) {
