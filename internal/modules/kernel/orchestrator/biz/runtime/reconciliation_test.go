@@ -66,34 +66,36 @@ func TestRuntimeControllerReconciliationGenerationsPreserveHistoryAndRejectStale
 	}
 }
 
-func TestRuntimeControllerReconciliationHistoryLimitRejectsNewGenerationWithoutCAS(t *testing.T) {
+func TestRuntimeControllerReconciliationHistoryIsNotAnExecutionBudget(t *testing.T) {
 	ctx := context.Background()
 	repository, controller, template := reconciliationControllerFixture(t, runtimecontract.RuntimeCWIReconciliationScopeCurrentRun)
-
-	for generation := uint64(1); generation <= runtimecontract.RuntimeCWIReconciliationHistoryLimit+1; generation++ {
+	for generation := uint64(1); generation <= 20; generation++ {
 		request := template.Clone()
 		request.RequestID = fmt.Sprintf("reconcile-history-%d", generation)
 		request.Generation = generation
+		before := repository.aggregate.Reconciliation.Clone()
 		if _, changed, err := controller.ensureReconciliationRequest(ctx, request); err != nil || !changed {
-			t.Fatalf("seal generation %d = changed=%v err=%v", generation, changed, err)
+			t.Fatalf("seal generation %d: changed=%v err=%v", generation, changed, err)
+		}
+		after := repository.aggregate.Reconciliation
+		if len(after.History) != int(generation)-1 || !reflect.DeepEqual(after.History[:len(before.History)], before.History) && len(before.History) > 0 {
+			t.Fatal("audit history lost or rewritten")
 		}
 	}
-
-	beforeRevision := repository.aggregate.StateRevision
-	beforeSaves := repository.saves
-	beforeHistory := len(repository.aggregate.Reconciliation.History)
-	beforeRequest := repository.aggregate.Reconciliation.Request.Clone()
-	overflow := template.Clone()
-	overflow.RequestID = "reconcile-history-overflow"
-	overflow.Generation = runtimecontract.RuntimeCWIReconciliationHistoryLimit + 2
-	if _, changed, err := controller.ensureReconciliationRequest(ctx, overflow); !errors.Is(err, common.ErrConflict) || changed {
-		t.Fatalf("history overflow was accepted: changed=%v err=%v", changed, err)
+	before := repository.aggregate.CloneRaw()
+	if _, changed, err := controller.ensureReconciliationRequest(ctx, *before.Reconciliation.Request); err != nil || changed || !reflect.DeepEqual(*repository.aggregate, before) {
+		t.Fatal("duplicate after long history mutated state")
 	}
-	if repository.saves != beforeSaves || repository.aggregate.StateRevision != beforeRevision ||
-		len(repository.aggregate.Reconciliation.History) != beforeHistory ||
-		repository.aggregate.Reconciliation.Request == nil ||
-		repository.aggregate.Reconciliation.Request.RequestID != beforeRequest.RequestID {
-		t.Fatalf("history overflow performed a partial CAS: saves=%d/%d aggregate=%+v", repository.saves, beforeSaves, repository.aggregate.Reconciliation)
+	// A genuine binding-set change still archives the exact current generation;
+	// this pure archive fixture does not invent a new semantic binding authority.
+	changedContract := before.CloneRaw()
+	changedContract.Facts.ReconciliationContract = runtimecontract.RuntimeCWIReconciliationContract{}
+	if changed, err := supersedeActiveReconciliationForCurrentContract(&changedContract); err != nil || !changed || len(changedContract.Reconciliation.History) != 20 {
+		t.Fatalf("archive long history: %v", err)
+	}
+	last := changedContract.Reconciliation.History[19]
+	if !reflect.DeepEqual(last.Request, *before.Reconciliation.Request) || last.RequestHash != before.Reconciliation.RequestHash || changedContract.Reconciliation.Validate() != nil {
+		t.Fatal("archive changed original identity")
 	}
 }
 

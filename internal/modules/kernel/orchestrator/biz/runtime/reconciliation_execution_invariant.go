@@ -8,7 +8,7 @@ import (
 )
 
 // Unaccepted snapshots use the complete source audit. Production commits check
-// only a newly admitted batch; a persisted generation is never re-adjudicated.
+// that a new batch is read-only; a persisted generation is never re-adjudicated.
 func validateReconciliationExecutionSources(a RuntimeAggregate) error {
 	if err := validateReconciliationBatchExecutionSources(a, a.Reconciliation.Request, a.Reconciliation.Batch); err != nil {
 		return err
@@ -49,7 +49,8 @@ func validateReconciliationBatchExecutionSources(a RuntimeAggregate, request *ru
 
 // The exact formal preimage supplies already committed generations. They may
 // only move, unchanged, to history. A new batch still proves its original
-// accepted execution and sealed scope in the one owning CAS transaction.
+// observation source in the owning CAS transaction; it cannot add another
+// validation execution under a query identity.
 func validateReconciliationExecutionTransition(previous, next RuntimeAggregate) error {
 	before, after := previous.Reconciliation, next.Reconciliation
 	if len(after.History) < len(before.History) || len(after.History) > len(before.History)+1 || !reflect.DeepEqual(before.History, after.History[:len(before.History)]) {
@@ -70,7 +71,14 @@ func validateReconciliationExecutionTransition(previous, next RuntimeAggregate) 
 				return nil
 			}
 		}
-		return validateReconciliationBatchExecutionSources(next, request, batch)
+		if batch != nil {
+			for _, o := range batch.Observations {
+				if o.ValidationExecution != nil {
+					return fmt.Errorf("read-only reconciliation cannot admit a new validation execution")
+				}
+			}
+		}
+		return nil
 	}
 	if len(after.History) > len(before.History) {
 		h := after.History[len(before.History)]

@@ -394,10 +394,10 @@ func TestValidateRuntimeCWIReconciliationLedgerFencesCurrentAndHistoricalScope(t
 	}
 }
 
-func TestValidateRuntimeCWIReconciliationLedgerRejectsUnboundedHistory(t *testing.T) {
+func TestValidateRuntimeCWIReconciliationLedgerPreservesLongHistory(t *testing.T) {
 	facts := runtimeCWILedgerFacts(t)
-	history := make([]RuntimeCWIReconciliationGeneration, 0, RuntimeCWIReconciliationHistoryLimit+1)
-	for generation := uint64(1); generation <= RuntimeCWIReconciliationHistoryLimit+1; generation++ {
+	history := make([]RuntimeCWIReconciliationGeneration, 0, 20)
+	for generation := uint64(1); generation <= 20; generation++ {
 		request := runtimeCWILedgerRequest(t, facts, fmt.Sprintf("request-history-%d", generation), generation)
 		history = append(history, RuntimeCWIReconciliationGeneration{
 			Superseded:  true,
@@ -405,8 +405,13 @@ func TestValidateRuntimeCWIReconciliationLedgerRejectsUnboundedHistory(t *testin
 			RequestHash: StableRuntimeCWIReconciliationRequestHash(request),
 		})
 	}
-	if err := ValidateRuntimeCWIReconciliationLedger(facts, RuntimeCWIReconciliationLedger{History: history}); err == nil || !strings.Contains(err.Error(), "history exceeds bounded limit") {
-		t.Fatalf("unbounded reconciliation history error = %v", err)
+	if err := ValidateRuntimeCWIReconciliationLedger(facts, RuntimeCWIReconciliationLedger{History: history}); err != nil {
+		t.Fatalf("valid long audit history rejected: %v", err)
+	}
+	history[19].Request = history[18].Request.Clone()
+	history[19].RequestHash = history[18].RequestHash
+	if err := ValidateRuntimeCWIReconciliationLedger(facts, RuntimeCWIReconciliationLedger{History: history}); err == nil {
+		t.Fatal("duplicate history gained admission")
 	}
 }
 

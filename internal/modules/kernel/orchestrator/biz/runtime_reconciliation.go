@@ -100,19 +100,8 @@ func (m *Biz) queryRuntimeReconciliationBatch(ctx context.Context, request runti
 		RequestID: request.RequestID, WorkspaceID: request.WorkspaceID, RunID: request.RunID,
 		Generation: request.Generation, BindingSetHash: request.BindingSetHash,
 	}
-	// Reconciliation runs before ordinary prerequisite acquisition. The
-	// activation-sealed declarations provide the executable recipe identity;
-	// any already-confirmed Shell inventory is merged in so the owner can use
-	// its current policy without making the persisted inventory a second source
-	// of binding authority.
-	validationRecipes := runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(aggregate.Facts.Activation.EvidencePolicies)
-	for _, recipe := range runtimecontract.RuntimeValidationRecipesFromOperationAdmissibilities(aggregate.Facts.Resources.OperationAdmissibilities) {
-		validationRecipes = append(validationRecipes, recipe)
-	}
-	validationRecipes = runtimecontract.NormalizeRuntimeValidationRecipes(validationRecipes)
 	var shellMembers []runtimecontract.RuntimeCWIOwnerReconciliationRequest
 	for _, binding := range request.Bindings {
-		validationScope, sealedRecipes := runtime.ReconciliationValidationContext(aggregate, binding)
 		for _, owner := range binding.OwnerModuleIDs {
 			command := runtimecontract.RuntimeCWIOwnerReconciliationRequest{
 				WorkspaceID: request.WorkspaceID, RunID: request.RunID, RequestID: request.RequestID,
@@ -120,19 +109,16 @@ func (m *Biz) queryRuntimeReconciliationBatch(ctx context.Context, request runti
 				BindingSetHash: request.BindingSetHash, OwnerModuleID: owner, Binding: binding.Clone(),
 				WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory,
 				WorkspaceBaselineRevision: request.WorkspaceBaselineRevision, WorkspaceBaselineRef: request.WorkspaceBaselineRef,
-				ValidationRecipes: append([]runtimecontract.RuntimeValidationRecipe(nil), validationRecipes...),
-			}
-			if owner == runtimecontract.RuntimeModuleShell && len(sealedRecipes) != 0 {
-				command.ValidationScopeTargetRefs = append([]string(nil), validationScope...)
-				command.ValidationRecipes = sealedRecipes
 			}
 			if owner == runtimecontract.RuntimeModuleShell && workspaceErr == nil {
-				scope, recipes, receiptHash := runtime.ReconciliationValidationExecutionSource(aggregate, binding)
-				if receiptHash != "" && len(scope) != 0 && len(recipes) != 0 {
-					command.ValidationScopeTargetRefs, command.ValidationRecipes, command.ValidationSourceReceiptHash = scope, recipes, receiptHash
-					shellMembers = append(shellMembers, command)
+				source, hash, err := runtime.ReconciliationValidationResultSource(aggregate, binding)
+				if err != nil {
+					batch.Observations = append(batch.Observations, unavailableRuntimeCWIReconciliationObservation(command, err.Error(), "validation_result_source_invalid"))
 					continue
 				}
+				command.ValidationSource, command.ValidationSourceReceiptHash = source, hash
+				shellMembers = append(shellMembers, command)
+				continue
 			}
 			observation, err := queryRuntimeCWIReconciliationOwner(ctx, m.EventHub(), owner, command, request)
 			if workspaceErr != nil {
@@ -158,8 +144,8 @@ func (m *Biz) queryRuntimeReconciliationBatch(ctx context.Context, request runti
 		c := shellevents.QueryRuntimeCWIReconciliationBatchCommand{Request: request.Clone(), Members: members}
 		values, err := queryShellReconciliationBatch(ctx, m.EventHub(), c)
 		if err != nil {
-			// An error may follow physical I/O. Never turn it into an automatic
-			// second test invocation in search of PASS.
+			// A read error remains unavailable. It cannot authorize a validation
+			// execution or manufacture a satisfied observation.
 			for _, member := range members {
 				values = append(values, unavailableRuntimeCWIReconciliationObservation(member, err.Error(), "owner_observation_unavailable"))
 			}
@@ -216,7 +202,7 @@ func queryRuntimeCWIReconciliationOwner(ctx context.Context, hub magicevent.Hub,
 		return runtimecontract.RuntimeCWIReconciliationObservation{}, fmt.Errorf("owner returned an invalid reconciliation result")
 	}
 	observation := value.Clone()
-	if observation.OwnerModuleID != owner || observation.ValidateForRequest(request) != nil {
+	if observation.OwnerModuleID != owner || observation.ValidationExecution != nil || observation.ValidateForRequest(request) != nil {
 		return runtimecontract.RuntimeCWIReconciliationObservation{}, fmt.Errorf("owner returned an observation outside the sealed binding")
 	}
 	return observation, nil

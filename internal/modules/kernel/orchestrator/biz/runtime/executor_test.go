@@ -1353,14 +1353,14 @@ func TestRuntimeControllerExecutesManagedValidationWithSealedRecipeAfterResource
 			binding = value
 		}
 	}
-	scope, recipes := ReconciliationValidationContext(completed, binding)
+	scope, recipes := auditReconciliationValidationContext(completed, binding)
 	if !reflect.DeepEqual(scope, sealedValidationScope) || !reflect.DeepEqual(recipes, executor.requests[0].ValidationRecipes) {
 		t.Fatalf("reconciliation lost exact execution authority after refresh/restart: scope=%v recipes=%+v binding=%+v", scope, recipes, binding)
 	}
-	if scopeAgain, recipesAgain := ReconciliationValidationContext(completed, binding); !reflect.DeepEqual(scope, scopeAgain) || !reflect.DeepEqual(recipes, recipesAgain) {
+	if scopeAgain, recipesAgain := auditReconciliationValidationContext(completed, binding); !reflect.DeepEqual(scope, scopeAgain) || !reflect.DeepEqual(recipes, recipesAgain) {
 		t.Fatal("duplicate reconciliation changed the sealed context")
 	}
-	sourceScope, sourceRecipes, receiptHash := ReconciliationValidationExecutionSource(completed, binding)
+	sourceScope, sourceRecipes, receiptHash := auditReconciliationValidationExecutionSource(completed, binding)
 	if receiptHash == "" || !reflect.DeepEqual(sourceScope, scope) || !reflect.DeepEqual(sourceRecipes, recipes) {
 		t.Fatal("accepted operation lost its grouped execution source")
 	}
@@ -1448,13 +1448,13 @@ func TestRuntimeControllerExecutesManagedValidationWithSealedRecipeAfterResource
 			case "changed-recipe":
 				requested.ValidationRecipeIDs = []string{"unsealed-recipe"}
 			}
-			if scope, recipes := ReconciliationValidationContext(changed, requested); len(scope) != 0 || len(recipes) != 0 {
+			if scope, recipes := auditReconciliationValidationContext(changed, requested); len(scope) != 0 || len(recipes) != 0 {
 				t.Fatal("unmatched authority obtained a reconciliation context")
 			}
 		})
 	}
 	binding.BindingHash = "superseded-binding"
-	if scope, recipes := ReconciliationValidationContext(completed, binding); len(scope) != 0 || len(recipes) != 0 {
+	if scope, recipes := auditReconciliationValidationContext(completed, binding); len(scope) != 0 || len(recipes) != 0 {
 		t.Fatal("superseded binding borrowed a completed dispatch context")
 	}
 }
@@ -1601,4 +1601,12 @@ func TestInputCapacityFailurePersistsAndRecoversWithoutBudgetOrCredit(t *testing
 	if err != nil || repository.saves != beforeSaves || duplicate.StateRevision != loaded.StateRevision || !reflect.DeepEqual(duplicate.Facts.Failure, loaded.Facts.Failure) || !reflect.DeepEqual(duplicate.ExecutionBudget, loaded.ExecutionBudget) {
 		t.Fatal("duplicate capacity failure mutated terminal or budget", err)
 	}
+}
+
+func auditReconciliationValidationContext(a RuntimeAggregate, b runtimecontract.RuntimeCWIReconciliationBindingRef) ([]string, []runtimecontract.RuntimeValidationRecipe) {
+	s, r, _ := reconciliationValidationContext(a, b, false, "")
+	return s, r
+}
+func auditReconciliationValidationExecutionSource(a RuntimeAggregate, b runtimecontract.RuntimeCWIReconciliationBindingRef) ([]string, []runtimecontract.RuntimeValidationRecipe, string) {
+	return reconciliationValidationContext(a, b, true, "")
 }

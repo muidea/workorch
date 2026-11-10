@@ -66,7 +66,7 @@ func validateRuntimeConvergenceSourceLedgersInSession(s RuntimeLineageAssertionS
 	if err := ValidateRuntimeEvidenceApplicabilityObservations(s.Facts, s.Receipts, revision, s.Reconciliation); err != nil {
 		return fmt.Errorf("runtime aggregate evidence applicability: %w", err)
 	}
-	if err := ValidateRuntimeCWISuspensionSources(s.Facts, s.Completed, revision); err != nil {
+	if err := ValidateRuntimeCWISuspensionSources(s.Facts, s.Completed, revision, s.Reconciliation); err != nil {
 		return err
 	}
 	if err := ValidateRuntimeApplicabilityCandidateInvalidations(s.Facts.EvidenceApplicabilityObservations, s.Attempts, s.Sessions); err != nil {

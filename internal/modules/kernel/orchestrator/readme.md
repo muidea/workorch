@@ -742,7 +742,7 @@ Orchestrator 的跨 owner 输入隔离、Run 物理 revision rebase、真实 agg
 SM-4 的 1024 步仅是一次 drive 调度批次。确有正式 revision 推进时沿既有 persisted-pending 让出并重驱；
 无进展仍拒绝，累计工作轮数不成为停止预算。provider、effect、receipt、assessment、terminal seal 和各 ACK 的持久断点不合并。
 
-reconciliation 新 batch 在原接纳 CAS 反查原 accepted receipt/sealed scope。正式历史不再重编业务来源，
+reconciliation 新 batch 消费原正式 accepted receipt 与当前依赖观察，不执行历史验证方法。正式历史不再重编业务来源，
 历史前缀只许原样保留；归档只许移动原 current generation。已有 batch 的 request/result 不可改写，
 新 observation 仍须完整证明原执行来源，不能靠自算 hash 授 credit。
 原 Definition、semantic 历史、purpose、已成功完成的工作轮、证据和 receipt 不可改写；完成的 dispatch 结果按原值保留。
@@ -759,11 +759,9 @@ SM影响：SM-1 的 opaque CAS/fence；SM-2/3 的新事务接纳与原结果消�
 真实 owner 测试覆盖 file/workspace-scoped 的 CAS前中断、CAS后响应丢失、重新构造 owner/controller 与 duplicate；
 冷审计测试继续覆盖 raw 漂移、真实缺项、原值隔离、并发和预算。整体完成状态以公开流程与部署验收证据为准。
 
-同一次 reconciliation 来源反查复用已选中的 normalized owner catalog 来投影诊断 scope，不再次选择／展开该
-catalog。scope 仍独立核对原 target authorization、operation hash、sealed snapshot/acquisition/owner 和目标包含关系；
-无缓存／PASS 标志，不跨调用保留。catalog 与 observation 先按原规范化 scalar identity 判断适用性，再完整准入
-匹配来源；不展开无关正文，返回值保持 detached。`validation_catalog_source*_test.go` 冻结改前完整算法，
-覆盖原文、空缺、whitespace、错来源、duplicate、真实封存归档及 scope/proof/source 的独立对照。
+reconciliation 当前来源投影只选择 exact binding 下最近的已完成 validation operation 与正式 receipt；
+不回退越过新的 rejected 结果、不选 assessment operation、不重新编译历史 catalog/proof/method。
+完整原方法展开只用于既有历史 execution-use 原件的离线审计与完整性回归，不进入当前查询生产链。
 confirmed-repair 的候选基线必须严格早于本次 assessment evidence cutoff：原规则要求实际修复 fact 严格晚于
 失败基线且不晚于 cutoff。未来／同截止点的 repair 不能满足该消费者，在展开完整历史前排除；所有可能成功的
 候选仍完整校验预算、operations、确认、review、receipt/fence 和后继普通验证。历史序号／原件不变，也不截断
@@ -948,9 +946,13 @@ Result 写后丢回复、冷 owner 恢复 running claim、有界 owner 失败、
 
 `runtime/cwi-suspension/v1` 的安全暂停／普通重验／原后继恢复见
 [CWI Suspension](../../../../docs/00-core/runtime/cwi-suspension.md)。SM-2 原 applicability-observation CAS
-封存 `Facts.CWISuspensions` 的完整来源；current bound fence 本身不放宽。首版只支持唯一已声明 validation-only
-ordinary 前驱，state-change-only 不补造来源，明确 `cwi_revalidation_source_unavailable` 失败。
-原 frozen binding/effect/receipt/budget 和 repair debt 保留；新普通 assessment 与本轮 owner sampling 后才恢复，
+或 reconciliation-batch CAS
+封存 `Facts.CWISuspensions` 的完整来源；current bound fence 本身不放宽。失效的历史来源经已声明的
+AcceptanceCoverageWorkItemID 回到普通验收消费者，多条依赖边可归并到同一消费者。当前安全暂停要求唯一
+validation-only ordinary 消费者；多个独立消费者或 state-change-only 无普通来源时，明确
+`cwi_revalidation_source_unavailable`，不继续请求 blocked 后继候选。
+后继尚无 effect 时也可安全暂停；暂停时封存 evidence revision，后续真实 effect 不追溯改变暂停前像。
+已有 frozen binding/effect/receipt/budget 和 repair debt 保留；新普通 assessment 与本轮 owner sampling 后才恢复，
 旧 owner qualification 不复用。独立 coordinator 前像／写集与 aggregate/schema reload 双门禁反证来源。
 `TestDriveRuntimeCWISuspensionRevalidatesOrdinaryPredecessorWithinOriginalBudget` 配对真实 File/Shell/Run/Workspace/Result、
 暂停／恢复 CAS 前后四切点、原预算、单次 effect、来源篡改与三 ACK；scripted provider/controller 重建不冒 live/fresh-process。
@@ -2108,29 +2110,27 @@ deadline/cleanup；purpose 与 operations 从完整原 subject 消费该事实�
 仅脚本化 provider，覆盖缺失依赖创建→同依赖修正→原 input 修订→fresh review/validation/assessment/三 ACK，
 并在原报告 retirement 和依赖 receipt 后恢复，调用数与不中断执行一致；不代表已部署 AI Proxy 终验。
 
-### Fresh reconciliation 共同事实组合
+### Reconciliation 正式结果消费与依赖续接
 
-已完成 managed validation 的 Shell 成员可按原 reconciliation request 有界分批，通过 Shell-owned
-`QueryRuntimeCWIReconciliationBatchCommand` 查询共同执行及各自独立行为。Core 只处理 typed 成员、
-原 accepted receipt/SM-3 seal 来源与完整 fan-out，不解释语言、命令或项目判据；实际适用性由 Shell 决定。
-不适用时 Shell 在任何共享 I/O 前执行各自原方法；查询开始后的错误只返回事实，不自动第二次执行。
+reconciliation generation 与已完成暂停都是 append-only 审计事实，条数不作为累计执行预算。
+当前请求归档、binding-set retirement 与读取校验不再保留固定 16 条停止门禁；不截断原件、不清零预算。
+当前事务成员数量、唯一未恢复暂停、真实来源、权限、资源和单次／repair／provider／capability 预算仍独立约束。
 
-`RuntimeValidationExecutionUse` 绑定 request/generation/binding-set、原消费者、原 receipt、scope/recipe，
-保留实际共享阶段原时间与 raw refs。组内所有消费者必须存在，共同阶段逐值相同，behavior 阶段不得共享。
-满足观察仍须通过原每个 attestation、全部 required checks 与完整 behavioral conjunction；
-共同事实、代码编译和 receipt 均不创造验收 credit。
-新 batch 在原接纳 CAS 反查原 completed seal 和 accepted receipt，按原 hash 精确选择；正式历史消费只核对原件保全，
-不能让更新的同绑定操作覆盖旧合法引用，也不能靠重算 observation/batch hash 假造来源。
-原来源查找先检查 workspace/run、committed 与 exact binding 必要适用条件，再核对匹配 dispatch 的完整 authority hash；
-不为无关 dispatch 展开整份权威正文。可命中的来源仍完整核验原 binding、operation、execution/fence、receipt、catalog、
-proof、scope 和 recipe；receipt hash 在本次匹配中只计算一次。倒序查找与历史 exact receipt 选择不变，不保留查找成功缓存。
-clone/hash/raw clone/持久恢复同步保全新用途；旧原件缺省 nil 不被补写、改判或授新 credit。
+Shell 成员沿原 request 有界批量只读查询。Core 从 exact completed validation binding/operation/receipt
+投影只读来源，Shell 检查原件身份并观察其正式依赖 selector；不编译或运行历史 recipe，不共享隐式执行。
+无正式结果明确 unavailable，实际依赖变化明确 changed，SM-2 在原 batch CAS 保留或撤销受影响当前 credit。
+原结果、历史 effect、raw 与审计用途继续保全，不改判旧语义、不追溯补 credit。
 
-SM-1 生命周期不变；SM-2 继续裁决 reconciliation retain/reopen/prerequisite，能力执行由 Shell 完成；
-SM-3 原 seal/receipt 是只读来源；SM-4 恢复已持久 aggregate/batch，不从缓存重建 authority。
-原普通 validation、assessment、CWI 和 Result→Workspace→Run 三 ACK 继续独立执行，LLM 输入/输出合同不增加组合字段。
-物理共同阶段只执行一次，但不增加或退回模型/operation 消费；不以关联消费者生成第二 receipt 或预算 credit。
-此接线只共享一次合法新批次内的共同执行，不支持跨请求、跨 Run 或跨 Workspace 历史 PASS 复用。
+依赖撤销和后继让位由同一 SM-2 迁移完成。历史来源沿原映射普通消费者重验；安全暂停保留后继原 binding、
+可选的既有 effect、repair debt 和预算。active dispatch、submitted provider、unknown 等不跨越原事务边界。
+恢复要求 fresh ordinary all-of、独立 assessment 和 owner applicability 观察，之后恢复原后继；无合法来源准确失败。
+同一已冻结请求保持原输入与身份；SM-3 最终 admission 的 typed disposition/code 不再被统一包装为 ErrConflict，
+SM-4 保留准确失败分类而不据此新增自动 retry 或执行 authority。
+
+SM-1 生命周期不变；SM-2 裁决当前 credit/focus；SM-3 负责封存操作链和最终门禁；SM-4 只恢复正式 aggregate，
+按 Result→Workspace→Run 三 ACK 交付。主 Loop 不增加按 CWI、失败文本或领域细节分派的分支。
+真实 File/Shell/Run/Workspace/Result 回归覆盖历史 effect→独立验收→后继变化→失效→原消费者重验→原后继→三 ACK，
+暂停／恢复 CAS 前后切点及后继 effect 前变化；provider 为固定 fixture，不代表 live 模型或公开 fullflow 验收。
 
 
 ### 输入修订与终态的正式来源消费

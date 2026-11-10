@@ -44,7 +44,8 @@ func TestDriveRuntimeCWISuspensionRevalidatesOrdinaryPredecessorWithinOriginalBu
 	}
 }
 
-func runRuntimeCWISuspensionMainline(t *testing.T, cut string) int64 {
+func runRuntimeCWISuspensionMainline(t *testing.T, cut string, historical ...bool) int64 {
+	mapped := len(historical) > 0 && historical[0]
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -84,18 +85,30 @@ func runRuntimeCWISuspensionMainline(t *testing.T, cut string) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if mapped {
+		bootstrap = withHistoricalSuspensionSource(t, bootstrap)
+	}
 	bootstrap = runtimeTestBootstrapWithBindings(bootstrap)
 	if processStage != "resume" {
 		runtimeTestPrepareNativeValidationThroughOwners(t, bootstrap, deliverable, func(preparation runtimecontract.RuntimeValidationProofPreparation) string {
 			var source strings.Builder
 			source.WriteString("package workorch_validation\nimport (\"testing\"; subject \"example.com/workorch-runtime-native-fixture\")\n")
 			for _, check := range preparation.CheckAttestations {
-				fmt.Fprintf(&source, "func %s(t *testing.T) { if subject.DeliveredValue() < 2 { t.Fatal(\"actual current behavior below sealed minimum\") } }\n", check.NativeCheckRef)
+				condition := "subject.DeliveredValue() < 2"
+				if mapped {
+					condition += " || subject.HistoricalValue() != 1"
+				}
+				fmt.Fprintf(&source, "func %s(t *testing.T) { if %s { t.Fatal(\"actual current behavior below sealed minimum\") } }\n", check.NativeCheckRef, condition)
 			}
 			return source.String()
 		})
 		if err := os.WriteFile(filepath.Join(deliverable, "subject.go"), []byte("package fixture\nfunc DeliveredValue() int { return 2 }\n"), 0644); err != nil {
 			t.Fatal(err)
+		}
+		if mapped {
+			if err := os.WriteFile(filepath.Join(deliverable, "history.go"), []byte("package fixture\nfunc HistoricalValue() int { return 0 }\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
@@ -153,8 +166,36 @@ func runRuntimeCWISuspensionMainline(t *testing.T, cut string) int64 {
 	if err := llm.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		calls.Add(1)
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		if command.DocumentKind == runtimecontract.RuntimeProviderDocumentOperations && len(command.Decision.Focus.CoverageWorkItemIDs) == 1 && command.Decision.Focus.CoverageWorkItemIDs[0] == "cwi-2" {
+			persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+			if err != nil || persisted.RuntimeState == nil {
+				t.Errorf("candidate has no committed source: %v", err)
+				return
+			}
+			facts := persisted.RuntimeState.Facts
+			for _, current := range facts.Coverage {
+				if current.ID != "cwi-2" {
+					continue
+				}
+				for _, id := range current.PrerequisiteCoverageWorkItemIDs {
+					for _, dependency := range facts.Coverage {
+						if dependency.ID == id && !runtimecontract.RuntimeCWIPrerequisiteReadyForConsumer(facts, dependency, current.ID) {
+							t.Errorf("blocked successor requested a provider candidate: %s", id)
+							return
+						}
+					}
+				}
+			}
+		}
 		if command.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
 			document := validationInputAdditionMainlineSemanticDocument(command)
+			if mapped {
+				for i := range document.Proposals {
+					if document.Proposals[i].CoverageWorkItemID == "cwi-history" {
+						document.Proposals[i].Target.ExactTargetRefs = []string{"history.go"}
+					}
+				}
+			}
 			if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
 				for _, id := range document.BatchCoverageWorkItemIDs {
 					if id != "cwi-2" {
@@ -180,6 +221,11 @@ func runRuntimeCWISuspensionMainline(t *testing.T, cut string) int64 {
 		var candidate runtimecontract.RuntimeCandidate
 		switch command.Decision.State {
 		case runtimecontract.ConvergenceStateNeedStateChange:
+			if id == "cwi-history" && mapped {
+				oldText, newText := "return 0", "return 1"
+				candidate = runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{ID: "original-historical-effect", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{"history.go"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{id}, Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}}}}}}}
+				break
+			}
 			if id != "cwi-2" {
 				t.Error("predecessor revalidation attempted an effect")
 				return
@@ -206,7 +252,10 @@ func runRuntimeCWISuspensionMainline(t *testing.T, cut string) int64 {
 	owner := newRuntimeDriveTestModule(t, hub)
 	command := orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"}
 	if cut != "uninterrupted" && processStage != "resume" {
-		crash := &runtimeSaveCrashRepository{delegate: runtimeStateRepository{hub: hub}, after: strings.HasPrefix(cut, "after_"), marker: cut, match: func(a runtime.RuntimeAggregate) bool {
+		crash := &runtimeSaveCrashRepository{delegate: runtimeStateRepository{hub: hub}, after: strings.HasPrefix(cut, "after_") || cut == "before_effect", marker: cut, match: func(a runtime.RuntimeAggregate) bool {
+			if cut == "before_effect" {
+				return a.ActiveDispatch == nil && a.Facts.Focus.CoverageWorkItemIDs[0] == "cwi-2" && len(a.Facts.Focus.CoverageEvidenceBindings) == 1 && a.Decision.State == runtimecontract.ConvergenceStateNeedStateChange
+			}
 			if len(a.Facts.CWISuspensions) != 1 {
 				return false
 			}
@@ -230,6 +279,20 @@ func runRuntimeCWISuspensionMainline(t *testing.T, cut string) int64 {
 		}()
 		if !crash.fired {
 			t.Fatal("crash did not fire")
+		}
+		if cut == "before_effect" {
+			command.ReconciliationRequestID = "observe-external-selector-change"
+			// A real external metadata change before the successor effect.
+			// The Shell owner must observe this exact selector; no owner
+			// result, authority, criterion or operation is manufactured.
+			path := filepath.Join(deliverable, "subject.go")
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(path, info.Mode().Perm()^0040); err != nil {
+				t.Fatal(err)
+			}
 		}
 		// Independent owner repository object reloads the exact JSON record;
 		// drive/controller is reconstructed. This is not an OS-process test.
@@ -258,7 +321,11 @@ func runRuntimeCWISuspensionMainline(t *testing.T, cut string) int64 {
 	if err := a.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if len(a.Facts.CWISuspensions) != 1 || a.Facts.CWISuspensions[0].ResumeBinding == nil || !runtimeTerminalDeliveryFullyAcknowledged(a) {
+	wantPauses := 1
+	if cut == "before_effect" {
+		wantPauses = 2
+	}
+	if len(a.Facts.CWISuspensions) != wantPauses || a.Facts.CWISuspensions[0].ResumeBinding == nil || !runtimeTerminalDeliveryFullyAcknowledged(a) {
 		t.Fatalf("missing exact pause/resume/ACK: %+v", a.Facts.CWISuspensions)
 	}
 	changed := 0
@@ -267,8 +334,19 @@ func runRuntimeCWISuspensionMainline(t *testing.T, cut string) int64 {
 			changed++
 		}
 	}
-	if changed != 1 || !reflect.DeepEqual(persisted.RuntimeBootstrap, initialRun.RuntimeBootstrap) {
+	wantChanges := 1
+	if mapped {
+		wantChanges++
+	}
+	if changed != wantChanges || !reflect.DeepEqual(persisted.RuntimeBootstrap, initialRun.RuntimeBootstrap) {
 		t.Fatalf("suspension replayed effect or changed sealed startup: durableChanges=%d startupSame=%t", changed, reflect.DeepEqual(persisted.RuntimeBootstrap, initialRun.RuntimeBootstrap))
+	}
+	if mapped {
+		for _, row := range a.Facts.Coverage {
+			if row.ID == "cwi-history" && (row.HistoricalBehavior == nil || len(row.HistoricalAcceptanceProofs) != wantPauses+1 || row.State != runtimecontract.RuntimeCoverageItemStateSatisfied) {
+				t.Fatalf("historical acceptance did not revalidate through its consumer: %+v", row)
+			}
+		}
 	}
 	runtimeAssertCWISuspensionArchiveTamperRejected(t, a)
 	before, count := persisted.RuntimeState.Clone(), calls.Load()
@@ -281,12 +359,19 @@ func runRuntimeCWISuspensionMainline(t *testing.T, cut string) int64 {
 	if err != nil || calls.Load() != count || !reflect.DeepEqual(after.RuntimeState, &before) {
 		t.Fatal("duplicate terminal changed receipt/budget/provider")
 	}
+	if cut == "uninterrupted" {
+		runtimeAssertReconciliationFormalResultReads(t, ctx, hub, persisted, a, deliverable)
+		unchanged, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+		if err != nil || calls.Load() != count || !reflect.DeepEqual(unchanged.RuntimeState, &before) {
+			t.Fatal("formal result query changed aggregate/provider/budget/receipts")
+		}
+	}
 	return count
 }
 
 func runtimeAssertCWISuspensionArchiveTamperRejected(t *testing.T, original runtime.RuntimeAggregate) {
 	t.Helper()
-	for _, scenario := range []string{"protocol", "future_pause", "duplicate_pause", "replayed_pause_source", "effect_source", "predecessor_source", "frozen_binding", "frozen_focus", "reopen_source", "missing_resume", "old_credit", "missing_assessment", "missing_reads", "missing_original_reads"} {
+	for _, scenario := range []string{"protocol", "future_pause", "missing_evidence_revision", "future_evidence_revision", "dropped_effect", "duplicate_pause", "replayed_pause_source", "effect_source", "predecessor_source", "frozen_binding", "frozen_focus", "reopen_source", "missing_resume", "old_credit", "missing_assessment", "missing_reads", "missing_original_reads"} {
 		t.Run("reject_"+scenario, func(t *testing.T) {
 			a := original.CloneRaw()
 			s := &a.Facts.CWISuspensions[0]
@@ -295,6 +380,17 @@ func runtimeAssertCWISuspensionArchiveTamperRejected(t *testing.T, original runt
 				s.ProtocolRef = "unknown"
 			case "future_pause":
 				s.SuspendedAtStateRevision = a.StateRevision + 1
+			case "missing_evidence_revision":
+				s.SuspendedEvidenceRevision = ""
+			case "future_evidence_revision":
+				s.SuspendedEvidenceRevision = a.Facts.EvidenceRevision + "~"
+			case "dropped_effect":
+				for i := range a.Facts.CWISuspensions {
+					if a.Facts.CWISuspensions[i].EffectEvidenceID != "" {
+						a.Facts.CWISuspensions[i].EffectEvidenceID = ""
+						break
+					}
+				}
 			case "duplicate_pause":
 				a.Facts.CWISuspensions = append(a.Facts.CWISuspensions, s.CloneRaw())
 			case "replayed_pause_source":
@@ -331,4 +427,68 @@ func runtimeAssertCWISuspensionArchiveTamperRejected(t *testing.T, original runt
 			}
 		})
 	}
+}
+
+func TestDriveRuntimeMappedDependencyBeforeSuccessorEffect(t *testing.T) {
+	runRuntimeCWISuspensionMainline(t, "before_effect", true)
+}
+
+func TestDriveRuntimeMappedDependencyContinuationAndRecovery(t *testing.T) {
+	var baseline int64
+	for _, cut := range []string{"uninterrupted", "before_suspend", "after_suspend", "before_resume", "after_resume"} {
+		t.Run(cut, func(t *testing.T) {
+			calls := runRuntimeCWISuspensionMainline(t, cut, true)
+			if baseline == 0 {
+				baseline = calls
+			} else if baseline != calls {
+				t.Fatalf("recovery repeated provider work: %d != %d", calls, baseline)
+			}
+		})
+	}
+}
+
+// A fresh three-CWI contract: real historical File effect, independent ordinary
+// acceptance, and a successor whose edit invalidates that exact acceptance.
+func withHistoricalSuspensionSource(t *testing.T, b runtimecontract.RuntimeBootstrap) runtimecontract.RuntimeBootstrap {
+	t.Helper()
+	history := runtimecontract.RuntimeCoverageItem{ID: "cwi-history", SliceID: "slice-mainline", SourceScope: "dodItem", SourceID: "cwi-history", TargetText: "通过原 File 操作将 HistoricalValue 从 0 改为 1；当前正确性由 cwi-1 独立验收", Order: 1}
+	for i := range b.CoverageItems {
+		b.CoverageItems[i].Order++
+		b.CoverageItems[i].SourceScope = "dodItem"
+		b.CoverageItems[i].SourceID = string(b.CoverageItems[i].ID)
+		b.CoverageItems[i].PrerequisiteCoverageWorkItemIDs = append(b.CoverageItems[i].PrerequisiteCoverageWorkItemIDs, history.ID)
+	}
+	b.CoverageItems = append([]runtimecontract.RuntimeCoverageItem{history}, b.CoverageItems...)
+	b.DefinitionFocuses = append([]runtimecontract.RuntimeDefinitionFocus{{ID: "focus-history", CoverageWorkItemIDs: []common.CoverageWorkItemID{history.ID}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileEdit}, TargetRole: "deliverable", RequireTargetGrounding: true}}, b.DefinitionFocuses...)
+	profile := &b.Activation.ExecutionContract.ProfileContracts[0]
+	profile.EvidenceRequirements = append([]runtimecontract.RuntimeProfileEvidenceRequirement{{ID: "cwi-history", Scope: "dodItem", TargetRole: "deliverable", TargetRefs: []string{"history.go"}, RequireTargetGrounding: true, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindFileEdit}}}, profile.EvidenceRequirements...)
+	for i := range profile.EvidenceRequirements {
+		profile.EvidenceRequirements[i].Scope = "dodItem"
+	}
+	b.Slices[0].CoverageWorkItemIDs = append([]common.CoverageWorkItemID{history.ID}, b.Slices[0].CoverageWorkItemIDs...)
+	inventory := runtimecontract.RuntimeSourceObligationInventory{SchemaVersion: runtimecontract.RuntimeSourceObligationInventorySchemaCurrent, CandidateHash: "historical-suspension-candidate", SpecificationHash: "historical-suspension-specification", DefinitionRevision: b.Definition.Revision, StartupInputHash: b.Definition.StartupInputHash, Sources: []runtimecontract.RuntimeDefinitionSource{{CandidateItemRef: "goal", ItemRef: "formal-goal", SourceScope: "goal", SourceID: "goal", Text: b.Definition.GoalDefinition}}, EvidencePurposeMappings: []runtimecontract.RuntimeEvidencePurposeMapping{{ContractRef: runtimecontract.RuntimeCrossCWIEvidencePurpose, HistoricalItemRef: "cwi-history", AcceptanceItemRef: "cwi-1"}}}
+	for _, item := range b.CoverageItems {
+		id := string(item.ID)
+		inventory.Sources = append(inventory.Sources, runtimecontract.RuntimeDefinitionSource{CandidateItemRef: id, ItemRef: "formal/" + id, SourceScope: item.SourceScope, SourceID: item.SourceID, Text: item.TargetText})
+		inventory.Requirements = append(inventory.Requirements, runtimecontract.RuntimeSourceRequirement{ID: "requirement/" + id, DimensionID: "dimension/" + id, Required: true, SourceKind: "USER_EXPLICIT", SourceItemRefs: []string{id}, Text: item.TargetText})
+		inventory.Obligations = append(inventory.Obligations, runtimecontract.RuntimeSourceObligation{ID: "obligation/" + id, RequirementID: "requirement/" + id, DoDItemRefs: []string{id}, Text: item.TargetText})
+		inventory.Verifications = append(inventory.Verifications, runtimecontract.RuntimeSourceVerification{ID: "verification/" + id, ObligationID: "obligation/" + id, Declaration: item.TargetText, ProfileID: profile.ID, EvidenceRequirementID: item.SourceID, Scope: item.SourceScope})
+	}
+	inventory = inventory.WithHash()
+	if err := inventory.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	b.Definition.SourceObligations = &inventory
+	items, err := runtimecontract.CompileRuntimeEvidencePurposeMappingCoverage(inventory, b.CoverageItems)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range items {
+		items[i].SourceObligationChecks, err = runtimecontract.CompileRuntimeSourceObligationChecks(inventory, items[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	b.CoverageItems = items
+	return b
 }

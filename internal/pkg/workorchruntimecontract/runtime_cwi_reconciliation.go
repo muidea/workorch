@@ -381,12 +381,10 @@ type RuntimeCWIOwnerReconciliationRequest struct {
 	WorkspaceInternalDirectory    string
 	WorkspaceBaselineRevision     string
 	WorkspaceBaselineRef          string
-	ValidationRecipes             []RuntimeValidationRecipe
-	// ValidationScopeTargetRefs is projected from the exact completed dispatch
-	// for this binding, never from a later workspace inventory. Empty means no
-	// replayable validation scope; owners must not infer one from TargetRefs.
-	ValidationScopeTargetRefs   []string
-	ValidationSourceReceiptHash string `json:",omitempty"`
+	ValidationSourceReceiptHash   string `json:",omitempty"`
+	// ValidationSource identifies the original committed result. It authorizes
+	// dependency observation only, never another validation execution.
+	ValidationSource *RuntimeOperationExecutionContext `json:",omitempty"`
 }
 
 func ValidateRuntimeCWIOwnerReconciliationRequest(c RuntimeCWIOwnerReconciliationRequest, ownerModuleID string) error {
@@ -396,6 +394,20 @@ func ValidateRuntimeCWIOwnerReconciliationRequest(c RuntimeCWIOwnerReconciliatio
 		strings.TrimSpace(c.WorkspaceDeliverableDirectory) == "" || strings.TrimSpace(c.WorkspaceBaselineRevision) == "" ||
 		strings.TrimSpace(c.WorkspaceBaselineRef) == "" {
 		return common.ErrInvalidArgument
+	}
+	if c.ValidationSource == nil {
+		if c.ValidationSourceReceiptHash != "" {
+			return fmt.Errorf("reconciliation receipt hash has no original source")
+		}
+	} else {
+		source := c.ValidationSource
+		if ownerModuleID != RuntimeModuleShell || c.ValidationSourceReceiptHash == "" || c.ValidationSourceReceiptHash != strings.TrimSpace(c.ValidationSourceReceiptHash) ||
+			source.WorkspaceID != c.WorkspaceID || source.RunID != c.RunID || source.Transaction.DefinitionRevision != c.DefinitionRevision || source.EvidenceKind != EvidenceKindValidation {
+			return fmt.Errorf("reconciliation validation source scope mismatch")
+		}
+		if err := ValidateRuntimeOperationExecutionContextScope(*source); err != nil {
+			return err
+		}
 	}
 	if err := c.Binding.Validate(); err != nil {
 		return err
@@ -810,12 +822,6 @@ type RuntimeCWIReconciliationLedger struct {
 	History []RuntimeCWIReconciliationGeneration
 }
 
-// RuntimeCWIReconciliationHistoryLimit keeps superseded SM-4 request
-// generations bounded. The active request is intentionally not part of this
-// count, so a full history remains auditable while one current generation can
-// still be scheduled by the Orchestrator.
-const RuntimeCWIReconciliationHistoryLimit = 16
-
 // RuntimeCWIReconciliationGeneration is an immutable historical snapshot of
 // one reconciliation request and its owner response.  It is pure contract
 // data; only the Orchestrator reducer decides when a generation is superseded.
@@ -966,9 +972,6 @@ func (l RuntimeCWIReconciliationLedger) Clone() RuntimeCWIReconciliationLedger {
 
 func (l RuntimeCWIReconciliationLedger) Validate() error {
 	l = l.Normalized()
-	if len(l.History) > RuntimeCWIReconciliationHistoryLimit {
-		return fmt.Errorf("reconciliation history exceeds bounded limit %d", RuntimeCWIReconciliationHistoryLimit)
-	}
 	seenHistoryGeneration := make(map[uint64]struct{}, len(l.History))
 	seenHistoryRequest := make(map[string]struct{}, len(l.History))
 	var historyWorkspaceID common.WorkspaceID

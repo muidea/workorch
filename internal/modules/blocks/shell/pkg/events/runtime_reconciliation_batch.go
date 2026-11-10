@@ -65,13 +65,9 @@ func (c QueryRuntimeCWIReconciliationBatchCommand) ValidateResult(r QueryRuntime
 			return fmt.Errorf("reconciliation batch returned foreign observation")
 		}
 		if o.ValidationExecution != nil {
-			for _, m := range c.Members {
-				if m.Binding.BindingID == o.BindingID && (o.ValidationExecution.SourceReceiptHash != m.ValidationSourceReceiptHash || o.ValidationExecution.SourceScopeHash != runtimecontract.RuntimeValidationExecutionScopeHash(m.ValidationScopeTargetRefs, m.ValidationRecipes)) {
-					return fmt.Errorf("reconciliation execution changed source receipt or scope")
-				}
-			}
+			return fmt.Errorf("read-only reconciliation cannot publish a new validation execution")
 		}
 		seen[o.BindingID] = true
 	}
-	return runtimecontract.ValidateRuntimeValidationExecutionUses(c.Request, r.Observations)
+	return nil
 }

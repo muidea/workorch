@@ -29,6 +29,11 @@ func runtimeSuspensionProjectionFixture(t *testing.T) RuntimeAggregate {
 	preFocus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	a.Facts.RemainingFocuses = append([]runtimecontract.CoverageFocus{preFocus}, a.Facts.RemainingFocuses...)
 	a.Facts.EvidenceApplicabilityObservations = []runtimecontract.RuntimeEvidenceApplicabilityObservation{{Request: runtimecontract.RuntimeEvidenceApplicabilityRequest{RequestID: cause.TriggerRef}}}
+	a.Reconciliation.Request = &runtimecontract.RuntimeCWIReconciliationRequest{RequestID: "original-request", WorkspaceID: a.Facts.WorkspaceID, RunID: a.Facts.RunID, DefinitionRevision: a.Facts.DefinitionRevision, Generation: 1, Bindings: []runtimecontract.RuntimeCWIReconciliationBindingRef{{CoverageWorkItemID: predecessor.ID, BindingID: old.BindingID, BindingHash: old.BindingHash}}}
+	a.Reconciliation.Batch = &runtimecontract.RuntimeCWIReconciliationBatch{Hash: "original-batch"}
+	a.Reconciliation.Reopened = []runtimecontract.RuntimeCWIReconciliationReopenedLineage{{WorkspaceID: a.Facts.WorkspaceID, RunID: a.Facts.RunID, RequestID: "original-request", Generation: 1, BatchHash: "original-batch", CoverageWorkItemID: predecessor.ID, BindingID: old.BindingID, ObservationRef: cause.TriggerRef}}
+	a.Reconciliation.Results = []runtimecontract.RuntimeCWIReconciliationResult{{WorkspaceID: a.Facts.WorkspaceID, RunID: a.Facts.RunID, RequestID: "original-request", Generation: 1, BatchHash: "original-batch", CoverageItemID: predecessor.ID, BindingID: old.BindingID, ObservationRef: cause.TriggerRef, Disposition: runtimecontract.RuntimeCWIReconciliationDispositionReopen}}
+
 	ref := a.Facts.Focus.CoverageEvidenceBindings[0].ID
 	fact := runtimecontract.EvidenceFact{ID: "real-effect", Kind: runtimecontract.EvidenceKindStateChange, BindingRefs: []string{ref}, CoverageWorkItemIDs: []common.CoverageWorkItemID{id}, DispatchID: "completed-effect", OperationID: "effect"}
 	a.Facts.Evidence.Accepted = append(a.Facts.Evidence.Accepted, fact)
@@ -133,21 +138,24 @@ func TestCWISuspensionSafeWindowGuardsDoNotDropInFlightResponsibility(t *testing
 	}
 }
 
-func TestCWISuspensionMissingOrdinarySourceUnknownAndCapacityFailClosed(t *testing.T) {
-	for _, scenario := range []string{"undeclared", "unknown", "capacity", "no_effect", "no_binding", "exhausted"} {
+func TestCWISuspensionMissingOrdinarySourceUnknownAndBudgetFailClosed(t *testing.T) {
+	for _, scenario := range []string{"undeclared", "missing_consumer", "missing_owner_source", "foreign_owner_source", "missing_owner_result", "unknown", "no_binding", "exhausted"} {
 		t.Run(scenario, func(t *testing.T) {
 			a := runtimeSuspensionProjectionFixture(t)
 			switch scenario {
 			case "undeclared":
 				a.Facts.DefinitionFocuses[len(a.Facts.DefinitionFocuses)-1].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+			case "foreign_owner_source":
+				a.Reconciliation.Reopened[0].WorkspaceID = "foreign"
+			case "missing_owner_result":
+				a.Reconciliation.Results = nil
 			case "unknown":
 				a.CompletedDispatches[0].OperationExecutions[0].State = runtimecontract.OperationExecutionOutcomeUnknown
-			case "capacity":
-				for range runtimecontract.RuntimeCWISuspensionLimit {
-					a.Facts.CWISuspensions = append(a.Facts.CWISuspensions, runtimecontract.RuntimeCWISuspension{ResumeBinding: &runtimecontract.RuntimeCWIBindingRef{}})
-				}
-			case "no_effect":
-				a.Facts.Evidence.Accepted = nil
+			case "missing_consumer":
+				a.Facts.Coverage[len(a.Facts.Coverage)-1].HistoricalBehavior = &runtimecontract.RuntimeHistoricalBehaviorCompletion{}
+			case "missing_owner_source":
+				a.Reconciliation.Reopened = nil
+				a.Facts.EvidenceApplicabilityObservations = nil
 			case "no_binding":
 				a.Facts.Coverage[0].CurrentBindingRef = nil
 			case "exhausted":

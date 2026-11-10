@@ -27,12 +27,26 @@ func TestReconciliationCommittedTransitionDoesNotRecompileHistory(t *testing.T) 
 	}
 }
 
-func TestReconciliationNewExecutionUseRequiresOriginalSource(t *testing.T) {
+func TestReconciliationNewBatchRejectsExecutionUse(t *testing.T) {
 	request := rc.RuntimeCWIReconciliationRequest{RequestID: "request", Bindings: []rc.RuntimeCWIReconciliationBindingRef{{BindingID: "binding"}}}
 	before := RuntimeAggregate{Reconciliation: rc.RuntimeCWIReconciliationLedger{Request: &request}}
 	next := before.CloneRaw()
 	next.Reconciliation.Batch = &rc.RuntimeCWIReconciliationBatch{Observations: []rc.RuntimeCWIReconciliationObservation{{BindingID: "binding", ValidationExecution: &rc.RuntimeValidationExecutionUse{SourceReceiptHash: "forged", SourceScopeHash: "forged"}}}}
 	if err := validateReconciliationExecutionTransition(before, next); err == nil {
 		t.Fatal("new self-hashed execution gained authority")
+	}
+}
+
+func TestReconciliationCommittedExecutionUseRemainsUnchangedHistory(t *testing.T) {
+	request := rc.RuntimeCWIReconciliationRequest{RequestID: "original", Generation: 1}
+	before := RuntimeAggregate{Reconciliation: rc.RuntimeCWIReconciliationLedger{Request: &request, RequestHash: "original-hash", Batch: &rc.RuntimeCWIReconciliationBatch{Observations: []rc.RuntimeCWIReconciliationObservation{{ValidationExecution: &rc.RuntimeValidationExecutionUse{SourceReceiptHash: "original-source"}}}}}}
+	next := before.CloneRaw()
+	if err := validateReconciliationExecutionTransition(before, next); err != nil {
+		t.Fatal(err)
+	}
+	next.Reconciliation.History = []rc.RuntimeCWIReconciliationGeneration{{Superseded: true, Request: request, RequestHash: before.Reconciliation.RequestHash, Batch: before.Reconciliation.Batch}}
+	next.Reconciliation.Request, next.Reconciliation.Batch, next.Reconciliation.RequestHash = nil, nil, ""
+	if err := validateReconciliationExecutionTransition(before, next); err != nil {
+		t.Fatal(err)
 	}
 }

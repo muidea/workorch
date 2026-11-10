@@ -448,8 +448,8 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 			return fmt.Errorf("runtime state evidence applicability: %w", err)
 		}
 	}
-	if changedCompletedDispatches || changedFacts || changedStateRevision {
-		if err := ValidateRuntimeCWISuspensionSources(r.Facts, r.CompletedDispatches, r.StateRevision); err != nil {
+	if changedCompletedDispatches || changedFacts || changedStateRevision || changedReconciliation {
+		if err := ValidateRuntimeCWISuspensionSources(r.Facts, r.CompletedDispatches, r.StateRevision, r.Reconciliation); err != nil {
 			return err
 		}
 	}

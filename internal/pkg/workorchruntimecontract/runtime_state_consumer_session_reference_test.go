@@ -36,7 +36,7 @@ func referenceRuntimeStateConsumerSession(r RuntimeStateRecord) error {
 	if err := ValidateRuntimeEvidenceApplicabilityObservations(r.Facts, r.OperationReceipts, r.StateRevision, r.Reconciliation); err != nil {
 		return fmt.Errorf("runtime state evidence applicability: %w", err)
 	}
-	if err := ValidateRuntimeCWISuspensionSources(r.Facts, r.CompletedDispatches, r.StateRevision); err != nil {
+	if err := ValidateRuntimeCWISuspensionSources(r.Facts, r.CompletedDispatches, r.StateRevision, r.Reconciliation); err != nil {
 		return err
 	}
 	if err := ValidateRuntimeApplicabilityCandidateInvalidations(r.Facts.EvidenceApplicabilityObservations, r.CandidateAttempts, r.CandidateRequestSessions); err != nil {

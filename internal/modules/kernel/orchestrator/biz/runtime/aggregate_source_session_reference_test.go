@@ -48,7 +48,7 @@ func referenceAggregateConvergenceSources(s runtimecontract.RuntimeLineageAssert
 	if err := runtimecontract.ValidateRuntimeEvidenceApplicabilityObservations(s.Facts, s.Receipts, revision, s.Reconciliation); err != nil {
 		return fmt.Errorf("runtime aggregate evidence applicability: %w", err)
 	}
-	if err := runtimecontract.ValidateRuntimeCWISuspensionSources(s.Facts, s.Completed, revision); err != nil {
+	if err := runtimecontract.ValidateRuntimeCWISuspensionSources(s.Facts, s.Completed, revision, s.Reconciliation); err != nil {
 		return err
 	}
 	if err := runtimecontract.ValidateRuntimeApplicabilityCandidateInvalidations(s.Facts.EvidenceApplicabilityObservations, s.Attempts, s.Sessions); err != nil {

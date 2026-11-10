@@ -45,22 +45,6 @@ func suspendRuntimeSuccessorForStalePredecessor(a *RuntimeAggregate) (bool, erro
 	if len(blocked) == 0 {
 		return false, nil
 	}
-	// A generic unresolved prerequisite is not permission to replace focus.
-	// Only an original stale owner observation of a settled predecessor admits
-	// this narrow lane; other reopen causes retain their existing contracts.
-	for _, row := range blocked {
-		if row.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateReopened || len(row.ReopenLineage) == 0 {
-			return false, nil
-		}
-		cause := row.ReopenLineage[len(row.ReopenLineage)-1]
-		observed := false
-		for _, o := range a.Facts.EvidenceApplicabilityObservations {
-			observed = observed || o.Request.RequestID == cause.TriggerRef
-		}
-		if !observed {
-			return false, nil
-		}
-	}
 	unavailable := func(reason string) (bool, error) {
 		failure := runtimecontract.FailureFact{Class: runtimecontract.FailureClassCandidateInfeasible, Code: runtimeCWIRevalidationSourceUnavailable, Message: reason}
 		if a.Facts.Failure != nil {
@@ -73,6 +57,29 @@ func suspendRuntimeSuccessorForStalePredecessor(a *RuntimeAggregate) (bool, erro
 		a.Facts.Resources.TargetSelection, a.Facts.Resources.TargetSnapshots = nil, nil
 		return true, nil
 	}
+	// Resolve affected dependencies to their declared ordinary acceptance
+	// consumer once, inside the invalidation CAS. Multiple historical edges
+	// may intentionally share that same consumer.
+	var consumers []runtimecontract.RuntimeCoverageItemFact
+	for _, dependency := range blocked {
+		row, supported := runtimecontract.RuntimeCWIRevalidationConsumer(a.Facts, dependency)
+		if !supported {
+			return unavailable(fmt.Sprintf("dependency %q has no reopened declared acceptance consumer", dependency.ID))
+		}
+		cause := row.ReopenLineage[len(row.ReopenLineage)-1]
+		if !runtimecontract.RuntimeCWIReopenHasOwnerSource(a.Facts, a.Reconciliation, row.ID, cause, a.StateRevision+1) {
+			return unavailable(fmt.Sprintf("acceptance consumer %q has no exact owner invalidation source", row.ID))
+		}
+		duplicate := false
+		for _, existing := range consumers {
+			duplicate = duplicate || existing.ID == row.ID
+		}
+		if !duplicate {
+			consumers = append(consumers, row)
+		}
+	}
+	blocked = consumers
+
 	if len(blocked) != 1 {
 		return unavailable("stale predecessor revalidation requires one exact source; multiple sources cannot be guessed")
 	}
@@ -82,9 +89,6 @@ func suspendRuntimeSuccessorForStalePredecessor(a *RuntimeAggregate) (bool, erro
 	}
 	if current.CurrentBindingRef == nil || current.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateBound {
 		return unavailable("stale predecessor revalidation cannot freeze a successor without its original current binding")
-	}
-	if len(a.Facts.CWISuspensions) >= runtimecontract.RuntimeCWISuspensionLimit {
-		return unavailable("bounded CWI suspension history exhausted")
 	}
 	if a.Facts.Repair.Exhausted {
 		return unavailable("CWI suspension cannot reset exhausted repair budget")
@@ -113,7 +117,11 @@ func suspendRuntimeSuccessorForStalePredecessor(a *RuntimeAggregate) (bool, erro
 		}
 	}
 	if effectID == "" {
-		return unavailable("CWI suspension requires an exact completed durable successor effect")
+		for _, fact := range a.Facts.Evidence.Accepted {
+			if fact.Kind == runtimecontract.EvidenceKindStateChange && runtimecontract.EvidenceAppliesToCoverageWorkItem(a.Facts.Focus, fact, currentID) {
+				return unavailable("CWI suspension cannot drop an unsettled successor effect")
+			}
+		}
 	}
 	for _, dispatch := range a.CompletedDispatches {
 		for _, execution := range dispatch.OperationExecutions {
@@ -137,7 +145,7 @@ func suspendRuntimeSuccessorForStalePredecessor(a *RuntimeAggregate) (bool, erro
 	if next.ID == "" {
 		return false, fmt.Errorf("%w: missing suspension predecessor cursor", common.ErrConflict)
 	}
-	pause := (runtimecontract.RuntimeCWISuspension{ProtocolRef: runtimecontract.RuntimeCWISuspensionV1, SuspendedAtStateRevision: a.StateRevision + 1,
+	pause := (runtimecontract.RuntimeCWISuspension{ProtocolRef: runtimecontract.RuntimeCWISuspensionV1, SuspendedAtStateRevision: a.StateRevision + 1, SuspendedEvidenceRevision: a.Facts.EvidenceRevision,
 		FrozenFocus: a.Facts.Focus, FrozenBinding: *current.CurrentBindingRef, EffectEvidenceID: effectID,
 		PredecessorID: predecessor.ID, ReopenSource: predecessor.ReopenLineage[len(predecessor.ReopenLineage)-1],
 		Repair: a.Facts.Repair, RepairDirective: a.Facts.RepairDirective, Failure: a.Facts.Failure}).CloneRaw()
@@ -279,7 +287,7 @@ func validateRuntimeCWISuspensionTransition(previous, next RuntimeAggregate) err
 		if !reflect.DeepEqual(added.FrozenPrerequisites, prerequisites) || !reflect.DeepEqual(added.FrozenObservations, observations) {
 			return fmt.Errorf("%w: suspension prerequisite archive differs from original owner preimage", common.ErrConflict)
 		}
-		if added.SuspendedAtStateRevision != next.StateRevision || !reflect.DeepEqual(added.FrozenFocus, previous.Facts.Focus) || !reflect.DeepEqual(added.Repair, previous.Facts.Repair) || !reflect.DeepEqual(added.RepairDirective, previous.Facts.RepairDirective) || !reflect.DeepEqual(added.Failure, previous.Facts.Failure) {
+		if added.SuspendedAtStateRevision != next.StateRevision || added.SuspendedEvidenceRevision != previous.Facts.EvidenceRevision || !reflect.DeepEqual(added.FrozenFocus, previous.Facts.Focus) || !reflect.DeepEqual(added.Repair, previous.Facts.Repair) || !reflect.DeepEqual(added.RepairDirective, previous.Facts.RepairDirective) || !reflect.DeepEqual(added.Failure, previous.Facts.Failure) {
 			return fmt.Errorf("%w: CWI suspension has no exact original focus/repair preimage", common.ErrConflict)
 		}
 		if !reflect.DeepEqual(previous.CompletedDispatches, next.CompletedDispatches) || !reflect.DeepEqual(previous.OperationReceipts, next.OperationReceipts) || !reflect.DeepEqual(previous.ExecutionBudget, next.ExecutionBudget) {

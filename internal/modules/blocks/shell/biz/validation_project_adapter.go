@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
-	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -70,24 +69,6 @@ func shellProjectRecipeDeclared(recipe runtimecontract.RuntimeValidationRecipe) 
 		recipe.InputReviewProtocolRef == runtimecontract.RuntimeValidationInputReviewProtocol &&
 		(recipe.Command == "" && len(recipe.Args) == 0 || recipe.Command == "go" && strings.Join(recipe.Args, "\x00") == "test\x00-v\x00./...") &&
 		(recipe.TimeoutMillis == 0 || recipe.TimeoutMillis >= 1000 && recipe.TimeoutMillis <= MaxCommandTimeout.Milliseconds())
-}
-
-func shellProjectReconciliationRawScope(command shellevents.QueryRuntimeCWIReconciliationCommand, recipeID string) shellProjectRawScope {
-	// 独立域隔离诊断存储；不是新的 execution/receipt journal，也不授原操作 replay 权。
-	body, _ := json.Marshal(struct {
-		WorkspaceID        string
-		RunID              string
-		RequestID          string
-		Generation         uint64
-		DefinitionRevision string
-		BindingSetHash     string
-		BindingHash        string
-		BaselineRevision   string
-		BaselineRef        string
-		RecipeID           string
-	}{string(command.WorkspaceID), string(command.RunID), command.RequestID, command.Generation, command.DefinitionRevision, command.BindingSetHash, command.Binding.BindingHash, command.WorkspaceBaselineRevision, command.WorkspaceBaselineRef, recipeID})
-	digest := sha256.Sum256(append([]byte("shell-project-reconciliation-raw/v1\x00"), body...))
-	return shellProjectRawScope{WorkspaceID: command.WorkspaceID, RunID: command.RunID, ExecutionKey: "reconciliation/" + hex.EncodeToString(digest[:])}
 }
 
 // 只消费 sealed recipe 与 proof mapping，禁止依照当前默认值升级旧执行。

@@ -96,9 +96,8 @@ Orchestrator 的原事务负责，不增加 SM-1～SM-4 transition、availabilit
   `RuntimeValidationProofRequirement` 时，才可对 matching recipe 发布逐 CWI applicability binding；recipe ID、进程 exit 0、
   zero-work marker 或 surface-wide check union 都不能自行成为 CWI proof。
 - applicability binding 必须把每个 Definition check 映射到 Shell-owner 的 exact observation protocol 与 native check
-  identity，并随 sealed execution authority 一同哈希封存。reconciliation 复用 exact completed dispatch 的完整 validation
-  scope 与 recipe，不扫描当前目录补 authority；准备/执行失败保留具体 owner code，缺少 scope 不猜测 target。
-  receipt/reconciliation 只承认该 protocol adapter 产生的 typed
+  identity，并随 sealed execution authority 一同哈希封存。reconciliation 只读取 exact completed dispatch 的正式
+  receipt 与原依赖 selector 的当前观察，不执行 recipe、不重新裁决历史 checks。普通执行只承认该 protocol adapter 产生的 typed
   check attestation；raw stdout/stderr（包括 `WORKORCH_CHECK_PASSED=*`）、recipe ID 或任意进程自报 marker 只能是诊断，
   不能填充 passed check authority。另一个 CWI/native check 即使来自同一 recipe 也不能获得当前 CWI credit。
 - recipe 的静态/输入 `Readiness` 与 requirement readiness 分开。一个 ready recipe 可以同时发布 ready CWI 的 exact binding、
@@ -412,10 +411,9 @@ SM-2/3/4 没有新 transition、counter 或预算，SM-1 不变。真实 owner p
 runner 的成功观察保持未分类；只有 owner completion 确认完整四阶段、准确 native checks、
 真实行为、原输出持久引用、清理及原 deadline 全部成立后，才署名 `behavioral` 模态。
 失败历史保留空模态；模态是 capability fact，不裁决 CWI credit。
-无原 execution 的 direct adapter 调用拒绝降级执行。reconciliation 使用 completed dispatch 的原 scope、recipe 和
-binding stage hash，经同一封套执行全部四阶段；它不产生 operation receipt 或 CWI credit。
-reconciliation 原文使用绑定 Workspace/Run、request/generation、Definition、binding-set/binding、baseline 与 recipe 的
-独立 `reconciliation/<digest>` scope；它不是执行恢复账本，也不能借原 receipt read topic 读取。
+无原 execution 的 direct adapter 调用拒绝降级执行。reconciliation Query 没有执行入口；需要新验证时，
+必须沿普通封存 dispatch、唯一 executionKey/fence、effect 和 receipt 产生新结果。历史 reconciliation 原始记录
+及 raw 引用继续保全、可离线审计，不作为当前查询执行或新验收来源。
 
 `shellProjectConjunctionObservation` 将实际阶段事实 detached 映射为中立
 `RuntimeValidationExecutionConjunction`，核对原四阶段身份、准确 argv 和 owner raw bytes/hash；
@@ -429,7 +427,6 @@ reconciliation 原文使用绑定 Workspace/Run、request/generation、Definitio
 逐次复核实际打开 inode，文件仅以 0600 保存。每条原文以 Workspace／Run／原 ExecutionKey／stage／stdout 或 stderr
 完整 scope 隔离，独立校验全部接收 bytes 的 SHA256 与实际已保存 bytes 的 SHA256。
 原文存储与单次读取容量分离：每流最多 16MiB，同一执行（含普通阶段及诊断阶段）合计最多 64MiB；
-reconciliation batch 的共同阶段与各独立阶段共享同一 64MiB quota，不能按 consumer 重置。
 64KiB 以内使用可逆 base64 JSON，较大流使用绑定完整 saved-stream hash 和有序 chunk hash 的小型 metadata，
 原 bytes 以不可变 64KiB chunk 文件保存。读取指定 offset 时只加载相关 chunk，不重复展开整流。
 任一容量超界仍 hash/count 全部接收 bytes，明确保留 incomplete／omitted reason，不能变成 PASS 或完整诊断。
@@ -475,7 +472,7 @@ Orchestrator 的 `runtime_shell_raw_output_receipt_integration_test.go` 配对�
 原文 wire 和 Workspace 为显式 fixture，不代表公开 project producer、fresh-process 恢复或 live 验收。
 该 read topic 不产生新的 SM-1～SM-4 transition、预算或 availability。
 `validation_project_adapter_test.go` 覆盖显式 v6 映射、完整 preparation/review 容量、公开 Shell 四阶段与旧工程失败、
-原 receipt duplicate、reconciliation scope/budget 拒绝及诊断域隔离。
+原 receipt duplicate、方法准入和诊断域隔离；reconciliation 无正式结果时重复查询不执行进程。
 Orchestrator 的 `runtime_project_conjunction_owner_mainline_test.go` 使用真实准备、File/Shell、文件型 Run CAS 和
 Result→Workspace→Run；实际 producer 的合取/raw identity 必须与 persisted receipt、EvidenceFact 和 exact stage mapping
 相等。重建 Shell owner、重新打开 Run repository 后，duplicate 仍返回原 receipt，全部实际 stage/stream 经原 receipt
@@ -704,27 +701,23 @@ project adapter 遵守原 recipe/operation 及更早父 context 的单一总期�
 不能以审查一致授执行 credit，也不能为未知耗时省略阶段或扩大期限。冻结原 subject 不注入新声明。
 结构 query 同时登记在 owner topic 与 concrete typed message 合同，均为 Orchestrator SM-3 的只读 participant。
 
-### 同一 reconciliation 批次的共同执行事实
+### Reconciliation 正式结果与当前依赖的只读消费
 
-`QueryRuntimeCWIReconciliationBatchCommand` 是 Shell 接收的有界 typed 查询：2–8 个成员必须逐值来自
-同一个已持久 request/generation/binding-set/baseline，不能扩展消费者。Orchestrator 只提供原 completed
-SM-3 seal 的 exact scope、recipe 和 accepted receipt hash；Shell 独立检查方法和各成员当前输入。
-同一当前项目、相同完整 project recipe、各自不重复的 exact native checks 才适用共同执行；成员的
-原行为 scope 不合并。任何不适用都在执行前回到各自原方法，不授共享证明。
+`QueryRuntimeCWIReconciliationBatchCommand` 仅批量读取 2–8 个同 request/generation/binding-set/baseline 的成员。
+每个成员携带原 validation dispatch 的只读 `ValidationSource` 与正式 receipt hash，不再携带可执行 recipe/scope。
+Shell 经原 typed receipt query 核对 Workspace/Run、transaction、operation、executionKey/fence、证据用途和原件身份；
+accepted receipt 缺失、无原依赖 selector 时明确 `validation_result_unavailable`，不在 Query 中补执行。
 
-适用时一次完整 scratch 副本执行共同 build/test/race，随后逐 CWI 执行完整 exact 行为。
-每个 `RuntimeValidationExecutionUse` 保留共同阶段同一实际时间、source/argv、原输出身份和受限引用，
-以及自己的独立行为、原 accepted receipt 和原 scope/recipe hash。该用途属于 fresh reconciliation
-事实，不是另一操作 receipt，不新增普通 validation 或 assessment credit。全批原文发布、关闭、source
-完整成员复核和 scratch cleanup 完成，且未超过本次 recipe 与父 context 的最早总期限，才返回满足。
-任一成员失败使整批不可满足，保留实际 failure code；执行后的错误不退回重跑。
+Shell 只重新观察原 `OwnerRevisionSet` 指定的 exact copied-input selector，使用 Workspace owner 的当前目录。
+原 selector 的文件／集合缺失或版本变化返回 `validation_dependencies_changed`；未变化时返回 satisfied 观察，
+只允许 SM-2 保留已有适用 credit，不创造 validation、assessment、receipt 或新业务结论。网络、时钟、工具链等
+未声明依赖不由 copied-input 相等推断；此读取的保证严格限于原正式依赖范围。
 
-scope 包含当前完整副本文件集合，新增/删除/替换相邻输入也使本批失效。只在这次查询内共享实际事实，
-不以 copied-input hash 宣称网络、时钟、外部文件、环境或工具链具有跨时间依赖闭包，不提供历史 PASS cache。
-原文继续保存在受限 Shell store，共同阶段用 reconciliation/group scope，独立阶段另含 binding identity；
-它们不是 operation receipt 的输出，不借原 receipt read topic 获得读取权限。
-持久 batch 后的 duplicate drive 读原 aggregate；在 batch CAS 前中断仍遵守原 fresh-query 语义，
-不承诺查询物理执行 at-most-once，也不另造恢复账本。
+重复、恢复或无关 binding 新增不运行 build/test/race/behavior，不产生新 process、raw 或 operation receipt。
+新普通验证仍完整执行原 all-of 和独立 assessment，并遵守当前合法事务的方法、权限、预算和 deadline。
+旧 `RuntimeValidationExecutionUse`、共同阶段 raw 与原范围保留离线审计，不保留旧 Query 执行分支。
+`TestReconciliationBatchWithoutFormalResultsDoesNotExecute` 和 orchestrator 真实 owner 主线核对零执行、
+重复读取、错 receipt/Workspace/fence/证据合同拒绝、真实 selector 变化及 aggregate/预算零变更。
 
 
 ### 验证输入的证明职责

@@ -78,12 +78,7 @@ func (c *driveDeliveryComponent) ensureReconciliationRequest(ctx context.Context
 		return RuntimeAggregate{}, false, fmt.Errorf("%w: reconciliation request generation is not newer than current generation", common.ErrConflict)
 	}
 	if ledger.Request != nil {
-		if len(ledger.History) >= runtimecontract.RuntimeCWIReconciliationHistoryLimit {
-			// Reject before replacing the active generation.  The immutable
-			// history is an audit bound, not a rolling cache: discarding an old
-			// request would make a later duplicate/restart ambiguous.
-			return RuntimeAggregate{}, false, fmt.Errorf("%w: runtime reconciliation history exceeds bounded limit %d", common.ErrConflict, runtimecontract.RuntimeCWIReconciliationHistoryLimit)
-		}
+
 		previous := runtimecontract.RuntimeCWIReconciliationGeneration{
 			Superseded:  true,
 			Request:     *ledger.Request,
@@ -130,8 +125,8 @@ func (c *authorityComponent) commitReconciliationBatch(ctx context.Context, work
 		}
 		return RuntimeAggregate{}, false, fmt.Errorf("%w: reconciliation request is not sealed", common.ErrConflict)
 	}
-	if aggregate.ActiveDispatch != nil {
-		return RuntimeAggregate{}, false, fmt.Errorf("%w: reconciliation cannot mutate CWI while a sealed dispatch is active", common.ErrConflict)
+	if aggregate.ActiveDispatch != nil || runtimeApplicabilityHasUnsettledProvider(aggregate) {
+		return RuntimeAggregate{}, false, fmt.Errorf("%w: reconciliation cannot displace an in-flight dispatch or provider transaction", common.ErrConflict)
 	}
 	request := aggregate.Reconciliation.Request.Clone()
 	if err := request.ValidateAgainstContract(aggregate.Facts.ReconciliationContract); err != nil {
@@ -186,6 +181,13 @@ func (c *authorityComponent) commitReconciliationBatch(ctx context.Context, work
 		}
 		if retireErr := retireSemanticPlanningForCurrentReopenedCWIs(&aggregate); retireErr != nil {
 			return RuntimeAggregate{}, false, retireErr
+		}
+		if changed, err := suspendRuntimeSuccessorForStalePredecessor(&aggregate); err != nil {
+			return RuntimeAggregate{}, false, err
+		} else if changed && aggregate.Facts.Failure == nil {
+			if err := prepareSemanticPlanningForAdvancedFocus(&aggregate); err != nil {
+				return RuntimeAggregate{}, false, err
+			}
 		}
 	}
 	nextFacts, nextDecision, reduceErr := reduceRuntimeAggregateWithDirective(aggregate, aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)

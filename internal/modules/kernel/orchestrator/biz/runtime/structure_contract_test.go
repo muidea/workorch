@@ -891,7 +891,7 @@ func assertRuntimeExportedMethods(t *testing.T, methods map[string][]string, rec
 // This is a lexical composition, never a caller's validated flag.
 func TestApplicabilityReadContinuationsStayBehindCompletePublicGates(t *testing.T) {
 	want := map[string]map[string]int{
-		"compileRuntimeOperationReadSource":          {"CompileRuntimeOperationReadSource": 1, "compileRuntimeEvidenceApplicabilitySource": 1},
+		"compileRuntimeOperationReadSource":          {"CompileRuntimeOperationReadSource": 1, "compileRuntimeEvidenceApplicabilitySource": 1, "ReconciliationValidationResultSource": 1},
 		"compileRuntimeEvidenceApplicabilitySource":  {"compileRuntimeEvidenceApplicabilityRequest": 1, "compileRuntimeEvidenceApplicabilityRead": 1},
 		"compileRuntimeEvidenceApplicabilityRequest": {"recordEvidenceApplicability": 1},
 		"nextRuntimeEvidenceApplicabilityRequest":    {"admitRuntimeDispatch": 1, "validateAssessmentApplicabilitySealTransition": 1, "validateCandidateAttemptBeginAuthority": 1},

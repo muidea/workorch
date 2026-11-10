@@ -40,26 +40,12 @@ func (m *Biz) handleRuntimeValidationReadDependencies(event magicevent.Event, re
 		setCapabilityError(result, fmt.Errorf("%w: Shell copied-input source receipt mismatch", common.ErrConflict))
 		return
 	}
-	// Caller directories cannot authorize reads. Query the current Workspace owner.
-	workspaceCommand := workspaceevents.GetWorkspaceCommand{WorkspaceID: command.WorkspaceID}
-	query := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGet, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), event.Context(), workspaceCommand)
-	query.BindLaneKey(eventcontract.QueryLaneKey(workspaceevents.TopicWorkspaceCommandGet, eventcontract.LaneScope{WorkspaceID: string(command.WorkspaceID)}))
-	response := m.SendEvent(query)
-	if response == nil {
-		setCapabilityError(result, fmt.Errorf("Shell dependency workspace query returned no result"))
+	directory, err := m.runtimeValidationWorkspaceDirectory(event.Context(), command.WorkspaceID)
+	if err != nil {
+		setCapabilityError(result, err)
 		return
 	}
-	data, queryErr := response.Get()
-	if queryErr != nil {
-		setCapabilityError(result, queryErr)
-		return
-	}
-	workspace, ok := data.(workspaceevents.WorkspaceResult)
-	if !ok || workspace.ValidateFor(workspaceCommand) != nil {
-		setCapabilityError(result, common.ErrConflict)
-		return
-	}
-	inputs, missing, err := observeShellValidationCopiedInputs(event.Context(), workspace.Workspace.DeliverableDirectory, command.OriginalDependencies)
+	inputs, missing, err := observeShellValidationCopiedInputs(event.Context(), directory, command.OriginalDependencies)
 	if err != nil {
 		setCapabilityError(result, err)
 		return
@@ -169,4 +155,25 @@ func observeShellValidationCopiedFile(ctx context.Context, file *os.File, ref st
 		}
 	}
 	return shellValidationCopiedInput{TargetRef: ref, ContentHash: hex.EncodeToString(digest.Sum(nil)), Size: size, Mode: uint32(info.Mode().Perm() & 0777)}, nil
+}
+
+// Caller directories cannot authorize dependency reads; the Workspace owner
+// supplies the current directory at both original-selector read ingresses.
+func (m *Biz) runtimeValidationWorkspaceDirectory(ctx context.Context, workspaceID common.WorkspaceID) (string, error) {
+	workspaceCommand := workspaceevents.GetWorkspaceCommand{WorkspaceID: workspaceID}
+	query := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGet, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceCommand)
+	query.BindLaneKey(eventcontract.QueryLaneKey(workspaceevents.TopicWorkspaceCommandGet, eventcontract.LaneScope{WorkspaceID: string(workspaceID)}))
+	response := m.SendEvent(query)
+	if response == nil {
+		return "", fmt.Errorf("Shell dependency workspace query returned no result")
+	}
+	data, queryErr := response.Get()
+	if queryErr != nil {
+		return "", queryErr
+	}
+	workspace, ok := data.(workspaceevents.WorkspaceResult)
+	if !ok || workspace.ValidateFor(workspaceCommand) != nil {
+		return "", common.ErrConflict
+	}
+	return workspace.Workspace.DeliverableDirectory, nil
 }

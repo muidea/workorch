@@ -19,7 +19,7 @@ func TestCWISuspensionTransitionRejectsPauseWriteSetSmuggling(t *testing.T) {
 	if err := validateRuntimeCWISuspensionTransition(previous, next); err != nil {
 		t.Fatal(err)
 	}
-	for _, scenario := range []string{"history_removed", "revision", "focus", "repair", "directive", "failure", "archive", "effect", "receipt", "budget", "pre_resumed", "dispatch", "submitted", "terminal", "material", "termination"} {
+	for _, scenario := range []string{"history_removed", "revision", "evidence_revision", "focus", "repair", "directive", "failure", "archive", "effect", "receipt", "budget", "pre_resumed", "dispatch", "submitted", "terminal", "material", "termination"} {
 		t.Run(scenario, func(t *testing.T) {
 			before, after := previous.CloneRaw(), next.CloneRaw()
 			s := &after.Facts.CWISuspensions[0]
@@ -29,6 +29,8 @@ func TestCWISuspensionTransitionRejectsPauseWriteSetSmuggling(t *testing.T) {
 				after.Facts.CWISuspensions = nil
 			case "revision":
 				s.SuspendedAtStateRevision++
+			case "evidence_revision":
+				s.SuspendedEvidenceRevision = "another-revision"
 			case "focus":
 				s.FrozenFocus.TargetRefs = append(s.FrozenFocus.TargetRefs, "drift")
 			case "repair":

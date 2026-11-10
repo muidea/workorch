@@ -39,56 +39,11 @@ func TestShellOwnerReconciliationDoesNotTreatGenericRecipeSuccessAsCWIProof(t *t
 	if result.Observation.Status != runtimecontract.RuntimeCWIReconciliationObservationUnverifiable {
 		t.Fatalf("generic recipe observation status = %q, want unverifiable", result.Observation.Status)
 	}
-	if result.Observation.OriginalDiagnostic == nil || result.Observation.OriginalDiagnostic.OriginalCode != "validation_recipe_resolution_failed" {
+	if result.Observation.OriginalDiagnostic == nil || result.Observation.OriginalDiagnostic.OriginalCode != "validation_result_unavailable" {
 		t.Fatalf("generic recipe diagnostic = %+v", result.Observation.OriginalDiagnostic)
 	}
 	if ref := runtimecontract.StableRuntimeCWIReconciliationObservationRef(result.Observation); ref == "" {
 		t.Fatal("generic recipe response observation did not produce stable lineage ref")
-	}
-}
-
-func TestShellOwnerReconciliationAcceptsOwnerNativeStructuredCheck(t *testing.T) {
-	ctx := context.Background()
-	hub := magicevent.NewHub(16)
-	t.Cleanup(func() { hub.Terminate(ctx) })
-	owner := &Biz{Base: basebiz.New(modulecommon.ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter()}
-	if err := owner.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { owner.Teardown(ctx) })
-
-	workspace := newGoValidationWorkspace(t, `package fixture
-
-import "testing"
-
-func TestWorkOrchCWI_SHELLRECONCILIATION(t *testing.T) {
-	if false {
-		t.Fatal("unreachable")
-	}
-}
-`)
-	const checkRef = "workorch-cwi-check-shell-reconciliation"
-	recipe := runtimecontract.RuntimeValidationRecipe{
-		ID: "structured-presence", Command: "go", Args: []string{"test", "./..."},
-	}
-	command := shellReconciliationQueryCommand(t, workspace, recipe)
-	response := hub.Send(magicevent.NewEventWithContext(
-		shellevents.TopicQueryRuntimeCWIReconciliation,
-		runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command,
-	))
-	data, err := response.Get()
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, ok := data.(shellevents.QueryRuntimeCWIReconciliationResult)
-	if !ok {
-		t.Fatalf("response type = %T", data)
-	}
-	if result.Observation.Status != runtimecontract.RuntimeCWIReconciliationObservationSatisfied {
-		t.Fatalf("structured check observation status = %q, want satisfied; diagnostic=%+v observation=%+v", result.Observation.Status, result.Observation.OriginalDiagnostic, result.Observation)
-	}
-	if len(result.Observation.CheckRefs) != 1 || !shellStringIncluded(result.Observation.CheckRefs, checkRef) {
-		t.Fatalf("structured check refs = %#v, want only %q", result.Observation.CheckRefs, checkRef)
 	}
 }
 
@@ -124,7 +79,6 @@ func shellReconciliationQueryCommand(t *testing.T, workspace string, recipe runt
 		WorkspaceDeliverableDirectory: workspace,
 		WorkspaceBaselineRevision:     "tree-shell-reconciliation",
 		WorkspaceBaselineRef:          "workspace-tree/tree-shell-reconciliation",
-		ValidationRecipes:             []runtimecontract.RuntimeValidationRecipe{recipe},
 	}
 }
 
@@ -143,22 +97,15 @@ func checkEntrypointReconciliation(t *testing.T, request RuntimeCommandRequest) 
 	command.Binding.TargetRefs = request.TargetRefs
 	command.Binding.RequiredCheckRefs = []string{request.ValidationCheckAttestations[0].RequiredCheckRef}
 	command.Binding.ValidationCheckAttestations = request.ValidationCheckAttestations
-	for _, complete := range []bool{true, false, true} {
-		command.ValidationScopeTargetRefs = nil
-		if complete {
-			command.ValidationScopeTargetRefs = request.ValidationScopeTargetRefs
-		}
+	for range 3 {
 		response := hub.Send(magicevent.NewEventWithContext(shellevents.TopicQueryRuntimeCWIReconciliation, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command))
 		data, err := response.Get()
 		if err != nil {
 			t.Fatal(err)
 		}
 		observation := data.(shellevents.QueryRuntimeCWIReconciliationResult).Observation
-		if complete && observation.Status != runtimecontract.RuntimeCWIReconciliationObservationSatisfied {
-			t.Fatalf("same v4 native/supplement proof failed reconciliation: %+v", observation)
-		}
-		if !complete && (observation.Status != runtimecontract.RuntimeCWIReconciliationObservationUnverifiable || observation.OriginalDiagnostic == nil || observation.OriginalDiagnostic.OriginalCode != "validation_behavior_contract_rejected") {
-			t.Fatalf("missing sealed scope borrowed targets or lost preflight cause: %+v", observation)
+		if observation.Status != runtimecontract.RuntimeCWIReconciliationObservationUnverifiable || observation.OriginalDiagnostic == nil || observation.OriginalDiagnostic.OriginalCode != "validation_result_unavailable" {
+			t.Fatalf("query executed without committed result: %+v", observation)
 		}
 	}
 }

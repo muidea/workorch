@@ -43,6 +43,16 @@ func (c *RuntimeController) queryOperationReceiptWithReadSource(ctx context.Cont
 	if !found || !reflect.DeepEqual(operation.TargetRefs, source.TargetRefs) || !reflect.DeepEqual(operation.CoverageWorkItemIDs, source.CoverageWorkItemIDs) {
 		return runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("%w: read dependency source operation scope mismatch", common.ErrConflict)
 	}
+	expectedEvidenceKind := ""
+	if dispatch.Candidate.StateChange != nil {
+		expectedEvidenceKind = runtimecontract.EvidenceKindStateChange
+	}
+	if dispatch.Candidate.Validation != nil {
+		expectedEvidenceKind = runtimecontract.EvidenceKindValidation
+	}
+	if source.EvidenceKind != expectedEvidenceKind || !reflect.DeepEqual(source.EvidencePolicies, aggregate.Facts.Activation.EvidencePolicies) {
+		return runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("%w: read source evidence contract mismatch", common.ErrConflict)
+	}
 	if source.HistoricalEffectProofContractRef != runtimeHistoricalEffectProofContractForDispatch(dispatch, operation) {
 		return runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("%w: read source proof purpose mismatch", common.ErrConflict)
 	}

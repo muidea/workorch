@@ -108,3 +108,31 @@ func TestClassifyTargetSnapshotCapacityIsBoundedAndPreservesCause(t *testing.T) 
 		t.Fatal("text granted capacity authority")
 	}
 }
+
+func TestCompleteAdmissionDispositionSurvivesDriveFailureBoundary(t *testing.T) {
+	for _, disposition := range []runtimecontract.RuntimeCompleteAdmissionDisposition{runtimecontract.RuntimeCompleteAdmissionPrerequisiteBlocked, runtimecontract.RuntimeCompleteAdmissionOwnerPrerequisite, runtimecontract.RuntimeCompleteAdmissionOwnerStale, runtimecontract.RuntimeCompleteAdmissionOwnerInfeasible, runtimecontract.RuntimeCompleteAdmissionDuplicateNoop, runtimecontract.RuntimeCompleteAdmissionStaleConflict, runtimecontract.RuntimeCompleteAdmissionCorrectableOnce, runtimecontract.RuntimeCompleteAdmissionTerminalContractFailure} {
+		rejection := &runtimecontract.RuntimeCompleteAdmissionRejection{Decision: runtimecontract.RuntimeCompleteAdmissionDecision{Disposition: disposition, Code: "exact-owner-code", Message: "original source diagnostic"}}
+		failure := classifyRuntimeDriveFailure(fmt.Errorf("drive: %w", rejection))
+		want := runtimecontract.FailureClassCandidateInfeasible
+		if disposition == runtimecontract.RuntimeCompleteAdmissionCorrectableOnce {
+			want = runtimecontract.FailureClassCandidateContractFailure
+		}
+		if disposition == runtimecontract.RuntimeCompleteAdmissionTerminalContractFailure {
+			want = runtimecontract.FailureClassRuntimeInvariantDefect
+		}
+		if failure.Class != want || failure.Code != rejection.Decision.Code || failure.Message != "drive: "+rejection.Error() {
+			t.Fatalf("disposition lost: %s %+v", disposition, failure)
+		}
+		if errors.Is(rejection, common.ErrConflict) {
+			t.Fatal("expected owner disposition became generic semantic conflict")
+		}
+	}
+}
+
+func TestCompleteAdmissionPreservesOriginalDiagnosticWithoutGenericConflict(t *testing.T) {
+	rejection := &runtimecontract.RuntimeCompleteAdmissionRejection{Decision: runtimecontract.RuntimeCompleteAdmissionDecision{Disposition: runtimecontract.RuntimeCompleteAdmissionTerminalContractFailure, Code: "exact-terminal-code"}, Cause: fmt.Errorf("%w: original source diagnostic", common.ErrConflict)}
+	failure := classifyRuntimeDriveFailure(rejection)
+	if failure.Code != "exact-terminal-code" || failure.Class != runtimecontract.FailureClassRuntimeInvariantDefect || failure.Message != "complete candidate admission terminal_contract_failure/exact-terminal-code: "+rejection.Cause.Error() || errors.Is(rejection, common.ErrConflict) {
+		t.Fatalf("lost original diagnostic or typed disposition: %+v", failure)
+	}
+}

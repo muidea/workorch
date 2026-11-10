@@ -3,6 +3,8 @@ package shell
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"slices"
 	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -137,10 +139,8 @@ func (m *Biz) Teardown(ctx context.Context) error {
 	return ctx.Err()
 }
 
-// handleRuntimeCWIReconciliationQuery executes only the recipes sealed for
-// this binding.  It deliberately does not persist an operation receipt or
-// mutate Runtime coverage: the result is an owner-local current-workspace
-// observation consumed by the Orchestrator's SM-2 reducer.
+// Reconciliation consumes a formal result and observes only its current
+// dependencies. Business execution requires the ordinary sealed dispatch.
 func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result magicevent.Result) {
 	command, ok := shellRuntimeIngressCommand[shellevents.QueryRuntimeCWIReconciliationCommand](event, result)
 	if !ok {
@@ -159,140 +159,56 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 }
 
 func (m *Biz) queryRuntimeCWIReconciliation(ctx context.Context, command shellevents.QueryRuntimeCWIReconciliationCommand) (runtimecontract.RuntimeCWIReconciliationObservation, error) {
-	if !runtimeCWIReconciliationBindingHasShellProof(command.Binding) {
-		observation := shellReconciliationObservation(command, runtimecontract.RuntimeCWIReconciliationObservationUnverifiable, command.WorkspaceBaselineRevision, nil, nil, "binding has no Shell validation recipe", "validation_recipe_unavailable")
-		return observation, nil
+	unavailable := func(code, message string) (runtimecontract.RuntimeCWIReconciliationObservation, error) {
+		return shellReconciliationObservation(command, runtimecontract.RuntimeCWIReconciliationObservationUnverifiable, command.WorkspaceBaselineRevision, command.Binding.TargetRefs, nil, message, code), nil
 	}
-	recipes := runtimeCWIReconciliationRecipes(command)
-	if len(recipes) != len(command.Binding.ValidationRecipeIDs) {
-		observation := shellReconciliationObservation(command, runtimecontract.RuntimeCWIReconciliationObservationUnverifiable, command.WorkspaceBaselineRevision, nil, nil, "sealed Shell validation recipe is unavailable", "validation_recipe_unavailable")
-		return observation, nil
+	source := command.ValidationSource
+	if source == nil || command.ValidationSourceReceiptHash == "" {
+		return unavailable("validation_result_unavailable", "binding has no committed validation result")
 	}
-	var observedRevision = command.WorkspaceBaselineRevision
-	allPassed := true
-	var failureCode, failureMessage string
-	var checkRefs []string
-	var targetRefs []string
-	for _, recipe := range recipes {
-		request := RuntimeCommandRequest{
-			WorkspaceID:                   command.WorkspaceID,
-			RunID:                         command.RunID,
-			StepID:                        common.StepID("reconciliation/" + command.RequestID + "/" + command.Binding.BindingID + "/" + recipe.ID),
-			WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
-			WorkspaceInternalDirectory:    command.WorkspaceInternalDirectory,
-			ValidationRecipeID:            recipe.ID,
-			ManagedValidation: runtimecontract.RuntimeManagedValidation{
-				RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
-				OriginalNodeKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
-			},
-			TargetRefs:                  append([]string(nil), command.Binding.TargetRefs...),
-			ValidationScopeTargetRefs:   append([]string(nil), command.ValidationScopeTargetRefs...),
-			ValidationRecipes:           []runtimecontract.RuntimeValidationRecipe{recipe},
-			ValidationCheckAttestations: runtimecontract.CloneRuntimeValidationCheckAttestationBindings(command.Binding.ValidationCheckAttestations),
-		}
-		// Reconciliation uses the same owner-local recipe resolution boundary as
-		// ordinary managed-validation dispatch. The provider supplies only the
-		// sealed recipe identity; Shell must materialize the command/args before
-		// invoking its adapter.
-		if resolveErr := resolveManagedValidationRecipe(&request); resolveErr != nil {
-			allPassed = false
-			if failureCode == "" {
-				failureCode, failureMessage = "validation_recipe_resolution_failed", "sealed validation recipe could not be prepared"
-			}
-			continue
-		}
-		output := RuntimeCommandResult{}
-		var executeErr error
-		if selected, selectErr := shellProjectRequestSelected(request); selectErr != nil {
-			output, executeErr = validationRecipeUnavailableResult(request, selectErr), selectErr
-		} else if selected {
-			produced, err := m.runtimeAdapter.executeShellProjectScope(ctx, request, shellProjectReconciliationRawScope(command, recipe.ID))
-			output, executeErr = produced.Result, err
-		} else {
-			output, executeErr = m.runtimeAdapter.ExecuteOperation(ctx, request)
-		}
-		if executeErr != nil || output.Status != "completed" || output.ExitCode != 0 || output.ZeroWork || output.ValidationObservation == nil || output.Evidence.Quality != common.EvidenceQualityValid {
-			allPassed = false
-			if failureCode == "" && output.FailureCode != "" {
-				failureCode, failureMessage = output.FailureCode, output.FailureMessage
-			}
-		}
-		if output.ValidationObservation != nil {
-			value := output.ValidationObservation.Normalized()
-			if value.RecipeID != recipe.ID {
-				allPassed = false
-			}
-			if len(runtimecontract.RuntimeValidationConflictingChecks(value)) != 0 {
-				allPassed = false
-			}
-			for _, attestation := range command.Binding.ValidationCheckAttestations {
-				attestation = attestation.Normalized()
-				if runtimecontract.RuntimeValidationAttestationPassed(value, attestation) {
-					checkRefs = append(checkRefs, attestation.RequiredCheckRef)
-				}
-			}
-			targetRefs = append(targetRefs, output.TargetRefs...)
+	if source.WorkspaceID != command.WorkspaceID || source.RunID != command.RunID || source.Transaction.DefinitionRevision != command.DefinitionRevision || source.EvidenceKind != runtimecontract.EvidenceKindValidation || (len(source.CoverageWorkItemIDs) != 0 && !slices.Contains(source.CoverageWorkItemIDs, command.Binding.CoverageWorkItemID)) {
+		return runtimecontract.RuntimeCWIReconciliationObservation{}, common.ErrInvalidArgument
+	}
+	receipt, found, err := m.queryRuntimeOperationReceiptWithSource(ctx, source.WorkspaceID, source.RunID, source.DispatchID, source.OperationID, source.Execution, source)
+	if err != nil {
+		return runtimecontract.RuntimeCWIReconciliationObservation{}, err
+	}
+	if !found || runtimecontract.StableRuntimeOperationReceiptHash(receipt) != command.ValidationSourceReceiptHash {
+		return runtimecontract.RuntimeCWIReconciliationObservation{}, fmt.Errorf("%w: reconciliation source receipt mismatch", common.ErrConflict)
+	}
+	if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || receipt.Evidence.OwnerRevisionSet == nil || receipt.Evidence.ApplicabilityDependencies == nil {
+		return unavailable("validation_result_unavailable", "source has no accepted validation result and exact dependency selector")
+	}
+	if err := runtimecontract.ValidateRuntimeEvidenceDependencyPair(receipt.Evidence.OwnerRevisionSet, receipt.Evidence.ApplicabilityDependencies, command.DefinitionRevision); err != nil {
+		return runtimecontract.RuntimeCWIReconciliationObservation{}, err
+	}
+	if !reflect.DeepEqual(*receipt.Evidence.OwnerRevisionSet, receipt.Evidence.ApplicabilityDependencies.OwnerRevisionSet) {
+		return runtimecontract.RuntimeCWIReconciliationObservation{}, fmt.Errorf("%w: validation dependency selector mismatch", common.ErrConflict)
+	}
+	for _, entry := range receipt.Evidence.OwnerRevisionSet.Entries {
+		if entry.OwnerKind != "capability" || entry.OwnerInstanceID != ModuleID+"/"+string(command.WorkspaceID) || entry.ResourceKind != string(runtimecontract.RuntimeResourceWorkspaceTarget) {
+			return runtimecontract.RuntimeCWIReconciliationObservation{}, common.ErrConflict
 		}
 	}
-	// Required checks/metrics/artifacts are binding-specific. A successful
-	// process alone is not proof for any CWI; each declared check must be
-	// explicitly reported by the owner, and a metric/artifact constraint that
-	// this owner cannot observe remains unverifiable.
-	if len(command.Binding.RequiredCheckRefs) != 0 {
-		for _, required := range command.Binding.RequiredCheckRefs {
-			if !shellStringIncluded(checkRefs, required) {
-				allPassed = false
-			}
-		}
-	} else {
-		// A successful generic recipe/exit code is intentionally insufficient
-		// for an heterogeneous CWI.  Every Shell-backed binding must declare at
-		// least one owner-verifiable check so a shared `go test ./...` (or an
-		// empty managed validation session) cannot fan out credit to unrelated
-		// artifacts, tools, configuration, or documentation work items.
-		allPassed = false
+	directory, err := m.runtimeValidationWorkspaceDirectory(ctx, command.WorkspaceID)
+	if err != nil {
+		return runtimecontract.RuntimeCWIReconciliationObservation{}, err
 	}
-	if len(command.Binding.MetricConstraints) != 0 || len(command.Binding.ArtifactRefs) != 0 {
-		allPassed = false
+	inputs, missing, err := observeShellValidationCopiedInputs(ctx, directory, *receipt.Evidence.OwnerRevisionSet)
+	if err != nil {
+		return runtimecontract.RuntimeCWIReconciliationObservation{}, err
 	}
-	status := runtimecontract.RuntimeCWIReconciliationObservationSatisfied
-	message, code := "", ""
-	if !allPassed {
-		status = runtimecontract.RuntimeCWIReconciliationObservationUnverifiable
-		message, code = "Shell recipe did not produce all binding-specific validation facts", "validation_proof_incomplete"
-		if failureCode != "" {
-			message, code = failureMessage, failureCode
-		}
-		if len(command.Binding.RequiredCheckRefs) == 0 {
-			message, code = "Shell binding declares no CWI-specific required checks", "validation_check_declaration_unavailable"
-		}
+	if missing {
+		return unavailable("validation_dependencies_changed", "an original validation dependency is missing")
 	}
-	if len(targetRefs) == 0 {
-		targetRefs = append([]string(nil), command.Binding.TargetRefs...)
+	current, err := shellValidationOwnerDependencies(command.DefinitionRevision, RuntimeCommandRequest{WorkspaceID: command.WorkspaceID, ManagedValidation: runtimecontract.RuntimeManagedValidation{RuntimeManaged: true}}, inputs)
+	if err != nil {
+		return runtimecontract.RuntimeCWIReconciliationObservation{}, err
 	}
-	observation := shellReconciliationObservation(command, status, observedRevision, targetRefs, checkRefs, message, code)
-	return observation, nil
-}
-
-func runtimeCWIReconciliationBindingHasShellProof(binding runtimecontract.RuntimeCWIReconciliationBindingRef) bool {
-	for _, kind := range binding.AllowedOperationKinds {
-		if runtimecontract.CanonicalRuntimeBlockKind(kind) == runtimecontract.RuntimeBlockKindManagedValidationSession {
-			return true
-		}
+	if !reflect.DeepEqual(current, *receipt.Evidence.OwnerRevisionSet) {
+		return unavailable("validation_dependencies_changed", "current dependencies differ from the original validation result")
 	}
-	return len(binding.ValidationRecipeIDs) != 0
-}
-
-func runtimeCWIReconciliationRecipes(command shellevents.QueryRuntimeCWIReconciliationCommand) []runtimecontract.RuntimeValidationRecipe {
-	ret := make([]runtimecontract.RuntimeValidationRecipe, 0, len(command.Binding.ValidationRecipeIDs))
-	for _, id := range command.Binding.ValidationRecipeIDs {
-		recipe, found := runtimecontract.RuntimeValidationRecipeForID(command.ValidationRecipes, id)
-		if !found {
-			continue
-		}
-		ret = append(ret, recipe)
-	}
-	return runtimecontract.NormalizeRuntimeValidationRecipes(ret)
+	return shellReconciliationObservation(command, runtimecontract.RuntimeCWIReconciliationObservationSatisfied, command.WorkspaceBaselineRevision, command.Binding.TargetRefs, command.Binding.RequiredCheckRefs, "", ""), nil
 }
 
 func shellReconciliationObservation(command shellevents.QueryRuntimeCWIReconciliationCommand, status runtimecontract.RuntimeCWIReconciliationObservationStatus, revision string, targetRefs, checkRefs []string, message, code string) runtimecontract.RuntimeCWIReconciliationObservation {

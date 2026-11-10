@@ -1590,9 +1590,6 @@ func supersedeActiveReconciliationForCurrentContract(aggregate *RuntimeAggregate
 		return false, nil
 	}
 	ledger := aggregate.Reconciliation.Clone()
-	if len(ledger.History) >= runtimecontract.RuntimeCWIReconciliationHistoryLimit {
-		return false, fmt.Errorf("runtime reconciliation history exceeds bounded limit %d", runtimecontract.RuntimeCWIReconciliationHistoryLimit)
-	}
 	previous := runtimecontract.RuntimeCWIReconciliationGeneration{
 		Superseded:  true,
 		Request:     request,

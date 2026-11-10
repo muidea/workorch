@@ -777,7 +777,7 @@ func (c *candidateDispatchComponent) admitAndSealCandidateAttempt(ctx context.Co
 	}
 	dispatch, completeAdmission, err := admitRuntimeDispatch(aggregate, manifest, candidate, &record, &admission, repairCommitment)
 	if !completeAdmission.Admitted() {
-		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: complete candidate admission %s: %s", common.ErrConflict, completeAdmission.Code, completeAdmission.Message)
+		return CandidateAdmissionCommitResult{}, &runtimecontract.RuntimeCompleteAdmissionRejection{Decision: completeAdmission, Cause: err}
 	}
 	if err != nil {
 		return CandidateAdmissionCommitResult{}, err
@@ -864,7 +864,7 @@ func (c *candidateDispatchComponent) sealGovernanceDispatch(ctx context.Context,
 	accepted := acceptedCandidateAdmission()
 	dispatch, completeAdmission, err := admitRuntimeDispatch(aggregate, manifest, candidate, nil, &accepted, nil)
 	if !completeAdmission.Admitted() {
-		return RuntimeAggregate{}, fmt.Errorf("%w: governance dispatch admission %s: %s", common.ErrConflict, completeAdmission.Code, completeAdmission.Message)
+		return RuntimeAggregate{}, &runtimecontract.RuntimeCompleteAdmissionRejection{Decision: completeAdmission, Cause: err}
 	}
 	if err != nil {
 		return RuntimeAggregate{}, err

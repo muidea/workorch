@@ -3692,6 +3692,17 @@ func classifyRuntimeDriveFailure(err error) runtimecontract.FailureFact {
 		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeInvariantDefect, Code: "runtime_drive_failed", Signature: "runtime-drive-failed", Message: "unknown drive failure"}
 	}
 	msg := err.Error()
+	var admission *runtimecontract.RuntimeCompleteAdmissionRejection
+	if errors.As(err, &admission) {
+		class := runtimecontract.FailureClassRuntimeInvariantDefect
+		switch admission.Decision.Disposition {
+		case runtimecontract.RuntimeCompleteAdmissionCorrectableOnce:
+			class = runtimecontract.FailureClassCandidateContractFailure
+		case runtimecontract.RuntimeCompleteAdmissionPrerequisiteBlocked, runtimecontract.RuntimeCompleteAdmissionOwnerPrerequisite, runtimecontract.RuntimeCompleteAdmissionOwnerStale, runtimecontract.RuntimeCompleteAdmissionOwnerInfeasible, runtimecontract.RuntimeCompleteAdmissionDuplicateNoop, runtimecontract.RuntimeCompleteAdmissionStaleConflict:
+			class = runtimecontract.FailureClassCandidateInfeasible
+		}
+		return runtimecontract.FailureFact{Class: class, Code: admission.Decision.Code, Signature: "complete-admission/" + string(admission.Decision.Disposition) + "/" + admission.Decision.Code, Message: msg}
+	}
 	var unsupportedCapability *runtimecontract.RuntimeCapabilityUnsupportedError
 	var capabilityCatalogUnavailable *runtimecontract.RuntimeCapabilityCatalogUnavailableError
 	var outcomeUnknown *runtime.OperationOutcomeUnknownError

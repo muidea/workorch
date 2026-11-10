@@ -112,6 +112,7 @@ func TestRuntimeControllerOperationReceiptFenceAndTerminalUniqueness(t *testing.
 	source := runtimecontract.RuntimeOperationExecutionContext{
 		WorkspaceID: claimed.Facts.WorkspaceID, RunID: claimed.Facts.RunID, DispatchID: claimed.ActiveDispatch.ID, OperationID: operationID,
 		Transaction: claimed.ActiveDispatch.Transaction, TargetRefs: operation.TargetRefs, CoverageWorkItemIDs: operation.CoverageWorkItemIDs,
+		EvidenceKind: runtimecontract.EvidenceKindStateChange, EvidencePolicies: runtimecontract.CloneRuntimeEvidencePolicies(claimed.Facts.Activation.EvidencePolicies),
 		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
 			ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, OperationHash: execution.OperationHash,
 			ExpectedEffectScope: execution.ExpectedEffectScope, IdempotencyClass: execution.IdempotencyClass,

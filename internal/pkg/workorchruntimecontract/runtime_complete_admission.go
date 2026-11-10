@@ -127,6 +127,21 @@ type RuntimeCompleteAdmissionDecision struct {
 	Message     string
 }
 
+// RuntimeCompleteAdmissionRejection preserves the final owner decision across
+// the drive boundary. It never grants a retry or weakens the final gate.
+type RuntimeCompleteAdmissionRejection struct {
+	Decision RuntimeCompleteAdmissionDecision
+	Cause    error
+}
+
+func (e *RuntimeCompleteAdmissionRejection) Error() string {
+	message := e.Decision.Message
+	if message == "" && e.Cause != nil {
+		message = e.Cause.Error()
+	}
+	return fmt.Sprintf("complete candidate admission %s/%s: %s", e.Decision.Disposition, e.Decision.Code, message)
+}
+
 func (d RuntimeCompleteAdmissionDecision) Admitted() bool {
 	return d.Disposition == RuntimeCompleteAdmissionAdmitted
 }
