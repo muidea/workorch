@@ -79,3 +79,15 @@ func TestCandidateFrozenWorkSourceUsesOriginalOwnerAcrossReload(t *testing.T) {
 		t.Fatal("reading source generated effects or credit")
 	}
 }
+
+func TestCandidateManifestProjectionPreservesCurrentContractWithoutHistoryContext(t *testing.T) {
+	aggregate := stateChangeAggregate(t)
+	expected, err := contract.BuildRuntimeCandidateContractManifest(aggregate.Decision, contract.RuntimeCandidateManifestOwnerFactsFromContext(contract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual, err := BuildRuntimeCandidateContractManifestForAggregate(aggregate)
+	if err != nil || !reflect.DeepEqual(actual, expected) {
+		t.Fatal("narrow manifest projection changed frozen provider contract", err)
+	}
+}

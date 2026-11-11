@@ -110,7 +110,7 @@ func compileRuntimeEvidenceApplicabilitySource(aggregate RuntimeAggregate, evide
 			receiptHash = runtimecontract.StableRuntimeOperationReceiptHash(receipt)
 		}
 	}
-	source, err := compileRuntimeOperationReadSource(aggregate, fact.DispatchID, fact.OperationID, receiptHash)
+	source, err := CompileRuntimeOperationReadSource(aggregate, fact.DispatchID, fact.OperationID, receiptHash)
 	if err != nil {
 		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, RuntimeOperationReadSource{}, err
 	}

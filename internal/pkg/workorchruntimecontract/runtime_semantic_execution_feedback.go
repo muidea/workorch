@@ -153,6 +153,8 @@ func ValidateRuntimeSemanticExecutionFeedback(c RuntimeSemanticPlanRequestContex
 // facts. A nil value explicitly means the receipt has no typed observation;
 // locations/hashes alone never imply a complete assertion or an accepted DoD.
 type RuntimeValidationExecutionFeedback struct {
+	FailedSourceInputs []RuntimeValidationInputReviewFile `json:"failedSourceInputs,omitempty"`
+	SourceInputFailure string                             `json:"sourceInputFailure,omitempty"`
 	// New diagnostic observations never replace the original failed checks.
 	DiagnosticComparisons    []RuntimeValidationDiagnosticComparison `json:"diagnosticComparisons,omitempty"`
 	RecipeID                 string                                  `json:"recipeId,omitempty"`
@@ -177,6 +179,7 @@ type RuntimeValidationDiagnosticComparison struct {
 }
 
 func (f RuntimeValidationExecutionFeedback) Clone() RuntimeValidationExecutionFeedback {
+	f.FailedSourceInputs = slices.Clone(f.FailedSourceInputs)
 	f.DiagnosticComparisons = slices.Clone(f.DiagnosticComparisons)
 	f.ExecutedChecks = slices.Clone(f.ExecutedChecks)
 	f.PassedChecks = slices.Clone(f.PassedChecks)
@@ -188,6 +191,12 @@ func (f RuntimeValidationExecutionFeedback) Clone() RuntimeValidationExecutionFe
 }
 
 func (f RuntimeValidationExecutionFeedback) Validate() error {
+	if err := validateRuntimeExecutionSourceInputs(f.FailedSourceInputs); err != nil {
+		return err
+	}
+	if f.SourceInputFailure != "" && (!boundedValidationExecutionRef(f.SourceInputFailure, 512) || !f.FailureDetailsIncomplete || len(f.FailedSourceInputs) != 0) {
+		return fmt.Errorf("failed source input omission must remain explicit and incomplete")
+	}
 	if len(f.DiagnosticComparisons) > RuntimeValidationExecutionMaxStages {
 		return fmt.Errorf("diagnostic comparison capacity exceeded")
 	}
@@ -215,6 +224,8 @@ func (f RuntimeValidationExecutionFeedback) Validate() error {
 	}
 	canonical.FailureDetailsIncomplete, canonical.ChecksTruncated = f.FailureDetailsIncomplete, f.ChecksTruncated
 	canonical.DiagnosticComparisons = slices.Clone(f.DiagnosticComparisons)
+	canonical.FailedSourceInputs = slices.Clone(f.FailedSourceInputs)
+	canonical.SourceInputFailure = f.SourceInputFailure
 	if !reflect.DeepEqual(f, *canonical) {
 		return fmt.Errorf("validation feedback is not canonical")
 	}

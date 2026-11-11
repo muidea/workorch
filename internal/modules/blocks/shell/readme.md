@@ -317,11 +317,19 @@ skip、独立诊断漂移与旧协议；这不代替公开 fullflow、真实 pro
 
 显式 `shell/project-multi-failure-validation` + `validation/input-consistency` 使用独立 observation
 `shell/go-test-json/project-multi-failure-behavior`，保留其它 adapter 的独立诊断范围，不发布工作权限。
-owner 从准确输入 bytes 编译完整项目测试来源（opaque source ref、package-qualified native case、input target），
-以 `validation/diagnostic-source-review/v1` 封存到 subject 并要求每个来源独立一致性评审。
-有界 corpus 包含全部 project `_test.go`、validation namespace helpers、普通非 Go fixture/documentation 和根定义；
-非 test/non-harness Go 文件仍为可修复的交付实现，不成为不可变验证输入。依赖未提供的外部 harness/fixture
-不能猜作 consistent。新 envelope 为 64 files/256 KiB、64 sources、64 KiB report；超界明确不可用，不裁剪。
+owner 从当前 requirement package 的准确输入 bytes 编译本次语义来源，以
+`validation/diagnostic-source-review/v1` 封存到 subject 并逐来源独立评审。完整适用 corpus 包含当前 package
+全部 checks/helpers/fixtures、共享非 Go project data/docs 和根定义；其它独立 harness 的正文不累计进入本次评审。
+非 test/non-harness Go 仍为 delivery；依赖未提供外部 harness/fixture 不得猜作 consistent。
+审查 envelope 保持64 files/256 KiB、64 sources、64 KiB report；真实适用超界明确不可用，不裁剪。
+全项目 build/test/race 仍实际执行全部旧/新测试，原输入仍全部受保护。Shell 在同一隔离 operation 快照读取完整
+原生来源库存（native identity、target 与 input hash），通过 `ExecutionConjunction.NativeSources` 保全实际执行来源，
+不把该库存当作语义审查结果。库存读取前后与实际首阶段的完整 source-set hash 必须一致；单文件/来源数与实际执行
+边界继续有界，准备及全部阶段共享原deadline。已提交历史语义结论不因邻接CWI新增输入而重判。
+新失败的完整来源并集继续独立执行/定位；当前subject之外的受影响原始正文通过
+`FailedSourceInputs` 沿原receipt、execution feedback和既有独立输入重审事务提供，保持bytes/hash。
+省略当前subject已有正文仅避免重复，不能省略必要依赖。缺失/漂移拒绝；保存超界以 `SourceInputFailure`
+明确记录，feedback保持incomplete及原FAIL，不授盲修权限；原64KiB完整feedback边界继续生效。
 允许普通附加 native Test 和同包 helper method；Go 原生 Test 名称发现与独立诊断 inventory 使用同一规则，method 和 Testhelper 不冒充 native Test。
 附加 native Test 必须完整独立评审，并参加全项目合取；失败仍阻止通过，不能替代 required checks。
 preparation/supplement 使用实际选中协议的容量和期限说明：multi-failure 为 64 files/256 KiB、64 sources/64 KiB report，
@@ -337,7 +345,7 @@ required checks 和原总期限；仅实际准备时加入私有 scratch 路径�
 及继承环境的 `exec.Command(WORKORCH_NATIVE_SOURCE_RUNNER, t.Name()).Run()` 请求执行，并将非零状态报告给
 `testing.T`。不得回放子测试 stdout/stderr。直接 `os.Executable`（含导入别名）在结构观察中返回
 `native_check_unmanaged_self_execution`，沿既有精确受保护输入维护取得新输入与独立评审，不由开发代理改写 live 输入。
-原 in-process 方法仍可使用；只有封存 corpus 实际调用 literal runner 环境入口才准备通道。
+原 in-process 方法仍可使用；multi-failure 的所有 JSON 测试阶段声明并准备来源通道，允许邻接既有测试使用；其它 adapter 仍按其封存方法准备。通道存在本身不证明任意来源实际执行。
 
 通道属于原 managed session 内部，不新增 dispatch、执行权限或 Runtime authority。
 Shell 在原 operation deadline 内编译固定最小 client；每 stage 使用随机独立 Linux abstract Unix socket。
@@ -758,3 +766,16 @@ Orchestrator 消费其适用事实决定输入重审或精确终止，Shell 不�
 `TestProjectMultiFailureDiagnosticActualSourcesAndBehavior` 和 context disposition 覆盖 producer；
 `TestDriveRuntimeProjectMultiFailureOwnerMainline/project_history_failure` 覆盖完整断言→独立重审→一致但无行为归因→
 精确失败交付/恢复，已归因失败仍覆盖原 File repair→新 all-of→assessment→有序三 ACK。
+
+Project all-of readiness inspects the runner method of every actual validation
+input, including tests in neighboring packages. Those method observations do
+not import neighboring criteria or bodies into the current CWI's semantic
+subject. A repairable method defect publishes exact existing targets and bytes
+through the ordinary owner maintenance observation. Its bounded corpus combines
+the current required subject with only the affected neighboring inputs. File
+still requires the original input revision, replay proof and Shell postimage
+observation. A neighboring postimage checks that exact method; unrelated original
+input defects remain independently unavailable until their own new owner
+observation and repair. No method/postimage observation grants readiness,
+ordinary validation, assessment or acceptance credit. Frozen recovery consumes
+the original corpus; it does not reread or rerender a different subject.

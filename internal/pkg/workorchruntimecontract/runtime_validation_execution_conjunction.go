@@ -136,6 +136,11 @@ type RuntimeValidationExecutionConjunction struct {
 	Stages             []RuntimeValidationExecutionStage
 	BehaviorTargetRefs []string
 	Complete           bool
+	// Observed on the exact operation snapshot by the execution owner. This
+	// inventory may include adjacent tests outside the current semantic subject.
+	NativeSources      []RuntimeValidationDiagnosticSource `json:",omitempty"`
+	FailedSourceInputs []RuntimeValidationInputReviewFile  `json:",omitempty"`
+	SourceInputFailure string                              `json:",omitempty"`
 }
 
 func boundedValidationExecutionRef(value string, bound int) bool {
@@ -163,6 +168,8 @@ func StableRuntimeValidationExecutionStagesHash(stages []RuntimeValidationExecut
 }
 
 func (c RuntimeValidationExecutionConjunction) Clone() RuntimeValidationExecutionConjunction {
+	c.NativeSources = slices.Clone(c.NativeSources)
+	c.FailedSourceInputs = slices.Clone(c.FailedSourceInputs)
 	if c.Stages != nil {
 		c.Stages = append(make([]RuntimeValidationExecutionStage, 0, len(c.Stages)), c.Stages...)
 		for index := range c.Stages {
@@ -212,6 +219,9 @@ func (o RuntimeValidationOutputIdentity) Validate() error {
 }
 
 func (c RuntimeValidationExecutionConjunction) Validate() error {
+	if err := c.validateSourceInventory(); err != nil {
+		return err
+	}
 	if !boundedValidationExecutionRef(c.ProtocolRef, 512) || !validationExecutionDigest(c.RequiredStagesHash) || len(c.Stages) == 0 || len(c.Stages) > RuntimeValidationExecutionMaxStages || len(c.BehaviorTargetRefs) > 64 || !reflect.DeepEqual(c.BehaviorTargetRefs, normalizeStrings(c.BehaviorTargetRefs)) {
 		return fmt.Errorf("validation execution conjunction identity or bounds invalid")
 	}

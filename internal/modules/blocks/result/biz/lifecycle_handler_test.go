@@ -554,3 +554,56 @@ func terminalDeliveryFixture(deliveryID string, artifactRefs []common.ArtifactID
 		},
 	}
 }
+
+func TestResultFileOwnerEmptyOriginalDiagnosticDeliveryAndRecovery(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	command := terminalDeliveryFixture("empty-diagnostic-delivery", nil)
+	command.Outcome = runtimecontract.TerminalOutcome{Kind: runtimecontract.TerminalOutcomeKindFailed, Code: "owner_fact_convergence_exhausted", Summary: "owner input unavailable"}
+	command.Material.RuntimeCloseout = &runtimecontract.RuntimeResultCloseout{
+		SchemaVersion:  runtimecontract.RuntimeResultCloseoutSchemaVersionCurrent,
+		RecoveryPolicy: runtimecontract.DefaultRuntimeRecoveryPolicy(),
+		OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
+			SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
+			OwnerModuleID: "blocks/shell", OriginalClass: "validation_readiness",
+			OriginalCode: "validation_input_review_capacity_exceeded", OriginalMessage: "exact original owner failure",
+			Signature: "validation-readiness/requirement/capacity", TargetRefs: []string{},
+			FieldViolations: []runtimecontract.RuntimeFieldViolation{{Path: "workspaceManifest.revision", Actual: "original", Allowed: []string{}}},
+		},
+	}
+	var original *resultmodel.Result
+	for reopen := 0; reopen < 2; reopen++ {
+		repositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(root)
+		hub := magicevent.NewHub(16)
+		owner, err := New(hub, nil, Dependencies{OwnerRepositories: repositories.ResultOwner, EventHub: hub})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for replay := 0; replay < 2; replay++ {
+			response, err := owner.applyTerminalDelivery(ctx, command)
+			if err != nil || response.DeliveryAck == nil || response.Result.State != common.ResultStateRejected {
+				t.Fatalf("file delivery reopen=%d replay=%d: %+v %v", reopen, replay, response, err)
+			}
+			if !response.DeliveryAck.ResultCloseout.SamePersistedValue(command.Material.RuntimeCloseout) {
+				t.Fatal("ACK changed the sealed failure material")
+			}
+			if original == nil {
+				original = response.Result
+			} else if !reflect.DeepEqual(original, response.Result) || response.Transitioned {
+				t.Fatal("replay rewrote the committed Result")
+			}
+		}
+		changed := command
+		closeout := command.Material.RuntimeCloseout.CloneRaw()
+		closeout.OriginalDiagnostic.FieldViolations[0].Actual = "changed"
+		changed.Material.RuntimeCloseout = &closeout
+		if response, err := owner.applyTerminalDelivery(ctx, changed); !errors.Is(err, common.ErrConflict) || response.DeliveryAck != nil {
+			t.Fatalf("actual source drift returned an ACK: %+v %v", response, err)
+		}
+		owner.Teardown(ctx)
+		hub.Terminate(ctx)
+	}
+	if command.Material.RuntimeCloseout.OriginalDiagnostic.TargetRefs == nil {
+		t.Fatal("delivery normalized the original diagnostic")
+	}
+}

@@ -44,7 +44,13 @@ func attachShellValidationCheckFailures(output *RuntimeCommandResult, request Ru
 			scope[target] = struct{}{}
 		}
 	}
-	observationLines := shellNativeObservationLines(request.validationProofBinding.InputReview)
+	observed := request.validationProofBinding.InputReview
+	if request.validationNativeInputs != nil {
+		// These are exact execution-owner bytes on the operation snapshot,
+		// not a claim that adjacent inputs received semantic review.
+		observed = &runtimecontract.RuntimeValidationInputReviewSubject{Files: request.validationNativeInputs}
+	}
+	observationLines := shellNativeObservationLines(observed)
 	seen := make(map[runtimecontract.RuntimeValidationCheckFailure]struct{})
 	assertionBytes, detailCount := 0, 0
 	assertions, incomplete, issue := shellSourceBoundAssertions(output.goTestJSONFacts, failed, func(record shellGoTestJSONDiagnosticRecord, ref string, line int) bool {

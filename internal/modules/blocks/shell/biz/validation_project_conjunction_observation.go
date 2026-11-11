@@ -21,6 +21,9 @@ func shellProjectConjunctionObservation(fact shellProjectConjunctionFact, expect
 		identities = append(identities, runtimecontract.RuntimeValidationExecutionStageIdentity{ID: spec.ID, Scope: spec.Scope, RequireTests: index > 0, RequireBehavior: index == 3})
 	}
 	ret := runtimecontract.RuntimeValidationExecutionConjunction{ProtocolRef: fact.ProtocolRef, RequiredStagesHash: runtimecontract.StableRuntimeValidationExecutionStagesHash(identities), Complete: fact.Complete, BehaviorTargetRefs: append([]string(nil), fact.BehaviorTargetRefs...)}
+	ret.NativeSources = slices.Clone(fact.NativeSources)
+	ret.FailedSourceInputs = slices.Clone(fact.FailedSourceInputs)
+	ret.SourceInputFailure = fact.SourceInputFailure
 	for index, stage := range fact.Stages {
 		identity, spec := identities[min(index, 3)], expected[min(index, 3)]
 		if strings.HasPrefix(stage.ID, "project-diagnostic-") {

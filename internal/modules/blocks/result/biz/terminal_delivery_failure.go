@@ -40,7 +40,7 @@ func terminalResultMismatchFields(left, right *resultmodel.Result) []string {
 		{"ArtifactRefs", reflect.DeepEqual(left.ArtifactRefs, right.ArtifactRefs)},
 		{"DoDAssessment", reflect.DeepEqual(left.DoDAssessment, right.DoDAssessment)},
 		{"SummaryDetail", reflect.DeepEqual(left.SummaryDetail, right.SummaryDetail)},
-		{"RuntimeCloseout", reflect.DeepEqual(left.RuntimeCloseout, right.RuntimeCloseout)},
+		{"RuntimeCloseout", left.RuntimeCloseout.SamePersistedValue(right.RuntimeCloseout)},
 		{"TerminalMaterialHash", strings.TrimSpace(left.TerminalMaterialHash) == strings.TrimSpace(right.TerminalMaterialHash)},
 		{"TerminalDelivery", sameTerminalDeliveryIdentity(left.TerminalDelivery, right.TerminalDelivery)},
 	} {

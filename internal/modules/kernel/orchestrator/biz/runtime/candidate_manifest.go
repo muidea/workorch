@@ -16,7 +16,9 @@ func BuildRuntimeCandidateContractManifestForAggregate(aggregate RuntimeAggregat
 		return runtimecontract.RuntimeCandidateContractManifest{}, err
 	}
 	ownerFacts := runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
-		runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil),
+		runtimecontract.RuntimeCandidateContext{
+			RequiredState: aggregate.Decision.State, Resources: aggregate.Facts.Resources, Failure: aggregate.Facts.Failure,
+		},
 	)
 	if aggregate.Decision.RequiredOutput.ImplementationWorkBindingHash != "" {
 		round, err := CurrentRuntimeImplementationWorkReservation(aggregate)

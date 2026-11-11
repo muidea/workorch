@@ -248,6 +248,54 @@ func TestTerminalMaterialSealCompletionRequiresExactSavedBody(t *testing.T) {
 	}
 }
 
+func TestTerminalMaterialSealAcceptsExactPersistedDiagnosticAcknowledgement(t *testing.T) {
+	previous := materialSealTerminalAggregate(t)
+	previous.Termination = nil
+	previous.Facts.Failure = &runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassNoProgressExhausted, Code: "owner_fact_convergence_exhausted", Signature: "owner-input-unavailable", Message: "owner input unavailable",
+		OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
+			SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: "blocks/shell",
+			OriginalClass: "validation_readiness", OriginalCode: "validation_input_review_capacity_exceeded", OriginalMessage: "exact owner diagnostic", Signature: "capacity", TargetRefs: []string{},
+		},
+	}
+	var err error
+	previous.Decision, err = ReduceRuntimeState(previous.Facts, &previous.Decision.AuthoritySnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seal, err := terminalMaterialSealFromAggregate(previous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate := previous
+	aggregate.StateRevision++
+	aggregate.TerminalMaterialSeal = &seal
+	body, _ := json.Marshal(seal.Material.RuntimeCloseout)
+	var persisted runtimecontract.RuntimeResultCloseout
+	if err := json.Unmarshal(body, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	ack := runtimecontract.RuntimeDeliveryAcknowledgement{
+		WorkspaceID: seal.Identity.WorkspaceID, RunID: seal.Identity.RunID, ResultID: runtimecontract.RuntimeTerminalResultID(seal.Identity.WorkspaceID, seal.Identity.RunID),
+		TerminalDeliveryID: seal.Identity.TerminalDeliveryID, Owner: runtimecontract.RuntimeDeliveryOwnerResult, AuthoritySnapshotID: seal.Identity.AuthoritySnapshotID,
+		CausationID: "terminal-delivery/" + seal.Identity.TerminalDeliveryID, Outcome: seal.Identity.Outcome,
+		AcknowledgedState: runtimecontract.RuntimeDeliveryAcknowledgedResultRecorded, ResultCloseout: &persisted,
+	}
+	if err := validateDeliveryAcknowledgementAgainstAggregate(aggregate, ack); err != nil {
+		t.Fatal("file-owner ACK rejected the original sealed representation", err)
+	}
+	duplicate := ack.CloneRaw()
+	duplicate.ResultCloseout = seal.Material.RuntimeCloseout
+	duplicate.AcknowledgedState = runtimecontract.RuntimeDeliveryAcknowledgedNoop
+	if !sameDeliveryAcknowledgementIdentity(ack, duplicate) || seal.Material.RuntimeCloseout.OriginalDiagnostic.TargetRefs == nil {
+		t.Fatal("duplicate comparison changed original material or delivery identity")
+	}
+	persisted.OriginalDiagnostic.OriginalMessage += "changed"
+	if err := validateDeliveryAcknowledgementAgainstAggregate(aggregate, ack); err == nil {
+		t.Fatal("ACK admitted changed original diagnostic")
+	}
+}
+
 func TestTerminalMaterialSealResponseLossReplayUsesExactPersistedGeneration(t *testing.T) {
 	previous := materialSealTerminalAggregate(t)
 	responseLoss := errors.New("seal CAS 已提交但响应丢失")

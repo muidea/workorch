@@ -3,6 +3,7 @@ package shell
 import (
 	"go/parser"
 	"go/token"
+	"slices"
 	"strings"
 	"testing"
 
@@ -92,5 +93,107 @@ func TestStructuralMaintenanceRetainsExactMalformedInputWithoutReview(t *testing
 		if shellValidationInputMaintenance(root, refs, shellNativeCheckInspection{Code: code, TargetRefs: []string{target}}, r, recipe, checks) != nil {
 			t.Fatal("unavailable failure acquired authority", code)
 		}
+	}
+}
+
+func TestProjectMethodMaintenanceIncludesOnlyAffectedNeighbor(t *testing.T) {
+	recipe, requirement, _ := conjunctiveSourceRequirement(t)
+	recipe.AdapterRef = modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic
+	checks, ok := shellValidationCheckAttestations(recipe, requirement)
+	if !ok {
+		t.Fatal("mapping")
+	}
+	root := t.TempDir()
+	target := shellValidationNativeCheckTargetRef(requirement, checks...)
+	current := conjunctiveSourceInput(checks, "", "")
+	neighbor := "historical_test.go"
+	original := "package fixture\nimport(\"os\";\"os/exec\";\"testing\")\nfunc TestHistorical(t *testing.T){ p,_:=os.Executable(); if err:=exec.Command(p).Run();err!=nil{t.Fatal(err)} }\n"
+	writeNativeStructureSource(t, root, "go.mod", "module fixture\ngo 1.26\n")
+	writeNativeStructureSource(t, root, target, current)
+	writeNativeStructureSource(t, root, neighbor, original)
+	// Another completed package is still executed, but its full body must not
+	// consume the current CWI's independent semantic review/maintenance envelope.
+	other := "workorch_validation/other/other_test.go"
+	writeNativeStructureSource(t, root, other, "package other\nimport \"testing\"\nfunc TestOther(t *testing.T){t.Fatal(\"independent\")}\n/*"+strings.Repeat("x", rc.RuntimeValidationDiagnosticSourceMaxBytes)+"*/")
+	refs := []string{"go.mod", target, neighbor, other}
+	inspection := inspectShellNativeValidationChecks(root, refs, checks)
+	if inspection.Code != "native_check_unmanaged_self_execution" || len(inspection.TargetRefs) != 1 || inspection.TargetRefs[0] != neighbor {
+		t.Fatalf("lost executed neighbor method: %+v", inspection)
+	}
+	maintenance := shellValidationInputMaintenance(root, refs, inspection, requirement, recipe, checks)
+	if maintenance == nil || maintenance.Validate(requirement, recipe.ID) != nil {
+		t.Fatal("missing exact maintenance")
+	}
+	found := false
+	for _, f := range maintenance.Files {
+		if f.TargetRef == other {
+			t.Fatal("unaffected history entered maintenance")
+		}
+		if f.TargetRef == neighbor {
+			found = f.Content == original
+		}
+	}
+	if !found {
+		t.Fatal("missing original bytes")
+	}
+	binding, err := rc.RuntimeValidationProofRequirementBindingForRecipe(requirement, recipe.ID, checks...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject, code := shellInputReview(root, refs, binding)
+	if code != "" {
+		t.Fatal(code)
+	}
+	for _, f := range subject.Files {
+		if f.TargetRef == neighbor || f.TargetRef == other {
+			t.Fatal("execution method expanded semantic review")
+		}
+	}
+	// Pure postimage inspection uses exactly the same rule and frozen corpus.
+	files := map[string]string{}
+	var frozen []string
+	for _, f := range maintenance.Files {
+		files[f.TargetRef] = f.Content
+		frozen = append(frozen, f.TargetRef)
+	}
+	read := func(ref string) ([]byte, error) { return []byte(files[ref]), nil }
+	if got := inspectShellNativeValidationSources(frozen, checks, read); got.Code != inspection.Code {
+		t.Fatalf("frozen rule drift: %+v", got)
+	}
+	files[neighbor] = "package fixture\nimport \"testing\"\nfunc TestHistorical(t *testing.T){t.Fatal(\"original criterion retained\")}\n"
+	if got := inspectShellNativeValidationSources(frozen, checks, read); got.Code != "" {
+		t.Fatalf("repaired method refused: %+v", got)
+	}
+	// A diagnostic cannot authorize a path absent from the observed inventory.
+	if shellValidationInputMaintenance(root, refs, shellNativeCheckInspection{Code: inspection.Code, TargetRefs: []string{"unobserved_test.go"}}, requirement, recipe, checks) != nil {
+		t.Fatal("unobserved target authorized")
+	}
+}
+
+func TestProjectMethodMaintenanceProtectionCoversEachProjectRecipe(t *testing.T) {
+	for _, adapter := range []string{modulecommon.ValidationRecipeAdapterProjectConjunction, modulecommon.ValidationRecipeAdapterProjectFailureDiagnostic, modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic} {
+		t.Run(adapter, func(t *testing.T) {
+			recipe, requirement, _ := conjunctiveSourceRequirement(t)
+			recipe.AdapterRef = adapter
+			checks, ok := shellValidationCheckAttestations(recipe, requirement)
+			if !ok {
+				t.Fatal("mapping")
+			}
+			root := t.TempDir()
+			current := shellValidationNativeCheckTargetRef(requirement, checks...)
+			writeNativeStructureSource(t, root, "go.mod", "module fixture\ngo 1.26\n")
+			writeNativeStructureSource(t, root, current, conjunctiveSourceInput(checks, "", ""))
+			neighbor := "historical_test.go"
+			writeNativeStructureSource(t, root, neighbor, "package fixture\nimport(\"os\";\"testing\")\nfunc TestOriginal(t *testing.T){_,err:=os.Executable();if err!=nil{t.Fatal(err)}}\n")
+			binding := shellTestWorkspaceManifestBinding("project-method", []string{"go.mod", current, neighbor})
+			surfaces := shellValidationSurfaces([]rc.RuntimeValidationRecipe{recipe}, []rc.RuntimeValidationRecipe{recipe}, []rc.RuntimeValidationRecipe{recipe}, []rc.RuntimeValidationProofRequirement{requirement}, binding, "tree", root)
+			if len(surfaces) != 1 || len(surfaces[0].ProofRequirementUnavailabilities) != 1 {
+				t.Fatalf("lost method failure: %+v", surfaces)
+			}
+			m := surfaces[0].ProofRequirementUnavailabilities[0].Maintenance
+			if m == nil || !slices.Contains(surfaces[0].InputTargetRefs, neighbor) || !slices.Equal(m.TargetRefs, []string{neighbor}) {
+				t.Fatal("maintenance escaped protected actual execution inputs")
+			}
+		})
 	}
 }

@@ -2,6 +2,8 @@ package shell
 
 import (
 	"fmt"
+	"go/parser"
+	"go/token"
 	"path/filepath"
 	"strings"
 
@@ -34,6 +36,25 @@ func inspectShellValidationInputPostimage(r rc.RuntimeValidationInputStructureRe
 		return rc.RuntimeValidationInputStructureObservation{}, common.ErrInvalidArgument
 	}
 	files[r.Postimage.TargetRef] = r.Postimage.Content
+	// A neighboring method maintenance edits its exact observed input only.
+	// Other unchanged invalid inputs retain their own failure and later repair;
+	// this postimage observation is not project readiness or semantic credit.
+	pkg, err := shellIsolatedValidationPackage(r.Revision.Binding.CheckAttestations)
+	if err != nil {
+		return rc.RuntimeValidationInputStructureObservation{}, err
+	}
+	if r.Revision.OwnerObservation != nil && pkg != "" && !strings.HasPrefix(r.Postimage.TargetRef, pkg+"/") {
+		file, parseErr := parser.ParseFile(token.NewFileSet(), r.Postimage.TargetRef, r.Postimage.Content, 0)
+		if parseErr != nil {
+			fact.Code = "native_check_source_invalid"
+		} else {
+			fact.Code = shellProjectInputMethodCode(r.Postimage.TargetRef, file)
+		}
+		if fact.Code != "" {
+			fact.TargetRefs = []string{r.Postimage.TargetRef}
+		}
+		return fact, nil
+	}
 	// Pure declaration and assertion readiness only, never semantic consistency.
 	inspection := inspectShellNativeValidationSources(refs, r.Revision.Binding.CheckAttestations, func(ref string) ([]byte, error) {
 		if filepath.IsAbs(ref) || strings.Contains(ref, "\\") {

@@ -141,7 +141,7 @@ func runShellProjectMultiFailureDiagnostic(ctx context.Context, directory string
 	if !shellProjectDiagnosticInputCurrent(directory, request) || ctx.Err() != nil {
 		return reject(runtimecontract.ValidationDiagnosticInputChanged, "validation_failure_input_changed", "independent diagnostic requires the exact current sealed input subject")
 	}
-	sources := request.validationProofBinding.InputReview.DiagnosticSources
+	sources := request.validationNativeSources
 	if original.NativeSourceFailure != "" {
 		kind := runtimecontract.ValidationDiagnosticSourcesUnavailable
 		if original.NativeSourceFailure == "validation_native_source_raw_capacity_exceeded" {
@@ -276,7 +276,7 @@ func runShellProjectFailureSourceIsolated(ctx context.Context, directory string,
 	directory = copied
 	request.ValidationScratchDirectory = scratch
 	env = managedValidationEnvironment(env, scratch)
-	sources := request.validationProofBinding.InputReview.DiagnosticSources
+	sources := request.validationNativeSources
 	file, err := os.CreateTemp(request.ValidationScratchDirectory, "project-source-*.cover")
 	if err != nil {
 		return fail(runtimecontract.ValidationDiagnosticExecutionUnavailable, "validation_failure_execution_unavailable", "independent diagnostic scratch could not be created")
@@ -301,9 +301,7 @@ func runShellProjectFailureSourceIsolated(ctx context.Context, directory string,
 	}
 	args = shellProcessBehaviorArgs(args, processPath)
 	spec := shellProjectStageSpec{ID: "project-diagnostic-" + strings.TrimPrefix(source.SourceRef, "shell-project-source-"), Scope: "diagnostic-source:" + source.SourceRef, Args: args, JSON: true}
-	if shellNativeChannelMethodRequired(request.validationProofBinding.InputReview.Files) {
-		spec.NativeSources = []runtimecontract.RuntimeValidationDiagnosticSource{source}
-	}
+	spec.NativeSources = []runtimecontract.RuntimeValidationDiagnosticSource{source}
 	result.spec = &spec
 	stageEnv := shellProcessBehaviorEnvironment(shellBehaviorEnvironment(env), processPath, args)
 	stage, _ := runShellProjectStageWithBudget(ctx, directory, stageEnv, spec, request.projectRawBudget)

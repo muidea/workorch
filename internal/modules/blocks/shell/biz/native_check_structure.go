@@ -109,7 +109,11 @@ func inspectShellNativeValidationSources(targetRefs []string, attestations []run
 	var invalidSources []string
 	fileCount, sourceBytes := 0, int64(0)
 	for _, ref := range normalizeShellStrings(targetRefs) {
-		if isolatedPackage != "" && !strings.HasPrefix(ref, isolatedPackage+"/") {
+		outsideSubject := isolatedPackage != "" && !strings.HasPrefix(ref, isolatedPackage+"/")
+		// Project methods execute neighboring tests too. Inspect their runner
+		// method without borrowing their declarations or semantic obligations
+		// into the current CWI's independent input subject.
+		if outsideSubject && (!shellProjectObservationProtocol(attestations[0].ObservationProtocolRef) || (!strings.HasSuffix(ref, "_test.go") && !strings.HasPrefix(ref, "workorch_validation/"))) {
 			continue
 		}
 		if !strings.HasSuffix(ref, ".go") || managedValidationSandboxPathExcluded(ref) {
@@ -136,6 +140,12 @@ func inspectShellNativeValidationSources(targetRefs []string, attestations []run
 			// Compilation has its own owner diagnostic. Do not infer a native
 			// declaration from a partial AST or export raw parser text.
 			invalidSources = append(invalidSources, ref)
+			continue
+		}
+		if outsideSubject {
+			if code := shellProjectInputMethodCode(ref, file); code != "" {
+				return shellNativeCheckInspection{Code: code, TargetRefs: []string{ref}}
+			}
 			continue
 		}
 		for _, check := range attestations {
@@ -361,4 +371,16 @@ func (w *shellNativeCheckWalk) body(fn shellNativeCheckFunction, body *ast.Block
 		return !found
 	})
 	return found
+}
+
+// This applies only to actual validation inputs, independent of which CWI
+// owns their criteria. It does not judge those criteria or grant execution.
+func shellProjectInputMethodCode(ref string, file *ast.File) string {
+	if strings.HasSuffix(ref, "_test.go") && shellNativeRunnerOverride(file) {
+		return "native_check_runner_override"
+	}
+	if shellNativeUnmanagedSelfExecution(file) {
+		return "native_check_unmanaged_self_execution"
+	}
+	return ""
 }

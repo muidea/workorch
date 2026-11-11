@@ -45,10 +45,7 @@ func TestEvaluateRuntimeCompleteAdmissionMatrix(t *testing.T) {
 		{name: "proposal missing", mutate: func(input *RuntimeCompleteAdmissionInput) {
 			input.Attempt.Proposal = nil
 		}, disposition: RuntimeCompleteAdmissionStaleConflict, code: "candidate_proposal_mismatch"},
-		{name: "run-086 prospective binding target cannot dispatch to main go", mutate: func(input *RuntimeCompleteAdmissionInput) {
-			input.Candidate.StateChange.Operations[0].Operation.TargetRefs[0] = "cmd/lsp-bridge/main.go"
-			input.Attempt.Proposal.StateChange.Operations[0].Operation.TargetRefs[0] = "cmd/lsp-bridge/main.go"
-		}, disposition: RuntimeCompleteAdmissionCorrectableOnce, code: "candidate_manifest_violation"},
+
 		{name: "attempt already closed", mutate: func(input *RuntimeCompleteAdmissionInput) {
 			input.Attempt.State = RuntimeCandidateAttemptStateAccepted
 		}, disposition: RuntimeCompleteAdmissionDuplicateNoop, code: "candidate_attempt_not_pending"},
@@ -81,7 +78,6 @@ func TestEvaluateRuntimeCompleteAdmissionDetachesAndDoesNotMutateInput(t *testin
 	cloned.Facts.Focus.TargetRefs[0] = "mutated.go"
 	cloned.Decision.RequiredOutput.TargetRefs[0] = "mutated.go"
 	cloned.SemanticPlanning.Manifest.OwnerCatalogs[0].TargetRefs[0] = "mutated.go"
-	cloned.Reconciliation.History = append(cloned.Reconciliation.History, RuntimeCWIReconciliationGeneration{})
 	cloned.Manifest.Bindings[0].TargetRefs[0] = "mutated.go"
 	cloned.Candidate.StateChange.Operations[0].Operation.TargetRefs[0] = "mutated.go"
 	cloned.Attempt.Proposal.StateChange.Operations[0].Operation.TargetRefs[0] = "mutated.go"
@@ -98,7 +94,7 @@ func TestEvaluateRuntimeCompleteAdmissionDetachesAndDoesNotMutateInput(t *testin
 	}
 }
 
-func TestEvaluateRuntimeCompleteAdmissionRejectsRetirementAfterAcceptedEffect(t *testing.T) {
+func TestOwnerAdmissionRejectsRetirementAfterAcceptedEffect(t *testing.T) {
 	input := runtimeCompleteAdmissionFixture(t)
 	current := input.Facts.Coverage[0].CurrentBindingRef.Clone()
 	ref := current.Clone()
@@ -116,14 +112,13 @@ func TestEvaluateRuntimeCompleteAdmissionRejectsRetirementAfterAcceptedEffect(t 
 	dispatch.OperationExecutions[0].Fence = 1
 	dispatch.OperationExecutions[0].OwnerReceiptRef = "receipt-1"
 	dispatch.OperationExecutions[0].OwnerReceiptHash = "receipt-hash-1"
-	input.CompletedDispatches = []RuntimeDispatchRecord{*dispatch}
-	input.OperationReceipts = []RuntimeOperationReceipt{{
+	completed := []RuntimeDispatchRecord{*dispatch}
+	receipts := []RuntimeOperationReceipt{{
 		ExecutionKey: dispatch.OperationExecutions[0].ExecutionKey, Fence: 1, OperationID: dispatch.OperationExecutions[0].OperationID,
 		Outcome: RuntimeOperationOutcomeAccepted, ObservedEffectScope: RuntimeEffectWorkspaceDurable, Changed: true, TargetRefs: []string{"main.go"},
 	}}
-	decision := EvaluateRuntimeCompleteAdmission(input)
-	if decision.Disposition != RuntimeCompleteAdmissionTerminalContractFailure || !strings.Contains(decision.Message, "retired after accepted durable execution") {
-		t.Fatalf("retirement/effect decision = %+v", decision)
+	if err := ValidateRuntimeCWIBindingRetirementsAgainstExecution(input.Facts, nil, completed, receipts); err == nil || !strings.Contains(err.Error(), "retired after accepted durable execution") {
+		t.Fatalf("retirement/effect owner admission = %v", err)
 	}
 }
 
@@ -351,5 +346,39 @@ func runtimeCompleteAdmissionDispatch(input *RuntimeCompleteAdmissionInput) *Run
 			OperationID: operationID, ExecutionKey: StableRuntimeOperationExecutionKey(input.Facts.WorkspaceID, input.Facts.RunID, "dispatch-1", operationID),
 			ExpectedEffectScope: RuntimeEffectWorkspaceDurable, State: OperationExecutionSealed,
 		}},
+	}
+}
+
+// Only tests detach fixtures before intentionally corrupting individual values.
+func (i RuntimeCompleteAdmissionInput) Clone() RuntimeCompleteAdmissionInput {
+	i.Facts = i.Facts.Normalized()
+	i.Decision = cloneRuntimeDecision(i.Decision)
+	i.SemanticPlanning = i.SemanticPlanning.Clone()
+	i.ImplementationWork = i.ImplementationWork.Clone()
+	i.Manifest = i.Manifest.Clone()
+	i.Candidate = cloneRuntimeCandidate(i.Candidate)
+	i.Attempt = i.Attempt.Clone()
+	if i.ActiveDispatch != nil {
+		value := i.ActiveDispatch.Clone()
+		i.ActiveDispatch = &value
+	}
+	return i
+}
+func cloneRuntimeDispatchRecords(values []RuntimeDispatchRecord) []RuntimeDispatchRecord {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]RuntimeDispatchRecord, len(values))
+	for idx := range values {
+		ret[idx] = values[idx].Clone()
+	}
+	return ret
+}
+
+func TestCandidateAdmissionRejectsProspectiveBindingTargetDrift(t *testing.T) {
+	input := runtimeCompleteAdmissionFixture(t)
+	input.Candidate.StateChange.Operations[0].Operation.TargetRefs[0] = "cmd/lsp-bridge/main.go"
+	if err := ValidateRuntimeCandidateAgainstManifest(input.Manifest, input.Candidate); err == nil {
+		t.Fatal("wrong prospective target admitted")
 	}
 }

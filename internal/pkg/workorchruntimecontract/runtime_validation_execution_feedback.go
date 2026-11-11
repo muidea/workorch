@@ -26,6 +26,11 @@ func ProjectRuntimeValidationExecutionFeedback(value *RuntimeValidationObservati
 	}
 	ret := &RuntimeValidationExecutionFeedback{RecipeID: o.RecipeID, ObservationProtocolRef: o.ObservationProtocolRef,
 		FailureDetailsIncomplete: o.FailureDetailsTruncated || o.OutputTruncated, ChecksTruncated: o.OutputTruncated}
+	if o.ExecutionConjunction != nil {
+		ret.FailedSourceInputs = o.ExecutionConjunction.Clone().FailedSourceInputs
+		ret.SourceInputFailure = o.ExecutionConjunction.SourceInputFailure
+		ret.FailureDetailsIncomplete = ret.FailureDetailsIncomplete || ret.SourceInputFailure != ""
+	}
 	bounded := func(values []string) []string {
 		if len(values) > RuntimeValidationFailureDetailLimit {
 			ret.ChecksTruncated = true

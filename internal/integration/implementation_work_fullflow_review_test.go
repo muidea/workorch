@@ -75,7 +75,7 @@ func TestImplementationWorkFullflowReviewUsesExactIndependentSourceCriteria(t *t
 		{"profile", "共同 CWI", runtimecontract.RuntimeValidationInputConsistent},
 	} {
 		t.Run(test.check, func(t *testing.T) {
-			item, err := implementationWorkFullflowReviewCheck(&validation, test.check, "共同 CWI", runtimecontract.RuntimeValidationInputReviewProtocol, files, "isolated package", refs)
+			item, err := implementationWorkFullflowReviewCheck(&validation, test.check, "共同 CWI", runtimecontract.RuntimeValidationInputReviewProtocol, files, "isolated package", refs, nil)
 			if err != nil || item.Conclusion != test.conclusion || len(item.Obligations) != 1 || item.Obligations[0].CriterionText != test.criterion {
 				t.Fatalf("independent source review drifted: %+v err=%v", item, err)
 			}
@@ -83,16 +83,16 @@ func TestImplementationWorkFullflowReviewUsesExactIndependentSourceCriteria(t *t
 	}
 	// Even a behavioral criterion cannot prove a declaration requiring owner facts.
 	validation.SourceChecks[0].Declaration = "查询真实 Git owner receipt"
-	item, err := implementationWorkFullflowReviewCheck(&validation, validation.Checks[0], "共同 CWI", runtimecontract.RuntimeValidationInputReviewProtocol, files, "isolated package", refs)
+	item, err := implementationWorkFullflowReviewCheck(&validation, validation.Checks[0], "共同 CWI", runtimecontract.RuntimeValidationInputReviewProtocol, files, "isolated package", refs, nil)
 	if err != nil || item.Conclusion != runtimecontract.RuntimeValidationInputInconclusive {
 		t.Fatal("source declaration authority was ignored")
 	}
 	validation.SourceChecks = validation.SourceChecks[:1]
-	if _, err := implementationWorkFullflowReviewCheck(&validation, validation.Checks[1], "共同 CWI", runtimecontract.RuntimeValidationInputReviewProtocol, files, "isolated package", refs); err == nil {
+	if _, err := implementationWorkFullflowReviewCheck(&validation, validation.Checks[1], "共同 CWI", runtimecontract.RuntimeValidationInputReviewProtocol, files, "isolated package", refs, nil); err == nil {
 		t.Fatal("missing source criterion fell back to shared CWI")
 	}
 	validation.SourceChecks = append(validation.SourceChecks, validation.SourceChecks[0])
-	if _, err := implementationWorkFullflowReviewCheck(&validation, validation.Checks[0], "共同 CWI", runtimecontract.RuntimeValidationInputReviewProtocol, files, "isolated package", refs); err == nil {
+	if _, err := implementationWorkFullflowReviewCheck(&validation, validation.Checks[0], "共同 CWI", runtimecontract.RuntimeValidationInputReviewProtocol, files, "isolated package", refs, nil); err == nil {
 		t.Fatal("duplicate source identity accepted")
 	}
 }
@@ -111,14 +111,36 @@ func TestImplementationWorkFullflowReviewCompositionPreservesOrdinaryAndTypedCon
 	validation := implementationWorkFullflowValidation{Checks: []string{"check"}}
 	files := []runtimecontract.RuntimeValidationInputReviewFile{{TargetRef: "checks/delivery_test.go", Content: implementationWorkFullflowInput("checks/delivery_test.go", []string{"TestDelivery"}, criterion)}}
 	refs := []string{files[0].TargetRef}
-	scope := "Shell 的根 module build/test/race 另外实际执行"
+	scope := "Current requirement review; wording is not a method identity."
+	plan := &runtimecontract.RuntimeValidationExecutionPlan{Stages: []runtimecontract.RuntimeValidationPlannedStage{
+		{Command: "go", Args: []string{"build", "./..."}, Identity: runtimecontract.RuntimeValidationExecutionStageIdentity{Scope: "root-module:./..."}},
+		{Command: "go", Args: []string{"test", "-json", "-count=1", "./..."}, Identity: runtimecontract.RuntimeValidationExecutionStageIdentity{Scope: "root-module:./..."}},
+		{Command: "go", Args: []string{"test", "-race", "-json", "-count=1", "./..."}, Identity: runtimecontract.RuntimeValidationExecutionStageIdentity{Scope: "root-module:./..."}},
+		{Command: "go", Args: []string{"test", "./checks"}, Identity: runtimecontract.RuntimeValidationExecutionStageIdentity{RequireTests: true, RequireBehavior: true}, RequiredCheckRefs: []string{"check"}},
+	}}
 	review := func(input []runtimecontract.RuntimeValidationInputReviewFile, consumers []runtimecontract.RuntimeLineageAssertion) runtimecontract.RuntimeValidationInputCheckReview {
 		t.Helper()
-		item, err := implementationWorkFullflowReviewCheck(&validation, "check", criterion, runtimecontract.RuntimeValidationInputReviewProtocol, input, scope, refs, consumers)
+		item, err := implementationWorkFullflowReviewCheck(&validation, "check", criterion, runtimecontract.RuntimeValidationInputReviewProtocol, input, scope, refs, plan, consumers)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return item
+	}
+	// A complete-suite obligation cannot be supplied by prose or an isolated plan.
+	for _, invalid := range []*runtimecontract.RuntimeValidationExecutionPlan{nil, {Stages: plan.Stages[:3]}} {
+		got, err := implementationWorkFullflowReviewCheck(&validation, "check", "完整工程", runtimecontract.RuntimeValidationInputReviewProtocol, files, "Root build/test/race and independent reviewed CWI behavior remain mandatory", refs, invalid, assertions)
+		if err != nil || got.Conclusion != runtimecontract.RuntimeValidationInputInconclusive {
+			t.Fatal("prose replaced a complete typed execution method", err)
+		}
+	}
+	isolated := plan.Clone()
+	isolated.Stages[1].Args = []string{"test", "./checks"}
+	if implementationWorkFullflowHasProjectPlan(&isolated) {
+		t.Fatal("isolated test became root all-of")
+	}
+	got, err := implementationWorkFullflowReviewCheck(&validation, "check", "完整工程", runtimecontract.RuntimeValidationInputReviewProtocol, files, scope, refs, plan, assertions)
+	if err != nil || got.Conclusion != runtimecontract.RuntimeValidationInputConsistent {
+		t.Fatal("complete typed plan depended on prompt wording", err)
 	}
 	item := review(files, assertions)
 	if item.Conclusion != runtimecontract.RuntimeValidationInputConsistent || len(item.Obligations) != 1 || item.Obligations[0].CriterionText != criterion || !slices.Equal(item.Obligations[0].ProofConsumerRefs, []string{"delivery", "repair", "rounds", runtimecontract.RuntimeValidationInputConsumer}) {
@@ -145,7 +167,7 @@ func TestImplementationWorkFullflowReviewCompositionPreservesOrdinaryAndTypedCon
 	if review(files, drifted).Conclusion != runtimecontract.RuntimeValidationInputConflict {
 		t.Fatal("rehashed single-round rule weakened two-round criterion")
 	}
-	if _, err := implementationWorkFullflowReviewCheck(&validation, "check", criterion, "unsupported-review-contract", files, scope, refs, assertions); err == nil {
+	if _, err := implementationWorkFullflowReviewCheck(&validation, "check", criterion, "unsupported-review-contract", files, scope, refs, plan, assertions); err == nil {
 		t.Fatal("unknown review contract silently carried composite declarations")
 	}
 }

@@ -67,14 +67,12 @@ func candidateRequestSessionManifestBinding(aggregate RuntimeAggregate, logicalR
 	if !found || session.DocumentKind != runtimecontract.RuntimeProviderDocumentOperations || session.ManifestHash != manifest.Hash {
 		return 0, fmt.Errorf("%w: candidate request session has no exact operations manifest binding", common.ErrConflict)
 	}
-	if err := runtimecontract.ValidateRuntimeCandidateContractManifestRawCanonical(manifest); err != nil {
-		return 0, fmt.Errorf("%w: candidate request session manifest is not canonical", common.ErrConflict)
-	}
 	if session.CandidateManifest != nil {
-		if err := runtimecontract.ValidateRuntimeCandidateContractManifestRawCanonical(*session.CandidateManifest); err != nil ||
-			!reflect.DeepEqual(*session.CandidateManifest, manifest) {
+		if !reflect.DeepEqual(*session.CandidateManifest, manifest) {
 			return 0, fmt.Errorf("%w: candidate request session manifest body changed", common.ErrConflict)
 		}
+	} else if err := runtimecontract.ValidateRuntimeCandidateContractManifestRawCanonical(manifest); err != nil {
+		return 0, fmt.Errorf("%w: candidate request session manifest is not canonical", common.ErrConflict)
 	}
 	return idx, nil
 }
@@ -356,15 +354,23 @@ func (c *candidateDispatchComponent) admitCandidateProposal(ctx context.Context,
 	if err := validateCandidateAttemptSessionBinding(aggregate, "", manifest, logicalRequestID); err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
-	if err := validateRuntimeCandidatePurposeFence(aggregate); err != nil {
-		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate proposal binding fence: %v", common.ErrConflict, err)
-	}
 	if record.ManifestHash != manifest.Hash || record.LogicalRequestID != logicalRequestID {
 		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate proposal does not match pending request-session binding", common.ErrConflict)
 	}
 	sessionIndex, err := candidateRequestSessionManifestBinding(aggregate, logicalRequestID, manifest)
 	if err != nil {
 		return CandidateAdmissionCommitResult{}, err
+	}
+	// A persisted proposal is the owner admission result. Duplicate delivery
+	// consumes that exact result before replay/semantic rules can be reapplied.
+	if record.Proposal != nil {
+		if runtimecontract.StableRuntimeCandidateHash(*record.Proposal) != runtimecontract.StableRuntimeCandidateHash(candidate) {
+			return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: pending candidate attempt proposal changed", common.ErrConflict)
+		}
+		return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: acceptedCandidateAdmission()}, nil
+	}
+	if err := validateRuntimeCandidatePurposeFence(aggregate); err != nil {
+		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate proposal binding fence: %v", common.ErrConflict, err)
 	}
 	admission := EvaluateCandidateAdmissionWithManifest(aggregate, manifest, candidate)
 	if !admission.Accepted() {
@@ -398,16 +404,6 @@ func (c *candidateDispatchComponent) admitCandidateProposal(ctx context.Context,
 		}
 	} else if repairCommitment == nil && session.RepairCommitmentHash != "" {
 		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: pending candidate has an orphan repair commitment hash", common.ErrConflict)
-	}
-	if record.Proposal != nil {
-		if runtimecontract.StableRuntimeCandidateHash(*record.Proposal) != runtimecontract.StableRuntimeCandidateHash(candidate) {
-			return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: pending candidate attempt proposal changed", common.ErrConflict)
-		}
-		if repairCommitment != nil &&
-			session.RepairCommitmentHash != runtimecontract.StableRuntimeDispatchRepairCommitmentHash(*repairCommitment) {
-			return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: pending candidate repair commitment hash changed", common.ErrConflict)
-		}
-		return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: admission}, nil
 	}
 	expectedRevision := aggregate.StateRevision
 	proposal := candidate
@@ -711,9 +707,6 @@ func (c *candidateDispatchComponent) admitAndSealCandidateAttempt(ctx context.Co
 	if err := validateCandidateAttemptSessionBinding(aggregate, "", manifest, logicalRequestID); err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
-	if err := validateRuntimeCandidatePurposeFence(aggregate); err != nil {
-		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate dispatch binding fence: %v", common.ErrConflict, err)
-	}
 	if record.ManifestHash != manifest.Hash || record.LogicalRequestID != logicalRequestID {
 		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate seal does not match pending request-session binding", common.ErrConflict)
 	}
@@ -721,37 +714,18 @@ func (c *candidateDispatchComponent) admitAndSealCandidateAttempt(ctx context.Co
 	if err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
-	admission := EvaluateCandidateAdmissionWithManifest(aggregate, manifest, candidate)
-	if !admission.Accepted() {
-		expectedRevision := aggregate.StateRevision
-		// Final admission may be reached directly after a restart or alternate
-		// owner probe. Preserve a schema-valid rejected candidate here too, so
-		// duplicate delivery has the same durable identity as proposal admission.
-		if candidate.ValidateWithActivation(aggregate.Decision, runtimecontract.RuntimeActivationForFacts(aggregate.Facts)) == nil {
-			proposal := candidate
-			aggregate.CandidateAttempts[idx].Proposal = &proposal
-		}
-		if err := closeCandidateAttemptWithCorrection(&aggregate, idx, attempt, *admission.Failure, admission.Correction); err != nil {
-			return CandidateAdmissionCommitResult{}, err
-		}
-		aggregate.StateRevision++
-
-		if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-			return CandidateAdmissionCommitResult{}, err
-		}
-		return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: admission}, nil
+	// Sealing consumes the formal proposal admission; restart follows this same
+	// persisted transaction and cannot introduce an alternate admission lane.
+	if record.Proposal == nil || runtimecontract.StableRuntimeCandidateHash(*record.Proposal) != runtimecontract.StableRuntimeCandidateHash(candidate) {
+		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate seal requires its exact admitted proposal", common.ErrConflict)
 	}
+	admission := acceptedCandidateAdmission()
 	if err := validateCandidateConformanceAdmission(record, manifest, candidate); err != nil {
 		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate conformance admission: %v", common.ErrConflict, err)
 	}
-	repairCommitment, err := deriveConfirmedRepairAdmissionCommitment(aggregate, manifest, candidate)
-	if err != nil {
-		return CandidateAdmissionCommitResult{}, err
-	}
+	// This source was derived and committed with the original proposal.
 	session := aggregate.CandidateRequestSessions[sessionIndex]
-	if !runtimecontract.SameRuntimeDispatchRepairCommitment(session.RepairCommitment, repairCommitment) {
-		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: final candidate repair commitment does not match its pre-seal request session", common.ErrConflict)
-	}
+	repairCommitment := session.RepairCommitment
 	wantRepairCommitmentHash := ""
 	if repairCommitment != nil {
 		wantRepairCommitmentHash = runtimecontract.StableRuntimeDispatchRepairCommitmentHash(*repairCommitment)
@@ -775,7 +749,7 @@ func (c *candidateDispatchComponent) admitAndSealCandidateAttempt(ctx context.Co
 	if err != nil {
 		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: derive candidate admission validation-recipe projection: %v", common.ErrConflict, err)
 	}
-	dispatch, completeAdmission, err := admitRuntimeDispatch(aggregate, manifest, candidate, &record, &admission, repairCommitment)
+	dispatch, completeAdmission, err := admitRuntimeDispatch(aggregate, manifest, candidate, &record, repairCommitment)
 	if !completeAdmission.Admitted() {
 		return CandidateAdmissionCommitResult{}, &runtimecontract.RuntimeCompleteAdmissionRejection{Decision: completeAdmission, Cause: err}
 	}
@@ -861,8 +835,7 @@ func (c *candidateDispatchComponent) sealGovernanceDispatch(ctx context.Context,
 	// to a governance interlude and could reject a legitimate owner suspension.
 	// The candidate shape and dependency have already crossed their two typed
 	// gates; the shared dispatch seal still validates the resulting transaction.
-	accepted := acceptedCandidateAdmission()
-	dispatch, completeAdmission, err := admitRuntimeDispatch(aggregate, manifest, candidate, nil, &accepted, nil)
+	dispatch, completeAdmission, err := admitRuntimeDispatch(aggregate, manifest, candidate, nil, nil)
 	if !completeAdmission.Admitted() {
 		return RuntimeAggregate{}, &runtimecontract.RuntimeCompleteAdmissionRejection{Decision: completeAdmission, Cause: err}
 	}
@@ -884,7 +857,7 @@ func (c *candidateDispatchComponent) sealGovernanceDispatch(ctx context.Context,
 // ledgers, but both cross the same manifest, active-dispatch and sealed-builder
 // fence. It is pure and owner-local; callers commit the returned value only
 // through the corresponding private internal event and one aggregate CAS.
-func admitRuntimeDispatch(aggregate RuntimeAggregate, manifest runtimecontract.RuntimeCandidateContractManifest, candidate runtimecontract.RuntimeCandidate, attempt *runtimecontract.RuntimeCandidateAttemptRecord, evaluated *CandidateAdmissionResult, repairCommitment *runtimecontract.RuntimeDispatchRepairCommitment) (runtimecontract.RuntimeDispatchRecord, runtimecontract.RuntimeCompleteAdmissionDecision, error) {
+func admitRuntimeDispatch(aggregate RuntimeAggregate, manifest runtimecontract.RuntimeCandidateContractManifest, candidate runtimecontract.RuntimeCandidate, attempt *runtimecontract.RuntimeCandidateAttemptRecord, repairCommitment *runtimecontract.RuntimeDispatchRepairCommitment) (runtimecontract.RuntimeDispatchRecord, runtimecontract.RuntimeCompleteAdmissionDecision, error) {
 	if aggregate.ActiveDispatch != nil {
 		return runtimecontract.RuntimeDispatchRecord{}, runtimecontract.RuntimeCompleteAdmissionDecision{
 			Disposition: runtimecontract.RuntimeCompleteAdmissionStaleConflict,
@@ -892,35 +865,12 @@ func admitRuntimeDispatch(aggregate RuntimeAggregate, manifest runtimecontract.R
 			Message:     "runtime authority already has an active dispatch",
 		}, nil
 	}
-	admission := evaluated
-	if admission == nil {
-		value := EvaluateCandidateAdmissionWithManifest(aggregate, manifest, candidate)
-		admission = &value
-	}
-	if !admission.Accepted() {
-		message := "runtime candidate rejected by manifest-bound admission"
-		if admission.Failure != nil {
-			message = admission.Failure.Reason
-		}
-		return runtimecontract.RuntimeDispatchRecord{}, runtimecontract.RuntimeCompleteAdmissionDecision{
-			Disposition: runtimecontract.RuntimeCompleteAdmissionCorrectableOnce,
-			Code:        "candidate_document_rejected",
-			Message:     message,
-		}, nil
-	}
 	var feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord
 	if attempt != nil {
 		complete := runtimecontract.EvaluateRuntimeCompleteAdmission(runtimecontract.RuntimeCompleteAdmissionInput{
-			Definition: aggregate.Definition, ProcessedEventIDs: aggregate.ProcessedEventIDs,
-			Facts: aggregate.Facts, Decision: aggregate.Decision, SemanticPlanning: aggregate.SemanticPlanning, ImplementationWork: aggregate.ImplementationWork,
-			Reconciliation: aggregate.Reconciliation, Manifest: manifest, Candidate: candidate, Attempt: *attempt,
-			ActiveDispatch:      sealedDispatchRecord(aggregate.ActiveDispatch),
-			CompletedDispatches: (aggregate.CompletedDispatches),
-			OperationReceipts:   aggregate.OperationReceipts,
-			ProofLineage:        aggregate.CoverageProofLineage, Governance: aggregate.OperationGovernanceBindings,
-			Budget: aggregate.ExecutionBudget, EvidenceSequence: aggregate.EvidenceSequence,
-			Resolutions: aggregate.GovernanceResolutions, Attempts: aggregate.CandidateAttempts,
-			Sessions: aggregate.CandidateRequestSessions, Confirmations: aggregate.RepairSurfaceConfirmations,
+			Facts: aggregate.Facts, Decision: aggregate.Decision, SemanticPlanning: aggregate.SemanticPlanning,
+			ImplementationWork: aggregate.ImplementationWork, Manifest: manifest, Candidate: candidate, Attempt: *attempt,
+			ActiveDispatch: sealedDispatchRecord(aggregate.ActiveDispatch),
 		})
 		if !complete.Admitted() {
 			return runtimecontract.RuntimeDispatchRecord{}, complete, nil

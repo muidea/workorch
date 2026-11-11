@@ -10,34 +10,19 @@ import (
 func TestValidationCatalogSourceSelectionMatchesOriginal(t *testing.T) {
 	first, observation := runtimeWebCatalogFixture(t, "source", "revision")
 	op := runtimecontract.RuntimeOperation{Kind: runtimecontract.StepKindWebSearch}
-	for _, name := range []string{"original", "whitespace", "missing", "observation-kind", "observation-missing", "invalid-catalog", "duplicates", "unrelated"} {
+	for _, name := range []string{"original", "missing", "observation-kind", "observation-missing", "unrelated"} {
 		t.Run(name, func(t *testing.T) {
 			catalog, obs := first.Normalized(), observation.Normalized()
 			switch name {
-			case "whitespace":
-				catalog.PrerequisiteID = " " + catalog.PrerequisiteID + " "
-				catalog.OwnerModuleID = " " + catalog.OwnerModuleID + " "
-				catalog.SnapshotID = " " + catalog.SnapshotID + " "
-				catalog.AcquisitionBinding = " " + catalog.AcquisitionBinding + " "
-				obs.PrerequisiteID = " " + obs.PrerequisiteID + " "
-				obs.Kind = runtimecontract.PrerequisiteKind(" " + string(obs.Kind) + " ")
-				obs.OwnerModuleID = " " + obs.OwnerModuleID + " "
-				obs.ContentHash = " " + obs.ContentHash + " "
 			case "missing":
 				catalog.SnapshotID = "different"
 			case "observation-kind":
 				obs.Kind = runtimecontract.PrerequisiteKind("other")
 			case "observation-missing":
 				obs.ObservationID = ""
-			case "invalid-catalog":
-				catalog.ObservedRevision = ""
 			}
 			values := []runtimecontract.RuntimeOperationAdmissibility{catalog}
 			observations := []runtimecontract.RuntimePrerequisiteObservation{obs}
-			if name == "duplicates" {
-				values = append(values, catalog)
-				observations = append(observations, obs)
-			}
 			if name == "unrelated" {
 				other := first.Normalized()
 				other.SnapshotID = "unrelated"
@@ -53,9 +38,6 @@ func TestValidationCatalogSourceSelectionMatchesOriginal(t *testing.T) {
 			if !reflect.DeepEqual(runtimecontract.CloneRuntimeOperationAdmissibilities(values), before) {
 				t.Fatal("selection mutated source")
 			}
-			if name == "whitespace" && got == nil {
-				t.Fatal("canonical identity rejected")
-			}
 			wantObs := historySourceReferenceRuntimeOwnerCatalogObservationForOperation(observations, &catalog)
 			gotObs := runtimeOwnerCatalogObservationForOperation(observations, &catalog)
 			if !reflect.DeepEqual(gotObs, wantObs) {
@@ -68,6 +50,14 @@ func TestValidationCatalogSourceSelectionMatchesOriginal(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestValidationCatalogMalformedBodyRejectedAtAdmission(t *testing.T) {
+	catalog, _ := runtimeWebCatalogFixture(t, "source", "revision")
+	catalog.ObservedRevision = ""
+	if err := catalog.Validate(); err == nil {
+		t.Fatal("malformed catalog entered the committed-state consumer")
 	}
 }
 

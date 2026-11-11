@@ -229,16 +229,15 @@ func ValidateRuntimeImplementationWorkInputCatalogs(facts RuntimeFacts, capabili
 }
 
 // ValidateRuntimeImplementationWorkAdmission validates the independent private
-// work reservation against current facts and its original sealed semantic source.
+// work reservation against current applicability. Its formal semantic source
+// and round structure were admitted by the original owner transaction; this
+// consumer does not replay those judgments.
 // It never requires or creates terminal CoverageEvidenceBinding.
-func ValidateRuntimeImplementationWorkAdmission(facts RuntimeFacts, decision RuntimeDecision, semantic RuntimeSemanticPlanningLedger, ledger RuntimeImplementationWorkLedger, manifest RuntimeCandidateContractManifest) (*RuntimeImplementationWorkRound, error) {
+func ValidateRuntimeImplementationWorkAdmission(facts RuntimeFacts, decision RuntimeDecision, ledger RuntimeImplementationWorkLedger, manifest RuntimeCandidateContractManifest) (*RuntimeImplementationWorkRound, error) {
 	if decision.RequiredOutput.ImplementationWorkBindingHash == "" || manifest.ImplementationWorkingBinding == nil || decision.State != ConvergenceStateNeedStateChange || facts.Failure != nil || facts.RepairDirective != nil || RuntimeImplementationWorkPrerequisitesPending(facts, manifest.ImplementationWorkingBinding) {
 		return nil, fmt.Errorf("implementation work admission lacks exact unblocked working purpose")
 	}
 	if err := ValidateRuntimeImplementationWorkInputCatalogs(facts, nil); err != nil {
-		return nil, err
-	}
-	if err := ValidateRuntimeCWILedger(facts); err != nil {
 		return nil, err
 	}
 	var selected *RuntimeImplementationWorkRound
@@ -257,12 +256,6 @@ func ValidateRuntimeImplementationWorkAdmission(facts RuntimeFacts, decision Run
 	}
 	if !reflect.DeepEqual(facts.Resources.OperationAdmissibilities, selected.WorkingBinding.MutationInputCatalogs) {
 		return nil, fmt.Errorf("implementation work admission lost original complete input-protection inventory")
-	}
-	if err := selected.Validate(); err != nil {
-		return nil, err
-	}
-	if err := ValidateRuntimeImplementationWorkingBindingSemanticSource(*selected, semantic); err != nil {
-		return nil, err
 	}
 	eligible := false
 	for _, item := range facts.Coverage {

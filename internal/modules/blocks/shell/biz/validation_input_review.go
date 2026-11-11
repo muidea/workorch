@@ -21,7 +21,7 @@ func shellInputReview(directory string, targets []string, binding runtimecontrac
 
 // Shared source selection and byte reader for review and structural maintenance.
 // The latter is explicitly not a semantic subject and cannot publish readiness.
-func shellReadValidationInputSubject(directory string, targets []string, binding runtimecontract.RuntimeValidationProofRequirementBinding, review bool) (*runtimecontract.RuntimeValidationInputReviewSubject, string) {
+func shellReadValidationInputSubject(directory string, targets []string, binding runtimecontract.RuntimeValidationProofRequirementBinding, review bool, maintenanceTargets ...string) (*runtimecontract.RuntimeValidationInputReviewSubject, string) {
 	root, err := os.OpenRoot(directory)
 	if err != nil {
 		return nil, "validation_input_review_source_unavailable"
@@ -43,8 +43,11 @@ func shellReadValidationInputSubject(directory string, targets []string, binding
 	}
 	var refs []string
 	for _, target := range normalizeShellStrings(targets) {
-		projectInput := binding.CheckAttestations[0].ObservationProtocolRef == shellProjectMultiFailureDiagnosticProtocolRef && (!strings.HasSuffix(target, ".go") || strings.HasSuffix(target, "_test.go") || strings.HasPrefix(target, "workorch_validation/"))
-		if projectInput || strings.HasPrefix(target, prefix) || target == "go.mod" || target == "go.sum" || target == "go.work" || target == "go.work.sum" {
+		// Other packages' tests remain mandatory execution inputs, but are not
+		// semantic inputs to this requirement's independent review. Helpers and
+		// fixtures belonging to another isolated harness cannot be borrowed.
+		projectInput := binding.CheckAttestations[0].ObservationProtocolRef == shellProjectMultiFailureDiagnosticProtocolRef && !strings.HasSuffix(target, ".go") && !strings.HasPrefix(target, "workorch_validation/")
+		if (!review && slices.Contains(maintenanceTargets, target)) || projectInput || strings.HasPrefix(target, prefix) || target == "go.mod" || target == "go.sum" || target == "go.work" || target == "go.work.sum" {
 			refs = append(refs, target)
 		}
 	}

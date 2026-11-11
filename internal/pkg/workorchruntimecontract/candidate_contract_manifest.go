@@ -246,9 +246,8 @@ func RuntimeCandidateManifestOwnerFactsFromResources(resources RuntimeResourceFa
 // are immutable activation declarations; this helper performs no acquisition,
 // state transition, provider rendering, or owner execution.
 func RuntimeCandidateManifestOwnerFactsFromContext(context RuntimeCandidateContext) RuntimeCandidateManifestOwnerFacts {
-	context = context.Normalized()
 	facts := RuntimeCandidateManifestOwnerFactsFromResources(context.Resources)
-	if context.RequiredState == ConvergenceStateNeedStateChange && context.Failure != nil && context.Failure.ValidationDiagnostic != nil {
+	if ConvergenceState(strings.TrimSpace(string(context.RequiredState))) == ConvergenceStateNeedStateChange && context.Failure != nil && context.Failure.ValidationDiagnostic != nil {
 		facts.InputRepair = context.Failure.ValidationDiagnostic.InputRepair.Clone()
 	}
 	return facts.Normalized()

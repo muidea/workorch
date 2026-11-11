@@ -128,7 +128,7 @@ func BenchmarkApplicabilityOriginalSourceCompilation(b *testing.B) {
 						if err != nil {
 							b.Fatal(err)
 						}
-						if _, err := compileRuntimeOperationReadSource(a, request.DispatchID, request.OperationID, request.SourceReceiptHash); err != nil {
+						if _, err := CompileRuntimeOperationReadSource(a, request.DispatchID, request.OperationID, request.SourceReceiptHash); err != nil {
 							b.Fatal(err)
 						}
 					} else if _, _, err := compileRuntimeEvidenceApplicabilitySource(a, id); err != nil {

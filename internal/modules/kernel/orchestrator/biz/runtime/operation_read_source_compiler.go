@@ -19,26 +19,22 @@ type RuntimeOperationReadSource struct {
 	ApplicabilitySource  *runtimecontract.RuntimeEvidenceApplicabilityDependencies
 }
 
-// CompileRuntimeOperationReadSource 只从完整有效 aggregate 重编原 sealed 来源；不使用当前 decision 或目录投影。
+// CompileRuntimeOperationReadSource consumes the Run-owner committed aggregate
+// and projects one original sealed source. It is not a raw snapshot admission:
+// external snapshots enter AdmitRuntimeOwnerStateRecord before this owner-local
+// read. Only the selected source's scope, receipt and execution joins belong
+// here; historical business decisions are not readmission prerequisites.
 func CompileRuntimeOperationReadSource(aggregate RuntimeAggregate, dispatchID, operationID, receiptHash string) (RuntimeOperationReadSource, error) {
-	if dispatchID == "" || dispatchID != strings.TrimSpace(dispatchID) || operationID == "" || operationID != strings.TrimSpace(operationID) || receiptHash == "" || receiptHash != strings.TrimSpace(receiptHash) {
-		return RuntimeOperationReadSource{}, common.ErrInvalidArgument
-	}
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeOperationReadSource{}, err
-	}
-	return compileRuntimeOperationReadSource(aggregate, dispatchID, operationID, receiptHash)
-}
-
-// Called only after the same lexical read has validated its complete aggregate.
-// The source joins, receipt identity and execution authority are always rebuilt.
-func compileRuntimeOperationReadSource(aggregate RuntimeAggregate, dispatchID, operationID, receiptHash string) (RuntimeOperationReadSource, error) {
 	if dispatchID == "" || dispatchID != strings.TrimSpace(dispatchID) || operationID == "" || operationID != strings.TrimSpace(operationID) || receiptHash == "" || receiptHash != strings.TrimSpace(receiptHash) {
 		return RuntimeOperationReadSource{}, common.ErrInvalidArgument
 	}
 	dispatch, _, found := operationReceiptDispatch(aggregate, dispatchID)
 	if !found {
 		return RuntimeOperationReadSource{}, fmt.Errorf("%w: read source dispatch is not persisted", common.ErrConflict)
+	}
+	if aggregate.StateRevision == 0 || dispatch.WorkspaceID != aggregate.Facts.WorkspaceID || dispatch.RunID != aggregate.Facts.RunID ||
+		dispatch.Transaction.DefinitionRevision != aggregate.Facts.DefinitionRevision {
+		return RuntimeOperationReadSource{}, fmt.Errorf("%w: read source dispatch scope does not match committed owner", common.ErrConflict)
 	}
 	operation, found := candidateOperationByID(dispatch.Candidate, operationID)
 	if !found {
@@ -59,6 +55,9 @@ func compileRuntimeOperationReadSource(aggregate RuntimeAggregate, dispatchID, o
 	}
 	if !found || runtimecontract.StableRuntimeOperationReceiptHash(receipt) != receiptHash || receipt.Evidence.OwnerRevisionSet == nil {
 		return RuntimeOperationReadSource{}, fmt.Errorf("%w: read source requires original receipt dependencies", common.ErrConflict)
+	}
+	if err := runtimecontract.ValidateRuntimeEvidenceDependencyPair(receipt.Evidence.OwnerRevisionSet, receipt.Evidence.ApplicabilityDependencies, dispatch.Transaction.DefinitionRevision); err != nil {
+		return RuntimeOperationReadSource{}, err
 	}
 	evidenceKind := ""
 	switch {

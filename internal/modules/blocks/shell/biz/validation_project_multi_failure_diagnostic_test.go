@@ -50,14 +50,10 @@ func TestProjectMultiFailureSourcePublicationIsExactAndProtectsOriginalTests(t *
 			t.Fatal("mutable implementation became immutable input")
 		}
 	}
-	found := false
 	for _, source := range binding.InputReview.DiagnosticSources {
 		if source.NativeCaseRef == "fixture/delivery/TestProduction" {
-			found = source.InputTargetRef == "delivery/production_test.go"
+			t.Fatal("adjacent execution input became a current-CWI semantic obligation")
 		}
-	}
-	if !found {
-		t.Fatal("production native source absent")
 	}
 	plan := binding.InputReview.ExecutionPlan
 	if plan == nil || len(plan.Stages) != 4 || plan.TimeoutMillis != recipe.TimeoutMillis {
@@ -70,6 +66,13 @@ func TestProjectMultiFailureSourcePublicationIsExactAndProtectsOriginalTests(t *
 	executed, executeErr := NewRuntimeAdapter().executeShellProjectScope(context.Background(), request, shellProjectRawScope{WorkspaceID: "ws", RunID: "run", ExecutionKey: "published-method"})
 	if executeErr != nil || executed.Conjunction == nil || !executed.Conjunction.Complete {
 		t.Fatalf("published method did not actually complete: %v status=%s code=%s", executeErr, executed.Result.Status, executed.Result.FailureCode)
+	}
+	found := false
+	for _, source := range executed.Conjunction.NativeSources {
+		found = found || source.NativeCaseRef == "fixture/delivery/TestProduction" && source.InputTargetRef == "delivery/production_test.go" && source.InputContentHash == runtimecontract.RuntimeValidationInputContentHash(files["delivery/production_test.go"])
+	}
+	if !found {
+		t.Fatal("actual project execution lost its adjacent native source")
 	}
 	for i, method := range plan.Stages {
 		stage := executed.Conjunction.Stages[i]
@@ -257,10 +260,10 @@ func TestProduction(t *testing.T){
 			}
 			// This is a direct owner producer fixture, not a Core binding/credit test.
 			if scenario == "drift" {
-				writeNativeStructureSource(t, root, "delivery/value_test.go", files["delivery/value_test.go"]+"// changed after review\n")
+				writeNativeStructureSource(t, root, target, files[target]+"// changed after review\n")
 			}
 			if scenario == "missing-source" {
-				binding.InputReview.DiagnosticSources = binding.InputReview.DiagnosticSources[:1]
+				binding.InputReview.DiagnosticSources = nil
 				binding.InputReview.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, binding)
 			}
 			if scenario == "legacy" {
@@ -370,6 +373,32 @@ func TestProduction(t *testing.T){
 				}
 			}
 			if wantDiagnostic {
+				feedback := runtimecontract.ProjectRuntimeValidationExecutionFeedback(result.Result.Evidence.Validation)
+				if scenario != "final-stage-failure" && len(feedback.FailedSourceInputs) == 0 || feedback.SourceInputFailure != "" || feedback.Validate() != nil {
+					t.Fatal("new failure lost the applicable adjacent source body")
+				}
+				for _, file := range feedback.FailedSourceInputs {
+					if file.Content != files[file.TargetRef] || file.ContentHash != runtimecontract.RuntimeValidationInputContentHash(files[file.TargetRef]) {
+						t.Fatal("failure feedback rewrote original source bytes")
+					}
+				}
+				if len(feedback.FailedSourceInputs) != 0 {
+					changed := result.Result.Evidence.Validation.Clone()
+					changed.ExecutionConjunction.FailedSourceInputs[0].Content += "\nchanged"
+					if runtimecontract.ValidateRuntimeValidationDiagnosticExecution(changed, binding, refs) == nil {
+						t.Fatal("failed source body drift admitted")
+					}
+					missing := result.Result.Evidence.Validation.Clone()
+					missing.ExecutionConjunction.FailedSourceInputs = nil
+					if runtimecontract.ValidateRuntimeValidationDiagnosticExecution(missing, binding, refs) == nil {
+						t.Fatal("missing applicable failed source body admitted")
+					}
+					missing.ExecutionConjunction.SourceInputFailure = "validation_failure_input_capacity_exceeded"
+					incomplete := runtimecontract.ProjectRuntimeValidationExecutionFeedback(&missing)
+					if !incomplete.FailureDetailsIncomplete || incomplete.SourceInputFailure == "" || len(incomplete.FailedChecks) == 0 {
+						t.Fatal("explicit source omission hid the known original failure")
+					}
+				}
 				wantTargets := []string{"delivery/value.go"}
 				if scenario == "disjoint" {
 					wantTargets = []string{"delivery/other.go", "delivery/value.go"}
@@ -390,7 +419,7 @@ func TestProduction(t *testing.T){
 				}
 				for _, stage := range result.Conjunction.Stages[diagnosticStart:] {
 					wantRelation := runtimecontract.ValidationReproductionExact
-					for _, source := range binding.InputReview.DiagnosticSources {
+					for _, source := range result.Conjunction.NativeSources {
 						if source.SourceRef == stage.DiagnosticSourceRef && source.NativeCaseRef == "fixture/delivery/TestProduction" {
 							if scenario == "changed-assertion" || scenario == "changed-cases" {
 								wantRelation = runtimecontract.ValidationReproductionChanged
@@ -406,7 +435,7 @@ func TestProduction(t *testing.T){
 
 					wantSourceTargets := []string{"delivery/value.go"}
 					if scenario == "disjoint" {
-						for _, source := range binding.InputReview.DiagnosticSources {
+						for _, source := range result.Conjunction.NativeSources {
 							if source.SourceRef == stage.DiagnosticSourceRef && source.NativeCaseRef == "fixture/delivery/TestProduction" {
 								wantSourceTargets = []string{"delivery/other.go"}
 							}

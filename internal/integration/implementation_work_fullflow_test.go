@@ -744,6 +744,7 @@ type implementationWorkFullflowValidation struct {
 		Protocol                    string                                              `json:"protocolRef"`
 		ScopeContractRef            string                                              `json:"scopeContractRef"`
 		ScopeRequirements           string                                              `json:"scopeRequirements"`
+		ExecutionPlan               *runtimecontract.RuntimeValidationExecutionPlan     `json:"executionPlan"`
 		Files                       []runtimecontract.RuntimeValidationInputReviewFile  `json:"files"`
 		LineageAssertions           []runtimecontract.RuntimeLineageAssertion           `json:"lineageAssertions"`
 		DiagnosticSourceContractRef string                                              `json:"diagnosticSourceContractRef"`
@@ -1015,7 +1016,7 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 						}
 					}
 					for _, check := range validation.Checks {
-						item, err := implementationWorkFullflowReviewCheck(validation, check, criterion, input.Protocol, input.Files, input.ScopeRequirements, refs, input.LineageAssertions)
+						item, err := implementationWorkFullflowReviewCheck(validation, check, criterion, input.Protocol, input.Files, input.ScopeRequirements, refs, input.ExecutionPlan, input.LineageAssertions)
 						if err != nil {
 							return nil, kind, err
 						}
@@ -1435,7 +1436,7 @@ func verifyDelivery(t *testing.T, criterion string) {
 
 // 独立review仅分析owner给出的exact input bytes/scope；不把目标文本包含某关键字
 // 当已满足，不读取Run repo，不把README自述当receipts或Git提交事实。
-func implementationWorkFullflowReviewCheck(validation *implementationWorkFullflowValidation, check, sharedCriterion, protocol string, files []runtimecontract.RuntimeValidationInputReviewFile, scope string, refs []string, assertionSets ...[]runtimecontract.RuntimeLineageAssertion) (runtimecontract.RuntimeValidationInputCheckReview, error) {
+func implementationWorkFullflowReviewCheck(validation *implementationWorkFullflowValidation, check, sharedCriterion, protocol string, files []runtimecontract.RuntimeValidationInputReviewFile, scope string, refs []string, plan *runtimecontract.RuntimeValidationExecutionPlan, assertionSets ...[]runtimecontract.RuntimeLineageAssertion) (runtimecontract.RuntimeValidationInputCheckReview, error) {
 	var assertions []runtimecontract.RuntimeLineageAssertion
 	if len(assertionSets) > 1 {
 		return runtimecontract.RuntimeValidationInputCheckReview{}, fmt.Errorf("multiple composition subjects")
@@ -1462,7 +1463,7 @@ func implementationWorkFullflowReviewCheck(validation *implementationWorkFullflo
 	}
 	reviewInput := func(text string) (string, string, string) {
 		if protocol == runtimecontract.RuntimeValidationInputReviewProtocol {
-			return implementationWorkFullflowReviewComposition(text, files, scope, assertions)
+			return implementationWorkFullflowReviewComposition(text, files, scope, plan, assertions)
 		}
 		return implementationWorkFullflowReviewInput(text, files, scope)
 	}
@@ -1488,7 +1489,7 @@ func implementationWorkFullflowReviewCheck(validation *implementationWorkFullflo
 // This synthetic independent reviewer maps responsibilities, not execution
 // success. Every declared consumer is still checked by the production reducer
 // at its original cutoff or after real terminal material and ordered ACKs.
-func implementationWorkFullflowReviewComposition(criterion string, files []runtimecontract.RuntimeValidationInputReviewFile, scope string, assertions []runtimecontract.RuntimeLineageAssertion) (string, string, string) {
+func implementationWorkFullflowReviewComposition(criterion string, files []runtimecontract.RuntimeValidationInputReviewFile, scope string, plan *runtimecontract.RuntimeValidationExecutionPlan, assertions []runtimecontract.RuntimeLineageAssertion) (string, string, string) {
 	ordinary, finding, reason := implementationWorkFullflowReviewInput("工程行为", files, scope)
 	if ordinary != runtimecontract.RuntimeValidationInputConsistent {
 		return ordinary, finding, reason
@@ -1536,10 +1537,27 @@ func implementationWorkFullflowReviewComposition(criterion string, files []runti
 	if strings.Contains(criterion, "决策工单") || strings.Contains(criterion, "审批工单") {
 		return runtimecontract.RuntimeValidationInputInconclusive, runtimecontract.RuntimeValidationInputUnknown, "当前组合不提供Decision/Approval工单证明消费者。"
 	}
-	if (strings.Contains(criterion, "完整") || strings.Contains(criterion, "全")) && !strings.Contains(scope, "Shell 的根 module build/test/race 另外实际执行") && !strings.Contains(scope, "Root build/test/race and independent reviewed CWI behavior remain mandatory") {
+	if (strings.Contains(criterion, "完整") || strings.Contains(criterion, "全")) && !implementationWorkFullflowHasProjectPlan(plan) {
 		return runtimecontract.RuntimeValidationInputInconclusive, runtimecontract.RuntimeValidationInputUnknown, "完整工程义务缺owner声明的实际项目级合取，不能从隔离包推定。"
 	}
 	return runtimecontract.RuntimeValidationInputConsistent, runtimecontract.RuntimeValidationInputCovered, "原全文义务由真实工程断言与subject中封存的typed消费者合取：输入直接调用生产实现并构建运行CLI；Shell声明根module build/test/race；工作/修复账本在原执行cutoff独立核验；Git历史receipt与最终snapshot、正式Result逐项索引及有序ACK在终态材料产生后核验。此评审仅封存职责，不声明未来事实存在，不授credit。"
+}
+
+// The mock reads the exact published method, not a sentence in the prompt.
+// This recognizes a declaration only; real stages and terminal consumers below
+// still have to execute and supply their independent receipts.
+func implementationWorkFullflowHasProjectPlan(plan *runtimecontract.RuntimeValidationExecutionPlan) bool {
+	if plan == nil || len(plan.Stages) != 4 {
+		return false
+	}
+	for i, args := range [][]string{{"build", "./..."}, {"test", "-json", "-count=1", "./..."}, {"test", "-race", "-json", "-count=1", "./..."}} {
+		stage := plan.Stages[i]
+		if stage.Command != "go" || stage.Identity.Scope != "root-module:./..." || !slices.Equal(stage.Args, args) {
+			return false
+		}
+	}
+	last := plan.Stages[3]
+	return last.Command == "go" && last.Identity.RequireTests && last.Identity.RequireBehavior && len(last.RequiredCheckRefs) != 0
 }
 
 func implementationWorkFullflowReviewInput(criterion string, files []runtimecontract.RuntimeValidationInputReviewFile, scope string) (string, string, string) {

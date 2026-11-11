@@ -75,6 +75,9 @@ type shellProjectConjunctionFact struct {
 	Complete           bool
 	FailureCode        string
 	CommitmentHash     string
+	NativeSources      []runtimecontract.RuntimeValidationDiagnosticSource `json:",omitempty"`
+	FailedSourceInputs []runtimecontract.RuntimeValidationInputReviewFile  `json:",omitempty"`
+	SourceInputFailure string                                              `json:",omitempty"`
 }
 
 // 原 bytes 不清洗、不摘要；hash 涵盖全部接收 bytes，即使存储边界已满。

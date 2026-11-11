@@ -41,7 +41,7 @@ func ReconciliationValidationResultSource(a RuntimeAggregate, binding runtimecon
 			if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted {
 				return nil, "", nil
 			}
-			source, err := compileRuntimeOperationReadSource(a, d.ID, op.ID, execution.OwnerReceiptHash)
+			source, err := CompileRuntimeOperationReadSource(a, d.ID, op.ID, execution.OwnerReceiptHash)
 			if err != nil {
 				return nil, "", err
 			}

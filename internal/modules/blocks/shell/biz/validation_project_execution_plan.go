@@ -37,7 +37,7 @@ func shellProjectReviewExecutionPlan(subject *rc.RuntimeValidationInputReviewSub
 			stage.Instrumentation = []string{"coverage_behavior", "process_behavior"}
 			stage.RequiredCheckRefs = normalizeShellStrings(binding.RequiredCheckRefs)
 		}
-		if spec.JSON && shellNativeChannelMethodRequired(subject.Files) {
+		if spec.JSON && (binding.CheckAttestations[0].ObservationProtocolRef == shellProjectMultiFailureDiagnosticProtocolRef || shellNativeChannelMethodRequired(subject.Files)) {
 			stage.Instrumentation = append(stage.Instrumentation, "native_source_channel")
 			slices.Sort(stage.Instrumentation)
 		}

@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"reflect"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -193,5 +192,5 @@ func sameDeliveryAcknowledgementIdentity(left, right runtimecontract.RuntimeDeli
 		left.AuthoritySnapshotID == right.AuthoritySnapshotID &&
 		left.CausationID == right.CausationID &&
 		left.Outcome == right.Outcome &&
-		reflect.DeepEqual(left.ResultCloseout, right.ResultCloseout)
+		left.ResultCloseout.SamePersistedValue(right.ResultCloseout)
 }

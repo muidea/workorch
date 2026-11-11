@@ -1856,7 +1856,17 @@ func %s(t *testing.T) {
 	}
 	if options.SequentialProjectFailures {
 		if options.IncrementalNativeSources {
-			assertSequentialProjectFailureClosure(t, *stored.RuntimeState, behaviorRepairs, reviewCalls, len(nativeFinalInputs)*3+1)
+			// Current-package semantic adoption keeps its three partial rounds.
+			// Neighboring method maintenance performs one complete real edit and
+			// never creates extra semantic reviews of unrelated original criteria.
+			neighbors := 0
+			for target := range nativeFinalInputs {
+				if !strings.HasPrefix(target, "workorch_validation/") {
+					neighbors++
+				}
+			}
+			assertSequentialProjectFailureClosure(t, *stored.RuntimeState, behaviorRepairs, reviewCalls,
+				len(nativeFinalInputs)*3+1-neighbors*2, 5+(len(nativeFinalInputs)-neighbors)*2)
 		} else {
 			assertSequentialProjectFailureClosure(t, *stored.RuntimeState, behaviorRepairs, reviewCalls)
 		}

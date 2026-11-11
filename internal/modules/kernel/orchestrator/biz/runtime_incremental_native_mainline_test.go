@@ -106,6 +106,12 @@ func incrementalNativeCandidate(t *testing.T, c llmevents.RequestRuntimeCandidat
 		} else if strings.Contains(f.Content, "// native-adoption:bare") {
 			stage = "helper"
 		}
+		// A neighboring method is outside this CWI's semantic adoption rounds.
+		// Repair its reported self-execution through a real complete File edit;
+		// initial inputs and their original criteria remain unchanged.
+		if v.OwnerObservation != nil && !strings.HasPrefix(target, "workorch_validation/") {
+			stage = "wired"
+		}
 		if finals[target] == "" {
 			t.Fatal("maintenance did not bind an actual original input", target)
 		}

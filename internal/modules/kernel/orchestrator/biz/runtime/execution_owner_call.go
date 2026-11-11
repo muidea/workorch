@@ -9,10 +9,6 @@ import (
 )
 
 func (x *activeDispatchExecution) operationExecutionCallHandoff(operation runtimecontract.RuntimeOperation, prepared preparedActiveDispatchOperation) (*RuntimeOperationExecutionCallHandoff, error) {
-	validationScopeTargetRefs, err := runtimeValidationScopeTargetRefs(x.dispatch, operation)
-	if err != nil {
-		return nil, err
-	}
 	ownerCatalog := runtimeOwnerCatalogForOperation(
 		x.dispatch.OperationAdmissibilities,
 		x.dispatch.OperationAdmissibilityObservations,
@@ -20,6 +16,10 @@ func (x *activeDispatchExecution) operationExecutionCallHandoff(operation runtim
 		prepared.execution.AdmissibilitySnapshotID,
 		prepared.execution.AcquisitionBinding,
 	)
+	validationScopeTargetRefs, err := runtimeValidationScopeFromOwnerCatalog(x.dispatch, operation, ownerCatalog)
+	if err != nil {
+		return nil, err
+	}
 	validationProofBinding, err := runtimeValidationProofBindingForOperation(x.dispatch, operation, ownerCatalog)
 	if err != nil {
 		return nil, err
@@ -179,14 +179,14 @@ func runtimeOwnerCatalogForOperation(values []runtimecontract.RuntimeOperationAd
 			strings.TrimSpace(catalog.AcquisitionBinding) != requiredAcquisitionBinding || !runtimeCatalogContainsOperationKind(catalog, canonicalKind) {
 			continue
 		}
-		catalog = catalog.Normalized()
-		if catalog.Validate() != nil {
-			continue
-		}
+		// Catalog bodies were admitted with the owner state/dispatch. This read
+		// joins the sealed source identity; it does not adjudicate the complete
+		// catalog again or normalize its original values. New or tampered
+		// bodies must enter the canonical state admission/transition gate.
 		if runtimeOwnerCatalogObservationForOperation(observations, &catalog) == nil {
 			continue
 		}
-		value := catalog
+		value := catalog.Clone()
 		return &value
 	}
 	return nil

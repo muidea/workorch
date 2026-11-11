@@ -6,6 +6,9 @@ import (
 )
 
 type RuntimeCommandRequest struct {
+	// Actual isolated execution provenance, never provider input or authority.
+	validationNativeInputs          []runtimecontract.RuntimeValidationInputReviewFile
+	validationNativeSources         []runtimecontract.RuntimeValidationDiagnosticSource
 	WorkspaceID                     common.WorkspaceID
 	RunID                           common.RunID
 	StepID                          common.StepID

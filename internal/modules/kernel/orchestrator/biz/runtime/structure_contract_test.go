@@ -526,7 +526,7 @@ func TestO6GovernanceComparisonsUseFocusedEntries(t *testing.T) {
 	for _, file := range parseRuntimeProductionSources(t) {
 		for _, declaration := range file.Decls {
 			function, ok := declaration.(*ast.FuncDecl)
-			if ok && function.Name.Name == "compileRuntimeOperationReadSource" {
+			if ok && function.Name.Name == "CompileRuntimeOperationReadSource" {
 				ast.Inspect(function.Body, func(node ast.Node) bool {
 					call, ok := node.(*ast.CallExpr)
 					if !ok {
@@ -887,11 +887,11 @@ func assertRuntimeExportedMethods(t *testing.T, methods map[string][]string, rec
 	}
 }
 
-// Private continuations are confined to complete public or owner-private gates.
-// This is a lexical composition, never a caller's validated flag.
-func TestApplicabilityReadContinuationsStayBehindCompletePublicGates(t *testing.T) {
+// Owner reads consume committed records; raw admission stays at its explicit
+// boundary. Source joins remain local and never trigger a cold business replay.
+func TestApplicabilityReadsConsumeCommittedOwnerResults(t *testing.T) {
 	want := map[string]map[string]int{
-		"compileRuntimeOperationReadSource":          {"CompileRuntimeOperationReadSource": 1, "compileRuntimeEvidenceApplicabilitySource": 1, "ReconciliationValidationResultSource": 1},
+		"CompileRuntimeOperationReadSource":          {"CompileRuntimeValidationInputSnapshotSource": 1, "compileRuntimeEvidenceApplicabilitySource": 1, "ReconciliationValidationResultSource": 1},
 		"compileRuntimeEvidenceApplicabilitySource":  {"compileRuntimeEvidenceApplicabilityRequest": 1, "compileRuntimeEvidenceApplicabilityRead": 1},
 		"compileRuntimeEvidenceApplicabilityRequest": {"recordEvidenceApplicability": 1},
 		"nextRuntimeEvidenceApplicabilityRequest":    {"admitRuntimeDispatch": 1, "validateAssessmentApplicabilitySealTransition": 1, "validateCandidateAttemptBeginAuthority": 1},
@@ -958,8 +958,8 @@ func TestApplicabilityReadContinuationsStayBehindCompletePublicGates(t *testing.
 		t.Fatal("observation request continuation must follow its complete owner aggregate gate")
 	}
 	for _, entry := range []string{"CompileRuntimeOperationReadSource"} {
-		if gates[entry] != 1 {
-			t.Fatalf("%s must run its complete aggregate gate exactly once", entry)
+		if gates[entry] != 0 {
+			t.Fatalf("%s must not readmit committed business history", entry)
 		}
 	}
 }
@@ -990,6 +990,52 @@ func TestRuntimeHandlersConsumeSingleOwnerAdmission(t *testing.T) {
 					if id, ok := sel.X.(*ast.Ident); ok && id.Name == "aggregate" {
 						t.Fatalf("%s repeats complete owner admission", fn.Name.Name)
 					}
+				}
+				return true
+			})
+		}
+	}
+}
+
+func TestCandidateSealConsumesProposalWithoutRepeatingAdmission(t *testing.T) {
+	for _, file := range parseRuntimeProductionSources(t) {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			switch fn.Name.Name {
+			case "admitAndSealCandidateAttempt", "admitRuntimeDispatch":
+				ast.Inspect(fn.Body, func(n ast.Node) bool {
+					call, ok := n.(*ast.CallExpr)
+					if !ok {
+						return true
+					}
+					if name, ok := call.Fun.(*ast.Ident); ok && (name.Name == "EvaluateCandidateAdmissionWithManifest" || name.Name == "deriveConfirmedRepairAdmissionCommitment") {
+						t.Errorf("%s rejudges committed proposal via %s", fn.Name.Name, name.Name)
+					}
+					return true
+				})
+			}
+		}
+	}
+}
+
+func TestSealedCatalogConsumerDoesNotReadmitCatalogBody(t *testing.T) {
+	for _, file := range parseRuntimeProductionSources(t) {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil || fn.Name.Name != "runtimeOwnerCatalogForOperation" {
+				continue
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				selector, ok := call.Fun.(*ast.SelectorExpr)
+				if ok && (selector.Sel.Name == "Validate" || selector.Sel.Name == "Normalized") {
+					t.Errorf("sealed catalog consumer repeats %s instead of consuming its admitted source", selector.Sel.Name)
 				}
 				return true
 			})

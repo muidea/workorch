@@ -236,7 +236,7 @@ func runtimeValidationScopeTargetRefs(dispatch runtimecontract.RuntimeDispatchRe
 	return runtimeValidationScopeForExecutionCatalog(operation, execution, catalog)
 }
 
-// Consume the same-call selected, normalized owner catalog. Target authorization,
+// Consume the same-call selected, admitted owner catalog. Target authorization,
 // operation identity, sealed catalog identity and diagnostic containment remain
 // this join's responsibility; no source or validation-success cache is retained.
 func runtimeValidationScopeFromOwnerCatalog(dispatch runtimecontract.RuntimeDispatchRecord, operation runtimecontract.RuntimeOperation, catalog *runtimecontract.RuntimeOperationAdmissibility) ([]string, error) {

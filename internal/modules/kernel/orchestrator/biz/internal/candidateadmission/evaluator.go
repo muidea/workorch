@@ -80,10 +80,9 @@ func Evaluate(input EvaluationInput) *runtimecontract.RuntimeCandidateFailure {
 	// The manifest owns every provider-selectable static field. The activation
 	// fence additionally checks executable parameter bounds and exact
 	// owner-published effect policy. Keep it in this pre-probe admission path as
-	// the same defense repeated by final dispatch sealing; otherwise a proposal
-	// can be persisted and probed only to fail later as an uncorrectable seal
-	// conflict. This check is pure and reads only facts already captured by the
-	// current Orchestrator authority transaction.
+	// the sole proposal admission. The accepted proposal is persisted before
+	// probing; final sealing consumes it and checks the new dispatch joins.
+	// This check is pure and reads only the current authority transaction.
 	if err := input.Candidate.ValidateWithActivation(input.Decision, runtimecontract.RuntimeActivationForFacts(input.Facts)); err != nil {
 		return completeCandidateFailure(input.Manifest, input.Candidate, contractFailure(CodeInvalid, InvalidSignature(input.Candidate), err.Error()))
 	}
@@ -179,7 +178,6 @@ func RepairClosureFailure(facts runtimecontract.RuntimeFacts, decision runtimeco
 // only unresolved proof is validation and current lineage already contains an
 // accepted state change followed by a state-change failure.
 func MissingValidationFailure(facts runtimecontract.RuntimeFacts, decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate, gap ValidationGapFacts) *runtimecontract.RuntimeCandidateFailure {
-	facts = facts.Normalized()
 	if decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		return nil
 	}
@@ -202,7 +200,6 @@ func MissingValidationFailure(facts runtimecontract.RuntimeFacts, decision runti
 // reconstructed from provider text. File still decides actual target
 // feasibility in its separate typed owner probe.
 func GroundedTargetFailure(facts runtimecontract.RuntimeFacts, decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate) *runtimecontract.RuntimeCandidateFailure {
-	facts = facts.Normalized()
 	operationPolicies := runtimecontract.RuntimeActivationForFacts(facts).OperationPolicies
 	if decision.State != runtimecontract.ConvergenceStateNeedStateChange || !facts.Focus.RequireTargetGrounding {
 		return nil

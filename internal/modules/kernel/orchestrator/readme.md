@@ -754,6 +754,15 @@ controller 不保留跨事件历史编译器、保留额度或查询影子权威
 `EvidenceApplicabilityRead` 仅在 drive 实际需要时计算本次 typed 查询；返回值不保存到 aggregate，
 不授 receipt/预算/credit，后继 observation 仍由原 private event 接纳。
 
+`CompileRuntimeOperationReadSource` 是同一 committed aggregate 的操作来源读取入口，File/Shell/Git 查询、
+validation input snapshot 和 reconciliation 共用它；不再以 `aggregate.Validate()` 冷准入重判完整历史。
+该入口保留选中 dispatch 的 Workspace/Run/Definition scope、原 executionKey/fence/owner/receiptHash、
+原始依赖的完整性及封存 execution authority 核对，不调用 provider、不执行 effect、不授当前 credit。
+未接纳外部快照仍须先经过 `AdmitRuntimeOwnerStateRecord`；任意自算 hash 不构成 owner 提交结果。
+此读取修正涉及 SM-2/SM-4 的正式来源消费，不更改 SM-1 生命周期或 SM-3 封存与独立验收门禁。
+最终 dispatch complete-admission 的全量账本校验以及 CAS full-file 编码/写入成本仍须分别评审，
+不得把本入口的局部回归当成整体权威消费或持续推进验收。
+
 SM影响：SM-1 的 opaque CAS/fence；SM-2/3 的新事务接纳与原结果消费；SM-4 的窄读取、恢复和有序交付。
 不改变原 Goal/DoD、all-of、权限预算、独立普通验证、assessment 或 Result→Workspace→Run 三 ACK。
 真实 owner 测试覆盖 file/workspace-scoped 的 CAS前中断、CAS后响应丢失、重新构造 owner/controller 与 duplicate；
@@ -2311,3 +2320,42 @@ diagnostic source 使用 frozen sourceIndex，内部恢复原 sourceRef 和固�
 SM-2 的当前依赖失效只撤销受影响 consumer credit；旧普通 proof 仍作为原历史事实保全，重新开启的 consumer 需要新的
 普通验证和独立 assessment。测试覆盖同一 consumer 完成 proof 后再被新的 owner 观察失效，其他 consumer 仍未完成，
 及重复新来源不改变 effect/receipt/预算。离线结构与局部回归不覆盖公开全流程或在线验收失败。
+### 阶段适用输入与实际执行来源
+
+当前Shell multi-failure输入审查只使用当前requirement的完整适用正文与原义务，实际全项目build/test/race另由
+Shell在原operation快照采集来源库存；相邻历史测试仍执行，语义正文不逐CWI累计重判。实际新失败的受影响相邻输入
+正文通过原receipt-backed execution feedback进入已有独立重审，缺项/超界保留明确失败，不补credit或盲修。
+SM-2/SM-3消费同一typed结果，未增加Loop分支、调度权威、预算或deadline；SM-1不变。
+SM-4的Result closeout比较与ACK/duplicate统一按精确持久化表示，消除omitempty空集合读回导致的假冲突，
+保留正文/来源/顺序/revision拒绝和有序三ACK；不改旧材料/hash，不自动解除intervention。
+回归包括真实Shell顺序两CWI（累计测试正文超过256KiB，历史测试仍实际执行）、完整失败并集/相邻正文及篡改缺项拒绝、
+provider C4冻结/稳定前缀与Result文件owner重开/ACK。局部回归不代替公开19CWI、真实provider、原300s目标或全部63CWI。
+
+### Proposal admission and final seal consumption
+
+SM-3 admits a new candidate proposal once, then persists its exact proposal and
+repair commitment in the original attempt/request session before owner probes.
+Duplicate proposal delivery consumes that result. Final sealing requires the
+same committed proposal and manifest body, current authority transaction,
+conformance and owner feasibility; it does not rerun CandidateEvaluator or
+rederive the original repair judgment. Recovery has the same source requirement
+and cannot enter through an alternate final-admission path.
+
+The final complete-admission view borrows the current owner values; historical
+receipt, governance, budget and event ledgers are not its inputs. CWI/current
+prerequisite applicability, current semantic binding/work reservation, owner
+snapshot/source identity and new dispatch joins remain checked. Original raw
+inputs and the new aggregate postimage retain their canonical owner admission
+and integrity guards. Binding retirement versus historical effects is judged at
+that owner boundary, rather than again at final dispatch. Pure activation and
+manifest projections read their applicable fields without copying unrelated
+assessment/evidence history. These changes affect SM-3 consumption and SM-2
+current applicability; SM-1, independent all-of/assessment and SM-4 ordered
+Result/Workspace/Run delivery remain separate responsibilities.
+
+Sealed operation-catalog reads select the exact owner/snapshot/acquisition and
+join its persisted prerequisite observation. They return a detached original
+without normalizing or repeating complete catalog admission. Outbound execution
+uses that one selection for diagnostic scope and proof binding. New or changed
+catalog bodies still enter the canonical owner admission/transition; raw
+snapshot audit remains separate from committed reads.

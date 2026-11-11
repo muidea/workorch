@@ -130,46 +130,23 @@ func (r *implementationWorkDetachedRepository) Save(ctx context.Context, aggrega
 	return nil
 }
 
-func (r *implementationWorkDetachedRepository) Load(ctx context.Context, workspace common.WorkspaceID, run common.RunID) (RuntimeAggregate, error) {
-	value, err := r.controllerRepository.Load(ctx, workspace, run)
+// These fixtures start with admitted owner state and persist only through the
+// production transition coordinator. Reload the committed wire representation,
+// as the production Run adapter does; cold admission remains in initialization
+// and explicit offline audits, not every historical read.
+func (r *implementationWorkDetachedRepository) Load(_ context.Context, workspace common.WorkspaceID, run common.RunID) (RuntimeAggregate, error) {
+	if r.aggregate == nil || r.aggregate.Facts.WorkspaceID != workspace || r.aggregate.Facts.RunID != run {
+		return RuntimeAggregate{}, common.ErrNotFound
+	}
+	data, err := json.Marshal(r.aggregate)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	var detached RuntimeAggregate
+	var detached runtimecontract.RuntimeStateRecord
 	if err := json.Unmarshal(data, &detached); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := detached.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return detached, nil
-}
-
-// Exercise the production owner-local compiler with independently decoded raw
-// DTO and aggregate inputs. Every query and transition still reloads and runs
-// the complete gates; no validation credential is retained by the fixture.
-func (r *implementationWorkDetachedRepository) LoadOwnerStateOriginal(ctx context.Context, workspace common.WorkspaceID, run common.RunID) (runtimecontract.RuntimeStateRecord, RuntimeAggregate, error) {
-	value, err := r.controllerRepository.Load(ctx, workspace, run)
-	if err != nil {
-		return runtimecontract.RuntimeStateRecord{}, RuntimeAggregate{}, err
-	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return runtimecontract.RuntimeStateRecord{}, RuntimeAggregate{}, err
-	}
-	var raw runtimecontract.RuntimeStateRecord
-	var aggregate RuntimeAggregate
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return raw, aggregate, err
-	}
-	if err := json.Unmarshal(data, &aggregate); err != nil {
-		return raw, aggregate, err
-	}
-	return raw, aggregate, nil
+	return ReadCommittedRuntimeOwnerStateRecord(detached)
 }
 
 // 完整 private Controller/CAS fixture；不是公开 Workspace admission 成功正例。
@@ -597,8 +574,8 @@ func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.Run
 		if repository.saves != beforeSaves+1 {
 			t.Fatalf("%s did not use one CAS", event.Kind)
 		}
-		// The fresh owner query below runs the production complete DTO and
-		// aggregate gates, then compares every field with the event after-image.
+		// The fresh committed owner query independently decodes the wire value
+		// and compares every field with the validated event after-image.
 		fresh, err := controller.Load(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 		if err != nil || !reflect.DeepEqual(ownerStateRecord(fresh), ownerStateRecord(aggregate)) {
 			t.Fatalf("fresh full aggregate reload after %s: %v; first mismatch %s", event.Kind, err, implementationWorkFirstDifference(reflect.ValueOf(fresh), reflect.ValueOf(aggregate), "aggregate"))
@@ -804,6 +781,11 @@ func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.Run
 	result, err := reopened.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{Kind: RuntimeInternalEventEligibleFocusProjected, Scope: RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{SemanticOrderManifestHash: manifest.Hash, SemanticCoverageOrder: document.CoverageOrder}})
 	if err != nil || repository.saves != before || !reflect.DeepEqual(result.Aggregate, aggregate) {
 		t.Fatalf("reopened exact purpose replay changed authority: %v", err)
+	}
+	// Complete historical proof replay is an explicit offline audit. Keep it
+	// once at the end of each pipeline, separate from production read/recovery.
+	if err := aggregate.Validate(); err != nil {
+		t.Fatalf("completed private pipeline offline audit: %v", err)
 	}
 	return aggregate
 }

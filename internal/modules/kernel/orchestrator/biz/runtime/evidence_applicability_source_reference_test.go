@@ -28,7 +28,7 @@ func referenceBeforeSingleSourceCompileRuntimeEvidenceApplicabilityRequest(aggre
 			receiptHash = runtimecontract.StableRuntimeOperationReceiptHash(receipt)
 		}
 	}
-	source, err := compileRuntimeOperationReadSource(aggregate, fact.DispatchID, fact.OperationID, receiptHash)
+	source, err := CompileRuntimeOperationReadSource(aggregate, fact.DispatchID, fact.OperationID, receiptHash)
 	if err != nil {
 		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, err
 	}
@@ -84,7 +84,7 @@ func referenceBeforeSingleSourceCompileRuntimeEvidenceApplicabilityRead(aggregat
 	if err != nil || !required {
 		return request, RuntimeOperationReadSource{}, false, err
 	}
-	source, err := compileRuntimeOperationReadSource(aggregate, request.DispatchID, request.OperationID, request.SourceReceiptHash)
+	source, err := CompileRuntimeOperationReadSource(aggregate, request.DispatchID, request.OperationID, request.SourceReceiptHash)
 	if err != nil {
 		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, RuntimeOperationReadSource{}, false, err
 	}

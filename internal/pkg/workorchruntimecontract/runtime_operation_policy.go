@@ -187,12 +187,11 @@ func RuntimeOperationPoliciesFromAdmissibilities(values []RuntimeOperationAdmiss
 // bootstrap fallback only until the corresponding current catalog is sealed.
 func EffectiveRuntimeOperationPolicies(activation []RuntimeOperationPolicyFact, catalogs []RuntimeOperationAdmissibility) []RuntimeOperationPolicyFact {
 	activation = NormalizeRuntimeOperationPolicyFacts(activation)
-	catalogs = NormalizeRuntimeOperationAdmissibilities(catalogs)
 	currentOwnerKinds := make(map[string]struct{})
 	var ret []RuntimeOperationPolicyFact
 	for _, catalog := range catalogs {
 		for _, kind := range catalog.OperationKinds {
-			currentOwnerKinds[catalog.OwnerModuleID+"|"+CanonicalRuntimeBlockKind(kind)] = struct{}{}
+			currentOwnerKinds[strings.TrimSpace(catalog.OwnerModuleID)+"|"+CanonicalRuntimeBlockKind(kind)] = struct{}{}
 		}
 		ret = append(ret, catalog.OperationPolicies...)
 	}
@@ -209,7 +208,8 @@ func EffectiveRuntimeOperationPolicies(activation []RuntimeOperationPolicyFact, 
 // facts reflect the current owner catalogs. It does not mutate the persisted
 // activation seed or any owner state.
 func RuntimeActivationForFacts(facts RuntimeFacts) RuntimeActivationContext {
-	facts = facts.Normalized()
+	// Only activation and policy fields are applicable to this projection.
+	// Copying evidence/assessment/history adds no input or authority here.
 	activation := facts.Activation.Clone()
 	activation.OperationPolicies = EffectiveRuntimeOperationPolicies(
 		activation.OperationPolicies,

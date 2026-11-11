@@ -170,3 +170,64 @@ func TestInputPostimageUsesSameRulesWithoutWriting(t *testing.T) {
 		t.Fatal("inspection wrote live source")
 	}
 }
+
+func TestNeighborPostimageRepairsOnlyExactObservedMethod(t *testing.T) {
+	recipe, requirement, _ := conjunctiveSourceRequirement(t)
+	recipe.AdapterRef = modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic
+	checks, ok := shellValidationCheckAttestations(recipe, requirement)
+	if !ok {
+		t.Fatal("mapping")
+	}
+	root := t.TempDir()
+	current := shellValidationNativeCheckTargetRef(requirement, checks...)
+	neighbor := "historical_test.go"
+	original := "package fixture\nimport(\"os\";\"testing\")\nfunc TestOriginal(t *testing.T){_,err:=os.Executable();if err!=nil{t.Fatal(err)}}\n"
+	repaired := "package fixture\nimport \"testing\"\nfunc TestOriginal(t *testing.T){t.Fatal(\"original criterion\")}\n"
+	writeNativeStructureSource(t, root, "go.mod", "module fixture\ngo 1.26\n")
+	writeNativeStructureSource(t, root, current, conjunctiveSourceInput(checks, "", "")+"func init(){}\n")
+	writeNativeStructureSource(t, root, neighbor, original)
+	binding := shellTestWorkspaceManifestBinding("neighbor", []string{"go.mod", current, neighbor})
+	surfaces := shellValidationSurfaces([]rc.RuntimeValidationRecipe{recipe}, []rc.RuntimeValidationRecipe{recipe}, []rc.RuntimeValidationRecipe{recipe}, []rc.RuntimeValidationProofRequirement{requirement}, binding, "tree", root)
+	catalog := rc.RuntimeOperationAdmissibility{PrerequisiteID: "catalog", OwnerModuleID: ModuleID, ObservedRevision: "tree", OperationKinds: []string{rc.RuntimeBlockKindManagedValidationSession}, ValidationSurfaces: surfaces}
+	catalog.SnapshotID = rc.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	observation := rc.RuntimePrerequisiteObservation{PrerequisiteID: "catalog", Kind: rc.PrerequisiteKindOperationAdmissibility, OwnerModuleID: ModuleID, ContentHash: catalog.SnapshotID, Dependencies: []rc.RuntimeFreshnessDependency{{Domain: rc.RuntimeResourceWorkspaceTree, OwnerModuleID: rc.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: "tree"}}}
+	observation.ObservationID = rc.StableRuntimePrerequisiteObservationID(observation)
+	facts := rc.RuntimeFacts{WorkspaceID: "ws-neighbor", RunID: "run-neighbor", DefinitionSeed: rc.RuntimeDefinitionSeed{Hash: "seed"}, Focus: rc.CoverageFocus{CoverageWorkItemIDs: []common.CoverageWorkItemID{requirement.CoverageWorkItemID}}, Resources: rc.RuntimeResourceFacts{OperationAdmissibilities: []rc.RuntimeOperationAdmissibility{catalog}, PrerequisiteObservations: []rc.RuntimePrerequisiteObservation{observation}}}
+	revision, err := rc.CompileRuntimeOwnerInputRevision(facts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	post := rc.RuntimeValidationInputReviewFile{TargetRef: neighbor, Content: repaired, ContentHash: rc.RuntimeValidationInputContentHash(repaired)}
+	proof := rc.RuntimeOperationReplayProof{OwnerModuleID: rc.RuntimeModuleFile, OperationID: "edit", TargetRefs: []string{neighbor}, BeforeHash: rc.RuntimeValidationInputContentHash(original), AfterHash: post.ContentHash, AdmissibilitySnapshotID: "file-catalog", AcquisitionBinding: "acquisition"}
+	request := rc.RuntimeInputStructureRequest(string(facts.WorkspaceID), string(facts.RunID), rc.AuthorityTransaction{AuthoritySnapshotID: "authority"}, "manifest", rc.RuntimeOperation{ID: "edit", Kind: rc.StepKindFileEdit, TargetRefs: []string{neighbor}}, revision, proof, post)
+	valid, err := inspectShellValidationInputPostimage(request)
+	if err != nil || valid.Code != "" {
+		t.Fatalf("neighbor edit incorrectly required unrelated original defect repair: %+v %v", valid, err)
+	}
+	// Recovery consumes the same frozen source, independently of later disk state.
+	raw, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored rc.RuntimeValidationInputStructureRequest
+	if err = json.Unmarshal(raw, &restored); err != nil {
+		t.Fatal(err)
+	}
+	again, err := inspectShellValidationInputPostimage(restored)
+	if err != nil || !reflect.DeepEqual(valid, again) {
+		t.Fatal("frozen method recovery drift", err)
+	}
+	// Same target's forbidden method is still rejected, with no mutation/credit.
+	request.Postimage.Content = original + "// another image\n"
+	request.Postimage.ContentHash = rc.RuntimeValidationInputContentHash(request.Postimage.Content)
+	request.Proof.AfterHash = request.Postimage.ContentHash
+	invalid, err := inspectShellValidationInputPostimage(request)
+	if err != nil || invalid.Code != "native_check_unmanaged_self_execution" {
+		t.Fatalf("unrepaired method admitted: %+v %v", invalid, err)
+	}
+	// Fresh owner observation still reports the independent current-package defect.
+	writeNativeStructureSource(t, root, neighbor, repaired)
+	if got := inspectShellNativeValidationChecks(root, binding.Manifest.TargetRefs, checks); got.Code != "native_check_versioned_contract_invalid" {
+		t.Fatalf("other defect disappeared: %+v", got)
+	}
+}

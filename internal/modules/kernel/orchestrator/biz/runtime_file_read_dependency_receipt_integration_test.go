@@ -188,7 +188,7 @@ func TestRuntimeFileReadDependencyQueryPairsActualReceiptAuthority(t *testing.T)
 	if !reflect.DeepEqual(runtimeStateRecordFromAggregate(repository.aggregate), before) || !reflect.DeepEqual(runtimeStateRecordFromAggregate(aggregate), before) {
 		t.Fatal("重编返回值污染原 aggregate")
 	}
-	for _, scenario := range []string{"dispatch", "operation", "receipt", "canonical", "missing_receipt", "raw_dependency", "coherent_dependency", "nil_dependency", "execution_hash"} {
+	for _, scenario := range []string{"dispatch", "operation", "receipt", "canonical", "missing_receipt", "raw_dependency", "coherent_dependency", "nil_dependency", "execution_hash", "workspace", "run", "definition", "uncommitted"} {
 		t.Run("compiler_"+scenario, func(t *testing.T) {
 			value := runtimeAggregateFromRecord(runtimeStateRecordFromAggregate(aggregate))
 			dispatchID, operationID, hash := command.DispatchID, command.OperationID, command.SourceReceiptHash
@@ -214,6 +214,14 @@ func TestRuntimeFileReadDependencyQueryPairsActualReceiptAuthority(t *testing.T)
 				value.OperationReceipts[0].Evidence.OwnerRevisionSet = nil
 			case "execution_hash":
 				value.CompletedDispatches[0].OperationExecutions[0].OperationHash = "forged"
+			case "workspace":
+				value.Facts.WorkspaceID = "different-workspace"
+			case "run":
+				value.Facts.RunID = "different-run"
+			case "definition":
+				value.Facts.DefinitionRevision = "different-definition"
+			case "uncommitted":
+				value.StateRevision = 0
 			}
 			input := runtimeStateRecordFromAggregate(value)
 			if _, err := runtime.CompileRuntimeOperationReadSource(value, dispatchID, operationID, hash); err == nil {

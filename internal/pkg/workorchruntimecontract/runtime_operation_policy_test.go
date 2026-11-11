@@ -1,6 +1,9 @@
 package workorchruntimecontract
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestEffectiveRuntimeOperationPoliciesCurrentOwnerCatalogReplacesActivation(t *testing.T) {
 	stateChanging := false
@@ -83,5 +86,28 @@ func TestRuntimeOperationPolicyValidationRejectsDuplicateAndConflictingAuthority
 	catalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	if err := catalog.Validate(); err == nil {
 		t.Fatal("catalog normalization hid duplicate operation policy authority")
+	}
+}
+
+func TestActivationPolicyProjectionDoesNotCopyUnrelatedHistory(t *testing.T) {
+	base := runtimeCompleteAdmissionFixture(t).Facts
+	history := base
+	history.Assessments = make([]RuntimeAssessmentFact, 1000)
+	for i := range history.Assessments {
+		history.Assessments[i] = RuntimeAssessmentFact{EvidenceRefs: []string{"formal-owner-source"}}
+	}
+	want := RuntimeActivationForFacts(base)
+	got := RuntimeActivationForFacts(history)
+	if !reflect.DeepEqual(want, got) {
+		t.Fatal("unrelated assessments changed activation")
+	}
+	small := testing.AllocsPerRun(10, func() { _ = RuntimeActivationForFacts(base) })
+	large := testing.AllocsPerRun(10, func() { _ = RuntimeActivationForFacts(history) })
+	if large > small+1 {
+		t.Fatalf("policy projection copied unrelated history: small=%v large=%v", small, large)
+	}
+	got.OperationPolicies = append(got.OperationPolicies, RuntimeOperationPolicyFact{ID: "local"})
+	if !reflect.DeepEqual(RuntimeActivationForFacts(base), want) {
+		t.Fatal("projection mutated original owner facts")
 	}
 }

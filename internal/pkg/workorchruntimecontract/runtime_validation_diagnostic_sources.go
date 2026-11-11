@@ -30,6 +30,10 @@ type RuntimeValidationDiagnosticSource struct {
 	SourceRef      string `json:"sourceRef"`
 	NativeCaseRef  string `json:"nativeCaseRef"`
 	InputTargetRef string `json:"inputTargetRef"`
+	// Present for capability-owner execution observations. Semantic review
+	// subjects already retain the exact bytes in Files; provenance is not a
+	// second semantic consistency judgment.
+	InputContentHash string `json:"inputContentHash,omitempty"`
 }
 
 type RuntimeValidationDiagnosticSourceReview struct {
@@ -53,6 +57,9 @@ func validateRuntimeDiagnosticSourceSubject(s RuntimeValidationInputReviewSubjec
 	previous := ""
 	natives := map[string]bool{}
 	for _, source := range s.DiagnosticSources {
+		if source.InputContentHash != "" {
+			return fmt.Errorf("semantic sources use exact subject files, not execution-only input hashes")
+		}
 		if !boundedValidationExecutionRef(source.SourceRef, 512) || source.SourceRef <= previous || !boundedValidationExecutionRef(source.NativeCaseRef, 1024) || natives[source.NativeCaseRef] {
 			return fmt.Errorf("diagnostic sources require canonical unique complete identities")
 		}
@@ -153,31 +160,25 @@ func ValidateRuntimeValidationDiagnosticExecution(observation RuntimeValidationO
 	if c == nil {
 		return nil
 	}
+	if err := validateRuntimeExecutionSourceBinding(c, binding, scope); err != nil {
+		return err
+	}
 	hasSources := false
 	for _, stage := range c.Stages {
 		for _, ref := range stage.FailedSourceRefs {
-			found := false
-			if binding.InputReview != nil {
-				for _, source := range binding.InputReview.DiagnosticSources {
-					found = found || source.SourceRef == ref
-				}
-			}
-			if !found {
-				return fmt.Errorf("failed source is absent from sealed inventory")
+			if !runtimeValidationSourceMatches(c, binding, ref, "") {
+				return fmt.Errorf("failed source is absent from owner input or execution inventory")
 			}
 		}
 		for _, child := range stage.NativeExecutions {
-			found := false
-			if binding.InputReview != nil {
-				for _, source := range binding.InputReview.DiagnosticSources {
-					found = found || (source.SourceRef == child.SourceRef && source.NativeCaseRef == child.NativeCaseRef)
-				}
-			}
-			if !found {
-				return fmt.Errorf("native execution changed sealed source identity")
+			if !runtimeValidationSourceMatches(c, binding, child.SourceRef, child.NativeCaseRef) {
+				return fmt.Errorf("native execution changed owner source identity")
 			}
 		}
 		hasSources = hasSources || stage.DiagnosticSourceRef != "" || stage.BehaviorTargetRefs != nil
+	}
+	if err := validateRuntimeFailedSourceBodies(c, binding); err != nil {
+		return err
 	}
 	if c.Complete {
 		return nil
@@ -203,12 +204,8 @@ func ValidateRuntimeValidationDiagnosticExecution(observation RuntimeValidationO
 		if stage.DiagnosticSourceRef == "" {
 			continue
 		}
-		found := false
-		for _, source := range binding.InputReview.DiagnosticSources {
-			found = found || source.SourceRef == stage.DiagnosticSourceRef
-		}
-		if !found {
-			return fmt.Errorf("diagnostic execution source is absent from sealed inventory")
+		if !runtimeValidationSourceMatches(c, binding, stage.DiagnosticSourceRef, "") {
+			return fmt.Errorf("diagnostic execution source is absent from owner inventory")
 		}
 		if stage.DiagnosticReproduction.Validate() != nil {
 			return fmt.Errorf("source behavior requires its actual reproduction relation")

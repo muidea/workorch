@@ -193,7 +193,7 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 				attestations = shellValidationSupplementAttestations(attestations, binding.Manifest.TargetRefs)
 				inspection := inspectShellNativeValidationChecks(workspaceDirectory, binding.Manifest.TargetRefs, attestations)
 				inputTargets = append(inputTargets, inspection.InputTargetRefs...)
-				if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
+				if shellProjectObservationProtocol(attestations[0].ObservationProtocolRef) {
 					for _, ref := range binding.Manifest.TargetRefs {
 						if strings.HasSuffix(ref, "_test.go") || strings.HasPrefix(ref, "workorch_validation/") {
 							inputTargets = append(inputTargets, ref)

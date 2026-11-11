@@ -27,6 +27,12 @@ owner 计算的 immutable mismatch 字段路径及原始 cause。阶段区分 wo
 Result read/create/read-back/compare、Artifact reconcile、transition/CAS/winner；外层 fence 不覆盖内部精确阶段。
 错误跨同步 EventHub 后仍可解包，原文继续进入 Orchestrator 的受限诊断存储，不输出业务字段值或无关配置。
 诊断不授予 overwrite、retry、Result/Workspace/Run ACK 或验收 credit；缺 ACK 的同材料交付仍走原幂等路径。
+
+RuntimeCloseout在Result写后读回、SM-4接纳ACK及duplicate比较共用精确持久化表示规则
+`SamePersistedValue`。当前JSON合同标为omitempty的空可选集合在读回后成为nil，内存分配形状不属于交付身份；
+正文、顺序、重复、来源、revision及非可选null/[]仍精确比较，不规范化或重写原件、不变更封存hash。
+这不重判DoD、不覆盖冲突、不增加重试预算或解锁intervention；真实文件owner重开及ACK回归覆盖该边界。
+
 生产 `Configure` 只接受通过 `Validate()` 的 canonical `ResultOwnerRepositories` 与 EventHub；公开面没有 generic create/update/delete。
 
 后台 Timer 注册失败由 `Start` 原样返回；已经取得的订阅、service 与 cancel 句柄必须保留用于清理，不能把任务提交失败当作启动成功。失败后先完成 owner 清理再重新启动。该任务错误合同不单独证明完整的进程输入／排空／释放屏障。

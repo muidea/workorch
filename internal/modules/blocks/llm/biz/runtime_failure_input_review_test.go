@@ -27,6 +27,8 @@ func TestFailureInputReviewProviderRetainsExactInputsAndReceiptBody(t *testing.T
 		Diagnostic: &rc.RuntimeSemanticExecutionDiagnostic{FeedbackHash: "owner-feedback", OwnerModuleID: rc.RuntimeModuleShell, OriginalClass: "execution_failure", OriginalCode: "validation_failed", Signature: "failure", SummaryOnly: true},
 		Validation: rc.ProjectRuntimeValidationExecutionFeedback(&rc.RuntimeValidationObservation{RecipeID: "review-recipe", FailedChecks: []string{"check"}, FailureDetailProtocolRef: rc.RuntimeValidationFailureDetailProtocol, CheckFailures: []rc.RuntimeValidationCheckFailure{{CheckRef: "check", TargetRef: "checks/input_test.go", Line: 15, DiagnosticHash: hex.EncodeToString(digest[:]), ComparisonHash: hex.EncodeToString(digest[:]), AssertionText: body}}})}
 	f.Validation.DiagnosticComparisons = []rc.RuntimeValidationDiagnosticComparison{{StageID: "independent", OriginStageID: "original", SourceRef: "source", ExitCode: 0, Reproduction: rc.ValidationReproductionAbsent}}
+	adjacent := "package checks\n// exact adjacent assertion body\n"
+	f.Validation.FailedSourceInputs = []rc.RuntimeValidationInputReviewFile{{TargetRef: "adjacent/input_test.go", Content: adjacent, ContentHash: rc.RuntimeValidationInputContentHash(adjacent)}}
 	// Preserve a real-size failure set through the provider projection, complete
 	// envelope gate, frozen reload and rendered integrity; no hidden count32 cap.
 	for n := 1; n < 39; n++ {
@@ -60,6 +62,9 @@ func TestFailureInputReviewProviderRetainsExactInputsAndReceiptBody(t *testing.T
 	if err := json.Unmarshal([]byte(rendered.PromptContext.Sections[4].Content), &projected); err != nil || len(projected.ExecutionFeedback) != 1 || len(projected.ExecutionFeedback[0].Validation.CheckFailures) != 39 || !reflect.DeepEqual(projected.ExecutionFeedback[0].Validation.DiagnosticComparisons, f.Validation.DiagnosticComparisons) {
 		t.Fatal("39 failures did not reach provider unchanged", err)
 	}
+	if !reflect.DeepEqual(projected.ExecutionFeedback[0].Validation.FailedSourceInputs, f.Validation.FailedSourceInputs) {
+		t.Fatal("affected adjacent input did not reach the same frozen failure transaction")
+	}
 	for i := 0; i < 3; i++ {
 		if before.PromptContext.Sections[i].Content != rendered.PromptContext.Sections[i].Content {
 			t.Fatalf("failure review changed stable C%d", i)
@@ -89,6 +94,9 @@ func TestFailureInputReviewProviderRetainsExactInputsAndReceiptBody(t *testing.T
 		}
 	}
 	for name, mutate := range map[string]func(*runtimeSemanticTailProjection){
+		"adjacent source": func(tail *runtimeSemanticTailProjection) {
+			tail.ExecutionFeedback[0].Validation.FailedSourceInputs[0].Content += "changed"
+		},
 		"diagnostic relation": func(tail *runtimeSemanticTailProjection) {
 			tail.ExecutionFeedback[0].Validation.DiagnosticComparisons[0].Reproduction = rc.ValidationReproductionChanged
 		},

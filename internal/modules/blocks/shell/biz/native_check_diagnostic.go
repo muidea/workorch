@@ -2,6 +2,7 @@ package shell
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -54,10 +55,6 @@ func shellValidationInputMaintenance(directory string, refs []string, inspection
 	if err != nil {
 		return nil
 	}
-	subject, code := shellReadValidationInputSubject(directory, refs, b, false)
-	if code != "" {
-		return nil
-	}
 	pkg, err := shellIsolatedValidationPackage(checks)
 	if err != nil || pkg == "" {
 		return nil
@@ -67,9 +64,13 @@ func shellValidationInputMaintenance(directory string, refs []string, inspection
 		targets = []string{shellValidationNativeCheckTargetRef(requirement, checks...)}
 	}
 	for _, target := range targets {
-		if !strings.HasPrefix(target, pkg+"/") {
+		if !slices.Contains(refs, target) || (!strings.HasPrefix(target, pkg+"/") && (!shellProjectObservationProtocol(checks[0].ObservationProtocolRef) || (!strings.HasSuffix(target, "_test.go") && !strings.HasPrefix(target, "workorch_validation/")))) {
 			return nil
 		}
+	}
+	subject, code := shellReadValidationInputSubject(directory, refs, b, false, targets...)
+	if code != "" {
+		return nil
 	}
 	m := &runtimecontract.RuntimeValidationInputMaintenance{Binding: b, Recipe: &recipe, Files: subject.Files, TargetRefs: targets}
 	if m.Validate(requirement, recipe.ID) != nil {

@@ -25,97 +25,19 @@ const (
 	RuntimeCompleteAdmissionTerminalContractFailure RuntimeCompleteAdmissionDisposition = "terminal_contract_failure"
 )
 
-// RuntimeCompleteAdmissionInput is an invocation-local detached view of
-// already-persisted canonical records. It is not persisted and deliberately
-// introduces no second CWI, binding, request, dispatch, or receipt model.
+// RuntimeCompleteAdmissionInput borrows read-only, already-admitted owner
+// values for the current seal. Proposal is the persisted admission product;
+// unaccepted external input must enter candidate admission first. Historical
+// business judgments are not inputs to this transaction fence.
 type RuntimeCompleteAdmissionInput struct {
-	Definition          RuntimeDefinitionContext
-	ProcessedEventIDs   []string
-	Facts               RuntimeFacts
-	Decision            RuntimeDecision
-	SemanticPlanning    RuntimeSemanticPlanningLedger
-	ImplementationWork  RuntimeImplementationWorkLedger
-	Reconciliation      RuntimeCWIReconciliationLedger
-	Manifest            RuntimeCandidateContractManifest
-	Candidate           RuntimeCandidate
-	Attempt             RuntimeCandidateAttemptRecord
-	ActiveDispatch      *RuntimeDispatchRecord
-	CompletedDispatches []RuntimeDispatchRecord
-	OperationReceipts   []RuntimeOperationReceipt
-	// Original read-only source ledgers required to replay historical ordinary
-	// settlements after rebind. These are not reconstructed from current status.
-	ProofLineage     []RuntimeCoverageProofLineage
-	Governance       []RuntimeOperationGovernanceBinding
-	Budget           RuntimeExecutionBudgetLedger
-	EvidenceSequence uint64
-	Resolutions      []RuntimeGovernanceResolutionRecord
-	Attempts         []RuntimeCandidateAttemptRecord
-	Sessions         []RuntimeCandidateRequestSession
-	Confirmations    []RuntimeRepairSurfaceConfirmationRecord
-}
-
-func (i RuntimeCompleteAdmissionInput) Clone() RuntimeCompleteAdmissionInput {
-	i.Definition = i.Definition.Normalized()
-	i.ProcessedEventIDs = append([]string(nil), i.ProcessedEventIDs...)
-	i.Facts = i.Facts.Normalized()
-	i.Decision = cloneRuntimeDecision(i.Decision)
-	i.SemanticPlanning = i.SemanticPlanning.Clone()
-	i.ImplementationWork = i.ImplementationWork.Clone()
-	i.Reconciliation = i.Reconciliation.Clone()
-	i.Manifest = i.Manifest.Clone()
-	i.Candidate = cloneRuntimeCandidate(i.Candidate)
-	i.Attempt = cloneRuntimeCompleteAdmissionAttempt(i.Attempt)
-	i.Budget = i.Budget.Clone()
-	i.ProofLineage = append([]RuntimeCoverageProofLineage(nil), i.ProofLineage...)
-	for n := range i.ProofLineage {
-		i.ProofLineage[n] = i.ProofLineage[n].Clone()
-	}
-	i.Governance = append([]RuntimeOperationGovernanceBinding(nil), i.Governance...)
-	for n := range i.Governance {
-		i.Governance[n] = i.Governance[n].Clone()
-	}
-	i.Resolutions = append([]RuntimeGovernanceResolutionRecord(nil), i.Resolutions...)
-	for n := range i.Resolutions {
-		i.Resolutions[n] = i.Resolutions[n].Clone()
-	}
-	i.Attempts = append([]RuntimeCandidateAttemptRecord(nil), i.Attempts...)
-	for n := range i.Attempts {
-		i.Attempts[n] = i.Attempts[n].Clone()
-	}
-	i.Sessions = append([]RuntimeCandidateRequestSession(nil), i.Sessions...)
-	for n := range i.Sessions {
-		i.Sessions[n] = i.Sessions[n].Clone()
-	}
-	i.Confirmations = append([]RuntimeRepairSurfaceConfirmationRecord(nil), i.Confirmations...)
-	for n := range i.Confirmations {
-		i.Confirmations[n] = i.Confirmations[n].Clone()
-	}
-	return i.cloneExecutionFacts()
-}
-
-func cloneRuntimeCompleteAdmissionAttempt(value RuntimeCandidateAttemptRecord) RuntimeCandidateAttemptRecord {
-	return value.Clone()
-}
-
-func (i RuntimeCompleteAdmissionInput) cloneExecutionFacts() RuntimeCompleteAdmissionInput {
-	if i.ActiveDispatch != nil {
-		value := i.ActiveDispatch.Clone()
-		i.ActiveDispatch = &value
-	}
-	i.CompletedDispatches = cloneRuntimeDispatchRecords(i.CompletedDispatches)
-	i.OperationReceipts = NormalizeRuntimeOperationReceipts(i.OperationReceipts)
-	return i
-}
-
-func cloneRuntimeDispatchRecords(values []RuntimeDispatchRecord) []RuntimeDispatchRecord {
-	if len(values) == 0 {
-		return nil
-	}
-	ret := make([]RuntimeDispatchRecord, len(values))
-	for idx := range values {
-		ret[idx] = values[idx].Clone()
-	}
-	return ret
+	Facts              RuntimeFacts
+	Decision           RuntimeDecision
+	SemanticPlanning   RuntimeSemanticPlanningLedger
+	ImplementationWork RuntimeImplementationWorkLedger
+	Manifest           RuntimeCandidateContractManifest
+	Candidate          RuntimeCandidate
+	Attempt            RuntimeCandidateAttemptRecord
+	ActiveDispatch     *RuntimeDispatchRecord
 }
 
 // RuntimeCompleteAdmissionDecision is intentionally small and owner-neutral.
@@ -154,17 +76,10 @@ func completeAdmissionFailure(disposition RuntimeCompleteAdmissionDisposition, c
 	return decision
 }
 
-// EvaluateRuntimeCompleteAdmission validates the complete final-seal matrix
-// using only detached canonical values. It performs no I/O, mutation, action
-// selection, correction accounting, or state transition.
-func EvaluateRuntimeCompleteAdmission(raw RuntimeCompleteAdmissionInput) RuntimeCompleteAdmissionDecision {
-	input := raw.Clone()
-	if err := input.Facts.Validate(); err != nil {
-		return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "facts_invalid", err)
-	}
-	if err := input.Decision.Validate(); err != nil {
-		return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "decision_invalid", err)
-	}
+// EvaluateRuntimeCompleteAdmission joins the exact persisted proposal to the
+// current authority and owner feasibility facts. It never repeats proposal or
+// historical aggregate admission, copies history, or mutates the borrowed input.
+func EvaluateRuntimeCompleteAdmission(input RuntimeCompleteAdmissionInput) RuntimeCompleteAdmissionDecision {
 	transaction := input.Decision.AuthorityTransaction()
 	if input.Facts.WorkspaceID != input.Decision.AuthoritySnapshot.WorkspaceID ||
 		input.Facts.RunID != input.Decision.AuthoritySnapshot.RunID ||
@@ -173,24 +88,12 @@ func EvaluateRuntimeCompleteAdmission(raw RuntimeCompleteAdmissionInput) Runtime
 		input.Facts.Focus.ID != transaction.FocusID {
 		return completeAdmissionFailure(RuntimeCompleteAdmissionStaleConflict, "snapshot_identity_mismatch", fmt.Errorf("runtime admission facts do not match the sealed authority transaction"))
 	}
-	if err := ValidateRuntimeCWILedger(input.Facts); err != nil {
-		return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "cwi_ledger_invalid", err)
-	}
-	if err := ValidateRuntimeHistoricalBehaviorCompletions(input.Facts, input.CompletedDispatches); err != nil {
-		return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "historical_behavior_lineage_invalid", err)
-	}
-	if err := ValidateRuntimeCWIFocusBindings(input.Facts); err != nil {
-		return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "cwi_binding_invalid", err)
-	}
-	if err := ValidateRuntimeCWIReconciliationLedger(input.Facts, input.Reconciliation); err != nil {
-		return completeAdmissionFailure(RuntimeCompleteAdmissionStaleConflict, "reconciliation_generation_stale", err)
-	}
 	if blocked := runtimeCurrentFocusBlockedPrerequisites(input.Facts); len(blocked) != 0 {
 		return completeAdmissionFailure(RuntimeCompleteAdmissionPrerequisiteBlocked, "cwi_prerequisite_blocked", fmt.Errorf("runtime current CWI prerequisites are not settled: %s", strings.Join(blocked, ",")))
 	}
 	workPurpose := input.Decision.RequiredOutput.ImplementationWorkBindingHash != ""
 	if workPurpose {
-		if _, err := ValidateRuntimeImplementationWorkAdmission(input.Facts, input.Decision, input.SemanticPlanning, input.ImplementationWork, input.Manifest); err != nil {
+		if _, err := ValidateRuntimeImplementationWorkAdmission(input.Facts, input.Decision, input.ImplementationWork, input.Manifest); err != nil {
 			return completeAdmissionFailure(RuntimeCompleteAdmissionStaleConflict, "implementation_work_authority_invalid", err)
 		}
 	} else if disposition, err := validateRuntimeCompleteAdmissionSemanticAuthority(input.Facts, input.SemanticPlanning); err != nil {
@@ -199,34 +102,6 @@ func EvaluateRuntimeCompleteAdmission(raw RuntimeCompleteAdmissionInput) Runtime
 			code = "semantic_authority_unsealed"
 		}
 		return completeAdmissionFailure(disposition, code, err)
-	}
-	ownerFacts := RuntimeCandidateManifestOwnerFactsFromContext(RuntimeCandidateContextForDecision(input.Facts, input.Decision, nil))
-	if workPurpose {
-		binding := input.Manifest.ImplementationWorkingBinding.Clone()
-		ownerFacts.ImplementationWorkingBinding = &binding
-		ownerFacts.TargetSelection = nil
-		ownerFacts.OperationAdmissibilities = []RuntimeOperationAdmissibility{binding.OwnerCatalog.Clone()}
-	}
-	if input.Decision.State == ConvergenceStateNeedAssessment {
-		focus := input.Decision.Focus.Normalized()
-		if _, err := RuntimeAssessmentSourceProjection(input.Facts, focus.ID, focus.CoverageWorkItemIDs); err != nil {
-			return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "assessment_definition_preimage_invalid", err)
-		}
-		preimage, err := RuntimeAssessmentPurposeForCurrentFocus(input.Facts, input.SemanticPlanning, focus)
-		if err != nil {
-			return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "assessment_purpose_preimage_invalid", err)
-		}
-		ownerFacts.AssessmentPurpose = preimage.Purpose
-		ownerFacts.AssessmentPurposeManifestHash = preimage.SemanticManifestHash
-	}
-	if err := ValidateRuntimeCandidateContractManifestForDecision(input.Manifest, input.Decision, ownerFacts); err != nil {
-		return completeAdmissionFailure(RuntimeCompleteAdmissionStaleConflict, "candidate_manifest_stale", err)
-	}
-	if err := ValidateRuntimeCandidateAgainstManifest(input.Manifest, input.Candidate); err != nil {
-		return completeAdmissionFailure(RuntimeCompleteAdmissionCorrectableOnce, "candidate_manifest_violation", err)
-	}
-	if err := input.Candidate.ValidateWithActivation(input.Decision, RuntimeActivationForFacts(input.Facts)); err != nil {
-		return completeAdmissionFailure(RuntimeCompleteAdmissionCorrectableOnce, "candidate_contract_invalid", err)
 	}
 	contractID := StableAuthorityContractID(input.Facts.WorkspaceID, input.Facts.RunID, transaction)
 	if input.Attempt.AuthorityContractID != contractID || !SameAuthorityContract(input.Attempt.Transaction, transaction) ||
@@ -249,9 +124,6 @@ func EvaluateRuntimeCompleteAdmission(raw RuntimeCompleteAdmissionInput) Runtime
 	if feasibility := evaluateRuntimeCompleteAdmissionFeasibility(input.Facts, input.Manifest, input.Candidate, input.Attempt.Feasibilities, input.Decision.AuthorityTransaction()); !feasibility.Admitted() {
 		return feasibility
 	}
-	if err := ValidateRuntimeCWIBindingRetirementsAgainstExecution(input.Facts, input.ActiveDispatch, input.CompletedDispatches, input.OperationReceipts); err != nil {
-		return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "binding_retirement_execution_conflict", err)
-	}
 	return RuntimeCompleteAdmissionDecision{Disposition: RuntimeCompleteAdmissionAdmitted, Code: "admitted"}
 }
 
@@ -261,10 +133,6 @@ func EvaluateRuntimeCompleteAdmission(raw RuntimeCompleteAdmissionInput) Runtime
 // revoke an already-sealed CWI binding. The binding keeps the immutable
 // semantic-manifest lineage required by final admission.
 func validateRuntimeCompleteAdmissionSemanticAuthority(facts RuntimeFacts, ledger RuntimeSemanticPlanningLedger) (RuntimeCompleteAdmissionDisposition, error) {
-	ledger = ledger.Clone()
-	if err := ledger.Validate(); err != nil {
-		return RuntimeCompleteAdmissionTerminalContractFailure, err
-	}
 	if ledger.Phase == RuntimeSemanticPlanningSealed {
 		if ledger.Manifest == nil || ledger.SealedBindingSetHash == "" || ledger.SealedBindingSetHash != facts.ReconciliationContract.BindingSetHash {
 			return RuntimeCompleteAdmissionTerminalContractFailure, fmt.Errorf("runtime sealed semantic authority does not match the current binding set")
@@ -285,7 +153,6 @@ func validateRuntimeCompleteAdmissionSemanticAuthority(facts RuntimeFacts, ledge
 }
 
 func runtimeCurrentFocusBlockedPrerequisites(facts RuntimeFacts) []string {
-	facts = facts.Normalized()
 	byID := make(map[string]RuntimeCoverageItemFact, len(facts.Coverage))
 	for _, item := range facts.Coverage {
 		byID[string(item.ID)] = item

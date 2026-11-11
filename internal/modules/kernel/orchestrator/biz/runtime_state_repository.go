@@ -78,8 +78,8 @@ func (r runtimeStateRepository) readRuntimeStateOriginal(ctx context.Context, wo
 	if !response.StatePresent || response.RuntimeState == nil {
 		return runtimecontract.RuntimeStateRecord{}, common.ErrNotFound
 	}
-	// Preserve the exact owner DTO, never Normalized: both complete-load paths
-	// validate it before accepting any independently detached converted aggregate.
+	// Preserve the exact integrity-checked owner DTO, never Normalized. The
+	// committed reader consumes it without readmitting historical business facts.
 	return *response.RuntimeState, nil
 }
 

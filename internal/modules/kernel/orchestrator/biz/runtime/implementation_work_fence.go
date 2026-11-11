@@ -17,7 +17,7 @@ func validateRuntimeCandidatePurposeFence(a RuntimeAggregate) error {
 	if err != nil {
 		return err
 	}
-	_, err = runtimecontract.ValidateRuntimeImplementationWorkAdmission(a.Facts, a.Decision, a.SemanticPlanning, a.ImplementationWork, manifest)
+	_, err = runtimecontract.ValidateRuntimeImplementationWorkAdmission(a.Facts, a.Decision, a.ImplementationWork, manifest)
 	return err
 }
 

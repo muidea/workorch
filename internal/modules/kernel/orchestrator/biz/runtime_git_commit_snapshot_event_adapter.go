@@ -13,13 +13,13 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// Original sealed sources are compiled from the complete aggregate. This read
+// Original sealed sources are projected from the committed owner aggregate. This read
 // does not persist freshness, reopen a CWI, seal material or grant credit.
 func (m *Biz) queryRuntimeGitCommitSnapshotFromAggregate(ctx context.Context, aggregate runtime.RuntimeAggregate, dispatchID, operationID, receiptHash, requestID string) (gitevents.QueryRuntimeCommitSnapshotResult, error) {
 	return m.queryRuntimeGitCommitSnapshotWithInputs(ctx, aggregate, dispatchID, operationID, receiptHash, requestID, nil)
 }
 
-// Both sources come from the same complete validated aggregate. The validation
+// Both sources come from the same committed owner aggregate. The validation
 // receipt, exact current binding and accepted semantic report are independently
 // reverse-proven before Git is asked about bytes in its original commit tree.
 func (m *Biz) queryRuntimeGitCommitSnapshotWithReviewedInputsFromAggregate(ctx context.Context, aggregate runtime.RuntimeAggregate, dispatchID, operationID, receiptHash, requestID, validationDispatchID, validationOperationID, validationReceiptHash string) (gitevents.QueryRuntimeCommitSnapshotResult, error) {

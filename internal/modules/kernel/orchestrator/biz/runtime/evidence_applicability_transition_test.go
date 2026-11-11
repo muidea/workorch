@@ -177,8 +177,8 @@ func TestApplicabilityRequestAndObservationKeepCompleteIndependentSourceGates(t 
 			case "reload":
 				before = runtimeTestEvidenceAggregateRoundTrip(t, before)
 			case "unrelated_invalid_event":
-				// Request source joins alone cannot find this corruption. Both
-				// public compilation and the private writer need the full gate.
+				// This deliberately unaccepted snapshot needs cold admission;
+				// current request joins cannot replace that original gate.
 				before.ProcessedEventIDs = []string{"same", "same"}
 			case "receipt_drift":
 				before.OperationReceipts[0].ExecutionKey = "changed-original-receipt"
@@ -189,7 +189,9 @@ func TestApplicabilityRequestAndObservationKeepCompleteIndependentSourceGates(t 
 			if gateErr != nil && fmt.Sprint(compileErr) != fmt.Sprint(gateErr) {
 				t.Fatalf("public entry skipped the first full-source error: %v != %v", compileErr, gateErr)
 			}
-			repository := &implementationWorkDetachedRepository{controllerRepository: controllerRepository{aggregate: &before}}
+			// Do not feed a deliberately corrupted snapshot to the fixture for
+			// already-committed owner reads. Keep the full raw admission boundary.
+			repository := &controllerRepository{aggregate: &before}
 			controller, err := NewRuntimeController(repository)
 			if err != nil {
 				t.Fatal(err)

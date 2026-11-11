@@ -75,8 +75,24 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 	}
 	behaviorArgs = shellProcessBehaviorArgs(behaviorArgs, processPath)
 	specs := shellProjectFixedStages(behaviorArgs, pkg)
-	if request.validationProofBinding.InputReview != nil && request.validationProofBinding.InputReview.DiagnosticSourceContractRef == runtimecontract.RuntimeValidationDiagnosticSourceReviewV1 && shellNativeChannelMethodRequired(request.validationProofBinding.InputReview.Files) {
-		sources := request.validationProofBinding.InputReview.DiagnosticSources
+	var executionSourceRevision string
+	if protocol == shellProjectMultiFailureDiagnosticProtocolRef {
+		var code string
+		executionSourceRevision, err = shellProjectSourceSetHash(directory)
+		if err != nil {
+			code = "validation_execution_sources_unavailable"
+		} else {
+			request.validationNativeSources, request.validationNativeInputs, code = shellProjectExecutionSources(directory, request.ValidationScopeTargetRefs)
+			current, sourceErr := shellProjectSourceSetHash(directory)
+			if code == "" && (sourceErr != nil || current != executionSourceRevision) {
+				code = "validation_execution_sources_changed"
+			}
+		}
+		if code != "" {
+			output.Status, output.FailureCode = "failed", code
+			result, err := finalizeShellResult(output, fmt.Errorf("execution source observation: %s", code))
+			return result, sealShellProjectConjunction(nil, nil, nil), err
+		}
 		client, clientErr := prepareShellNativeRunner(ctx, request.ValidationScratchDirectory, env)
 		if clientErr != nil {
 			return output, sealShellProjectConjunction(nil, nil, nil), clientErr
@@ -84,7 +100,7 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 		env = append(env, shellNativeRunnerEnv+"="+client)
 		for index := range specs {
 			if specs[index].JSON {
-				specs[index].NativeSources = sources
+				specs[index].NativeSources = request.validationNativeSources
 			}
 		}
 	}
@@ -112,6 +128,10 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 			}
 		}
 		stages = append(stages, stage)
+		if protocol == shellProjectMultiFailureDiagnosticProtocolRef && stage.SourceBefore != executionSourceRevision {
+			stageErr = fmt.Errorf("execution source inventory differs from the actual operation snapshot")
+			stages[len(stages)-1].FailureCode = "validation_execution_sources_changed"
+		}
 		output.Stdout, output.Stderr = string(stage.Stdout.Raw), string(stage.Stderr.Raw)
 		output.ExitCode = int64(stage.ExitCode)
 		output.StdoutBytes, output.StderrBytes = stage.Stdout.Bytes, stage.Stderr.Bytes
@@ -248,10 +268,21 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 		}
 	}
 	fact := sealShellProjectConjunction(stages, specs, behavior)
+	if protocol == shellProjectMultiFailureDiagnosticProtocolRef {
+		fact.NativeSources = request.validationNativeSources
+		var reviewed []runtimecontract.RuntimeValidationInputReviewFile
+		if request.validationProofBinding.InputReview != nil {
+			reviewed = request.validationProofBinding.InputReview.Files
+		}
+		fact.FailedSourceInputs, fact.SourceInputFailure = shellProjectFailedSourceInputs(directory, fact.NativeSources, stages, reviewed)
+		if len(stages) != 0 && stages[0].SourceBefore != executionSourceRevision {
+			fact.FailedSourceInputs, fact.SourceInputFailure = nil, "validation_execution_sources_changed"
+		}
+	}
 	if protocol != fact.ProtocolRef {
 		fact.ProtocolRef = protocol
-		fact.CommitmentHash = shellProjectConjunctionCommitmentHash(fact)
 	}
+	fact.CommitmentHash = shellProjectConjunctionCommitmentHash(fact)
 	if executeErr == nil && !fact.Complete {
 		executeErr = fmt.Errorf("复合验证未完成：%s", fact.FailureCode)
 		output.Status, output.FailureCode = "failed", fact.FailureCode

@@ -48,7 +48,7 @@ func (m *Biz) queryRuntimeFileMutationApplicabilityFromAggregate(ctx context.Con
 	return m.queryRuntimeFileMutationApplicabilityFromSource(ctx, source, aggregate.StateRevision, requestID)
 }
 
-// Only same-call complete aggregate compilers supply this detached owner read.
+// Only committed aggregate source projections supply this detached owner read.
 // The receiving File owner still verifies the exact original receipt and fence.
 func (m *Biz) queryRuntimeFileMutationApplicabilityFromSource(ctx context.Context, source runtime.RuntimeOperationReadSource, stateRevision uint64, requestID string) (*runtimecontract.RuntimeOwnerRevisionSet, bool, error) {
 	if requestID == "" || requestID != strings.TrimSpace(requestID) {

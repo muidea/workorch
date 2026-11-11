@@ -103,6 +103,9 @@ func assertSequentialProjectFailureClosure(t *testing.T, state runtimecontract.R
 		// postimages are independently reviewed before the failure chain.
 		wantReviews += wantRounds - 2
 	}
+	if len(maintenanceRounds) > 1 {
+		wantReviews = maintenanceRounds[1]
+	}
 	if repairs != 3 || reviews != wantReviews || len(state.GovernanceRequests) != 0 || len(state.ImplementationWork.Rounds) != wantRounds {
 		t.Fatalf("sequence omitted or repeated a phase: repairs=%d reviews=%d rounds=%d tickets=%d", repairs, reviews, len(state.ImplementationWork.Rounds), len(state.GovernanceRequests))
 	}

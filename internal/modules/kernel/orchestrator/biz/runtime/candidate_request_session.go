@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -333,16 +334,18 @@ func candidateRequestSessionActionAllowed(aggregate RuntimeAggregate, documentKi
 // pure authority projection; this function only proves that the caller is
 // using the persisted document/session that carried that exact projection.
 func validateCandidateAttemptSessionBinding(aggregate RuntimeAggregate, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string) error {
-	expectedManifest, buildErr := BuildRuntimeCandidateContractManifestForAggregate(aggregate)
-	if buildErr != nil {
-		return fmt.Errorf("%w: candidate manifest preimage is unavailable: %v", common.ErrConflict, buildErr)
-	}
-	if expectedManifest.Hash != manifest.Hash {
-		return fmt.Errorf("%w: candidate manifest does not match current sealed authority", common.ErrConflict)
-	}
 	_, session, found := runtimeCandidateRequestSessionByID(aggregate.CandidateRequestSessions, logicalRequestID)
 	if !found {
 		return fmt.Errorf("%w: candidate request session is missing", common.ErrConflict)
+	}
+	if session.CandidateManifest == nil {
+		// First admission binds the new manifest to its current owner preimage.
+		expectedManifest, err := BuildRuntimeCandidateContractManifestForAggregate(aggregate)
+		if err != nil || expectedManifest.Hash != manifest.Hash {
+			return fmt.Errorf("%w: candidate manifest does not match current sealed authority: %v", common.ErrConflict, err)
+		}
+	} else if !reflect.DeepEqual(*session.CandidateManifest, manifest) {
+		return fmt.Errorf("%w: candidate manifest differs from its committed request source", common.ErrConflict)
 	}
 	if err := validateCurrentCandidateRequestSession(aggregate, session); err != nil {
 		return err
@@ -368,10 +371,9 @@ func currentCandidateRequestSession(aggregate RuntimeAggregate, logicalRequestID
 }
 
 func validateCurrentCandidateRequestSession(aggregate RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession) error {
-	session = session.Normalized()
-	if err := session.Validate(); err != nil {
-		return err
-	}
+	// The session body was admitted at its creation/update CAS. Current use
+	// checks its authority association, without replaying the original wire,
+	// manifest and repair judgments.
 	transaction := aggregate.Decision.AuthorityTransaction()
 	if session.ExpectedDocument == nil || session.Transaction != transaction || session.LogicalRequestID != runtimecontract.StableRuntimeCandidateRequestSessionID(session.DocumentKind, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction, session.StablePrefixHash, session.ManifestHash, session.CorrectionHash) {
 		return fmt.Errorf("%w: runtime candidate request session does not match current authority", common.ErrConflict)
@@ -384,7 +386,7 @@ func validateCurrentCandidateRequestSession(aggregate RuntimeAggregate, session 
 
 func runtimeCandidateRequestSessionByID(values []runtimecontract.RuntimeCandidateRequestSession, logicalRequestID string) (int, runtimecontract.RuntimeCandidateRequestSession, bool) {
 	for idx, session := range values {
-		if session.Normalized().LogicalRequestID == strings.TrimSpace(logicalRequestID) {
+		if strings.TrimSpace(session.LogicalRequestID) == strings.TrimSpace(logicalRequestID) {
 			return idx, session.Normalized(), true
 		}
 	}

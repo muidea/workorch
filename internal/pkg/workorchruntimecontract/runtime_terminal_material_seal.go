@@ -103,7 +103,7 @@ func ValidateRuntimeTerminalMaterialSeal(seal *RuntimeTerminalMaterialSeal, sour
 	}
 	for _, acknowledgement := range acknowledgements {
 		if acknowledgement.Owner == RuntimeDeliveryOwnerResult &&
-			(acknowledgement.ResultCloseout == nil || !reflect.DeepEqual(*acknowledgement.ResultCloseout, *seal.Material.RuntimeCloseout)) {
+			(acknowledgement.ResultCloseout == nil || !acknowledgement.ResultCloseout.SamePersistedValue(seal.Material.RuntimeCloseout)) {
 			return fmt.Errorf("Result acknowledgement material does not match original terminal seal")
 		}
 	}
