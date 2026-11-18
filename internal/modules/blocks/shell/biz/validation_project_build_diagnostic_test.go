@@ -105,6 +105,11 @@ func TestProjectBuildFailurePublishesTypedDiagnosticAndOriginalStage(t *testing.
 			if diagnostic.OwnerCode != wantCode || diagnostic.Stage != "project-build" || result.Result.Evidence.Validation == nil || result.Result.Evidence.Validation.ProofClass != "" {
 				t.Fatalf("failure was untyped or credited: %+v", diagnostic)
 			}
+			if scenario == "source-compile" {
+				if len(diagnostic.FailureLocations) == 0 || diagnostic.FailureLocations[0].TargetRef != "delivery/value.go" || diagnostic.FailureLocations[0].Line != 2 || !strings.Contains(diagnostic.FailureLocations[0].Message, "missingValue") {
+					t.Fatalf("expected scoped FailureLocations for delivery/value.go line 2, got %+v", diagnostic.FailureLocations)
+				}
+			}
 			stage := result.Conjunction.Stages[0]
 			store, err := openShellProjectRawStore(request.WorkspaceInternalDirectory)
 			if err != nil {

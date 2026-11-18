@@ -110,6 +110,8 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
 	}
+	authorityContext := runtimeCandidateAuthorityContextProjection(candidateContext, manifest)
+	compactRuntimeCandidateAuthorityTargetSnapshots(&authorityContext, outputContract)
 	authorityJSON, err := json.Marshal(struct {
 		Decision       runtimecontract.RuntimeDecision          `json:"decision"`
 		Transaction    runtimecontract.AuthorityTransaction     `json:"transaction"`
@@ -119,7 +121,7 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 		request.Decision,
 		request.Transaction,
 		outputContract,
-		runtimeCandidateAuthorityContextProjection(candidateContext, manifest),
+		authorityContext,
 	})
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
@@ -340,7 +342,7 @@ func validateRuntimeCandidateContextIntegrity(
 			Context        runtimeCandidateAuthorityProjection      `json:"context"`
 			OutputContract runtimeCandidateOutputContractProjection `json:"outputContract"`
 		}
-		if json.Unmarshal([]byte(contents["C3"]), &actual) != nil || !reflect.DeepEqual(actual.Context.ValidationProofPreparations, expectedPreparations) || !reflect.DeepEqual(actual.Context.ValidationGenerationContexts, expectedContexts) {
+		if json.Unmarshal([]byte(contents["C3"]), &actual) != nil || expandRuntimeCandidateAuthorityTargetSnapshots(&actual.Context, actual.OutputContract) != nil || !reflect.DeepEqual(actual.Context.ValidationProofPreparations, expectedPreparations) || !reflect.DeepEqual(actual.Context.ValidationGenerationContexts, expectedContexts) {
 			missing = append(missing, "P4.validation_preparation_context")
 		}
 		if !runtimeCandidateInputRevisionSourcesMatch(manifest, actual.OutputContract.OperationContracts) {

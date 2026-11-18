@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -48,6 +49,7 @@ type ValidationFailureDiagnostic struct {
 	TargetRejection               *RuntimeValidationFailureTargetRejection  `json:"targetRejection,omitempty"`
 	InputRepair                   *RuntimeValidationInputRepair             `json:"inputRepair,omitempty"`
 	InputLocations                []RuntimeValidationInputLocation          `json:"inputLocations,omitempty"`
+	FailureLocations              []RuntimeValidationFailureLocation        `json:"failureLocations,omitempty"`
 	InputAddition                 RuntimeValidationInputAddition            `json:"inputAddition,omitzero"`
 	SchemaVersion                 string                                    `json:"schemaVersion,omitempty"`
 	Class                         string                                    `json:"class,omitempty"`
@@ -140,10 +142,53 @@ func (r RuntimeValidationFailureTargetRejection) Validate() error {
 	return nil
 }
 
+const (
+	RuntimeValidationFailureLocationMaxCount   = 16
+	RuntimeValidationFailureLocationMessageMax = 512
+)
+
+// RuntimeValidationFailureLocation records a bounded, owner-observed failure
+// coordinate within the sealed target scope. It supplies factual location context
+// without exposing raw execution logs or overriding owner repair authority.
+type RuntimeValidationFailureLocation struct {
+	TargetRef string `json:"targetRef"`
+	Line      int    `json:"line"`
+	Column    int    `json:"column,omitempty"`
+	Message   string `json:"message"`
+}
+
+func normalizeRuntimeValidationFailureLocations(values []RuntimeValidationFailureLocation) []RuntimeValidationFailureLocation {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]RuntimeValidationFailureLocation, len(values))
+	for i, value := range values {
+		value.TargetRef = strings.TrimSpace(value.TargetRef)
+		value.Message = strings.TrimSpace(value.Message)
+		ret[i] = value
+	}
+	return ret
+}
+
+func ValidateRuntimeValidationFailureLocations(values []RuntimeValidationFailureLocation) error {
+	if len(values) > RuntimeValidationFailureLocationMaxCount {
+		return fmt.Errorf("validation failure locations exceed bound %d", RuntimeValidationFailureLocationMaxCount)
+	}
+	for _, value := range values {
+		target := strings.TrimSpace(value.TargetRef)
+		msg := strings.TrimSpace(value.Message)
+		if target == "" || value.Line < 1 || value.Column < 0 || msg == "" || len(msg) > RuntimeValidationFailureLocationMessageMax || !utf8.ValidString(msg) || strings.ContainsRune(msg, 0) {
+			return fmt.Errorf("invalid validation failure location")
+		}
+	}
+	return nil
+}
+
 func (d ValidationFailureDiagnostic) Normalized() ValidationFailureDiagnostic {
 	d.TargetRejection = d.TargetRejection.Clone()
 	d.InputRepair = d.InputRepair.Clone()
 	d.InputLocations = append([]RuntimeValidationInputLocation(nil), d.InputLocations...)
+	d.FailureLocations = normalizeRuntimeValidationFailureLocations(d.FailureLocations)
 	d.InputAddition = d.InputAddition.Normalized()
 	d.SchemaVersion = strings.TrimSpace(d.SchemaVersion)
 	d.Class = strings.TrimSpace(d.Class)
@@ -177,7 +222,7 @@ func sameValidationFailureDiagnostic(left, right *ValidationFailureDiagnostic) b
 	}
 	l := left.Normalized()
 	r := right.Normalized()
-	return l.Unavailability == r.Unavailability && reflect.DeepEqual(l.TargetRejection, r.TargetRejection) && SameRuntimeValidationInputRepair(l.InputRepair, r.InputRepair) && reflect.DeepEqual(l.InputLocations, r.InputLocations) && l.InputAddition == r.InputAddition && l.SchemaVersion == r.SchemaVersion && l.Class == r.Class && l.OwnerCode == r.OwnerCode && l.Reason == r.Reason &&
+	return l.Unavailability == r.Unavailability && reflect.DeepEqual(l.TargetRejection, r.TargetRejection) && SameRuntimeValidationInputRepair(l.InputRepair, r.InputRepair) && reflect.DeepEqual(l.InputLocations, r.InputLocations) && reflect.DeepEqual(l.FailureLocations, r.FailureLocations) && l.InputAddition == r.InputAddition && l.SchemaVersion == r.SchemaVersion && l.Class == r.Class && l.OwnerCode == r.OwnerCode && l.Reason == r.Reason &&
 		l.RecommendedEvidenceTargetType == r.RecommendedEvidenceTargetType && l.Stage == r.Stage &&
 		l.Operation == r.Operation && l.CommandKind == r.CommandKind && l.ExitCode == r.ExitCode &&
 		l.TimedOut == r.TimedOut && l.CommandPolicyViolation == r.CommandPolicyViolation &&

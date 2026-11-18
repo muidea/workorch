@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -138,6 +140,9 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 			diagnostic.OwnerCode = shellcommon.ValidationDiagnosticCodeModuleChecksumUpdate
 			diagnostic.TargetRefs = []string{"go.sum"}
 		}
+	}
+	if class == runtimemodel.ValidationDiagnosticBuildFailed && targetCandidatesValid && len(diagnostic.TargetRefs) > 0 && len(diagnostic.InputLocations) == 0 {
+		diagnostic.FailureLocations = shellValidationFailureLocations(*output, request, execCommand, class, diagnostic.TargetRefs)
 	}
 	output.ValidationFailureDiagnostic = diagnostic
 	output.RuntimeDiagnostics.ValidationFailureDiagnostic = diagnostic
@@ -403,8 +408,9 @@ func defaultShellValidationDiagnosticTargetType(class string) string {
 }
 
 var (
-	shellGoDiagnosticTargetPattern = regexp.MustCompile(`(?:^|[[:space:]])((?:\./)?[[:alnum:]_./-]+\.go):[0-9]+(?::[0-9]+)?:`)
-	shellGoModuleDiagnosticPattern = regexp.MustCompile(`(?:^|[[:space:]])((?:\./)?(?:go\.mod|go\.work|go\.sum)):[0-9]+(?::[0-9]+)?:`)
+	shellGoDiagnosticTargetPattern    = regexp.MustCompile(`(?:^|[[:space:]])((?:\./)?[[:alnum:]_./-]+\.go):[0-9]+(?::[0-9]+)?:`)
+	shellGoModuleDiagnosticPattern    = regexp.MustCompile(`(?:^|[[:space:]])((?:\./)?(?:go\.mod|go\.work|go\.sum)):[0-9]+(?::[0-9]+)?:`)
+	shellGoFailureLocationLinePattern = regexp.MustCompile(`^((?:\./)?(?:[[:alnum:]_./-]+\.go|go\.mod|go\.work|go\.sum)):([0-9]+)(?::([0-9]+))?:\s*(.+)$`)
 	// go test/go list report a package-name conflict without line/column
 	// locations. The two parenthesized file names and the directory are still
 	// structured tool output and can be safely intersected with the File-owner
@@ -424,6 +430,76 @@ func shellValidationDiagnosticTargetRefs(output RuntimeCommandResult, request Ru
 		return nil
 	}
 	return refs
+}
+
+func shellValidationFailureLocations(output RuntimeCommandResult, request RuntimeCommandRequest, execCommand, diagnosticClass string, targetRefs []string) []runtimemodel.RuntimeValidationFailureLocation {
+	if !shellInputHasManagedValidation(request) || strings.TrimSpace(filepath.Base(execCommand)) != "go" || len(targetRefs) == 0 {
+		return nil
+	}
+	scope := make(map[string]struct{}, len(targetRefs))
+	for _, value := range targetRefs {
+		if normalized, ok := normalizeShellDiagnosticTargetRef(value, output.WorkingDirectory); ok {
+			scope[normalized] = struct{}{}
+		}
+	}
+	if len(scope) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	ret := make([]runtimemodel.RuntimeValidationFailureLocation, 0)
+	for _, record := range shellValidationDiagnosticRecords(output, execCommand, diagnosticClass) {
+		for _, line := range strings.Split(record.Output, "\n") {
+			match := shellGoFailureLocationLinePattern.FindStringSubmatch(strings.TrimSpace(line))
+			if len(match) != 5 {
+				continue
+			}
+			ref, ok := shellDiagnosticTargetInScope(match[1], record.Package, record.ImportPath, output.WorkingDirectory, scope)
+			if !ok {
+				continue
+			}
+			lineNo, errLine := strconv.Atoi(match[2])
+			if errLine != nil || lineNo < 1 {
+				continue
+			}
+			colNo := 0
+			if match[3] != "" {
+				parsedCol, errCol := strconv.Atoi(match[3])
+				if errCol != nil || parsedCol < 0 {
+					continue
+				}
+				colNo = parsedCol
+			}
+			msg := strings.TrimSpace(match[4])
+			if msg == "" || len(msg) > runtimemodel.RuntimeValidationFailureLocationMessageMax || !utf8.ValidString(msg) || strings.ContainsRune(msg, 0) {
+				continue
+			}
+			key := fmt.Sprintf("%s\x00%d\x00%d\x00%s", ref, lineNo, colNo, msg)
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+			ret = append(ret, runtimemodel.RuntimeValidationFailureLocation{TargetRef: ref, Line: lineNo, Column: colNo, Message: msg})
+		}
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		if ret[i].TargetRef != ret[j].TargetRef {
+			return ret[i].TargetRef < ret[j].TargetRef
+		}
+		if ret[i].Line != ret[j].Line {
+			return ret[i].Line < ret[j].Line
+		}
+		if ret[i].Column != ret[j].Column {
+			return ret[i].Column < ret[j].Column
+		}
+		return ret[i].Message < ret[j].Message
+	})
+	if len(ret) > runtimemodel.RuntimeValidationFailureLocationMaxCount {
+		ret = ret[:runtimemodel.RuntimeValidationFailureLocationMaxCount]
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
 }
 
 // shellValidationDiagnosticTargetCandidates distinguishes an empty valid

@@ -16,6 +16,69 @@ type runtimeCandidateWorkFileRef struct {
 
 const runtimeCandidateFileReferenceRule = "workFileRefs replace only empty C4.implementationWorkContent.snapshots[snapshot].Content with the exact source path in this request's C3 generation corpus or operationContracts inputRevision input files. Target, hash and complete bytes must match. Expand workFileRefs first, then changeReviewFileRefs (which may reference the expanded C4 work snapshots), then changeReviewValueRefs. No external lookup or cycles are allowed. Restore all original inputs and operations before proposing changes; references grant no execution or validation credit."
 
+const runtimeCandidateTargetSnapshotReferenceRule = "targetSnapshotRefs replace only empty C3.context.resources.targetSnapshots[snapshot].Content with the exact source path in this request's C3 generation corpus or operationContracts inputRevision input files. Target, contentHash and complete bytes must match."
+
+func compactRuntimeCandidateAuthorityTargetSnapshots(authorityContext *runtimeCandidateAuthorityProjection, output runtimeCandidateOutputContractProjection) {
+	if authorityContext == nil || len(authorityContext.Resources.TargetSnapshots) == 0 {
+		return
+	}
+	sources := runtimeCandidateAuthorityBodySources(output, authorityContext.ValidationGenerationContexts)
+	if len(sources) == 0 {
+		return
+	}
+	for si := range authorityContext.Resources.TargetSnapshots {
+		s := &authorityContext.Resources.TargetSnapshots[si]
+		if s.Content == "" {
+			continue
+		}
+		for _, source := range sources {
+			f := source.file
+			if s.TargetRef == f.TargetRef && s.ContentHash == f.ContentHash && s.Content == f.Content {
+				authorityContext.Resources.TargetSnapshotRefs = append(authorityContext.Resources.TargetSnapshotRefs, runtimeCandidateWorkFileRef{si, source.ref})
+				s.Content = ""
+				break
+			}
+		}
+	}
+	if len(authorityContext.Resources.TargetSnapshotRefs) != 0 {
+		authorityContext.Resources.TargetSnapshotReferenceRule = runtimeCandidateTargetSnapshotReferenceRule
+	}
+}
+
+func expandRuntimeCandidateAuthorityTargetSnapshots(authorityContext *runtimeCandidateAuthorityProjection, output runtimeCandidateOutputContractProjection) error {
+	if authorityContext == nil {
+		return nil
+	}
+	refs := authorityContext.Resources.TargetSnapshotRefs
+	if len(refs) == 0 {
+		if authorityContext.Resources.TargetSnapshotReferenceRule != "" {
+			return fmt.Errorf("unexpected target snapshot reference rule")
+		}
+		return nil
+	}
+	if authorityContext.Resources.TargetSnapshotReferenceRule != runtimeCandidateTargetSnapshotReferenceRule {
+		return fmt.Errorf("target snapshot references lack exact rule")
+	}
+	sources := runtimeCandidateAuthorityBodySources(output, authorityContext.ValidationGenerationContexts)
+	seen := map[int]bool{}
+	for _, ref := range refs {
+		if ref.Snapshot < 0 || ref.Snapshot >= len(authorityContext.Resources.TargetSnapshots) || seen[ref.Snapshot] {
+			return fmt.Errorf("target snapshot reference duplicate or outside request")
+		}
+		seen[ref.Snapshot] = true
+		s := &authorityContext.Resources.TargetSnapshots[ref.Snapshot]
+		f, err := runtimeFileReferenceSource(ref.Source, sources)
+		if err != nil {
+			return err
+		}
+		if s.Content != "" || s.TargetRef != f.TargetRef || s.ContentHash != f.ContentHash {
+			return fmt.Errorf("target snapshot reference differs from exact target/hash/content")
+		}
+		s.Content = f.Content
+	}
+	return nil
+}
+
 // Sources are enumerated from the closed provider projection, never resolved
 // through arbitrary JSON paths, external state or another request. C3 bodies
 // remain inline; C4 work can reference C3, and review can reference C3 or work.

@@ -65,6 +65,14 @@ func sectionMessages(request llmmodels.ProviderRequest, prefixOnly bool) []respo
 				if end := semanticWorkPrefixEnd(section.Content); end > 0 && (len(ends) == 0 || end > ends[len(ends)-1]) {
 					ends = append(ends, end)
 				}
+				if len(ends) == 0 {
+					if end := semanticManifestPrefixEnd(section.Content); end > 0 {
+						ends = append(ends, end)
+					}
+					if end := semanticManifestGenerationPrefixEnd(section.Content); end > 0 && (len(ends) == 0 || end > ends[len(ends)-1]) {
+						ends = append(ends, end)
+					}
+				}
 			} else if section.ID == "C3.runtime-authority" {
 				if end := operationsContextStablePrefixEnd(section.Content); end > 0 {
 					ends = append(ends, end)
@@ -225,12 +233,32 @@ func semanticContentPrefixEnd(content string) int {
 	return start + innerStart + bodiesEnd
 }
 
+func semanticManifestPrefixEnd(content string) int {
+	return jsonPrefixEndBeforeKeys(content, "manifest", "batchId", "batchSequence", "batchCoverageWorkItemIds")
+}
+
+func semanticManifestGenerationPrefixEnd(content string) int {
+	mStart, mEnd := jsonFieldRange(content, "manifest")
+	if mEnd == 0 {
+		return 0
+	}
+	end := jsonPrefixEndBeforeKeys(content[mStart:mEnd], "validationGenerationContexts")
+	if end <= 0 {
+		return 0
+	}
+	return mStart + end
+}
+
 func operationsContextStablePrefixEnd(content string) int {
 	ctxStart, ctxEnd := jsonFieldRange(content, "context")
 	if ctxEnd == 0 {
 		return 0
 	}
-	end := jsonPrefixEndBeforeKeys(content[ctxStart:ctxEnd], "evidenceRevision", "focus")
+	ctxJSON := content[ctxStart:ctxEnd]
+	if _, actEnd := jsonFieldRange(ctxJSON, "activation"); actEnd > 0 && actEnd < len(ctxJSON)-1 {
+		return ctxStart + actEnd
+	}
+	end := jsonPrefixEndBeforeKeys(ctxJSON, "evidenceRevision", "focus")
 	if end <= 0 {
 		return 0
 	}

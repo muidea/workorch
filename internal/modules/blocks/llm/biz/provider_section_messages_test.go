@@ -484,3 +484,60 @@ func TestProviderSectionMessagesSplitOperationsAuthorityWithoutChangingBytes(t *
 		}
 	}
 }
+
+func TestProviderSectionMessagesSplitActivationAndSemanticManifestPrefix(t *testing.T) {
+	renderOps := func(genCtx, res, evRev, focus, snapID string) llmmodels.ProviderRequest {
+		r := sectionCacheRequest("ws", "phase")
+		r.PromptContext.SchemaVersion = "workorch.runtime_candidate_prompt"
+		r.PromptContext.Sections[0].ID = "C0.runtime-candidate-contract"
+		r.PromptContext.Sections[0].Content = runtimeCandidateContractCatalogCurrent()
+		r.PromptContext.Sections[3].ID = "C3.runtime-authority"
+		r.PromptContext.Sections[3].Content = `{"context":{"workspaceId":"ws","activation":{"contract":"c1"},"validationGenerationContexts":"` + genCtx + `","resources":"` + res + `","evidenceRevision":"` + evRev + `","focus":"` + focus + `"},"outputContract":{"kind":"ops"},"decision":{"action":"need_state_change"},"transaction":{"authoritySnapshotId":"` + snapID + `"}}`
+		r.PromptContext.Sections = append(r.PromptContext.Sections, llmmodels.PromptSection{ID: "C4.execution-tail", Role: "user", Content: "attempt0"})
+		return r
+	}
+	baseOps := renderOps("gen1", "res1", "ev1", "focus1", "snap1")
+	origOps := sectionMessages(baseOps, false)
+	if len(origOps[3].Content) != 3 {
+		t.Fatalf("operations C3 with activation blocks = %d, want 3", len(origOps[3].Content))
+	}
+	if joinResponsesBlocks(origOps[3].Content) != "### C3.runtime-authority\n"+baseOps.PromptContext.Sections[3].Content {
+		t.Fatal("operations C3 with activation text changed")
+	}
+	changedGenAndRes := sectionMessages(renderOps("gen2", "res2", "ev2", "focus2", "snap2"), false)
+	if !reflect.DeepEqual(origOps[3].Content[0], changedGenAndRes[3].Content[0]) {
+		t.Fatal("validationGenerationContexts/resources edit invalidated activation prefix m3[0]")
+	}
+	changedActivation := sectionMessages(renderOps("gen1", "res1", "ev1", "focus1", "snap1"), false)
+	changedActivation[3].Content[0].Text += "diff"
+	if reflect.DeepEqual(origOps[3].Content[0], changedActivation[3].Content[0]) {
+		t.Fatal("sanity check failed")
+	}
+
+	renderSemantic := func(obligations, genCtx, target string) llmmodels.ProviderRequest {
+		r := sectionCacheRequest("ws", "phase")
+		r.PromptContext.SchemaVersion = "workorch.runtime_semantic_prompt"
+		r.PromptContext.Sections[0].ID = "C0.runtime-semantic-contract"
+		r.PromptContext.Sections[0].Content = runtimeSemanticPlanContractCatalog()
+		r.PromptContext.Sections[3].ID = "C3.semantic-authority"
+		r.PromptContext.Sections[3].Content = `{"workspaceId":"ws","runId":"run","manifest":{"proofObligations":"` + obligations + `","ownerCatalogs":"cat","validationGenerationContexts":"` + genCtx + `"},"targets":"` + target + `","focus":"f"}`
+		r.PromptContext.Sections = append(r.PromptContext.Sections, llmmodels.PromptSection{ID: "C4.semantic-tail", Role: "user", Content: "tail"})
+		return r
+	}
+	baseSem := renderSemantic("obl1", "gen1", "t1")
+	origSem := sectionMessages(baseSem, false)
+	if len(origSem[3].Content) != 3 {
+		t.Fatalf("semantic C3 without workContext blocks = %d, want 3", len(origSem[3].Content))
+	}
+	if joinResponsesBlocks(origSem[3].Content) != "### C3.semantic-authority\n"+baseSem.PromptContext.Sections[3].Content {
+		t.Fatal("semantic C3 without workContext text changed")
+	}
+	changedSemGen := sectionMessages(renderSemantic("obl1", "gen2", "t2"), false)
+	if !reflect.DeepEqual(origSem[3].Content[:2], changedSemGen[3].Content[:2]) {
+		t.Fatal("validationGenerationContexts/targets change invalidated semantic manifest prefix m3[:2]")
+	}
+	changedSemObl := sectionMessages(renderSemantic("obl2", "gen1", "t1"), false)
+	if !reflect.DeepEqual(origSem[3].Content[0], changedSemObl[3].Content[0]) {
+		t.Fatal("manifest proofObligations change invalidated semantic authority header m3[0]")
+	}
+}

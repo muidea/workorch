@@ -385,6 +385,11 @@ func writeRuntimeOriginalDiagnosticTypedFactsHash(h interface{ Write([]byte) (in
 		writeHashString(h, value.EvidenceMode)
 		writeHashString(h, value.StdoutPreview)
 		writeHashString(h, value.StderrPreview)
+		for _, loc := range value.FailureLocations {
+			writeHashString(h, loc.TargetRef)
+			writeHashString(h, fmt.Sprintf("%d:%d", loc.Line, loc.Column))
+			writeHashString(h, loc.Message)
+		}
 	}
 	if diagnostic.ValidationFailureObservation == nil {
 		writeHashString(h, "validation-failure-observation:nil")
@@ -538,8 +543,13 @@ func (d *RuntimeOriginalDiagnostic) Validate() error {
 			return fmt.Errorf("original diagnostic target observation: %w", err)
 		}
 	}
-	if canonical.ValidationDiagnostic != nil && (canonical.ValidationDiagnostic.StdoutPreview != "" || canonical.ValidationDiagnostic.StderrPreview != "") {
-		return fmt.Errorf("original diagnostic cannot persist raw validation output")
+	if canonical.ValidationDiagnostic != nil {
+		if canonical.ValidationDiagnostic.StdoutPreview != "" || canonical.ValidationDiagnostic.StderrPreview != "" {
+			return fmt.Errorf("original diagnostic cannot persist raw validation output")
+		}
+		if err := ValidateRuntimeValidationFailureLocations(canonical.ValidationDiagnostic.FailureLocations); err != nil {
+			return fmt.Errorf("original diagnostic failure locations: %w", err)
+		}
 	}
 	if canonical.ValidationFailureObservation != nil {
 		if err := canonical.ValidationFailureObservation.Validate(); err != nil {

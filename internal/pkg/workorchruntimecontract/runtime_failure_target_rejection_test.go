@@ -76,3 +76,53 @@ func TestValidationFailureTargetRejectionBindsReceiptAndFeedback(t *testing.T) {
 		t.Fatal("deleting rejection preserved receipt identity")
 	}
 }
+
+func TestValidationFailureLocationsSurviveSanitizationHashAndValidate(t *testing.T) {
+	diagnostic := &ValidationFailureDiagnostic{
+		Class:      ValidationDiagnosticBuildFailed,
+		OwnerCode:  "source_compile_failed",
+		TargetRefs: []string{"cmd/app/main.go"},
+		FailureLocations: []RuntimeValidationFailureLocation{
+			{TargetRef: "cmd/app/main.go", Line: 298, Column: 17, Message: "cannot use w as http.Header"},
+		},
+		StdoutPreview: "raw stdout must be cleared",
+		StderrPreview: "raw stderr must be cleared",
+	}
+	sanitized := RuntimeOriginalDiagnosticFromFailureFact("blocks/shell", FailureFact{
+		Class:                FailureClassBuildFailure,
+		Code:                 "validation_project_stage_failed",
+		Message:              "compile failed",
+		Signature:            "sig-1",
+		ValidationDiagnostic: diagnostic,
+	})
+	if sanitized == nil || sanitized.ValidationDiagnostic == nil {
+		t.Fatal("expected sanitized original diagnostic")
+	}
+	if sanitized.ValidationDiagnostic.StdoutPreview != "" || sanitized.ValidationDiagnostic.StderrPreview != "" {
+		t.Fatal("raw previews were not stripped")
+	}
+	if len(sanitized.ValidationDiagnostic.FailureLocations) != 1 || sanitized.ValidationDiagnostic.FailureLocations[0].Line != 298 || sanitized.ValidationDiagnostic.FailureLocations[0].Column != 17 {
+		t.Fatalf("failure locations lost on sanitization: %+v", sanitized.ValidationDiagnostic.FailureLocations)
+	}
+	fb := validRuntimeFeedback()
+	fb.OriginalDiagnostic = sanitized
+	if err := fb.Validate(); err != nil {
+		t.Fatalf("valid failure locations rejected: %v", err)
+	}
+	fbHash := StableRuntimeFeedbackHash(fb)
+	fbChanged := cloneRuntimeFeedbackRaw(fb)
+	fbChanged.OriginalDiagnostic.ValidationDiagnostic.FailureLocations[0].Line++
+	if StableRuntimeFeedbackHash(fbChanged) == fbHash {
+		t.Fatal("feedback hash ignored FailureLocations change")
+	}
+	overLimit := make([]RuntimeValidationFailureLocation, RuntimeValidationFailureLocationMaxCount+1)
+	for i := range overLimit {
+		overLimit[i] = RuntimeValidationFailureLocation{TargetRef: "a.go", Line: i + 1, Message: "err"}
+	}
+	if err := ValidateRuntimeValidationFailureLocations(overLimit); err == nil {
+		t.Fatal("expected over-capacity failure locations to fail validation")
+	}
+	if err := ValidateRuntimeValidationFailureLocations([]RuntimeValidationFailureLocation{{TargetRef: "a.go", Line: 1, Message: "bad\x00msg"}}); err == nil {
+		t.Fatal("expected NUL byte in failure location message to fail validation")
+	}
+}

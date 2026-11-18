@@ -2296,6 +2296,7 @@ func cloneValidationFailureDiagnosticRaw(in ValidationFailureDiagnostic) Validat
 	out.TargetRejection = in.TargetRejection.Clone()
 	out.InputRepair = in.InputRepair.Clone()
 	out.InputLocations = cloneRuntimeStateRawSlice(in.InputLocations, func(value RuntimeValidationInputLocation) RuntimeValidationInputLocation { return value })
+	out.FailureLocations = cloneRuntimeStateRawSlice(in.FailureLocations, func(value RuntimeValidationFailureLocation) RuntimeValidationFailureLocation { return value })
 	out.TargetRefs = cloneRuntimeStateRawSlice(in.TargetRefs, func(item string) string { return item })
 	return out
 }

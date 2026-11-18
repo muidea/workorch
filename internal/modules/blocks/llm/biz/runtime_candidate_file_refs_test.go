@@ -340,3 +340,70 @@ func TestCandidateCorrectionConsumesOriginalFrozenProjection(t *testing.T) {
 		t.Fatal("new correction tail bypassed original source integrity")
 	}
 }
+
+func TestRuntimeCandidateTargetSnapshotRefsDeduplicateAndPreserveFailureLocations(t *testing.T) {
+	r, p, _ := candidateBodyReferenceFixture(t, false)
+	genFile := r.CandidateContext.Resources.OperationAdmissibilities[0].ValidationSurfaces[0].GenerationContext.Files[0]
+	var authority struct {
+		Context        runtimeCandidateAuthorityProjection      `json:"context"`
+		OutputContract runtimeCandidateOutputContractProjection `json:"outputContract"`
+		Decision       struct{ FocusRef string }                `json:"decision"`
+	}
+	if err := json.Unmarshal([]byte(p.PromptContext.Sections[3].Content), &authority); err != nil {
+		t.Fatal(err)
+	}
+	authority.Context.Resources.TargetSnapshots = []rc.TargetSnapshot{
+		{TargetRef: genFile.TargetRef, ContentHash: genFile.ContentHash, Content: genFile.Content, ContentState: rc.SnapshotContentStateComplete, Size: int64(len(genFile.Content))},
+		{TargetRef: "distinct.go", ContentHash: rc.RuntimeValidationInputContentHash("package distinct\n"), Content: "package distinct\n", ContentState: rc.SnapshotContentStateComplete, Size: 17},
+	}
+	compactRuntimeCandidateAuthorityTargetSnapshots(&authority.Context, authority.OutputContract)
+	if len(authority.Context.Resources.TargetSnapshotRefs) != 1 || authority.Context.Resources.TargetSnapshotRefs[0].Snapshot != 0 || authority.Context.Resources.TargetSnapshotRefs[0].Source == "" {
+		t.Fatalf("expected TargetSnapshotRefs to deduplicate snapshot 0 against validationGenerationContexts, got %+v", authority.Context.Resources.TargetSnapshotRefs)
+	}
+	if len(authority.Context.Resources.TargetSnapshots) != 2 || authority.Context.Resources.TargetSnapshots[0].Content != "" || authority.Context.Resources.TargetSnapshots[1].Content != "package distinct\n" {
+		t.Fatalf("expected snapshot 0 content compacted and snapshot 1 retained inline, got %+v", authority.Context.Resources.TargetSnapshots)
+	}
+	compacted, _ := json.Marshal(authority)
+	p.PromptContext.Sections[3].Content = string(compacted)
+	var expanded runtimeCandidateAuthorityProjection
+	if err := json.Unmarshal([]byte(compacted), &struct {
+		Context *runtimeCandidateAuthorityProjection `json:"context"`
+	}{&expanded}); err != nil {
+		t.Fatal(err)
+	}
+	if err := expandRuntimeCandidateAuthorityTargetSnapshots(&expanded, authority.OutputContract); err != nil {
+		t.Fatalf("expandRuntimeCandidateAuthorityTargetSnapshots failed: %v", err)
+	}
+	if expanded.Resources.TargetSnapshots[0].Content != genFile.Content {
+		t.Fatal("expanded TargetSnapshots[0].Content did not match exact generation corpus content")
+	}
+	projectedFailure := runtimeProviderSafeFailure(&rc.FailureFact{
+		Code:  "validation_project_stage_failed",
+		Class: rc.FailureClassBuildFailure,
+		ValidationDiagnostic: &rc.ValidationFailureDiagnostic{
+			Class:      rc.ValidationDiagnosticBuildFailed,
+			OwnerCode:  "source_compile_failed",
+			TargetRefs: []string{genFile.TargetRef},
+			FailureLocations: []rc.RuntimeValidationFailureLocation{
+				{TargetRef: genFile.TargetRef, Line: 12, Column: 5, Message: "undefined symbol"},
+			},
+		},
+	})
+	rawFailure, _ := json.Marshal(projectedFailure)
+	if !strings.Contains(string(rawFailure), "undefined symbol") || !strings.Contains(string(rawFailure), `"line":12`) {
+		t.Fatalf("expected FailureLocations in failure projection, got %s", rawFailure)
+	}
+	r.CandidateContext.Resources.TargetSnapshots = []rc.TargetSnapshot{
+		{TargetRef: genFile.TargetRef, ContentHash: genFile.ContentHash, Content: genFile.Content, ContentState: rc.SnapshotContentStateComplete, Size: int64(len(genFile.Content))},
+		{TargetRef: "distinct.go", ContentHash: rc.RuntimeValidationInputContentHash("package distinct\n"), Content: "package distinct\n", ContentState: rc.SnapshotContentStateComplete, Size: 17},
+	}
+	if err := validateRuntimeCandidateContextIntegrity(r.DefinitionContext, r.CandidateContext, r.CandidateManifest, r.CandidateAttempt, r.CandidateCorrectionObservation, p.ContextBudget, p.PromptContext); err != nil {
+		t.Fatalf("valid compacted C3 failed integrity check: %v", err)
+	}
+	authority.Context.Resources.TargetSnapshotRefs[0].Source = "C3.context.resources.targetSnapshots[0].Content"
+	tampered, _ := json.Marshal(authority)
+	p.PromptContext.Sections[3].Content = string(tampered)
+	if err := validateRuntimeCandidateContextIntegrity(r.DefinitionContext, r.CandidateContext, r.CandidateManifest, r.CandidateAttempt, r.CandidateCorrectionObservation, p.ContextBudget, p.PromptContext); err == nil {
+		t.Fatal("expected self-referential TargetSnapshotRefs source to fail integrity check")
+	}
+}

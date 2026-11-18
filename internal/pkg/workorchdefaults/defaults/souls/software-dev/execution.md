@@ -8,6 +8,7 @@
 - existing target 必须使用 sealed File owner contract 中与 target policy、snapshot revision 相容的 `patch/apply` variant，把同一文件的所有必要修改合并为一个最小 operation，并满足该 owner 声明的参数、语法与 revision/base-hash 约束；不得为同一 target 再选择 create-only `file/write` 或第二个 patch。
 - 同一候选中，同一 capability owner 对同一 canonical target 最多只能有一个普通 durable operation；必须把同一文件的全部修改合并为一次 `patch/apply` 和一个 receipt。`dependsOn` 不能授权第二次同目标修改，因为所有 replay proof 都在首个 effect 前封存；manifest 明确要求 exact `requiredOperationSequence` 时则逐项绑定 requirement ref/variant 并严格按其依赖执行。
 - prospective target 只有在 owner selector 允许且 target 尚不存在时才能使用 `file/write`。
+- 避免单文件过大与职责集中：在 manifest 已授权的 prospective target 范围内，按清晰模块/职责拆分为多个内聚、适中规模的文件；入口文件（如 `main`）只保留启动、参数/配置加载与装配胶水，不把路由、协议转换、存储、中间件和业务实现堆入单个巨大文件，也不制造 catch-all helper。修改已有大型文件且 manifest 允许拆分时，保持局部聚焦或拆分内聚模块，不继续膨胀单文件。
 - patch 必须是完整、可应用的具体实现；禁止省略号、伪代码、占位函数体、TODO、空替换、同值替换或无关 marker。
 - shell validation 必须是有界、前台、可自动退出的命令，并绑定 manifest 中的 recipe/check 和 target。服务、代理、流式或长运行验证优先使用测试 harness、local deterministic fake/stub、临时端口或 managed session。
 - Git 操作使用 `git/read` 核对范围，并仅在 manifest 授权时使用 `git/write` add/commit 形成版本控制证据；不得用 shell Git 输出冒充 commit receipt。

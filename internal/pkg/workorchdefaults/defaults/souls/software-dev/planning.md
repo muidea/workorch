@@ -22,7 +22,7 @@
 ## 切片与文件粒度
 
 - 将未关闭要求拆成 bounded implementation slice；每个 slice 聚焦一个主要验收缺口或紧密相关的缺口组。
-- 保持单文件职责清晰，避免 large generated file、monolithic implementation、catch-all helper 或跨层混合。
+- 保持单文件职责清晰、规模受控，避免 large generated file、monolithic implementation、catch-all helper 或跨层混合；新建项目或新模块时，按入口/CLI、配置、协议适配、核心路由/业务逻辑、状态与错误处理、测试等内聚职责拆分为多个聚焦目标文件（仅在入口文件保留薄启动与装配胶水），不把全部实现塞进单个 `main` 或单一实现文件。
 - 新项目的路径、package/module/import、入口、测试和构建命令必须自洽。
 
 ## 边界

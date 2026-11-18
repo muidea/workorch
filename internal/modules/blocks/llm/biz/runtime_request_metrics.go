@@ -135,9 +135,18 @@ func runtimeProviderContextSectionMetrics(s models.PromptSection, prompt *models
 	switch s.ID {
 	case "C3.runtime-authority":
 		var p struct {
-			Context runtimeCandidateAuthorityProjection `json:"context"`
+			Context        runtimeCandidateAuthorityProjection      `json:"context"`
+			OutputContract runtimeCandidateOutputContractProjection `json:"outputContract"`
 		}
 		if json.Unmarshal([]byte(s.Content), &p) == nil {
+			if len(p.Context.Resources.TargetSnapshotRefs) != 0 {
+				m.LocalReferences += len(p.Context.Resources.TargetSnapshotRefs)
+				if expandRuntimeCandidateAuthorityTargetSnapshots(&p.Context, p.OutputContract) == nil {
+					p.Context.Resources.TargetSnapshotRefs, p.Context.Resources.TargetSnapshotReferenceRule = nil, ""
+					raw, _ := json.Marshal(p)
+					m.ExpandedBytes = len(raw)
+				}
+			}
 			work := p.Context.RequiredState == rc.ConvergenceStateNeedStateChange
 			reason := "sealed_state_change_source_and_dependencies"
 			if !work {

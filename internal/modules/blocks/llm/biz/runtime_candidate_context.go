@@ -25,10 +25,12 @@ type runtimeCandidateDefinitionProjection struct {
 // ledger a second time. This projection is derived without mutating the
 // EventHub command or persisted Runtime aggregate.
 type runtimeCandidateAuthorityResourceProjection struct {
-	Manifest        *runtimecontract.WorkspaceManifest                `json:"manifest,omitempty"`
-	TargetSnapshots []runtimecontract.TargetSnapshot                  `json:"targetSnapshots,omitempty"`
-	TargetSelection *runtimecontract.RuntimeTargetSelection           `json:"targetSelection,omitempty"`
-	FailureTarget   *runtimeCandidateAuthorityFailureTargetProjection `json:"failureTarget,omitempty"`
+	TargetSnapshotRefs          []runtimeCandidateWorkFileRef                     `json:"targetSnapshotRefs,omitempty"`
+	TargetSnapshotReferenceRule string                                            `json:"targetSnapshotReferenceRule,omitempty"`
+	Manifest                    *runtimecontract.WorkspaceManifest                `json:"manifest,omitempty"`
+	TargetSnapshots             []runtimecontract.TargetSnapshot                  `json:"targetSnapshots,omitempty"`
+	TargetSelection             *runtimecontract.RuntimeTargetSelection           `json:"targetSelection,omitempty"`
+	FailureTarget               *runtimeCandidateAuthorityFailureTargetProjection `json:"failureTarget,omitempty"`
 }
 
 type runtimeCandidateAuthorityFailureTargetProjection struct {
@@ -132,6 +134,7 @@ type runtimeCandidateProviderSafeFailureProjection struct {
 type runtimeCandidateValidationDiagnosticProjection struct {
 	Unavailability     runtimecontract.RuntimeValidationDiagnosticUnavailability `json:"unavailability,omitempty"`
 	InputLocations     []runtimecontract.RuntimeValidationInputLocation          `json:"inputLocations,omitempty"`
+	FailureLocations   []runtimecontract.RuntimeValidationFailureLocation        `json:"failureLocations,omitempty"`
 	InputAddition      runtimecontract.RuntimeValidationInputAddition            `json:"inputAddition,omitzero"`
 	Class              string                                                    `json:"class,omitempty"`
 	OwnerCode          string                                                    `json:"ownerCode,omitempty"`
@@ -573,6 +576,7 @@ func runtimeProviderSafeFailure(value *runtimecontract.FailureFact) *runtimeCand
 		d := failure.ValidationDiagnostic.Normalized()
 		ret.ValidationDiagnostic = &runtimeCandidateValidationDiagnosticProjection{Unavailability: d.Unavailability, Class: d.Class, OwnerCode: d.OwnerCode, InputAddition: d.InputAddition,
 			InputLocations:     append([]runtimecontract.RuntimeValidationInputLocation(nil), d.InputLocations...),
+			FailureLocations:   append([]runtimecontract.RuntimeValidationFailureLocation(nil), d.FailureLocations...),
 			EvidenceTargetType: d.RecommendedEvidenceTargetType, Operation: d.Operation, CommandKind: d.CommandKind,
 			ExitCode: d.ExitCode, TimedOut: d.TimedOut, UnavailableCommand: d.UnavailableCommand, TargetRefs: append([]string(nil), d.TargetRefs...)}
 	}
