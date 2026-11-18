@@ -412,11 +412,8 @@ func runtimeOperationAdmissibilityTargetRefs(aggregate runtime.RuntimeAggregate,
 		seen[target] = struct{}{}
 	}
 	var fileExtras []string
-	for _, inventory := range aggregate.Facts.Resources.OperationAdmissibilities {
-		if inventory.OwnerModuleID != runtimecontract.RuntimeModuleFile {
-			continue
-		}
-		for _, target := range inventory.TargetRefs {
+	appendFileExtras := func(refs []string) {
+		for _, target := range refs {
 			target = strings.TrimSpace(target)
 			if target == "" {
 				continue
@@ -426,6 +423,20 @@ func runtimeOperationAdmissibilityTargetRefs(aggregate runtime.RuntimeAggregate,
 			}
 			fileExtras = append(fileExtras, target)
 		}
+	}
+	hasFileCatalog := false
+	for _, inventory := range aggregate.Facts.Resources.OperationAdmissibilities {
+		if inventory.OwnerModuleID != runtimecontract.RuntimeModuleFile {
+			continue
+		}
+		hasFileCatalog = true
+		appendFileExtras(inventory.TargetRefs)
+	}
+	// A prior File mutation retires File OperationAdmissibility while
+	// need_validation refreshes only the File Manifest. Fall back to the
+	// committed File Manifest so Shell validation keeps workspace scope.
+	if !hasFileCatalog && aggregate.Facts.Resources.Manifest != nil {
+		appendFileExtras(aggregate.Facts.Resources.Manifest.TargetRefs)
 	}
 	fileExtras = dedupeSortedTargets(fileExtras)
 	remaining := maxItems - len(activeTargets)

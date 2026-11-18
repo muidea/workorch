@@ -645,4 +645,25 @@ func TestRuntimeOperationAdmissibilityTargetRefsScopedMerge(t *testing.T) {
 	if len(overShellTargets) != maxItems+1 {
 		t.Fatalf("len(over-budget active Shell targets) = %d, want %d (must fail closed downstream, not truncate)", len(overShellTargets), maxItems+1)
 	}
+
+	retiredFileCatalogAgg := runtime.RuntimeAggregate{
+		Facts: runtimecontract.RuntimeFacts{
+			Focus: runtimecontract.CoverageFocus{
+				ID: "focus-after-file-mutation",
+				CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{
+					{ID: "validation-binding", TargetRefs: []string{"workorch_validation/project/check/input_test.go"}},
+				},
+			},
+			Resources: runtimecontract.RuntimeResourceFacts{
+				Manifest: &runtimecontract.WorkspaceManifest{
+					Revision:   "manifest-after-edit",
+					TargetRefs: []string{"go.mod", "internal/proxy/streaming.go", "workorch_validation/project/check/input_test.go"},
+				},
+			},
+		},
+	}
+	manifestFallbackTargets := runtimeOperationAdmissibilityTargetRefs(retiredFileCatalogAgg, runtimecontract.RuntimeModuleShell)
+	if !slices.Equal(manifestFallbackTargets, []string{"go.mod", "internal/proxy/streaming.go", "workorch_validation/project/check/input_test.go"}) {
+		t.Fatalf("Shell targets without File OperationAdmissibility = %v, want committed Manifest targets", manifestFallbackTargets)
+	}
 }

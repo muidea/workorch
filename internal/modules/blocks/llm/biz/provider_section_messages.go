@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"slices"
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 )
@@ -62,6 +63,13 @@ func sectionMessages(request llmmodels.ProviderRequest, prefixOnly bool) []respo
 					ends = append(ends, end)
 				}
 				if end := semanticWorkPrefixEnd(section.Content); end > 0 && (len(ends) == 0 || end > ends[len(ends)-1]) {
+					ends = append(ends, end)
+				}
+			} else if section.ID == "C3.runtime-authority" {
+				if end := operationsContextStablePrefixEnd(section.Content); end > 0 {
+					ends = append(ends, end)
+				}
+				if end := operationsAuthorityPrefixEnd(section.Content); end > 0 && (len(ends) == 0 || end > ends[len(ends)-1]) {
 					ends = append(ends, end)
 				}
 			}
@@ -215,4 +223,59 @@ func semanticContentPrefixEnd(content string) int {
 		return 0
 	}
 	return start + innerStart + bodiesEnd
+}
+
+func operationsContextStablePrefixEnd(content string) int {
+	ctxStart, ctxEnd := jsonFieldRange(content, "context")
+	if ctxEnd == 0 {
+		return 0
+	}
+	end := jsonPrefixEndBeforeKeys(content[ctxStart:ctxEnd], "evidenceRevision", "focus")
+	if end <= 0 {
+		return 0
+	}
+	return ctxStart + end
+}
+
+func operationsAuthorityPrefixEnd(content string) int {
+	return jsonPrefixEndBeforeKeys(content, "decision", "transaction")
+}
+
+func jsonPrefixEndBeforeKeys(content string, stopKeys ...string) int {
+	d := json.NewDecoder(bytes.NewBufferString(content))
+	if token, err := d.Token(); err != nil || token != json.Delim('{') {
+		return 0
+	}
+	lastEnd := 0
+	hit := false
+	for d.More() {
+		keyToken, err := d.Token()
+		if err != nil {
+			return 0
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return 0
+		}
+		var raw json.RawMessage
+		if d.Decode(&raw) != nil {
+			return 0
+		}
+		if !hit && slices.Contains(stopKeys, key) {
+			hit = true
+		}
+		if !hit {
+			lastEnd = int(d.InputOffset())
+		}
+	}
+	if _, err := d.Token(); err != nil {
+		return 0
+	}
+	if _, err := d.Token(); err != io.EOF {
+		return 0
+	}
+	if !hit {
+		return 0
+	}
+	return lastEnd
 }

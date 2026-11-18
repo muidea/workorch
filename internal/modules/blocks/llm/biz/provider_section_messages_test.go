@@ -438,3 +438,49 @@ func TestSemanticCacheBoundariesReuseContentAcrossIntentAndHistoryChanges(t *tes
 		}
 	}
 }
+
+func TestProviderSectionMessagesSplitOperationsAuthorityWithoutChangingBytes(t *testing.T) {
+	render := func(resources, evRev, focus, snapID, tail string) llmmodels.ProviderRequest {
+		r := sectionCacheRequest("ws", "phase")
+		r.PromptContext.SchemaVersion = "workorch.runtime_candidate_prompt"
+		r.PromptContext.Sections[0].ID = "C0.runtime-candidate-contract"
+		r.PromptContext.Sections[0].Content = runtimeCandidateContractCatalogCurrent()
+		r.PromptContext.Sections[3].ID = "C3.runtime-authority"
+		r.PromptContext.Sections[3].Content = `{"context":{"workspaceId":"ws","resources":"` + resources + `","evidenceRevision":"` + evRev + `","focus":"` + focus + `"},"outputContract":{"kind":"ops"},"decision":{"action":"need_state_change"},"transaction":{"authoritySnapshotId":"` + snapID + `"}}`
+		r.PromptContext.Sections = append(r.PromptContext.Sections, llmmodels.PromptSection{ID: "C4.execution-tail", Role: "user", Content: tail})
+		return r
+	}
+	base := render("res1", "ev1", "focus1", "snap1", "attempt0")
+	original := sectionMessages(base, false)
+	if len(original[3].Content) != 3 {
+		t.Fatalf("operations C3 blocks = %d, want 3", len(original[3].Content))
+	}
+	count := 0
+	for _, m := range original {
+		for _, b := range m.Content {
+			if b.PromptCacheBreakpoint != nil {
+				count++
+			}
+		}
+	}
+	if count != 4 || joinResponsesBlocks(original[3].Content) != "### C3.runtime-authority\n"+base.PromptContext.Sections[3].Content {
+		t.Fatalf("cache breakpoint count = %d or exact text changed", count)
+	}
+	changedFocus := sectionMessages(render("res1", "ev2", "focus2", "snap2", "attempt0"), false)
+	if !reflect.DeepEqual(original[3].Content[0], changedFocus[3].Content[0]) {
+		t.Fatal("volatile evidenceRevision/focus/transaction broke stable C3 context prefix")
+	}
+	changedSnapOnly := sectionMessages(render("res1", "ev1", "focus1", "snap2", "attempt0"), false)
+	if !reflect.DeepEqual(original[3].Content[:2], changedSnapOnly[3].Content[:2]) {
+		t.Fatal("transaction authoritySnapshotId change broke C3 outputContract prefix")
+	}
+	changedResources := sectionMessages(render("res2", "ev1", "focus1", "snap1", "attempt0"), false)
+	if reflect.DeepEqual(original[3].Content[0], changedResources[3].Content[0]) {
+		t.Fatal("real resource change reused stale C3 prefix")
+	}
+	for _, bad := range []string{`{"context":`, `{"context":{"evidenceRevision":"1"}} trailing`, `[]`} {
+		if operationsContextStablePrefixEnd(bad) != 0 || operationsAuthorityPrefixEnd(bad) != 0 {
+			t.Fatal("invalid JSON created operations boundary")
+		}
+	}
+}

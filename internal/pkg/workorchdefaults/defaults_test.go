@@ -1130,14 +1130,14 @@ func assertSoftwareDevAcceptanceSlicePolicy(t *testing.T, hints map[string]any) 
 	if policy["schemaVersion"] != "workorch.acceptance_slice_policy" {
 		t.Fatalf("acceptanceSlicePolicy schemaVersion = %q", policy["schemaVersion"])
 	}
-	if got := testIntFromAny(policy["maxWorkItems"]); got != 4 {
-		t.Fatalf("acceptanceSlicePolicy maxWorkItems = %d, want 4", got)
+	if got := testIntFromAny(policy["maxWorkItems"]); got != 16 {
+		t.Fatalf("acceptanceSlicePolicy maxWorkItems = %d, want 16", got)
 	}
 	if got := testIntFromAny(policy["maxFocuses"]); got != 128 {
 		t.Fatalf("acceptanceSlicePolicy maxFocuses = %d, want 128", got)
 	}
-	if got := testIntFromAny(policy["maxCandidateContextItems"]); got != 4 {
-		t.Fatalf("acceptanceSlicePolicy maxCandidateContextItems = %d, want 4", got)
+	if got := testIntFromAny(policy["maxCandidateContextItems"]); got != 16 {
+		t.Fatalf("acceptanceSlicePolicy maxCandidateContextItems = %d, want 16", got)
 	}
 	groups, ok := policy["groups"].([]any)
 	if !ok || len(groups) < 4 {
@@ -1152,10 +1152,10 @@ func assertSoftwareDevAcceptanceSlicePolicy(t *testing.T, hints map[string]any) 
 	}
 	wantMaxWorkItems := map[string]int{
 		"slice-primary-state-change":     2,
-		"slice-direct-validation":        4,
+		"slice-direct-validation":        16,
 		"slice-version-control-snapshot": 2,
-		"slice-supplemental-evidence":    4,
-		"slice-remaining-acceptance":     4,
+		"slice-supplemental-evidence":    12,
+		"slice-remaining-acceptance":     16,
 	}
 	priorities := map[string]int{}
 	for _, raw := range groups {

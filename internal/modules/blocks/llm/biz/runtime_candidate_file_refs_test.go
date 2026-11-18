@@ -308,6 +308,7 @@ func TestCandidateCorrectionConsumesOriginalFrozenProjection(t *testing.T) {
 	original.Request.PromptContext.Sections[3].Content = string(body)
 	var messages []responsesInputMessage
 	json.Unmarshal(original.Messages, &messages)
+	messages[3].Content = messages[3].Content[:1]
 	messages[3].Content[0].Text = "### " + original.Request.PromptContext.Sections[3].ID + "\n" + string(body)
 	original.Messages, _ = json.Marshal(messages)
 	raw, _ = json.Marshal(original)

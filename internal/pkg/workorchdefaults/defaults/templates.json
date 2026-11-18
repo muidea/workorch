@@ -325,9 +325,9 @@
       "stateChangePolicy": "must_produce_state_change",
       "acceptanceSlicePolicy": {
         "schemaVersion": "workorch.acceptance_slice_policy",
-        "maxWorkItems": 4,
+        "maxWorkItems": 16,
         "maxFocuses": 128,
-        "maxCandidateContextItems": 4,
+        "maxCandidateContextItems": 16,
         "completionPolicy": "all_required_items_accepted",
         "resultPolicy": "slice_result_allowed",
         "groups": [
@@ -348,7 +348,7 @@
             "title": "Direct validation evidence",
             "scope": "direct_validation",
             "priority": 20,
-            "maxWorkItems": 4,
+            "maxWorkItems": 16,
             "match": {
               "missingEvidenceKinds": [
                 "validation"
@@ -360,7 +360,7 @@
             "title": "Supplemental evidence",
             "scope": "supplemental_evidence",
             "priority": 30,
-            "maxWorkItems": 4,
+            "maxWorkItems": 12,
             "match": {
               "evidenceRoles": [
                 "supplemental_evidence"
@@ -384,7 +384,7 @@
             "title": "Remaining acceptance",
             "scope": "remaining_acceptance",
             "priority": 90,
-            "maxWorkItems": 4,
+            "maxWorkItems": 16,
             "match": {
               "all": true
             }
