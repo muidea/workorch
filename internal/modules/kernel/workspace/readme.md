@@ -161,8 +161,13 @@ Workspace 与非零 expected revision。owner 反查完整持久 authoring/六�
 再读 revision 排除混合观察；缺失或漂移拒绝，不 fallback admission、不生成 ticket，也不物化资源。
 返回有界 detached snapshot，保留正式 DoD 原顺序与逐项来源。snapshot hash 是内容身份，不是 readiness。
 `AuthoringConfigurationHash` 绑定本次 owner 完整配置观察（含独立存储的 Soul 绑定），不与历史确认 journal
-配置 hash 比较。准备受理、原始 ExecutionInputs、结算与首次激活仍反查同一本次配置；新准备可以使用更新后的
-系统默认，既有准备记录仍保留原来源，不改写或复用成新的观察。
+配置 hash 比较。创作确认进入 `materialized` 且首次 admission candidate 落盘后，在无确认/准备/reservation
+在途写入时，单个 Workspace 可通过 `/workspace/command/update-llm-selection`（CAS）在启动前重新设置或清除
+`DefaultLLMSelection`，并通过 `UpdateWorkspaceCommand` 在不改动已确认定义/目录/模板/Profile/Policy 字段的前提下
+调整 Soul 绑定，均不自动创建或启动 Run，也不影响已封存 Run；此前已完成但尚未消费的准备记录会自动因 revision/hash
+变化而投影 `stale`（`binding_changed`），已落盘的同批确认准入重放仅核对当前 `WorkspaceConfigurationHash`。
+准备受理、原始 ExecutionInputs、结算与首次激活仍反查同一本次配置；新准备可以使用更新后的
+系统默认与工作空间选择，既有准备记录仍保留原来源，不改写或复用成新的观察。
 内部目录含无效 UTF-8 或 NUL 时明确拒绝，不借 JSON 替换字符、路径清洗或截断修复原输入。
 
 `QueryWorkspacePreparationStateCommand/Result`（`/workspace/activation-preparation/state/query`）

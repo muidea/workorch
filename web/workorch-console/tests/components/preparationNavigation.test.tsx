@@ -14,6 +14,7 @@ vi.mock('../../src/api', () => ({ workorchApi: {
   readWorkspaceSoulBindings: vi.fn(), listSkills: vi.fn(), listMCPServers: vi.fn(), listMemory: vi.fn(),
   readConfiguration: vi.fn(), readStartupPreparation: vi.fn(), checkStartupPreparation: vi.fn(),
   recoverStartupPreparation: vi.fn(), submitWorkspaceExecution: vi.fn(),
+  updateWorkspaceLLMSelection: vi.fn(), updateWorkspaceSoulBindings: vi.fn(),
 } }));
 vi.mock('../../src/pages/components/WorkspaceAuthoringEditor', () => ({ WorkspaceAuthoringEditor: () => null }));
 vi.mock('../../src/pages/components/WorkspaceAuthoringCandidate', () => ({ WorkspaceAuthoringCandidate: () => null }));
@@ -132,5 +133,49 @@ describe('STEP04 整页导航没有隐式外部库存读取', () => {
     expect(screen.getByText('技能（Skill）（显式库存查询）: 未加载')).toBeTruthy();
     expect(workorchApi.listSkills).toHaveBeenCalledExactlyOnceWith('ws');
     expect(workorchApi.readConfiguration).not.toHaveBeenCalled();
+  });
+
+  it('启动前允许单独设置与重置工作空间模型，未修改配置提交新执行时不重复写 LLM/Soul CAS', async () => {
+    vi.mocked(workorchApi.updateWorkspaceLLMSelection).mockResolvedValue({ id: 'ws', title: 'ws', state: 'active', revision: 11 } as Awaited<ReturnType<typeof workorchApi.updateWorkspaceLLMSelection>>);
+    vi.mocked(workorchApi.submitWorkspaceExecution).mockResolvedValue({
+      accepted: true, workspaceId: 'ws', requestId: 'req-1', intent: 'restart', state: 'accepted', reason: 'reconciliation_requested'
+    } as unknown as Awaited<ReturnType<typeof workorchApi.submitWorkspaceExecution>>);
+
+    render(page());
+    await screen.findByText('original goal');
+
+    await act(async () => fireEvent.click(button('设置模型')));
+    expect(workorchApi.readConfiguration).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText(/系统默认：fresh-model/)).toBeTruthy();
+    await act(async () => fireEvent.click(button('保存模型设置')));
+    await waitFor(() => expect(workorchApi.updateWorkspaceLLMSelection).toHaveBeenCalledExactlyOnceWith(
+      'ws',
+      { target: { providerId: 'ai-proxy', modelId: 'fresh-model' }, reasoningEffort: undefined },
+      10
+    ));
+    expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
+
+    vi.mocked(workorchApi.readWorkspaceSnapshotProjection).mockResolvedValueOnce({
+      snapshot: {
+        ...snapshot('ws'),
+        workspace: { id: 'ws', title: 'ws', state: 'active', revision: 11, defaultLLMSelection: { target: { providerId: 'ai-proxy', modelId: 'fresh-model' } } }
+      },
+      projection: { state: 'ready' }
+    } as unknown as Awaited<ReturnType<typeof workorchApi.readWorkspaceSnapshotProjection>>);
+
+    await act(async () => fireEvent.click(button('创建新执行')));
+    expect(workorchApi.readConfiguration).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(button('创建新的后台执行').disabled).toBe(false));
+
+    vi.mocked(workorchApi.updateWorkspaceLLMSelection).mockClear();
+    await act(async () => fireEvent.click(button('创建新的后台执行')));
+    await waitFor(() => expect(workorchApi.submitWorkspaceExecution).toHaveBeenCalledExactlyOnceWith('ws', { intent: 'restart' }));
+    expect(workorchApi.updateWorkspaceLLMSelection).not.toHaveBeenCalled();
+    expect(workorchApi.updateWorkspaceSoulBindings).not.toHaveBeenCalled();
+
+    await act(async () => fireEvent.click(button('设置模型')));
+    await waitFor(() => expect(button('恢复跟随系统默认').disabled).toBe(false));
+    await act(async () => fireEvent.click(button('恢复跟随系统默认')));
+    await waitFor(() => expect(workorchApi.updateWorkspaceLLMSelection).toHaveBeenCalledExactlyOnceWith('ws', null, 11));
   });
 });

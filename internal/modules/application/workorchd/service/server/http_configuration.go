@@ -71,7 +71,7 @@ func registerConfigurationRoutes(router engine.RouteRegistry, state *serverState
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
 		}
-		item, err := state.updateLLMConfiguration(req)
+		item, err := state.updateLLMConfiguration(r.Context(), req)
 		if err != nil {
 			writeBusinessError(w, err)
 			return

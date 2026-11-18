@@ -819,7 +819,7 @@ func TestConfigurationEndpointReturnsRedactedAIProxyConfiguration(t *testing.T) 
 
 func TestUpdateLLMConfigurationEndpointReturnsRedactedConfiguration(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
-	state.updateLLMConfiguration = func(cmd configcore.UpdateLLMConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error) {
+	state.updateLLMConfiguration = func(_ context.Context, cmd configcore.UpdateLLMConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error) {
 		if cmd.APIKey == nil || *cmd.APIKey != "rotated-key" || cmd.DefaultChatModelID == nil || *cmd.DefaultChatModelID != "gpt-4.1" {
 			t.Fatalf("update command = %+v, want narrow llm update command", cmd)
 		}
@@ -830,8 +830,10 @@ func TestUpdateLLMConfigurationEndpointReturnsRedactedConfiguration(t *testing.T
 					APIKeyConfigured: true,
 					Timeout:          "180s",
 				},
-				DefaultChat:     runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4.1"},
-				RestartRequired: true,
+				DefaultChat: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4.1"},
+				Active: &workorchconfigurationcontract.LLMActiveConfiguration{
+					DefaultChat: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4.1"},
+				},
 			},
 		}, nil
 	}
@@ -851,8 +853,8 @@ func TestUpdateLLMConfigurationEndpointReturnsRedactedConfiguration(t *testing.T
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal configuration: %v", err)
 	}
-	if strings.Contains(rec.Body.String(), "secret-value") || !body.Configuration.LLM.AIProxy.APIKeyConfigured || !body.Configuration.LLM.RestartRequired {
-		t.Fatalf("body = %s, want redacted restart-pending configuration", rec.Body.String())
+	if strings.Contains(rec.Body.String(), "secret-value") || !body.Configuration.LLM.AIProxy.APIKeyConfigured || body.Configuration.LLM.Active == nil || body.Configuration.LLM.Active.DefaultChat.ModelID != "gpt-4.1" {
+		t.Fatalf("body = %s, want redacted active configuration", rec.Body.String())
 	}
 }
 

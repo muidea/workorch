@@ -389,3 +389,107 @@ func testAuthoringApplicableBootstrapAndStart(t *testing.T, mode string) {
 		t.Fatalf("unprepared Start changed Run cardinality: %d %v", len(runs), err)
 	}
 }
+
+func TestConfirmedAndAdmittedWorkspaceAllowsPreStartLLMAndSoulUpdatesAndAdmissionReplay(t *testing.T) {
+	ctx := context.Background()
+	owners := openFileDefinitionAdmissionOwners(t, t.TempDir())
+	defer owners.close()
+
+	confirmation := seedReviewedAuthoringConfirmationWithProof(t, owners, "ws-authoring-llm-reset", true)
+	if _, err := owners.workspace.submitDefinitionAuthoringConfirmationInternalEvent(ctx, definitionAuthoringConfirmationInternalEvent{Command: confirmation}); err != nil {
+		t.Fatal(err)
+	}
+	current, err := owners.repositories.Workspaces.Get(ctx, confirmation.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := authoringAdmissionCandidateFromCurrentConfiguration(t, current)
+	admitted, err := owners.workspace.submitDefinitionAuthoringAdmission(ctx, workspaceevents.AdmitDefinitionAuthoringCommand{
+		Candidate:                 candidate,
+		ExpectedWorkspaceRevision: current.Revision,
+		ExpectedConfigurationHash: workspace.WorkspaceConfigurationHash(current),
+	})
+	if err != nil || admitted.StartupInput == nil {
+		t.Fatalf("initial admission = %+v err=%v", admitted, err)
+	}
+
+	current, err = owners.repositories.Workspaces.Get(ctx, confirmation.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection := runtimecontract.ProviderInferenceSelection{
+		Target:          runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "pre-start-model"},
+		ReasoningEffort: "high",
+	}
+	resp, err := owners.workspace.updateWorkspaceLLMSelection(ctx, magicevent.NewEventWithContext(
+		workspaceevents.TopicWorkspaceCommandUpdateLLMSelection,
+		"application/workorchd/appservice",
+		workspaceevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		workspaceevents.UpdateWorkspaceLLMSelectionCommand{
+			WorkspaceID:      confirmation.WorkspaceID,
+			Selection:        &selection,
+			ExpectedRevision: current.Revision,
+		},
+	))
+	if err != nil || !resp.Changed || resp.Workspace == nil || resp.Workspace.DefaultLLMSelection == nil || !resp.Workspace.DefaultLLMSelection.Same(selection) {
+		t.Fatalf("pre-start LLM update = %+v err=%v", resp, err)
+	}
+
+	// Non-definition Soul binding update succeeds while confirmed definition fields remain immutable.
+	current, err = owners.repositories.Workspaces.Get(ctx, confirmation.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	soulCmd := workspaceevents.UpdateWorkspaceCommand{
+		WorkspaceID:          current.ID,
+		Title:                current.Title,
+		Description:          current.Description,
+		DeliverableDirectory: current.DeliverableDirectory,
+		InternalDirectory:    current.InternalDirectory,
+		TemplateID:           current.TemplateID,
+		TemplateBindingHash:  current.TemplateBindingHash,
+		ProfileID:            current.ProfileID,
+		DefaultLLMSelection:  current.DefaultLLMSelection,
+		DefaultSoulID:        "soul-pre-start",
+		ContextHints:         current.ContextHints,
+		EvidencePolicies:     current.EvidencePolicies,
+	}
+	if _, err := owners.workspace.updateWorkspace(ctx, magicevent.NewEventWithContext(
+		workspaceevents.TopicWorkspaceCommandUpdate,
+		"application/workorchd/appservice",
+		workspaceevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		soulCmd,
+	)); err != nil {
+		t.Fatalf("pre-start soul binding update err=%v", err)
+	}
+	tamperCmd := soulCmd
+	tamperCmd.ProfileID = "other-profile"
+	if _, err := owners.workspace.updateWorkspace(ctx, magicevent.NewEventWithContext(
+		workspaceevents.TopicWorkspaceCommandUpdate,
+		"application/workorchd/appservice",
+		workspaceevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		tamperCmd,
+	)); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("confirmed profile tamper err=%v, want conflict", err)
+	}
+
+	// Idempotent admission replay succeeds after pre-start LLM/Soul configuration updates.
+	current, err = owners.repositories.Workspaces.Get(ctx, confirmation.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := owners.workspace.submitDefinitionAuthoringAdmission(ctx, workspaceevents.AdmitDefinitionAuthoringCommand{
+		Candidate:                 current.DefinitionAdmissionCandidates[0].Clone(),
+		ExpectedWorkspaceRevision: current.Revision,
+		ExpectedConfigurationHash: workspace.WorkspaceConfigurationHash(current),
+	})
+	if err != nil || replayed.StartupInput == nil || replayed.StartupInput.StartupInputHash != admitted.StartupInput.StartupInputHash {
+		t.Fatalf("admission replay after LLM update = %+v err=%v", replayed, err)
+	}
+}

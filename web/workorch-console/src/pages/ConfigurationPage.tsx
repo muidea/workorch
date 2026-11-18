@@ -126,7 +126,7 @@ export function ConfigurationPage() {
       };
       const nextConfiguration = await workorchApi.updateLLMConfiguration(payload);
       applyConfiguration(nextConfiguration);
-      message.success('LLM 配置已保存，重启 WorkOrch 后生效');
+      message.success('LLM 配置已更新');
     } catch (error) {
       message.error(errorMessage(error));
     } finally {
@@ -310,7 +310,12 @@ export function ConfigurationPage() {
                 extra={<Button type="primary" onClick={() => void llmForm.validateFields().then((values) => saveLLMConfiguration(values))} loading={saving}>保存 LLM 配置</Button>}
               >
                 <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                  {configuration?.llm.restartRequired && <Alert type="warning" showIcon message="保存的 LLM 配置尚未确认生效，需要重启 WorkOrch。" description="生成候选使用当前运行进程的配置；保存选择不能作为实际调用模型的证明。" />}
+                  <Alert
+                    type="info"
+                    showIcon
+                    message="保存的 LLM 配置在当前运行进程内立即生效。"
+                    description="生成候选使用当前运行进程的配置；保存选择不能作为实际调用模型的证明。"
+                  />
                   <Descriptions column={1} items={[
                     { key: 'activeChat', label: '当前进程对话模型', children: configuration?.llm.active ? `${configuration.llm.active.defaultChat.providerId}/${configuration.llm.active.defaultChat.modelId}` : '未取得运行配置，当前模型未知' },
                     { key: 'activeEmbedding', label: '当前进程 Embedding 模型', children: configuration?.llm.active ? configuration.llm.active.defaultEmbedding ? `${configuration.llm.active.defaultEmbedding.providerId}/${configuration.llm.active.defaultEmbedding.modelId}` : '未配置' : '未知' },

@@ -2,8 +2,10 @@ package biz
 
 import (
 	"context"
+	"errors"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
@@ -14,7 +16,18 @@ func (p *runtimeApplicationPorts) configureConfigurationPorts() {
 	ports.Configuration.ReadConfiguration = appservice.ReadServiceConfiguration
 	ports.Configuration.UpdateServerConfiguration = appservice.UpdateServerConfiguration
 	ports.Configuration.UpdateRuntimeConfiguration = appservice.UpdateRuntimeConfiguration
-	ports.Configuration.UpdateLLMConfiguration = appservice.UpdateLLMConfiguration
+	ports.Configuration.UpdateLLMConfiguration = func(ctx context.Context, cmd configcore.UpdateLLMConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error) {
+		var ret workorchconfigurationcontract.ServiceConfiguration
+		err := p.withSession(ctx, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.UpdateLLMConfigurationWithSession(ctx, session, cmd)
+			return err
+		})
+		if errors.Is(err, errRuntimeComponentUnavailable) {
+			return appservice.UpdateLLMConfiguration(cmd)
+		}
+		return ret, err
+	}
 	ports.Configuration.UpdateWebSearchConfiguration = appservice.UpdateWebSearchConfiguration
 	ports.Configuration.GetLLMModelCatalog = func(ctx context.Context) (workorchmanagementcontract.ProviderCatalogSummary, error) {
 		var ret workorchmanagementcontract.ProviderCatalogSummary

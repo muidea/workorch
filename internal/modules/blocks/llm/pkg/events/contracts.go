@@ -8,6 +8,7 @@ func Contracts() []eventcontract.Contract {
 		TopicLLMCommandCompleteProvider,
 		TopicLLMCommandCompleteProviderDocument,
 		TopicLLMCommandGenerateEmbedding,
+		TopicLLMCommandReloadConfiguration,
 		TopicLLMCommandRefreshProviderModelCatalog,
 		TopicRequestRuntimeCandidate,
 	)...)

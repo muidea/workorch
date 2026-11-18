@@ -182,10 +182,14 @@ export const workorchApi = {
     });
     return body.soulBindings;
   },
-  updateWorkspaceLLMSelection: async (workspaceId: string, selection: ProviderInferenceSelection, expectedRevision: number) => {
+  updateWorkspaceLLMSelection: async (workspaceId: string, selection: ProviderInferenceSelection | null, expectedRevision: number) => {
     const body = await request<{ workspace: Workspace }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/llm-selection`, {
-      method: 'PUT',
-      body: JSON.stringify({ providerId: selection.target.providerId, modelId: selection.target.modelId, reasoningEffort: selection.reasoningEffort, expectedRevision })
+      method: selection === null ? 'DELETE' : 'PUT',
+      body: JSON.stringify(
+        selection === null
+          ? { expectedRevision }
+          : { providerId: selection.target.providerId, modelId: selection.target.modelId, reasoningEffort: selection.reasoningEffort, expectedRevision }
+      )
     });
     return body.workspace;
   },

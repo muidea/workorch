@@ -1,7 +1,11 @@
 package server
 
 import (
+	"context"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
+	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 )
 
 // newDefaultApplicationOperations is retained for standalone/test server
@@ -90,7 +94,9 @@ func newDefaultApplicationOperations() applicationOperations {
 	operations.readConfiguration = defaultReadConfiguration
 	operations.updateServerConfiguration = appservice.UpdateServerConfiguration
 	operations.updateRuntimeConfiguration = appservice.UpdateRuntimeConfiguration
-	operations.updateLLMConfiguration = appservice.UpdateLLMConfiguration
+	operations.updateLLMConfiguration = func(_ context.Context, cmd configcore.UpdateLLMConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error) {
+		return appservice.UpdateLLMConfiguration(cmd)
+	}
 	operations.updateWebSearchConfiguration = appservice.UpdateWebSearchConfiguration
 	return operations
 }

@@ -241,6 +241,8 @@ func TestWebLLMConfigurationHidesAIProxyImplementationDetails(t *testing.T) {
 		`refreshLLMModelCatalog()`,
 		`clearApiKey`,
 		`显式清空 API 密钥`,
+		`重启 WorkOrch`,
+		`restartRequired`,
 	} {
 		if strings.Contains(pageData, forbidden) {
 			t.Fatalf("ConfigurationPage exposes an LLM implementation detail %q", forbidden)
@@ -254,7 +256,8 @@ func TestWebLLMConfigurationHidesAIProxyImplementationDetails(t *testing.T) {
 		`name={['budget', 'contextUtilizationRatio']}`,
 		`name={['budget', 'estimatedTokensPerByte']}`,
 		`保存 LLM 配置`,
-		`重启 WorkOrch 后生效`,
+		`LLM 配置已更新`,
+		`保存的 LLM 配置在当前运行进程内立即生效。`,
 	} {
 		if !strings.Contains(pageData, want) {
 			t.Fatalf("ConfigurationPage missing LLM configuration contract %q", want)

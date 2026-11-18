@@ -113,6 +113,9 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const [activationConfigurationLoading, setActivationConfigurationLoading] = useState(false);
   const [activationIntent, setActivationIntent] = useState<'resume' | 'restart'>('resume');
   const [soulBindingEditorOpen, setSoulBindingEditorOpen] = useState(false);
+  const [llmSelectionEditorOpen, setLLMSelectionEditorOpen] = useState(false);
+  const [llmSelectionSaving, setLLMSelectionSaving] = useState(false);
+  const [llmSelectionConfigurationLoading, setLLMSelectionConfigurationLoading] = useState(false);
   const [workspaceDeleteOpen, setWorkspaceDeleteOpen] = useState(false);
   const [workspaceDeleting, setWorkspaceDeleting] = useState(false);
   const [soulBindingSaving, setSoulBindingSaving] = useState(false);
@@ -121,12 +124,19 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const workspaceListRequestSeq = useRef(0);
   const workspaceContextRequestSeq = useRef(0);
   const activationConfigurationRequestSeq = useRef(0);
+  const llmSelectionConfigurationRequestSeq = useRef(0);
   const skillInventoryRequestSeq = useRef(0);
   const currentWorkspaceIdRef = useRef<string | undefined>(undefined);
   const lastEventRevisionRef = useRef(0);
   const workspaceEventRefreshTimerRef = useRef<number | undefined>(undefined);
   const [activationForm] = Form.useForm();
 	const activationSelectedTargetKey = Form.useWatch('llmTargetKey', activationForm);
+  const [llmSelectionForm] = Form.useForm<{
+    llmTargetKey?: string;
+    llmTarget?: { providerId?: string; modelId?: string };
+    reasoningEffort?: string;
+  }>();
+  const llmSelectionSelectedTargetKey = Form.useWatch('llmTargetKey', llmSelectionForm);
   const [soulBindingsForm] = Form.useForm();
   const [workspaceDeleteForm] = Form.useForm<WorkspaceDeleteFormValues>();
 
@@ -138,8 +148,11 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     setConfiguration(undefined);
     setActivationOpen(false);
     setActivationConfigurationLoading(false);
+    setLLMSelectionEditorOpen(false);
+    setLLMSelectionConfigurationLoading(false);
     return () => {
       activationConfigurationRequestSeq.current++;
+      llmSelectionConfigurationRequestSeq.current++;
       skillInventoryRequestSeq.current++;
     };
   }, [workspaceId]);
@@ -212,6 +225,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const readyDoDs = dods.filter((item) => item.state === 'ready' || item.state === 'satisfied');
   const activationLLMTargetOptions = helpers.chatTargetOptions(configuration);
   const selectedOption = activationLLMTargetOptions.find((item) => item.value === activationSelectedTargetKey);
+  const selectedLLMOption = activationLLMTargetOptions.find((item) => item.value === llmSelectionSelectedTargetKey);
   const activationReadyTarget = helpers.activationReadyChatTarget(configuration);
   const defaultChatModelId = configuration?.llm.defaultChat?.modelId;
   const defaultChatProviderId = configuration?.llm.defaultChat?.providerId || 'ai-proxy';
@@ -790,6 +804,118 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     setSoulBindingEditorOpen(true);
   };
 
+  const openLLMSelectionEditor = async () => {
+    if (!workspaceId) {
+      message.error('请先选择工作空间');
+      return;
+    }
+    const targetWorkspaceId = workspaceId;
+    const token = ++llmSelectionConfigurationRequestSeq.current;
+    setConfiguration(undefined);
+    llmSelectionForm.resetFields();
+    const initialSelection = snapshot?.workspace.defaultLLMSelection;
+    if (initialSelection?.target.modelId) {
+      const providerId = initialSelection.target.providerId || 'ai-proxy';
+      const modelId = initialSelection.target.modelId;
+      llmSelectionForm.setFieldsValue({
+        llmTarget: { providerId, modelId },
+        reasoningEffort: initialSelection.reasoningEffort,
+        llmTargetKey: helpers.providerModelTargetKey(providerId, modelId)
+      });
+    }
+    setLLMSelectionEditorOpen(true);
+    setLLMSelectionConfigurationLoading(true);
+    let nextConfiguration: ServiceConfiguration;
+    try {
+      nextConfiguration = await workorchApi.readConfiguration();
+    } catch (error) {
+      if (token === llmSelectionConfigurationRequestSeq.current && currentWorkspaceIdRef.current === targetWorkspaceId) {
+        setLLMSelectionConfigurationLoading(false);
+        message.error(errorMessage(error));
+      }
+      return;
+    }
+    if (token !== llmSelectionConfigurationRequestSeq.current || currentWorkspaceIdRef.current !== targetWorkspaceId) {
+      return;
+    }
+    setConfiguration(nextConfiguration);
+    setLLMSelectionConfigurationLoading(false);
+    const readyOptions = helpers.chatTargetOptions(nextConfiguration);
+    const defaultSelection = snapshot?.workspace.defaultLLMSelection;
+    const readyDefault = readyOptions.find(
+      (item) => item.providerId === defaultSelection?.target.providerId && item.modelId === defaultSelection?.target.modelId
+    );
+    const target = readyDefault ? defaultSelection?.target : helpers.activationReadyChatTarget(nextConfiguration);
+    const reasoningEffort = readyDefault && defaultSelection?.reasoningEffort && (readyDefault.reasoningEfforts ?? []).includes(defaultSelection.reasoningEffort)
+      ? defaultSelection.reasoningEffort
+      : undefined;
+    llmSelectionForm.setFieldsValue({
+      llmTarget: target,
+      reasoningEffort,
+      llmTargetKey: helpers.providerModelTargetKey(target?.providerId, target?.modelId)
+    });
+  };
+
+  const closeLLMSelectionEditor = () => {
+    llmSelectionConfigurationRequestSeq.current++;
+    setLLMSelectionConfigurationLoading(false);
+    setLLMSelectionEditorOpen(false);
+  };
+
+  const saveWorkspaceLLMSelection = async (values: { llmTarget?: { providerId?: string; modelId?: string }; reasoningEffort?: string }) => {
+    if (!workspaceId) {
+      message.error('请先选择工作空间');
+      return;
+    }
+    const selectedModelId = values.llmTarget?.modelId?.trim() || activationReadyTarget?.modelId;
+    const normalizedLLMTarget = selectedModelId
+      ? {
+          providerId: values.llmTarget?.providerId?.trim() || activationReadyTarget?.providerId || 'ai-proxy',
+          modelId: selectedModelId
+        }
+      : undefined;
+    if (!normalizedLLMTarget) {
+      message.error('当前没有 ready 的对话模型，请先完成模型配置');
+      return;
+    }
+    const reasoningEffort = values.reasoningEffort?.trim() || undefined;
+    const expectedRevision = snapshot?.workspace.revision ?? 0;
+    setLLMSelectionSaving(true);
+    try {
+      await workorchApi.updateWorkspaceLLMSelection(
+        workspaceId,
+        { target: normalizedLLMTarget, reasoningEffort },
+        expectedRevision
+      );
+      await loadWorkspaceContext(workspaceId);
+      closeLLMSelectionEditor();
+      message.success('工作空间模型配置已保存');
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setLLMSelectionSaving(false);
+    }
+  };
+
+  const clearWorkspaceLLMSelection = async () => {
+    if (!workspaceId) {
+      message.error('请先选择工作空间');
+      return;
+    }
+    const expectedRevision = snapshot?.workspace.revision ?? 0;
+    setLLMSelectionSaving(true);
+    try {
+      await workorchApi.updateWorkspaceLLMSelection(workspaceId, null, expectedRevision);
+      await loadWorkspaceContext(workspaceId);
+      closeLLMSelectionEditor();
+      message.success('已恢复为跟随系统默认模型');
+    } catch (error) {
+      message.error(errorMessage(error));
+    } finally {
+      setLLMSelectionSaving(false);
+    }
+  };
+
   const openWorkspaceDelete = () => {
     workspaceDeleteForm.setFieldsValue({ purge: false });
     setWorkspaceDeleteOpen(true);
@@ -845,20 +971,48 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       }
       const reasoningEffort = request.reasoningEffort?.trim() || undefined;
       const expectedRevision = snapshot?.workspace.revision ?? 0;
+      const existingSelection = snapshot?.workspace.defaultLLMSelection;
+      const effectiveCurrentTarget = existingSelection?.target
+        ?? (defaultChatReady && configuration?.llm.defaultChat?.modelId
+          ? {
+              providerId: configuration.llm.defaultChat.providerId?.trim() || 'ai-proxy',
+              modelId: configuration.llm.defaultChat.modelId.trim()
+            }
+          : undefined);
+      const effectiveCurrentReasoningEffort = existingSelection?.reasoningEffort?.trim() || undefined;
+      const llmSelectionChanged = !effectiveCurrentTarget
+        || effectiveCurrentTarget.providerId !== normalizedLLMTarget.providerId
+        || effectiveCurrentTarget.modelId !== normalizedLLMTarget.modelId
+        || effectiveCurrentReasoningEffort !== reasoningEffort;
+      const requestedDefaultSoulId = request.soulId?.trim() || undefined;
+      const currentDefaultSoulId = soulBindings?.defaultSoulId?.trim() || undefined;
+      const requestedStageBindings = request.soulBindings ?? {};
+      const currentStageBindings = soulBindings?.bindings ?? {};
+      const allBindingStages = Array.from(new Set([
+        ...soulBindingStages,
+        ...Object.keys(requestedStageBindings),
+        ...Object.keys(currentStageBindings)
+      ]));
+      const soulBindingsChanged = requestedDefaultSoulId !== currentDefaultSoulId || allBindingStages.some(
+        (stage) => (requestedStageBindings[stage]?.trim() || undefined) !== (currentStageBindings[stage]?.trim() || undefined)
+      );
       // Fresh activation configuration is persisted through Workspace-owner
-      // APIs before the immutable restart intent. Resume deliberately skips
-      // this branch and can never patch model or Soul state.
-      prepareOwnerState = workorchApi.updateWorkspaceLLMSelection(
-        targetWorkspaceId,
-        { target: normalizedLLMTarget, reasoningEffort },
-        expectedRevision
+      // APIs only when changed before the immutable restart intent, preserving
+      // an already completed first-execution preparation revision when untouched.
+      prepareOwnerState = (llmSelectionChanged
+        ? workorchApi.updateWorkspaceLLMSelection(
+            targetWorkspaceId,
+            { target: normalizedLLMTarget, reasoningEffort },
+            expectedRevision
+          )
+        : Promise.resolve()
       ).then(async () => {
-        if (request.soulId || request.soulBindings) {
+        if (soulBindingsChanged) {
           const nextBindings: WorkspaceSoulBindings = {
-            defaultSoulId: request.soulId || soulBindings?.defaultSoulId,
+            defaultSoulId: requestedDefaultSoulId,
             bindings: {
-              ...(soulBindings?.bindings ?? {}),
-              ...(request.soulBindings ?? {})
+              ...currentStageBindings,
+              ...requestedStageBindings
             }
           };
           const updated = await workorchApi.updateWorkspaceSoulBindings(targetWorkspaceId, nextBindings);
@@ -1106,10 +1260,12 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
               menu={{
                 items: [
                   { key: 'authoring', label: '规格创作／澄清', disabled: !workspaceId || Boolean(snapshot?.workspace.activeRunId) },
+                  { key: 'llm', label: '调整工作空间模型', disabled: !workspaceId },
                   { key: 'soul', label: '调整执行人格', disabled: !workspaceId }
                 ],
                 onClick: ({ key }) => {
                   if (key === 'authoring') openDefinitionRevision();
+                  else if (key === 'llm') void openLLMSelectionEditor();
                   else if (key === 'soul') openSoulBindingEditor();
                 }
               }}
@@ -1181,7 +1337,16 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
               items={[
                 { key: 'id', label: '工作空间 ID', children: snapshot.workspace.id },
                 { key: 'activeRun', label: '活跃运行', children: snapshot.workspace.activeRunId || '-' },
-                { key: 'nextRunLLMTarget', label: '下次运行默认模型', children: providerModelTargetLabel(snapshot.workspace.defaultLLMSelection) },
+                {
+                  key: 'nextRunLLMTarget',
+                  label: '下次运行默认模型',
+                  children: (
+                    <Space size={4} wrap>
+                      <span>{snapshot.workspace.defaultLLMSelection ? providerModelTargetLabel(snapshot.workspace.defaultLLMSelection) : '跟随系统默认'}</span>
+                      <Button size="small" type="link" onClick={() => void openLLMSelectionEditor()}>设置模型</Button>
+                    </Space>
+                  )
+                },
                 { key: 'activeRunSealedLLMSelection', label: '当前运行封存模型', children: providerModelTargetLabel(activeRun?.sealedLLMSelection) },
                 { key: 'displayOutcome', label: '展示结果（非 Owner 状态）', children: snapshot.displayOutcome?.runId ? `${snapshot.displayOutcome.runId} / ${stateLabel(snapshot.displayOutcome.state)}` : '-' },
                 { key: 'canonicalRunState', label: 'Run Owner 状态', children: activeRun ? `${activeRun.id} / ${stateLabel(activeRun.state)}` : '尚未启动执行' },
@@ -2193,6 +2358,90 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           ) : (
             <Empty description="暂无可用执行人格，可先到系统配置创建执行人格" />
           )}
+        </Space>
+      </Modal>
+      <Modal
+        title="调整工作空间模型"
+        open={llmSelectionEditorOpen}
+        confirmLoading={llmSelectionSaving}
+        onCancel={closeLLMSelectionEditor}
+        footer={[
+          <Button
+            key="reset"
+            disabled={llmSelectionSaving || !snapshot?.workspace.defaultLLMSelection}
+            onClick={() => void clearWorkspaceLLMSelection()}
+          >
+            恢复跟随系统默认
+          </Button>,
+          <Button key="cancel" onClick={closeLLMSelectionEditor}>取消</Button>,
+          <Button
+            key="submit"
+            type="primary"
+            loading={llmSelectionSaving}
+            disabled={llmSelectionConfigurationLoading || !activationLLMReady}
+            onClick={() => llmSelectionForm.submit()}
+          >
+            保存模型设置
+          </Button>
+        ]}
+      >
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          {llmSelectionConfigurationLoading ? <Alert type="info" message="正在读取当前进程 LLM 配置；尚未提交保存" /> : null}
+          <Typography.Paragraph type="secondary">
+            修改工作空间下次 fresh activation 的默认模型与推理强度；仅通过 CAS 更新工作空间偏好，不会启动新的 Run，也不影响已启动或已封存的 Run。
+          </Typography.Paragraph>
+          <Form
+            form={llmSelectionForm}
+            layout="vertical"
+            onFinish={(values) => void saveWorkspaceLLMSelection(values)}
+          >
+            <Form.Item
+              name="llmTargetKey"
+              label="工作空间默认模型"
+              rules={[{ required: true, message: '请选择可用的对话模型' }]}
+              extra={
+                !activationLLMReady
+                  ? '当前没有可用的对话模型，请先在系统配置中完成模型设置'
+                  : defaultChatModelId
+                    ? `系统默认：${defaultChatModelId}${defaultChatReady ? '' : `（当前不可用，已自动选择 ${activationReadyTarget?.modelId}）`}`
+                    : `已自动选择模型：${activationReadyTarget?.modelId}`
+              }
+            >
+              <Select
+                showSearch
+                placeholder="选择可用对话模型"
+                options={activationLLMTargetOptions.map((item) => ({ value: item.value, label: item.label }))}
+                onChange={(value?: string) => {
+                  const selected = activationLLMTargetOptions.find((item) => item.value === value);
+                  llmSelectionForm.setFieldsValue({
+                    llmTarget: {
+                      providerId: selected?.providerId || 'ai-proxy',
+                      modelId: selected?.modelId
+                    },
+                    reasoningEffort: undefined
+                  });
+                }}
+              />
+            </Form.Item>
+            <Form.Item name={['llmTarget', 'providerId']} hidden initialValue="ai-proxy">
+              <Input />
+            </Form.Item>
+            <Form.Item name={['llmTarget', 'modelId']} hidden>
+              <Input />
+            </Form.Item>
+            <Form.Item
+              name="reasoningEffort"
+              label="推理强度"
+              extra={selectedLLMOption?.defaultReasoningEffort ? `模型默认：${selectedLLMOption.defaultReasoningEffort}` : '留空时使用模型默认策略'}
+            >
+              <Select
+                allowClear
+                placeholder="模型默认"
+                disabled={!selectedLLMOption?.reasoningSupported || !selectedLLMOption?.reasoningValid}
+                options={(selectedLLMOption?.reasoningEfforts ?? []).map((effort) => ({ value: effort, label: effort }))}
+              />
+            </Form.Item>
+          </Form>
         </Space>
       </Modal>
       <Modal

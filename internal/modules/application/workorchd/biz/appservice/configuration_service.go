@@ -31,6 +31,21 @@ func UpdateLLMConfiguration(cmd configcore.UpdateLLMConfigurationCommand) (worko
 	return configcore.UpdateLLMConfiguration(cmd)
 }
 
+func UpdateLLMConfigurationWithHub(ctx context.Context, hub magicevent.Hub, cmd configcore.UpdateLLMConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error) {
+	return configcore.UpdateLLMConfigurationWithHub(ctx, hub, cmd)
+}
+
+func UpdateLLMConfigurationWithSession(ctx context.Context, session *runtimecore.Session, cmd configcore.UpdateLLMConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error) {
+	if session == nil {
+		return workorchconfigurationcontract.ServiceConfiguration{}, common.ErrInvalidArgument
+	}
+	hub, err := session.RequiredCommandHub()
+	if err != nil {
+		return workorchconfigurationcontract.ServiceConfiguration{}, err
+	}
+	return UpdateLLMConfigurationWithHub(ctx, hub, cmd)
+}
+
 func UpdateWebSearchConfiguration(cmd configcore.UpdateWebSearchConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error) {
 	return configcore.UpdateWebSearchConfiguration(cmd)
 }

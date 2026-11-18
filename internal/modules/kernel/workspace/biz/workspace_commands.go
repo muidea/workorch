@@ -149,7 +149,16 @@ func (m *Biz) updateWorkspace(ctx context.Context, ev magicevent.Event) (workspa
 	if err := workspaceDeletionRejectsMutation(current); err != nil {
 		return workspaceCommandResponse{}, err
 	}
-	if current.DefinitionAuthoringConfirmation != nil {
+	if authoringConfirmationInProgress(current) || preparationOrReservationInFlight(current) {
+		return workspaceCommandResponse{}, common.ErrConflict
+	}
+	if current.DefinitionAuthoringConfirmation != nil &&
+		(cmd.DeliverableDirectory != current.DeliverableDirectory ||
+			cmd.InternalDirectory != current.InternalDirectory ||
+			cmd.TemplateID != current.TemplateID ||
+			cmd.ProfileID != current.ProfileID ||
+			!cmd.ContextHints.Equal(current.ContextHints) ||
+			!equalPayloadSlice(cmd.EvidencePolicies, current.EvidencePolicies)) {
 		return workspaceCommandResponse{}, common.ErrConflict
 	}
 	// Generic metadata updates deliberately preserve lifecycle-owned fields.
@@ -191,7 +200,7 @@ func (m *Biz) updateWorkspaceLLMSelection(ctx context.Context, ev magicevent.Eve
 	if err := workspaceDeletionRejectsMutation(item); err != nil {
 		return workspaceCommandResponse{}, err
 	}
-	if item.DefinitionAuthoringConfirmation != nil {
+	if authoringConfirmationInProgress(item) || preparationOrReservationInFlight(item) {
 		return workspaceCommandResponse{}, common.ErrConflict
 	}
 	if cmd.ExpectedRevision == 0 || item.Revision != cmd.ExpectedRevision {
@@ -279,4 +288,36 @@ func workspaceFromUpdateCommand(current *workspacemodel.Workspace, cmd workspace
 	item.ContextHints = cmd.ContextHints.Clone()
 	item.EvidencePolicies = workorcheventpayload.CloneSlice(cmd.EvidencePolicies)
 	return &item
+}
+
+func authoringConfirmationInProgress(item *workspacemodel.Workspace) bool {
+	return item != nil && item.DefinitionAuthoringConfirmation != nil &&
+		(item.DefinitionAuthoringConfirmation.Phase != workspacemodel.DefinitionAuthoringConfirmationMaterialized ||
+			len(item.DefinitionAdmissionCandidates) <= len(item.DefinitionAuthoringHistory))
+}
+
+func preparationOrReservationInFlight(item *workspacemodel.Workspace) bool {
+	if item == nil {
+		return false
+	}
+	if item.PreparationFence != nil && item.PreparationFence.Pending != nil {
+		return true
+	}
+	if item.StartupPreparation == nil || len(item.StartupPreparation.Attempts) == 0 {
+		return false
+	}
+	last := item.StartupPreparation.Attempts[len(item.StartupPreparation.Attempts)-1]
+	return last.State == workspacemodel.WorkspacePreparationAccepted || last.State == workspacemodel.WorkspacePreparationUnknown
+}
+
+func equalPayloadSlice(left, right []workorcheventpayload.Payload) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if !left[i].Equal(right[i]) {
+			return false
+		}
+	}
+	return true
 }

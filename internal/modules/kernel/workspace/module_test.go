@@ -312,6 +312,84 @@ func TestWorkspaceLLMSelectionSurvivesFileBackedOwnerRestart(t *testing.T) {
 	}
 }
 
+func TestUpdateWorkspaceLLMSelectionAllowsConfirmedBeforeStartAndRejectsInFlightStates(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewWorkspaceRepository()
+	confirmedID := common.WorkspaceID("ws-confirmed-admitted")
+	if err := repo.Create(ctx, &workspacemodel.Workspace{
+		ID:    confirmedID,
+		Title: "confirmed workspace",
+		State: common.WorkspaceStateActive,
+		DefinitionAuthoringConfirmation: &workspacemodel.DefinitionAuthoringConfirmation{
+			Phase: workspacemodel.DefinitionAuthoringConfirmationMaterialized,
+		},
+		DefinitionAdmissionCandidates: []workspacemodel.DefinitionAdmissionCandidate{
+			{WorkspaceID: confirmedID, CandidateID: "authoring-1", CandidateRevision: 1},
+		},
+	}); err != nil {
+		t.Fatalf("Create confirmed workspace: %v", err)
+	}
+	preparedID := common.WorkspaceID("ws-confirm-prepared")
+	if err := repo.Create(ctx, &workspacemodel.Workspace{
+		ID:    preparedID,
+		Title: "preparing workspace",
+		State: common.WorkspaceStateActive,
+		DefinitionAuthoringConfirmation: &workspacemodel.DefinitionAuthoringConfirmation{
+			Phase: workspacemodel.DefinitionAuthoringConfirmationPrepared,
+		},
+	}); err != nil {
+		t.Fatalf("Create prepared workspace: %v", err)
+	}
+
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	module := New()
+	if err := module.Configure(workspaceModuleTestDependencies(hub, repo, repo, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	selection := runtimecontract.ProviderInferenceSelection{
+		Target:          runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-before-start"},
+		ReasoningEffort: "medium",
+	}
+	current, _ := repo.Get(ctx, confirmedID)
+	updated := sendWorkspaceTestCommand(t, ctx, hub, workspaceevents.TopicWorkspaceCommandUpdateLLMSelection, workspaceevents.UpdateWorkspaceLLMSelectionCommand{
+		WorkspaceID:      confirmedID,
+		Selection:        &selection,
+		ExpectedRevision: current.Revision,
+	})
+	if !updated.Changed || updated.Workspace == nil || updated.Workspace.DefaultLLMSelection == nil || !updated.Workspace.DefaultLLMSelection.Same(selection) {
+		t.Fatalf("updated confirmed workspace = %+v", updated.Workspace)
+	}
+	cleared := sendWorkspaceTestCommand(t, ctx, hub, workspaceevents.TopicWorkspaceCommandUpdateLLMSelection, workspaceevents.UpdateWorkspaceLLMSelectionCommand{
+		WorkspaceID:      confirmedID,
+		ExpectedRevision: updated.Workspace.Revision,
+	})
+	if !cleared.Changed || cleared.Workspace == nil || cleared.Workspace.DefaultLLMSelection != nil {
+		t.Fatalf("cleared confirmed workspace = %+v", cleared.Workspace)
+	}
+
+	prepared, _ := repo.Get(ctx, preparedID)
+	rejected := hub.Send(magicevent.NewEventWithContext(
+		workspaceevents.TopicWorkspaceCommandUpdateLLMSelection,
+		"workspace/module-test",
+		workspaceevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		workspaceevents.UpdateWorkspaceLLMSelectionCommand{
+			WorkspaceID:      preparedID,
+			Selection:        &selection,
+			ExpectedRevision: prepared.Revision,
+		},
+	))
+	if rejected == nil || !errors.Is(rejected.Error(), common.ErrConflict) {
+		t.Fatalf("prepared phase update error = %v, want conflict", rejected)
+	}
+}
+
 type workspaceTestCommandResult struct {
 	Workspace *workspaceevents.Workspace
 	Changed   bool

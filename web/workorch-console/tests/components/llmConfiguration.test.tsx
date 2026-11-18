@@ -28,7 +28,7 @@ function configuration(models = endpointOnlyModels): ServiceConfiguration {
     },
     llm: {
       defaultChat: { providerId: 'ai-proxy', modelId: 'chat' },
-      budget: { contextUtilizationRatio: 0.75, estimatedTokensPerByte: 0.25 }, restartRequired: false,
+      budget: { contextUtilizationRatio: 0.75, estimatedTokensPerByte: 0.25 },
       catalog: { providerId: 'ai-proxy', state: 'fresh', models: [
         { providerId: 'ai-proxy', modelId: 'chat', operations: ['responses'], capabilityReady: true, contextWindowTokens: 8192, maxOutputTokens: 1024 },
         ...models
@@ -48,14 +48,15 @@ describe('LLM 配置目录发现与调用资格', () => {
   it('保存的模型与运行进程模型分开展示，不能用保存选择冒充生效事实', async () => {
     const cfg = configuration();
     cfg.llm.defaultChat.modelId = 'saved-chat';
-    cfg.llm.restartRequired = true;
     cfg.llm.active = { defaultChat: { providerId: 'ai-proxy', modelId: 'active-chat' } };
     vi.mocked(workorchApi.readConfiguration).mockResolvedValue(cfg);
     render(<StyleProvider container={styleContainer}><ConfigProvider theme={{ hashed: false, token: { motion: false } }} wave={{ disabled: true }}><AntApp><ConfigurationPage /></AntApp></ConfigProvider></StyleProvider>);
     await act(async () => {});
     fireEvent.click(screen.getByRole('tab', { name: 'LLM' }));
     expect(await screen.findByText('ai-proxy/active-chat')).toBeTruthy();
-    expect(screen.getByText('保存的 LLM 配置尚未确认生效，需要重启 WorkOrch。')).toBeTruthy();
+    expect(screen.getByText('保存的 LLM 配置在当前运行进程内立即生效。')).toBeTruthy();
+    expect(screen.getByText('生成候选使用当前运行进程的配置；保存选择不能作为实际调用模型的证明。')).toBeTruthy();
+    expect(screen.queryByText(/需要重启 WorkOrch/)).toBeNull();
     expect(screen.queryByText('ai-proxy/saved-chat')).toBeNull();
     expect(workorchApi.updateLLMConfiguration).not.toHaveBeenCalled();
   });

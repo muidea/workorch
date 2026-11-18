@@ -92,7 +92,9 @@ Web 只在页面内存保留原 payload 和恢复提示；未收到完整创建�
 这些 Application 调用仅提交原 typed reserve/complete，不修改 Runtime SM-1～SM-4，不确认、不启动 Run。
 
 系统配置读模型保留 persisted 默认选择，并通过既有 LLM typed active-configuration query 单独投影当前进程
-`llm.active` 目标。owner 观察不可用时留空并保持 restart-pending，不以 persisted 值冒充生效模型，不输出密钥。
+`llm.active` 目标。更新 LLM 配置与 catalog refresh 在进程内通过 `workorchconfig.Reload()` 和
+`/llm/command/reload-configuration`（`ReloadLLMConfiguration`）立即生效，不再要求重启 WorkOrch；
+owner 观察不可用时 `llm.active` 仍留空，不以 persisted 值冒充实际生效或已调用模型的证明，不输出密钥。
 
 reserve 只表示调用权已消费，LLM typed fact 可能仍在内存，诊断可读也不替代 completion；只有 Workspace completion CAS
 成功才是阶段持久结果。可信结果返回后，parser／completion／exact owner readback 共用一个最多 5 秒的 settlement scope，

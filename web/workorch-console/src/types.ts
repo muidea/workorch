@@ -234,7 +234,6 @@ export type LLMConfiguration = {
   active?: { defaultChat: ProviderModelTarget; defaultEmbedding?: ProviderModelTarget };
   budget: LLMContextBudgetPolicyView;
   catalog?: ProviderCatalogSummary;
-  restartRequired: boolean;
 };
 
 export type UpdateLLMConfigurationRequest = {

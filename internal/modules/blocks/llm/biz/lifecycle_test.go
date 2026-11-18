@@ -69,6 +69,7 @@ func TestLLMGenericCommandMatrixRequiresExactApplicationSourceBeforePayload(t *t
 		{llmevents.TopicLLMCommandCompleteProvider, llmSetupDraftAppserviceSource},
 		{llmevents.TopicLLMCommandGenerateEmbedding, llmApplicationOwnerSource},
 		{llmevents.TopicLLMCommandGetActiveConfiguration, llmApplicationOwnerSource},
+		{llmevents.TopicLLMCommandReloadConfiguration, llmApplicationOwnerSource},
 		{llmevents.TopicLLMCommandGetProviderModelCatalog, llmApplicationOwnerSource},
 		{llmevents.TopicLLMCommandRefreshProviderModelCatalog, llmApplicationOwnerSource},
 		{llmevents.TopicLLMCommandValidateInferenceSelection, llmApplicationOwnerSource},

@@ -42,6 +42,7 @@ type Biz struct {
 	catalogService                    *CatalogService
 	candidateProvider                 llmruntime.CandidateProvider
 	loadLLMConfig                     func() (workorchconfig.LLMConfig, error)
+	configMu                          sync.RWMutex
 	activeLLMConfig                   workorchconfig.LLMConfig
 	activeLLMConfigurationRevision    string
 	activeLLMConfigurationInitialized bool
@@ -124,7 +125,10 @@ func (m *Biz) Start() error {
 	if len(m.subscriptions) != 0 {
 		return common.ErrConflict
 	}
-	if !m.activeLLMConfigurationInitialized {
+	m.configMu.RLock()
+	initialized := m.activeLLMConfigurationInitialized
+	m.configMu.RUnlock()
+	if !initialized {
 		if err := m.captureActiveLLMConfiguration(); err != nil {
 			return err
 		}
@@ -134,6 +138,7 @@ func (m *Biz) Start() error {
 		llmevents.TopicLLMCommandCompleteProviderDocument,
 		llmevents.TopicLLMCommandGenerateEmbedding,
 		llmevents.TopicLLMCommandGetActiveConfiguration,
+		llmevents.TopicLLMCommandReloadConfiguration,
 		llmevents.TopicLLMCommandGetProviderModelCatalog,
 		llmevents.TopicLLMCommandRefreshProviderModelCatalog,
 		llmevents.TopicLLMCommandValidateInferenceSelection,
@@ -162,14 +167,16 @@ func (m *Biz) Start() error {
 	return nil
 }
 
-// captureActiveLLMConfiguration freezes the provider settings for this LLM
-// owner lifecycle. The framework configuration watcher may reload TOML later,
-// but it cannot rotate credentials, models, or budget policy underneath an
-// active owner or a sealed Runtime request.
+// captureActiveLLMConfiguration refreshes the provider settings snapshot held
+// by this LLM owner. The framework configuration watcher or external TOML edits
+// cannot rotate credentials, models, or budget policy underneath an active
+// transaction until this owner explicitly reloads via command.
 func (m *Biz) captureActiveLLMConfiguration() error {
 	if m == nil || m.loadLLMConfig == nil {
 		return common.ErrInvalidArgument
 	}
+	m.configMu.Lock()
+	defer m.configMu.Unlock()
 	configured, err := m.loadLLMConfig()
 	if err != nil {
 		return err
@@ -183,27 +190,39 @@ func (m *Biz) captureActiveLLMConfiguration() error {
 		return err
 	}
 	m.activeLLMConfig = workorchconfig.CloneLLMConfig(configured)
+	if !m.activeLLMConfigurationInitialized || m.activeLLMConfigurationRevision != revision || m.preparationConfigurationEpoch == "" {
+		m.preparationConfigurationEpoch = "llm-preparation-epoch:" + rand.Text()
+	}
 	m.activeLLMConfigurationRevision = revision
-	m.preparationConfigurationEpoch = "llm-preparation-epoch:" + rand.Text()
 	m.activeLLMConfigurationInitialized = true
 	return nil
 }
 
-func (m *Biz) activeConfiguration() (workorchconfig.LLMConfig, error) {
-	if m == nil || !m.activeLLMConfigurationInitialized || m.activeLLMConfigurationRevision == "" {
-		return workorchconfig.LLMConfig{}, fmt.Errorf("%w: llm owner configuration is not initialized", common.ErrInvalidArgument)
+func (m *Biz) activeConfigurationSnapshot() (workorchconfig.LLMConfig, string, string, error) {
+	if m == nil {
+		return workorchconfig.LLMConfig{}, "", "", fmt.Errorf("%w: llm owner configuration is not initialized", common.ErrInvalidArgument)
 	}
-	return workorchconfig.CloneLLMConfig(m.activeLLMConfig), nil
+	m.configMu.RLock()
+	defer m.configMu.RUnlock()
+	if !m.activeLLMConfigurationInitialized || m.activeLLMConfigurationRevision == "" {
+		return workorchconfig.LLMConfig{}, "", "", fmt.Errorf("%w: llm owner configuration is not initialized", common.ErrInvalidArgument)
+	}
+	return workorchconfig.CloneLLMConfig(m.activeLLMConfig), m.activeLLMConfigurationRevision, m.preparationConfigurationEpoch, nil
+}
+
+func (m *Biz) activeConfiguration() (workorchconfig.LLMConfig, error) {
+	configured, _, _, err := m.activeConfigurationSnapshot()
+	return configured, err
 }
 
 func (m *Biz) activeConfigurationStatus() (llmevents.GetActiveConfigurationResult, error) {
-	configured, err := m.activeConfiguration()
+	configured, revision, _, err := m.activeConfigurationSnapshot()
 	if err != nil {
 		return llmevents.GetActiveConfigurationResult{}, err
 	}
 	ret := llmevents.GetActiveConfigurationResult{
 		ProviderID:            runtimecontract.BuiltinAIProxyProviderID,
-		ConfigurationRevision: m.activeLLMConfigurationRevision,
+		ConfigurationRevision: revision,
 		DefaultChat:           configured.DefaultChat.ToRuntimeTarget(),
 	}
 	if configured.DefaultEmbedding != nil {
@@ -276,10 +295,12 @@ func (m *Biz) Teardown(ctx context.Context) error {
 	}
 	m.catalogService = nil
 	m.candidateProvider = nil
+	m.configMu.Lock()
 	m.activeLLMConfig = workorchconfig.LLMConfig{}
 	m.activeLLMConfigurationRevision = ""
 	m.preparationConfigurationEpoch = ""
 	m.activeLLMConfigurationInitialized = false
+	m.configMu.Unlock()
 	m.physicalSubmissionGuard.clear()
 	m.started = false
 	m.shutdownMu.Lock()
@@ -1049,6 +1070,22 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 		}
 		result.Set(status, nil)
 		return
+	case llmevents.TopicLLMCommandReloadConfiguration:
+		if _, ok := ev.Data().(llmevents.ReloadConfigurationCommand); !ok {
+			setLLMMagicError(result, common.ErrInvalidArgument)
+			return
+		}
+		if err := m.captureActiveLLMConfiguration(); err != nil {
+			setLLMMagicError(result, err)
+			return
+		}
+		status, err := m.activeConfigurationStatus()
+		if err != nil {
+			setLLMMagicError(result, err)
+			return
+		}
+		result.Set(status, nil)
+		return
 	case llmevents.TopicLLMCommandGetProviderModelCatalog:
 		_, ok := ev.Data().(llmevents.GetProviderModelCatalogCommand)
 		if !ok {
@@ -1375,16 +1412,16 @@ func (m *Biz) completeProvider(ctx context.Context, target runtimecontract.Provi
 	if m == nil {
 		return llmmodels.ProviderCompletionResult{}, metadata, common.ErrInvalidArgument
 	}
-	if expectedConfigurationRevision != "" && expectedConfigurationRevision != m.activeLLMConfigurationRevision {
+	cfg, activeRevision, _, err := m.activeConfigurationSnapshot()
+	if err != nil {
+		return llmmodels.ProviderCompletionResult{}, metadata, err
+	}
+	if expectedConfigurationRevision != "" && expectedConfigurationRevision != activeRevision {
 		return llmmodels.ProviderCompletionResult{}, metadata, fmt.Errorf("%w: provider configuration changed after specification reserve", common.ErrConflict)
 	}
 	target = metadata.Target
 	if target.ProviderID == "" && target.ModelID == "" {
-		configured, err := m.activeConfiguration()
-		if err != nil {
-			return llmmodels.ProviderCompletionResult{}, metadata, err
-		}
-		target = configured.DefaultChat.ToRuntimeTarget()
+		target = cfg.DefaultChat.ToRuntimeTarget()
 		metadata.Target = target
 	}
 	if err := target.Validate(); err != nil {
@@ -1393,15 +1430,11 @@ func (m *Biz) completeProvider(ctx context.Context, target runtimecontract.Provi
 	if model := strings.TrimSpace(request.Model); model != "" && model != target.ModelID {
 		return llmmodels.ProviderCompletionResult{}, metadata, fmt.Errorf("%w: provider request model %q conflicts with target model %q", common.ErrInvalidArgument, model, target.ModelID)
 	}
-	profile, err := m.resolveTarget(ctx, target, workorchconfig.LLMOperationResponses)
+	profile, err := m.resolveTargetWithConfig(ctx, cfg, target, workorchconfig.LLMOperationResponses)
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, metadata, err
 	}
 	metadata.Profile = profile
-	cfg, err := m.activeConfiguration()
-	if err != nil {
-		return llmmodels.ProviderCompletionResult{}, metadata, err
-	}
 	runtime, err := ResolveProviderClient(cfg, target, profile)
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, metadata, err
@@ -1514,15 +1547,15 @@ func (m *Biz) generateEmbedding(ctx context.Context, target runtimecontract.Prov
 	if m == nil {
 		return llmmodels.ProviderEmbeddingResult{}, metadata, common.ErrInvalidArgument
 	}
-	profile, err := m.resolveTarget(ctx, target, "embeddings")
-	if err != nil {
-		return llmmodels.ProviderEmbeddingResult{}, metadata, err
-	}
-	metadata.Profile = profile
 	cfg, err := m.activeConfiguration()
 	if err != nil {
 		return llmmodels.ProviderEmbeddingResult{}, metadata, err
 	}
+	profile, err := m.resolveTargetWithConfig(ctx, cfg, target, "embeddings")
+	if err != nil {
+		return llmmodels.ProviderEmbeddingResult{}, metadata, err
+	}
+	metadata.Profile = profile
 	runtime, err := ResolveProviderClient(cfg, target, profile)
 	if err != nil {
 		return llmmodels.ProviderEmbeddingResult{}, metadata, err
@@ -1537,10 +1570,14 @@ func (m *Biz) resolveTarget(ctx context.Context, target runtimecontract.Provider
 	if err != nil {
 		return llmmodels.ResolvedProviderModelProfile{}, err
 	}
+	return m.resolveTargetWithConfig(ctx, cfg, target, operation)
+}
+
+func (m *Biz) resolveTargetWithConfig(ctx context.Context, cfg workorchconfig.LLMConfig, target runtimecontract.ProviderModelTarget, operation string) (llmmodels.ResolvedProviderModelProfile, error) {
 	target = target.Normalized()
 	var catalog *llmmodels.ProviderModelCatalog
 	if target.ProviderID == runtimecontract.BuiltinAIProxyProviderID {
-		current, catalogErr := m.getCatalog(ctx, false)
+		current, catalogErr := m.getCatalogWithConfig(ctx, cfg, false)
 		if catalogErr != nil && current.State == llmmodels.ProviderCatalogStateUnavailable {
 			return llmmodels.ResolvedProviderModelProfile{}, catalogErr
 		}
@@ -1556,6 +1593,13 @@ func (m *Biz) getCatalog(ctx context.Context, forceRefresh bool) (llmmodels.Prov
 	cfg, err := m.activeConfiguration()
 	if err != nil {
 		return llmmodels.ProviderModelCatalog{}, err
+	}
+	return m.getCatalogWithConfig(ctx, cfg, forceRefresh)
+}
+
+func (m *Biz) getCatalogWithConfig(ctx context.Context, cfg workorchconfig.LLMConfig, forceRefresh bool) (llmmodels.ProviderModelCatalog, error) {
+	if m == nil || m.catalogService == nil {
+		return llmmodels.ProviderModelCatalog{}, common.ErrInvalidArgument
 	}
 	return m.catalogService.GetCatalog(ctx, cfg, forceRefresh)
 }

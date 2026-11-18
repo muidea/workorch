@@ -59,7 +59,12 @@ func RefreshLLMModelCatalog(ctx context.Context, hub magicevent.Hub) (workorchma
 		return workorchmanagementcontract.ProviderCatalogSummary{}, err
 	}
 	if active.ConfigurationRevision != persistedRevision {
-		return workorchmanagementcontract.ProviderCatalogSummary{}, fmt.Errorf("%w: llm configuration was saved and requires a WorkOrch restart before catalog refresh", common.ErrInvalidArgument)
+		if err := workorchconfig.Reload(); err != nil {
+			return workorchmanagementcontract.ProviderCatalogSummary{}, err
+		}
+		if _, err := ReloadLLMConfiguration(ctx, hub); err != nil {
+			return workorchmanagementcontract.ProviderCatalogSummary{}, err
+		}
 	}
 	providerID := runtimecontract.BuiltinAIProxyProviderID
 	ev := magicevent.NewEventWithContext(
@@ -79,6 +84,33 @@ func RefreshLLMModelCatalog(ctx context.Context, hub magicevent.Hub) (workorchma
 		return workorchmanagementcontract.ProviderCatalogSummary{}, err
 	}
 	return catalogSummaryFromModel(response.Catalog), nil
+}
+
+func ReloadLLMConfiguration(ctx context.Context, hub magicevent.Hub) (llmevents.GetActiveConfigurationResult, error) {
+	if hub == nil {
+		return llmevents.GetActiveConfigurationResult{}, common.ErrInvalidArgument
+	}
+	providerID := runtimecontract.BuiltinAIProxyProviderID
+	ev := magicevent.NewEventWithContext(
+		llmevents.TopicLLMCommandReloadConfiguration,
+		modulecommon.ModuleID,
+		llmevents.CommandDestination,
+		magicevent.NewHeader(),
+		ctx,
+		llmevents.ReloadConfigurationCommand{},
+	)
+	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandReloadConfiguration, eventcontract.LaneScope{
+		SubjectType: "llm_configuration",
+		SubjectID:   providerID,
+	}))
+	response, err := sendLLMCommand[llmevents.GetActiveConfigurationResult](hub, ev)
+	if err != nil {
+		return llmevents.GetActiveConfigurationResult{}, err
+	}
+	if err := validateActiveLLMConfigurationResult(providerID, response); err != nil {
+		return llmevents.GetActiveConfigurationResult{}, err
+	}
+	return response, nil
 }
 
 func GetActiveLLMConfiguration(ctx context.Context, hub magicevent.Hub) (llmevents.GetActiveConfigurationResult, error) {
@@ -102,13 +134,20 @@ func GetActiveLLMConfiguration(ctx context.Context, hub magicevent.Hub) (llmeven
 	if err != nil {
 		return llmevents.GetActiveConfigurationResult{}, err
 	}
-	if response.ProviderID != providerID || response.ConfigurationRevision == "" || response.DefaultChat.Validate() != nil || response.DefaultChat.ProviderID != providerID {
-		return llmevents.GetActiveConfigurationResult{}, fmt.Errorf("%w: invalid active LLM configuration status", common.ErrInvalidArgument)
-	}
-	if response.DefaultEmbedding != nil && (response.DefaultEmbedding.Validate() != nil || response.DefaultEmbedding.ProviderID != providerID) {
-		return llmevents.GetActiveConfigurationResult{}, fmt.Errorf("%w: invalid active LLM embedding default", common.ErrInvalidArgument)
+	if err := validateActiveLLMConfigurationResult(providerID, response); err != nil {
+		return llmevents.GetActiveConfigurationResult{}, err
 	}
 	return response, nil
+}
+
+func validateActiveLLMConfigurationResult(providerID string, response llmevents.GetActiveConfigurationResult) error {
+	if response.ProviderID != providerID || response.ConfigurationRevision == "" || response.DefaultChat.Validate() != nil || response.DefaultChat.ProviderID != providerID {
+		return fmt.Errorf("%w: invalid active LLM configuration status", common.ErrInvalidArgument)
+	}
+	if response.DefaultEmbedding != nil && (response.DefaultEmbedding.Validate() != nil || response.DefaultEmbedding.ProviderID != providerID) {
+		return fmt.Errorf("%w: invalid active LLM embedding default", common.ErrInvalidArgument)
+	}
+	return nil
 }
 
 func sendLLMCommand[Response any](hub magicevent.Hub, ev magicevent.Event) (Response, error) {
@@ -201,13 +240,14 @@ func ReadServiceConfigurationWithCatalog(ctx context.Context, hub magicevent.Hub
 		return workorchconfigurationcontract.ServiceConfiguration{}, err
 	}
 	active, activeErr := GetActiveLLMConfiguration(ctx, hub)
-	if activeErr != nil {
-		// We cannot prove the persisted configuration is active. Treat the
-		// process as restart-pending so callers cannot refresh a catalog with
-		// newly saved credentials against an unknown owner snapshot.
-		item.LLM.RestartRequired = true
-	} else {
-		item.LLM.RestartRequired = active.ConfigurationRevision != persistedRevision
+	if activeErr == nil {
+		if active.ConfigurationRevision != persistedRevision {
+			if err := workorchconfig.Reload(); err == nil {
+				if reloaded, reloadErr := ReloadLLMConfiguration(ctx, hub); reloadErr == nil {
+					active = reloaded
+				}
+			}
+		}
 		item.LLM.Active = &workorchconfigurationcontract.LLMActiveConfiguration{DefaultChat: active.DefaultChat}
 		if active.DefaultEmbedding != nil {
 			embedding := *active.DefaultEmbedding

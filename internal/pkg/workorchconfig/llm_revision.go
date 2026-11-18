@@ -11,8 +11,8 @@ import (
 )
 
 // CloneLLMConfig returns an independent copy of the LLM configuration. The
-// LLM owner keeps this value for its process lifetime, so caller-owned maps
-// and slices must not remain shared with the active snapshot.
+// LLM owner keeps this snapshot across transactions until explicitly reloaded,
+// so caller-owned maps and slices must not remain shared with the active snapshot.
 func CloneLLMConfig(cfg LLMConfig) LLMConfig {
 	ret := cfg
 	if cfg.DefaultEmbedding != nil {
@@ -28,9 +28,9 @@ func CloneLLMConfig(cfg LLMConfig) LLMConfig {
 }
 
 // LLMConfigurationRevision is a secret-safe identity for the complete LLM
-// configuration consumed by the active LLM owner. It deliberately includes
-// defaults, catalog policy, model overrides, and budget policy so any saved
-// LLM change is staged for the next process start.
+// configuration consumed by the active LLM owner. It includes defaults,
+// catalog policy, model overrides, and budget policy so active owner reloads
+// and sealed transactions can detect configuration changes accurately.
 func LLMConfigurationRevision(input LLMConfig) (string, error) {
 	cfg, err := NormalizeLLMConfig(CloneLLMConfig(input))
 	if err != nil {

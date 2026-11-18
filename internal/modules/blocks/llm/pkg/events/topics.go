@@ -5,6 +5,7 @@ const (
 	TopicLLMCommandCompleteProvider            = "/llm/command/complete-provider"
 	TopicLLMCommandGenerateEmbedding           = "/llm/command/generate-embedding"
 	TopicLLMCommandGetActiveConfiguration      = "/llm/command/get-active-configuration"
+	TopicLLMCommandReloadConfiguration         = "/llm/command/reload-configuration"
 	TopicLLMCommandGetProviderModelCatalog     = "/llm/command/get-provider-model-catalog"
 	TopicLLMCommandRefreshProviderModelCatalog = "/llm/command/refresh-provider-model-catalog"
 	TopicLLMCommandValidateInferenceSelection  = "/llm/command/validate-inference-selection"

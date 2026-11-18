@@ -96,10 +96,14 @@ type GenerateEmbeddingCommand struct {
 	Input       string
 }
 
-// GetActiveConfigurationCommand queries the LLM owner's immutable process
+// GetActiveConfigurationCommand queries the LLM owner's current active process
 // configuration snapshot. Persisted configuration belongs to the application
-// configuration writer and is intentionally not read by this owner command.
+// configuration writer and is applied in-process via ReloadConfigurationCommand.
 type GetActiveConfigurationCommand struct{}
+
+// ReloadConfigurationCommand instructs the LLM owner to reload its active
+// configuration from the current process configuration without restarting.
+type ReloadConfigurationCommand struct{}
 
 type GetActiveConfigurationResult struct {
 	ProviderID            string
@@ -760,6 +764,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[CompleteProviderCommand, CompleteProviderResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicLLMCommandCompleteProvider),
 		eventcontract.CommandTopic[GenerateEmbeddingCommand, GenerateEmbeddingResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicLLMCommandGenerateEmbedding),
 		eventcontract.CommandTopic[GetActiveConfigurationCommand, GetActiveConfigurationResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicLLMCommandGetActiveConfiguration),
+		eventcontract.CommandTopic[ReloadConfigurationCommand, GetActiveConfigurationResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicLLMCommandReloadConfiguration),
 		eventcontract.CommandTopic[GetProviderModelCatalogCommand, GetProviderModelCatalogResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicLLMCommandGetProviderModelCatalog),
 		eventcontract.CommandTopic[RefreshProviderModelCatalogCommand, RefreshProviderModelCatalogResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicLLMCommandRefreshProviderModelCatalog),
 		eventcontract.CommandTopic[ValidateProviderInferenceSelectionCommand, ValidateProviderInferenceSelectionResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicLLMCommandValidateInferenceSelection),

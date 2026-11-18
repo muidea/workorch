@@ -41,7 +41,6 @@ type LLMConfiguration struct {
 	Active           *LLMActiveConfiguration                           `json:"active,omitempty"`
 	Budget           workorchconfig.LLMContextBudgetPolicyConfig       `json:"budget"`
 	Catalog          workorchmanagementcontract.ProviderCatalogSummary `json:"catalog"`
-	RestartRequired  bool                                              `json:"restartRequired"`
 }
 
 // A missing observation is unknown, not proof that the saved selection is active.

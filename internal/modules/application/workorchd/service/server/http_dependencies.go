@@ -103,7 +103,7 @@ type ValidateFunc func(context.Context, string, string) error
 type ReadConfigurationFunc func() (workorchconfigurationcontract.ServiceConfiguration, error)
 type UpdateServerConfigurationFunc func(configcore.UpdateServerConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error)
 type UpdateRuntimeConfigurationFunc func(configcore.UpdateRuntimeConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error)
-type UpdateLLMConfigurationFunc func(configcore.UpdateLLMConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error)
+type UpdateLLMConfigurationFunc func(context.Context, configcore.UpdateLLMConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error)
 type UpdateWebSearchConfigurationFunc func(configcore.UpdateWebSearchConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error)
 
 type GetLLMModelCatalogFunc func(context.Context) (workorchmanagementcontract.ProviderCatalogSummary, error)

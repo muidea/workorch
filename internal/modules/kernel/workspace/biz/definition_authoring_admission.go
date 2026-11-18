@@ -57,7 +57,14 @@ func (m *Biz) verifyConfirmedAuthoringAdmission(ctx context.Context, current *wo
 		return common.ErrConflict
 	}
 	journal := *current.DefinitionAuthoringConfirmation
-	if journal.ReadCommitted(current.DefinitionAuthoring, current.ID) != nil || candidate.AuthoringRef.InputHash != journal.InputHash || candidate.AuthoringRef.DerivationPermitID != journal.DerivationPermitID || candidate.AuthoringRef.ProposalHash != journal.ProposalHash || candidate.AuthoringRef.SpecificationHash != journal.SpecificationHash || command.ExpectedConfigurationHash != journal.ConfigurationHash || workspacemodel.WorkspaceConfigurationHash(current) != journal.ConfigurationHash {
+	if journal.ReadCommitted(current.DefinitionAuthoring, current.ID) != nil || candidate.AuthoringRef.InputHash != journal.InputHash || candidate.AuthoringRef.DerivationPermitID != journal.DerivationPermitID || candidate.AuthoringRef.ProposalHash != journal.ProposalHash || candidate.AuthoringRef.SpecificationHash != journal.SpecificationHash {
+		return common.ErrConflict
+	}
+	if len(current.DefinitionAdmissionCandidates) == len(current.DefinitionAuthoringHistory) {
+		if command.ExpectedConfigurationHash != journal.ConfigurationHash || workspacemodel.WorkspaceConfigurationHash(current) != journal.ConfigurationHash {
+			return common.ErrConflict
+		}
+	} else if command.ExpectedConfigurationHash != workspacemodel.WorkspaceConfigurationHash(current) {
 		return common.ErrConflict
 	}
 	derivation, err := current.DefinitionAuthoring.CommittedDerivation(journal.DerivationPermitID)

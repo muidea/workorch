@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
@@ -160,29 +161,16 @@ dataDir = ".workorch-data"
 	if !cfg.LLM.AIProxy.APIKeyConfigured {
 		t.Fatalf("api key should remain configured after partial update")
 	}
-	if !cfg.LLM.RestartRequired {
-		t.Fatal("LLM model update must remain staged until restart")
-	}
-	persistedConfig, err := workorchconfig.Persisted()
-	if err != nil {
-		t.Fatalf("persisted: %v", err)
-	}
-	if persistedConfig.LLM.AIProxy.BaseURL != "http://127.0.0.1:8080" || persistedConfig.LLM.AIProxy.Timeout != "180s" || persistedConfig.LLM.AIProxy.APIKey != "test-key" || persistedConfig.LLM.DefaultChat.ProviderID != "ai-proxy" || persistedConfig.LLM.DefaultChat.ModelID != modelID {
-		t.Fatalf("persisted llm = %+v, want staged provider settings", persistedConfig.LLM)
-	}
-	if err := workorchconfig.Reload(); err != nil {
-		t.Fatalf("restart reload: %v", err)
-	}
 	current, err := workorchconfig.Current()
 	if err != nil {
-		t.Fatalf("current after restart: %v", err)
+		t.Fatalf("current after update: %v", err)
 	}
-	if current.LLM.DefaultChat.ModelID != modelID {
-		t.Fatalf("restarted llm = %+v, want persisted model", current.LLM)
+	if current.LLM.AIProxy.BaseURL != "http://127.0.0.1:8080" || current.LLM.AIProxy.Timeout != "180s" || current.LLM.AIProxy.APIKey != "test-key" || current.LLM.DefaultChat.ProviderID != "ai-proxy" || current.LLM.DefaultChat.ModelID != modelID {
+		t.Fatalf("current llm = %+v, want immediate in-process model update", current.LLM)
 	}
 }
 
-func TestUpdateLLMConfigurationStagesAIProxyAPIKeyUntilRestart(t *testing.T) {
+func TestUpdateLLMConfigurationAppliesAIProxyAPIKeyImmediately(t *testing.T) {
 	configDir := t.TempDir()
 	content := `
 endpointName = "workorch"
@@ -210,25 +198,12 @@ dataDir = ".workorch-data"
 	if !updated.LLM.AIProxy.APIKeyConfigured {
 		t.Fatal("rotated api key is not reported as configured")
 	}
-	if !updated.LLM.RestartRequired {
-		t.Fatal("rotated api key must require restart")
-	}
-	persistedConfig, err := workorchconfig.Persisted()
-	if err != nil {
-		t.Fatalf("persisted after rotation: %v", err)
-	}
-	if persistedConfig.LLM.AIProxy.APIKey != "rotated-key" {
-		t.Fatalf("persisted api key = %q, want staged key", persistedConfig.LLM.AIProxy.APIKey)
-	}
-	if err := workorchconfig.Reload(); err != nil {
-		t.Fatalf("restart reload: %v", err)
-	}
 	current, err := workorchconfig.Current()
 	if err != nil {
-		t.Fatalf("current after restart: %v", err)
+		t.Fatalf("current after update: %v", err)
 	}
 	if current.LLM.AIProxy.APIKey != "rotated-key" {
-		t.Fatalf("restarted api key = %q, want rotated key", current.LLM.AIProxy.APIKey)
+		t.Fatalf("current api key = %q, want rotated key applied in-process", current.LLM.AIProxy.APIKey)
 	}
 	persisted, err := os.ReadFile(configPath)
 	if err != nil {
@@ -258,7 +233,7 @@ func TestUpdateLLMConfigurationBlankAPIKeyPreservesStoredValue(t *testing.T) {
 	}
 }
 
-func TestLLMConfigurationProjectionAndCatalogRefreshUseActiveOwnerRevision(t *testing.T) {
+func TestLLMConfigurationUpdateAndCatalogRefreshReloadOwnerInProcess(t *testing.T) {
 	useWorkorchTestConfig(t, "file", t.TempDir())
 	ctx := context.Background()
 	active, err := workorchconfig.Current()
@@ -269,6 +244,9 @@ func TestLLMConfigurationProjectionAndCatalogRefreshUseActiveOwnerRevision(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
+	activeTarget := active.LLM.DefaultChat.ToRuntimeTarget()
+	reloadedCount := 0
+	refreshedCount := 0
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	observer := magicevent.NewSimpleObserver(llmevents.CommandDestination, hub)
@@ -276,29 +254,63 @@ func TestLLMConfigurationProjectionAndCatalogRefreshUseActiveOwnerRevision(t *te
 		result.Set(llmevents.GetActiveConfigurationResult{
 			ProviderID:            workorchconfig.BuiltinAIProxyProviderID,
 			ConfigurationRevision: activeRevision,
-			DefaultChat:           active.LLM.DefaultChat.ToRuntimeTarget(),
+			DefaultChat:           activeTarget,
 		}, nil)
 	})
-	t.Cleanup(func() { observer.Unsubscribe(llmevents.TopicLLMCommandGetActiveConfiguration) })
+	observer.Subscribe(llmevents.TopicLLMCommandReloadConfiguration, func(_ magicevent.Event, result magicevent.Result) {
+		reloadedCount++
+		cur, loadErr := workorchconfig.Current()
+		if loadErr != nil {
+			result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: loadErr.Error(), Cause: loadErr})
+			return
+		}
+		rev, revErr := workorchconfig.LLMConfigurationRevision(cur.LLM)
+		if revErr != nil {
+			result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: revErr.Error(), Cause: revErr})
+			return
+		}
+		activeRevision = rev
+		activeTarget = cur.LLM.DefaultChat.ToRuntimeTarget()
+		result.Set(llmevents.GetActiveConfigurationResult{
+			ProviderID:            workorchconfig.BuiltinAIProxyProviderID,
+			ConfigurationRevision: activeRevision,
+			DefaultChat:           activeTarget,
+		}, nil)
+	})
+	observer.Subscribe(llmevents.TopicLLMCommandGetProviderModelCatalog, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(llmevents.GetProviderModelCatalogResult{}, nil)
+	})
+	observer.Subscribe(llmevents.TopicLLMCommandRefreshProviderModelCatalog, func(_ magicevent.Event, result magicevent.Result) {
+		refreshedCount++
+		result.Set(llmevents.RefreshProviderModelCatalogResult{}, nil)
+	})
+	t.Cleanup(func() {
+		observer.Unsubscribe(llmevents.TopicLLMCommandGetActiveConfiguration)
+		observer.Unsubscribe(llmevents.TopicLLMCommandReloadConfiguration)
+		observer.Unsubscribe(llmevents.TopicLLMCommandGetProviderModelCatalog)
+		observer.Unsubscribe(llmevents.TopicLLMCommandRefreshProviderModelCatalog)
+	})
 
-	apiKey := "staged-key"
-	updated, err := UpdateLLMConfiguration(configcore.UpdateLLMConfigurationCommand{APIKey: &apiKey})
+	apiKey := "rotated-key"
+	modelID := "gpt-4.1"
+	updated, err := UpdateLLMConfigurationWithHub(ctx, hub, configcore.UpdateLLMConfigurationCommand{
+		APIKey:             &apiKey,
+		DefaultChatModelID: &modelID,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !updated.LLM.RestartRequired {
-		t.Fatal("LLM update response must be restart-pending")
+	if reloadedCount != 1 {
+		t.Fatalf("reloadedCount = %d, want 1", reloadedCount)
 	}
-
-	projection, err := ReadServiceConfigurationWithCatalog(ctx, hub)
-	if err != nil {
-		t.Fatal(err)
+	if updated.LLM.Active == nil || updated.LLM.Active.DefaultChat.ModelID != modelID {
+		t.Fatalf("updated active LLM = %+v, want %q applied immediately", updated.LLM.Active, modelID)
 	}
-	if !projection.LLM.RestartRequired {
-		t.Fatal("configuration projection must compare persisted config with owner snapshot")
+	if _, err := RefreshLLMModelCatalog(ctx, hub); err != nil {
+		t.Fatalf("refresh catalog after live config reload: %v", err)
 	}
-	if _, err := RefreshLLMModelCatalog(ctx, hub); !errors.Is(err, common.ErrInvalidArgument) {
-		t.Fatalf("refresh error = %v, want restart-required invalid argument", err)
+	if refreshedCount != 1 {
+		t.Fatalf("refreshedCount = %d, want 1", refreshedCount)
 	}
 }
 

@@ -65,22 +65,25 @@ func (s *CatalogService) observeCache(ctx context.Context, cfg workorchconfig.LL
 }
 
 func (m *Biz) observeProviderCatalogCache(ctx context.Context, command llmevents.ObserveProviderCatalogCacheCommand) (llmevents.ObserveProviderCatalogCacheResult, error) {
-	if m == nil || command.Validate() != nil || m.preparationConfigurationEpoch == "" {
+	if m == nil || command.Validate() != nil {
 		return llmevents.ObserveProviderCatalogCacheResult{}, common.ErrInvalidArgument
 	}
 	bound, err := common.BindRuntimeWorkspaceContext(ctx, command.WorkspaceID)
 	if err != nil {
 		return llmevents.ObserveProviderCatalogCacheResult{}, err
 	}
-	cfg, err := m.activeConfiguration()
-	if err != nil {
+	cfg, _, epoch, err := m.activeConfigurationSnapshot()
+	if err != nil || epoch == "" {
+		if epoch == "" && err != nil {
+			return llmevents.ObserveProviderCatalogCacheResult{}, common.ErrInvalidArgument
+		}
 		return llmevents.ObserveProviderCatalogCacheResult{}, common.ErrConflict
 	}
 	catalog, now, err := m.catalogService.observeCache(bound, cfg)
 	if err != nil {
 		return llmevents.ObserveProviderCatalogCacheResult{}, err
 	}
-	value := llmevents.ObserveProviderCatalogCacheResult{WorkspaceID: command.WorkspaceID, OwnerEpoch: m.preparationConfigurationEpoch, ObservedAt: now, Catalog: catalog}
+	value := llmevents.ObserveProviderCatalogCacheResult{WorkspaceID: command.WorkspaceID, OwnerEpoch: epoch, ObservedAt: now, Catalog: catalog}
 	if len(cfg.AIProxy.ModelOverrides) > llmevents.CatalogCacheObservationModelLimit {
 		return llmevents.ObserveProviderCatalogCacheResult{}, common.ErrConflict
 	}

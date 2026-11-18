@@ -1,9 +1,11 @@
 package configcore
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
@@ -61,13 +63,22 @@ func UpdateLLMConfiguration(cmd UpdateLLMConfigurationCommand) (workorchconfigur
 	if err := workorchconfig.Save(cfg); err != nil {
 		return workorchconfigurationcontract.ServiceConfiguration{}, err
 	}
-	item, err := ReadServiceConfiguration()
+	if err := workorchconfig.Reload(); err != nil {
+		return workorchconfigurationcontract.ServiceConfiguration{}, err
+	}
+	return ReadServiceConfiguration()
+}
+
+func UpdateLLMConfigurationWithHub(ctx context.Context, hub magicevent.Hub, cmd UpdateLLMConfigurationCommand) (workorchconfigurationcontract.ServiceConfiguration, error) {
+	item, err := UpdateLLMConfiguration(cmd)
 	if err != nil {
 		return workorchconfigurationcontract.ServiceConfiguration{}, err
 	}
-	// The active LLM owner has intentionally retained its startup snapshot.
-	// This write therefore always stages the persisted values for the next
-	// WorkOrch process, even when the framework configuration watcher reloads.
-	item.LLM.RestartRequired = true
-	return item, nil
+	if hub == nil {
+		return item, nil
+	}
+	if _, err := ReloadLLMConfiguration(ctx, hub); err != nil {
+		return workorchconfigurationcontract.ServiceConfiguration{}, err
+	}
+	return ReadServiceConfigurationWithCatalog(ctx, hub)
 }

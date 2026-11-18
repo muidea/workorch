@@ -209,19 +209,29 @@ func TestConfigurationReadSeparatesSavedAndObservedLLMTargets(t *testing.T) {
 				}
 				result.Set(active, nil)
 			})
+			reloadedResult := llmevents.GetActiveConfigurationResult{
+				ProviderID:            "ai-proxy",
+				ConfigurationRevision: revision,
+				DefaultChat:           runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "reloaded-chat"},
+				DefaultEmbedding:      &embedding,
+			}
+			observer.Subscribe(llmevents.TopicLLMCommandReloadConfiguration, func(_ magicevent.Event, result magicevent.Result) {
+				result.Set(reloadedResult, nil)
+			})
 			observer.Subscribe(llmevents.TopicLLMCommandGetProviderModelCatalog, func(_ magicevent.Event, result magicevent.Result) {
 				result.Set(llmevents.GetProviderModelCatalogResult{}, nil)
 			})
 			t.Cleanup(func() {
 				observer.Unsubscribe(llmevents.TopicLLMCommandGetActiveConfiguration)
+				observer.Unsubscribe(llmevents.TopicLLMCommandReloadConfiguration)
 				observer.Unsubscribe(llmevents.TopicLLMCommandGetProviderModelCatalog)
 			})
 			view, err := ReadServiceConfigurationWithCatalog(ctx, hub)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if view.LLM.DefaultChat != persisted.LLM.DefaultChat.ToRuntimeTarget() || view.LLM.RestartRequired != (name != "same revision") {
-				t.Fatalf("saved target or restart state changed: %+v", view.LLM)
+			if view.LLM.DefaultChat != persisted.LLM.DefaultChat.ToRuntimeTarget() {
+				t.Fatalf("saved target changed: %+v", view.LLM)
 			}
 			if name == "owner unavailable" {
 				if view.LLM.Active != nil {
@@ -229,7 +239,11 @@ func TestConfigurationReadSeparatesSavedAndObservedLLMTargets(t *testing.T) {
 				}
 				return
 			}
-			if view.LLM.Active == nil || view.LLM.Active.DefaultChat != active.DefaultChat {
+			wantActive := active
+			if name == "saved change" {
+				wantActive = reloadedResult
+			}
+			if view.LLM.Active == nil || view.LLM.Active.DefaultChat != wantActive.DefaultChat {
 				t.Fatalf("owner observation lost: %+v", view.LLM.Active)
 			}
 			if name == "same revision" {

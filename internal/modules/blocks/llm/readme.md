@@ -24,7 +24,7 @@ Eventstream 只记录 audit notification。
 
 | 交互方 | 方向 | typed EventHub 合同 | 调用/授权语义 |
 | --- | --- | --- | --- |
-| `application/workorchd` | Application → LLM | `CompleteProviderCommand/CompleteProviderResult`、`CompleteProviderDocumentCommand/Result`、`GenerateEmbeddingCommand/GenerateEmbeddingResult`、active config/catalog/selection commands | generic completion 仅接受 exact `application/workorchd/appservice`；独立文档及其余 command 仅接受 exact `application/workorchd`，均在读取 payload/provider 前校验 |
+| `application/workorchd` | Application → LLM | `CompleteProviderCommand/CompleteProviderResult`、`CompleteProviderDocumentCommand/Result`、`GenerateEmbeddingCommand/GenerateEmbeddingResult`、active config/reload/catalog/selection commands | generic completion 仅接受 exact `application/workorchd/appservice`；独立文档及其余 command 仅接受 exact `application/workorchd`，均在读取 payload/provider 前校验；`/llm/command/reload-configuration` (`ReloadConfigurationCommand` → `GetActiveConfigurationResult`) 在进程内重读配置并更新当前 `active` 快照与 `preparationConfigurationEpoch`，不改写已封存 Run 的 `ProviderCeiling` 或在途请求的 `expectedConfigurationRevision` |
 | `kernel/orchestrator` | Orchestrator → LLM | capabilities、provider ceiling、candidate preflight、`RequestRuntimeCandidateCommand/Result` | 所有 Runtime topic 仅接受 exact `kernel/orchestrator` source |
 | Eventstream | LLM → Eventstream | `LLMUsageRecordedData` | provider execution/preflight 的 bounded factual audit（包含未提交失败）；Eventstream 校验 exact LLM source |
 | ai-proxy | LLM → HTTP provider | `/v1/models`、`/v1/responses`、`/v1/embeddings` | owner-private adapter；endpoint/credential 不进入跨 owner result |
