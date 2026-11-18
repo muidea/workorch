@@ -126,3 +126,56 @@ func TestProjectBuildFailurePublishesTypedDiagnosticAndOriginalStage(t *testing.
 		})
 	}
 }
+
+func TestShellValidationTestFailureLocationsPrioritizesSubstantiveAssertions(t *testing.T) {
+	request := RuntimeCommandRequest{
+		ManagedValidation: runtimecontract.RuntimeManagedValidation{
+			RuntimeManaged: true,
+			Kind:           runtimecontract.RuntimeBlockKindManagedValidationSession,
+		},
+		ValidationScopeTargetRefs: []string{"checks/input_test.go", "internal/config/config.go"},
+		ValidationEvidence:        runtimecontract.RuntimeValidationEvidence{DiagnosticClass: runtimecontract.ValidationDiagnosticTestFailed},
+	}
+	output := RuntimeCommandResult{
+		Command:  "go",
+		Args:     []string{"test", "./..."},
+		ExitCode: 1,
+		Stage:    "project-test",
+		ValidationObservation: &runtimecontract.RuntimeValidationObservation{
+			CheckFailures: []runtimecontract.RuntimeValidationCheckFailure{
+				{
+					CheckRef:      "TestCheckA",
+					TargetRef:     "checks/input_test.go",
+					Line:          26,
+					AssertionText: "native source child failed: exit status 1",
+				},
+				{
+					CheckRef:      "TestCheckA",
+					TargetRef:     "checks/input_test.go",
+					Line:          30,
+					AssertionText: "invalid fallback error did not mention fallback: config: at least one enabled provider required",
+				},
+				{
+					CheckRef:      "TestCheckWrapperOnly",
+					TargetRef:     "checks/input_test.go",
+					Line:          45,
+					AssertionText: "native source child failed: exit status 1",
+				},
+			},
+		},
+	}
+	attachShellValidationFailureDiagnostic(&output, request, "go", 1, false, false, errors.New("exit status 1"))
+	d := output.ValidationFailureDiagnostic
+	if d == nil || d.Class != runtimecontract.ValidationDiagnosticTestFailed {
+		t.Fatalf("expected ValidationDiagnosticTestFailed, got %+v", d)
+	}
+	if len(d.FailureLocations) != 2 {
+		t.Fatalf("expected 2 FailureLocations (inner assertion + wrapper-only check), got %+v", d.FailureLocations)
+	}
+	if d.FailureLocations[0].Line != 30 || !strings.Contains(d.FailureLocations[0].Message, "at least one enabled provider required") {
+		t.Fatalf("expected substantive assertion at line 30 first, got %+v", d.FailureLocations[0])
+	}
+	if d.FailureLocations[1].Line != 45 || !strings.Contains(d.FailureLocations[1].Message, "native source child failed") {
+		t.Fatalf("expected wrapper fallback at line 45, got %+v", d.FailureLocations[1])
+	}
+}

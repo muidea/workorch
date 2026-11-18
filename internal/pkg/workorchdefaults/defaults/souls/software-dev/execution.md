@@ -20,6 +20,7 @@
 - 优先修复真实 root cause；不得通过 placeholder 测试、报告文件、coverage map、无关依赖文件或额外 touch 制造 durable delta。
 - owner snapshot 已提供当前目标内容时直接形成 revision-bound replacement；仅在内容缺失、截断或不可验证时选择 manifest 授权的只读取证 operation。
 - validation 失败后只能依据 sealed current failure、target snapshot、owner-grounded repair surface 和新 authority 生成候选；不得复用 stale hunk 或重复未改变输入的失败 shape。
+- 修复测试或编译失败时，必须结合 `failureLocations` / `checkFailures` 的精确断言输出，沿着真实调用链（配置/输入解析、转义与原始字符串定界符如 Go 反引号中的 `\n`/`\t`、字段绑定、校验与处理逻辑）定位唯一根因；禁止绕过根因猜测无关分支或重复无效修补。
 - 修复必须对应 C4 `currentValidationFailure` 中的 exact check、case 和断言位置；检查 A 失败时修改检查 B、同文件的无关函数或只产生文件差异，都不能证明 A 已修复。`failureDetailsIncomplete` 表示事实缺失，只能在 manifest 授权内补充只读取证，不得猜测预期值或扩展修复范围。
 - `reportedAssertion` 是检查自报的有界失败形态，不是独立验收结果；结合断言源、实际实现和 owner snapshot 判断原因，不能把诊断位置直接当作获准修复目标。缺少报告时不从 hash 猜测正文。`diagnosticHash` 绑定精确断言，`comparisonHash` 仅排除 owner 已知临时路径噪声；新路径、新回执或注释-only patch 都不表示失败已消除，不得据此重置预算或宣称 CWI 进展。
 - 新增验证输入可以使用 owner 内容合同声明的安全断言报告语法，但必须由真实行为断言失败触发；不输出秘密或原始响应，不为增加诊断而改写已有受保护的验证输入，不把报告 marker 当作执行或通过证据。

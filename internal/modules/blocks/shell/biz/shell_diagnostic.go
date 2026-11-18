@@ -143,6 +143,8 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 	}
 	if class == runtimemodel.ValidationDiagnosticBuildFailed && targetCandidatesValid && len(diagnostic.TargetRefs) > 0 && len(diagnostic.InputLocations) == 0 {
 		diagnostic.FailureLocations = shellValidationFailureLocations(*output, request, execCommand, class, diagnostic.TargetRefs)
+	} else if class == runtimemodel.ValidationDiagnosticTestFailed && targetCandidatesValid && len(diagnostic.InputLocations) == 0 && output.ValidationObservation != nil && len(output.ValidationObservation.CheckFailures) > 0 {
+		diagnostic.FailureLocations = shellValidationTestFailureLocations(output.ValidationObservation.CheckFailures)
 	}
 	output.ValidationFailureDiagnostic = diagnostic
 	output.RuntimeDiagnostics.ValidationFailureDiagnostic = diagnostic
@@ -481,6 +483,58 @@ func shellValidationFailureLocations(output RuntimeCommandResult, request Runtim
 			ret = append(ret, runtimemodel.RuntimeValidationFailureLocation{TargetRef: ref, Line: lineNo, Column: colNo, Message: msg})
 		}
 	}
+	return finalizeShellValidationFailureLocations(ret)
+}
+
+func shellValidationTestFailureLocations(failures []runtimemodel.RuntimeValidationCheckFailure) []runtimemodel.RuntimeValidationFailureLocation {
+	hasSubstantive := make(map[string]bool)
+	for _, failure := range failures {
+		msg := strings.TrimSpace(failure.AssertionText)
+		if msg != "" && !strings.HasPrefix(msg, "native source child failed:") && strings.TrimSpace(failure.TargetRef) != "" && failure.Line >= 1 {
+			hasSubstantive[failure.CheckRef] = true
+		}
+	}
+	seen := make(map[string]struct{})
+	ret := make([]runtimemodel.RuntimeValidationFailureLocation, 0, len(failures))
+	for _, failure := range failures {
+		ref := strings.TrimSpace(failure.TargetRef)
+		msg := strings.TrimSpace(failure.AssertionText)
+		if ref == "" || failure.Line < 1 || msg == "" || !utf8.ValidString(msg) || strings.ContainsRune(msg, 0) {
+			continue
+		}
+		if hasSubstantive[failure.CheckRef] && strings.HasPrefix(msg, "native source child failed:") {
+			continue
+		}
+		msg = truncateFailureLocationMessage(msg)
+		if msg == "" {
+			continue
+		}
+		key := fmt.Sprintf("%s\x00%d\x00%s", ref, failure.Line, msg)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		ret = append(ret, runtimemodel.RuntimeValidationFailureLocation{
+			TargetRef: ref,
+			Line:      failure.Line,
+			Message:   msg,
+		})
+	}
+	return finalizeShellValidationFailureLocations(ret)
+}
+
+func truncateFailureLocationMessage(msg string) string {
+	if len(msg) <= runtimemodel.RuntimeValidationFailureLocationMessageMax {
+		return msg
+	}
+	cut := runtimemodel.RuntimeValidationFailureLocationMessageMax
+	for cut > 0 && !utf8.RuneStart(msg[cut]) {
+		cut--
+	}
+	return strings.TrimSpace(msg[:cut])
+}
+
+func finalizeShellValidationFailureLocations(ret []runtimemodel.RuntimeValidationFailureLocation) []runtimemodel.RuntimeValidationFailureLocation {
 	sort.Slice(ret, func(i, j int) bool {
 		if ret[i].TargetRef != ret[j].TargetRef {
 			return ret[i].TargetRef < ret[j].TargetRef
