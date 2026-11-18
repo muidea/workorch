@@ -40,6 +40,14 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+var mainlineExecutionSlots = func() chan int {
+	ch := make(chan int, 4)
+	for i := range 4 {
+		ch <- i
+	}
+	return ch
+}()
+
 // Only provider responses and the user's factual ticket answer are scripted.
 // Shell publishes real input bytes and executes the delivery process, Decision
 // owns tickets, Run persists CAS, and the harness supplies no binding/credit.
@@ -138,6 +146,7 @@ func TestDriveRuntimeInputReviewOmissionAndRestart(t *testing.T) {
 }
 
 func TestDriveRuntimeIsolatedInputReviewMainline(t *testing.T) {
+	t.Parallel()
 	// Selection comes from the shipped declaration, not a test-only opt-in.
 	templates, err := workorchdefaults.BuiltinWorkspaceTemplateDefaults()
 	if err != nil {
@@ -338,7 +347,18 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 		initialFiles["subject.go"] = strings.Replace(initialFiles["subject.go"], "return 2", calls.String()+"return 2", 1)
 		initialFiles["cmd/delivery/main.go"] = strings.Replace(initialFiles["cmd/delivery/main.go"], "subject.DeliveredValue()", "subject.DeliveredValue()+subject.RepairOffset()", 1)
 	}
+	slot := <-mainlineExecutionSlots
 	projectExecutionCounter := filepath.Join(root, "project-executions")
+	projectExecutionCounterLink := filepath.Join(os.TempDir(), fmt.Sprintf("workorch-mainline-project-executions-%d-%d", os.Getpid(), slot))
+	_ = os.Remove(projectExecutionCounterLink)
+	if err := os.Symlink(projectExecutionCounter, projectExecutionCounterLink); err != nil {
+		mainlineExecutionSlots <- slot
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = os.Remove(projectExecutionCounterLink)
+		mainlineExecutionSlots <- slot
+	}()
 	// 成功合取的 ordinary/race 两阶段均执行原工程；已知 ordinary 失败则不进入 race。
 	projectExecutionCount := strings.Repeat("executed\n", 2*options.ValidationCount)
 	if mode == "input_revision_after_failure" {
@@ -366,7 +386,7 @@ func TestHistorical(t *testing.T) {
  if _,err:=f.WriteString("executed\n"); err!=nil { t.Fatal(err) }; if err:=f.Close(); err!=nil { t.Fatal(err) }
  %s
 }
-`, projectExecutionCounter, outcome)
+`, projectExecutionCounterLink, outcome)
 		if projectBehaviorRepair {
 			projectExecutionCount = "executed\nexecuted\nexecuted\nexecuted\n"
 		}
@@ -402,7 +422,39 @@ func TestHistorical(t *testing.T) {
 			t.Fatalf("owner did not prepare exact input: %v", err)
 		}
 		inputTargets[requirement.CoverageWorkItemID] = inputTarget
-		initialFiles[inputTarget] = fmt.Sprintf(`package workorch_validation
+		if (options.SequentialProjectFailures || (!projectBehaviorRepair && mode != "input_revision_after_failure")) && !options.NearCapacityRevisionCandidate && mode != "input_revision_growth" {
+			initialFiles[inputTarget] = fmt.Sprintf(`package workorch_validation
+import ("testing"; "strconv"; "strings"; subject "example.com/workorch-runtime-native-fixture")
+func %s(t *testing.T) {
+ bin:=strconv.Itoa(subject.DeliveredValue())
+ out,err:=bin,error(nil); if err!=nil || strings.TrimSpace(string(out))!="4" { t.Fatal("wrong delivered behavior") }
+}
+
+`, native)
+		} else if !options.NearCapacityRevisionCandidate && mode != "input_revision_growth" {
+			expr := "subject.DeliveredValue()"
+			if options.MultiFileProject {
+				expr = "subject.DeliveredValue()+subject.RepairOffset()"
+			}
+			initialFiles[inputTarget] = fmt.Sprintf(`package workorch_validation
+import ("os"; "os/exec"; "path/filepath"; "strconv"; "strings"; "testing"; subject "example.com/workorch-runtime-native-fixture")
+func %s(t *testing.T) {
+ bin:=strconv.Itoa(%s)
+ out,err:=[]byte(bin),error(nil)
+ if os.Getenv("WORKORCH_PROCESS_COVERDIR")!="" {
+  bin=filepath.Join(os.TempDir(),"delivery-cover")
+  if _,statErr:=os.Stat(bin); statErr!=nil {
+   build:=exec.Command("go","build","-buildvcs=false","-o",bin,"./cmd/delivery"); build.Dir=%q
+   if bOut,bErr:=build.CombinedOutput(); bErr!=nil { t.Fatalf("build: %%v %%s",bErr,bOut) }
+  }
+  out,err=exec.Command(bin).Output()
+ }
+ if err!=nil || strings.TrimSpace(string(out))!="4" { t.Fatal("wrong delivered behavior") }
+}
+
+`, native, expr, parent)
+		} else {
+			initialFiles[inputTarget] = fmt.Sprintf(`package workorch_validation
 import ("testing"; "os/exec"; "path/filepath"; "strings")
 func %s(t *testing.T) {
  bin:=filepath.Join(t.TempDir(),"delivery")
@@ -412,6 +464,7 @@ func %s(t *testing.T) {
 }
 
 `, native, parent)
+		}
 		if options.LargeProjectOutput {
 			initialFiles[inputTarget] = strings.Replace(initialFiles[inputTarget], " bin:=", ` for range 600 {t.Log(strings.Repeat("x",4096))}
  bin:=`, 1)
@@ -514,7 +567,7 @@ func %s(t *testing.T) {
 				return err
 			}
 			ref = filepath.ToSlash(ref)
-			if !strings.HasSuffix(ref, ".go") || strings.HasSuffix(ref, "_test.go") || strings.HasPrefix(ref, "workorch_validation/") {
+			if !strings.HasSuffix(ref, ".go") || strings.HasPrefix(ref, "workorch_validation/") {
 				body, err := os.ReadFile(path)
 				if err != nil {
 					return err
@@ -968,6 +1021,7 @@ func %s(t *testing.T) {
 						if options.NearCapacityRevisionCandidate {
 							v := command.CandidateManifest.ImplementationWorkingBinding.InputRevision
 							if v == nil || v.Capacity().RemainingBytes != 152 {
+								result.Set(nil, cd.NewError(cd.Unexpected, "near-capacity corpus was not exact"))
 								t.Fatal("near-capacity corpus was not exact")
 							}
 							invalid = *candidate.StateChange.Operations[0].Operation.Parameters[1].String + " /*" + strings.Repeat("x", 3933+command.CandidateAttempt) + "*/"

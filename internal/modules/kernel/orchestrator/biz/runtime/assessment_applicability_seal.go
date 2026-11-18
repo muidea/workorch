@@ -1,12 +1,10 @@
 package runtime
 
-import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
-
 import (
 	"fmt"
-	"reflect"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 // A new SM-3 assessment seal must consume the exact independently loaded SM-2
@@ -20,21 +18,28 @@ func validateAssessmentApplicabilitySealTransition(previous, next RuntimeAggrega
 	if previous.ActiveDispatch != nil {
 		known[previous.ActiveDispatch.ID] = true
 	}
-	dispatches := append([]runtimecontract.RuntimeDispatchRecord(nil), next.CompletedDispatches...)
-	if next.ActiveDispatch != nil {
-		dispatches = append(dispatches, *next.ActiveDispatch)
-	}
-	for _, dispatch := range dispatches {
+	checkDispatch := func(dispatch runtimecontract.RuntimeDispatchRecord) error {
 		if known[dispatch.ID] || dispatch.Candidate.Assessment == nil {
-			continue
+			return nil
 		}
 		authority := dispatch.AssessmentAuthorityInput
 		if authority == nil || authority.ApplicabilityReconciliationRequestHash != previous.Reconciliation.RequestHash ||
-			!reflect.DeepEqual(authority.ApplicabilityObservations, previous.Facts.EvidenceApplicabilityObservations) {
+			!runtimecontract.RuntimeRawEqual(authority.ApplicabilityObservations, previous.Facts.EvidenceApplicabilityObservations) {
 			return fmt.Errorf("%w: assessment applicability seal differs from independent current-generation preimage", common.ErrConflict)
 		}
 		if _, required, err := nextRuntimeEvidenceApplicabilityRequest(previous); err != nil || required {
 			return fmt.Errorf("%w: assessment seal precedes fresh owner applicability observation: %v", common.ErrConflict, err)
+		}
+		return nil
+	}
+	for i := range next.CompletedDispatches {
+		if err := checkDispatch(next.CompletedDispatches[i]); err != nil {
+			return err
+		}
+	}
+	if next.ActiveDispatch != nil {
+		if err := checkDispatch(*next.ActiveDispatch); err != nil {
+			return err
 		}
 	}
 	return nil

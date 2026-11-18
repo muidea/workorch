@@ -3,6 +3,8 @@ package workorchruntimecontract
 import (
 	"fmt"
 	"reflect"
+
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 // RuntimeAssessmentPurposePreimage is the immutable semantic-plan fact from
@@ -51,25 +53,58 @@ func runtimeAssessmentPurposePreimagesFromSemanticLedger(ledger RuntimeSemanticP
 	return runtimeAssessmentPurposePreimagesFromSemanticLedgerInSession(ledger, semanticLedgerAlreadyValidated, newRuntimeSemanticValidationSession())
 }
 
+func semanticBatchesCoverAny(batches []RuntimeSemanticPlanBatch, needed map[common.CoverageWorkItemID]struct{}) bool {
+	if len(needed) == 0 {
+		return true
+	}
+	for i := range batches {
+		batch := batches[i].Normalized()
+		if batch.State != RuntimeSemanticPlanBatchAccepted {
+			continue
+		}
+		if len(batch.CoverageWorkItemIDs) == 0 {
+			return true
+		}
+		for _, id := range batch.CoverageWorkItemIDs {
+			if _, ok := needed[id]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func runtimeAssessmentPurposePreimagesFromSemanticLedgerInSession(ledger RuntimeSemanticPlanningLedger, semanticLedgerAlreadyValidated bool, session *runtimeSemanticValidationSession) ([]runtimeAssessmentPurposeBindingPreimage, error) {
+	return runtimeAssessmentPurposePreimagesFromSemanticLedgerForCoverageInSession(ledger, semanticLedgerAlreadyValidated, nil, session)
+}
+
+func runtimeAssessmentPurposePreimagesFromSemanticLedgerForCoverageInSession(ledger RuntimeSemanticPlanningLedger, semanticLedgerAlreadyValidated bool, neededCoverageIDs map[common.CoverageWorkItemID]struct{}, session *runtimeSemanticValidationSession) ([]runtimeAssessmentPurposeBindingPreimage, error) {
 	ret := make([]runtimeAssessmentPurposeBindingPreimage, 0)
 	// The enclosing call owns the session; each hit still requires exact raw equality.
 	// Detach only the active generation. Cloning the ledger before clearing
 	// History needlessly clones every immutable snapshot that is traversed
 	// separately below.
-	active := ledger
-	active = active.WithoutHistory()
-	active = active.Clone()
-	activeEntries, err := runtimeAssessmentPurposePreimagesFromSemanticGenerationInSession(active, session)
-	if err != nil {
-		return nil, err
+	if hasAcceptedAssessmentPurposeBatch(ledger.Manifest, ledger.Batches) && (len(neededCoverageIDs) == 0 || semanticBatchesCoverAny(ledger.Batches, neededCoverageIDs)) {
+		active := ledger
+		active = active.WithoutHistory()
+		active = active.Clone()
+		activeEntries, err := runtimeAssessmentPurposePreimagesFromSemanticGenerationInSession(active, session)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, activeEntries...)
 	}
-	ret = append(ret, activeEntries...)
 	for index, generation := range ledger.AllHistory() {
 		if !semanticLedgerAlreadyValidated {
 			if err := validateRuntimeSemanticPlanningGenerationNormalized(generation, normalizeRuntimeSemanticGenerationForValidation(generation, session), session); err != nil {
 				return nil, fmt.Errorf("runtime assessment purpose semantic history %d: %w", index, err)
 			}
+		}
+		if !hasAcceptedAssessmentPurposeBatch(generation.Snapshot.Manifest, generation.Snapshot.Batches) {
+			continue
+		}
+		if len(neededCoverageIDs) > 0 && !semanticBatchesCoverAny(generation.Snapshot.Batches, neededCoverageIDs) {
+			continue
 		}
 		entries, err := runtimeAssessmentPurposePreimagesFromSemanticGenerationInSession(generation.Snapshot, session)
 		if err != nil {

@@ -121,7 +121,7 @@ func mapAcceptanceProjection(run *runmodel.Run) projectioncontract.AcceptancePro
 	projection.SemanticPlanning = runtimeSemanticPlanningProjection(*state)
 	projection.CapabilityStates = runtimeCapabilityStateStatuses(facts)
 	projection.Governance = runtimeGovernanceStatuses(*state)
-	projection.Audit = mapRuntimeAudit(state)
+	projection.Audit = mapRuntimeAuditWithFacts(state, facts)
 	projection.Summary = summarizeAcceptanceSlices(projection.Slices)
 	return projection
 }
@@ -172,9 +172,11 @@ func runtimeRepairDirectiveProjection(value *runtimecontract.RuntimeRepairDirect
 }
 
 func runtimeOperationStatuses(state runtimecontract.RuntimeStateRecord) []projectioncontract.RuntimeOperationStatus {
-	dispatches := append([]runtimecontract.RuntimeDispatchRecord(nil), state.CompletedDispatches...)
+	dispatches := state.CompletedDispatches
 	if state.ActiveDispatch != nil {
-		dispatches = append(dispatches, state.ActiveDispatch.Clone())
+		dispatches = make([]runtimecontract.RuntimeDispatchRecord, len(state.CompletedDispatches)+1)
+		copy(dispatches, state.CompletedDispatches)
+		dispatches[len(state.CompletedDispatches)] = state.ActiveDispatch.Clone()
 	}
 	ret := make([]projectioncontract.RuntimeOperationStatus, 0)
 	for _, dispatch := range dispatches {

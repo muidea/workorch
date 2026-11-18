@@ -19,7 +19,9 @@ func MissingRuntimeValidationDiscoverySources(facts runtimecontract.RuntimeFacts
 	if len(required) == 0 {
 		return nil
 	}
-	facts = facts.Normalized()
+	facts.Prerequisites.Satisfied = runtimecontract.NormalizeRuntimePrerequisites(facts.Prerequisites.Satisfied)
+	facts.Resources.PrerequisiteObservations = runtimecontract.NormalizeRuntimePrerequisiteObservations(facts.Resources.PrerequisiteObservations)
+	facts.Resources.OperationAdmissibilities = runtimecontract.NormalizeRuntimeOperationAdmissibilities(facts.Resources.OperationAdmissibilities)
 	missing := make([]string, 0, len(required))
 	for _, source := range required {
 		if runtimeValidationDiscoverySourceSatisfied(facts, source) {
@@ -88,7 +90,7 @@ func runtimeValidationDiscoverySourceSatisfied(facts runtimecontract.RuntimeFact
 func reconcileRuntimeValidationDiscoveryPrerequisites(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeFacts, error) {
 	missing := MissingRuntimeValidationDiscoverySources(facts)
 	if len(missing) == 0 {
-		return facts.Normalized(), nil
+		return facts, nil
 	}
 	requirements, unresolved := runtimeValidationDiscoveryRequirements(facts, missing)
 	if len(unresolved) != 0 {

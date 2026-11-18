@@ -252,8 +252,10 @@ func validateAndNormalizeRuntimeValidationProofPreparation(p RuntimeValidationPr
 	if strings.Contains(p.DeclarationRef, "*") {
 		return RuntimeValidationProofPreparation{}, fmt.Errorf("runtime validation proof preparation declaration %q is not CWI-specific", p.DeclarationRef)
 	}
-	if (p.ContentContractRef == "") != (p.ContentRequirements == "") || len(p.ContentContractRef) > 512 || len(p.ContentRequirements) > 4096 || !utf8.ValidString(p.ContentContractRef+p.ContentRequirements) ||
-		strings.IndexFunc(p.ContentContractRef+p.ContentRequirements, func(r rune) bool { return r < 32 || r == 127 }) >= 0 {
+	if (p.ContentContractRef == "") != (p.ContentRequirements == "") || len(p.ContentContractRef) > 512 || len(p.ContentRequirements) > 4096 ||
+		!utf8.ValidString(p.ContentContractRef) || !utf8.ValidString(p.ContentRequirements) ||
+		strings.IndexFunc(p.ContentContractRef, runtimeProspectiveControlRune) >= 0 ||
+		strings.IndexFunc(p.ContentRequirements, runtimeProspectiveControlRune) >= 0 {
 		return RuntimeValidationProofPreparation{}, fmt.Errorf("runtime validation proof preparation requires bounded owner content contract and requirements together")
 	}
 	required := make([]string, 0, len(p.CheckAttestations))
@@ -487,6 +489,8 @@ func runtimeProspectiveTargetMatchesClause(targetRef string, clause RuntimeProsp
 	}
 	return true
 }
+
+func runtimeProspectiveControlRune(r rune) bool { return r < 32 || r == 127 }
 
 func runtimeProspectiveTargetRefValid(targetRef string) bool {
 	targetRef = strings.TrimSpace(targetRef)

@@ -371,20 +371,88 @@ func runtimeWorkspaceManifestBinding(facts runtimecontract.RuntimeFacts) (runtim
 // that intersection after a semantic seal is required because a File effect
 // retires both owner catalogs before SM-2 can seal the next generation.
 func runtimeOperationAdmissibilityTargetRefs(aggregate runtime.RuntimeAggregate, ownerModuleID string) []string {
-	targets := runtime.GroundedRepairTargets(aggregate.Facts)
-	if ownerModuleID != runtimecontract.RuntimeModuleShell {
-		return targets
-	}
-	for _, inventory := range aggregate.Facts.Resources.OperationAdmissibilities {
-		if inventory.OwnerModuleID == runtimecontract.RuntimeModuleFile {
-			targets = append(targets, inventory.TargetRefs...)
+	targets := append([]string(nil), runtime.GroundedRepairTargets(aggregate.Facts)...)
+	var manifestSet map[string]struct{}
+	if manifest := aggregate.Facts.Resources.Manifest; manifest != nil {
+		manifestSet = make(map[string]struct{}, len(manifest.TargetRefs))
+		for _, target := range manifest.TargetRefs {
+			target = strings.TrimSpace(target)
+			if target != "" {
+				manifestSet[target] = struct{}{}
+			}
 		}
 	}
-	sort.Strings(targets)
-	ret := targets[:0]
+	for _, binding := range aggregate.Facts.Focus.CoverageEvidenceBindings {
+		if len(binding.ProspectiveTargetRefs) != 0 {
+			continue
+		}
+		for _, target := range binding.TargetRefs {
+			target = strings.TrimSpace(target)
+			if target == "" {
+				continue
+			}
+			if manifestSet != nil {
+				if _, ok := manifestSet[target]; !ok {
+					continue
+				}
+			}
+			targets = append(targets, target)
+		}
+	}
+	activeTargets := dedupeSortedTargets(targets)
+	if ownerModuleID != runtimecontract.RuntimeModuleShell {
+		return activeTargets
+	}
+	maxItems := runtimecontract.DefaultRuntimeOwnerInventoryBudget().MaxItems
+	if len(activeTargets) >= maxItems {
+		return activeTargets
+	}
+	seen := make(map[string]struct{}, len(activeTargets))
+	for _, target := range activeTargets {
+		seen[target] = struct{}{}
+	}
+	var fileExtras []string
+	for _, inventory := range aggregate.Facts.Resources.OperationAdmissibilities {
+		if inventory.OwnerModuleID != runtimecontract.RuntimeModuleFile {
+			continue
+		}
+		for _, target := range inventory.TargetRefs {
+			target = strings.TrimSpace(target)
+			if target == "" {
+				continue
+			}
+			if _, ok := seen[target]; ok {
+				continue
+			}
+			fileExtras = append(fileExtras, target)
+		}
+	}
+	fileExtras = dedupeSortedTargets(fileExtras)
+	remaining := maxItems - len(activeTargets)
+	if len(fileExtras) > remaining {
+		fileExtras = fileExtras[:remaining]
+	}
+	return dedupeSortedTargets(append(activeTargets, fileExtras...))
+}
+
+func dedupeSortedTargets(targets []string) []string {
+	if len(targets) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(targets))
 	for _, target := range targets {
 		target = strings.TrimSpace(target)
-		if target == "" || (len(ret) != 0 && ret[len(ret)-1] == target) {
+		if target != "" {
+			out = append(out, target)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out)
+	ret := out[:0]
+	for _, target := range out {
+		if len(ret) != 0 && ret[len(ret)-1] == target {
 			continue
 		}
 		ret = append(ret, target)

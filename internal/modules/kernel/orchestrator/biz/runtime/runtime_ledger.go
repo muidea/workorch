@@ -172,19 +172,25 @@ func resetRepairForFocus(focusID, sliceID, revision string) runtimecontract.Runt
 // particular, it must not clear a valid current-focus directive merely because
 // the first repair cycle has not yet written counters into the ledger.
 func rebindRepairForCurrentFocus(facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
-	facts = facts.Normalized()
-	currentFocusID := strings.TrimSpace(facts.Focus.ID)
+	focus := facts.Focus.Normalized()
+	facts.EvidenceRevision = strings.TrimSpace(facts.EvidenceRevision)
+	facts.Repair = facts.Repair.Normalized()
+	if facts.RepairDirective != nil {
+		directive := facts.RepairDirective.Normalized()
+		facts.RepairDirective = &directive
+	}
+	currentFocusID := strings.TrimSpace(focus.ID)
 	if currentFocusID == "" {
 		facts.RepairDirective = nil
 		return facts
 	}
 	if facts.Repair.FocusID != "" && facts.Repair.FocusID != currentFocusID {
-		facts.Repair = resetRepairForFocus(currentFocusID, facts.Focus.SliceID, facts.EvidenceRevision)
+		facts.Repair = resetRepairForFocus(currentFocusID, focus.SliceID, facts.EvidenceRevision).Normalized()
 	}
 	if facts.RepairDirective != nil && facts.RepairDirective.FocusID != currentFocusID {
 		facts.RepairDirective = nil
 	}
-	return facts.Normalized()
+	return facts
 }
 
 func noteRepairNoProgress(ledger runtimecontract.RuntimeRepairLedger) runtimecontract.RuntimeRepairLedger {

@@ -210,6 +210,10 @@ lost-receipt recovery 若确认 sealed 后像，只保留本次实际读取的 `
   对排除输入的零副作用拒绝，以及合法实现目标的重复只读 feasibility。
 - workspace manifest/revision 对 deliverable topology/content 变化敏感；admissibility/target snapshot 漂移返回 typed stale，
   不自行刷新 authority。
+- `OperationAdmissibility` 是绑定当前 focus/scope 的有界投影（`OwnerInventoryBudget.MaxItems = 32`）：仅 `TargetRefs`
+  计入 `MaxItems`，`SelectorRefs` 与 `ConstraintRefs` 作为解释词汇不消耗 target 预算；`RequiredTargetRefs`
+  去重后 100% 优先保全（含匹配的 `baseHash` 等 `TargetParameterBindings`）且绝不截断，当
+  `len(unique(RequiredTargetRefs)) > MaxItems` 时在采集前 fail-closed 返回 `RuntimeOwnerInventoryBudgetExceededError`。
 - state-changing effect 返回 exact before/after revision 和 bounded evidence。execution key 已有 committed receipt 时返回 replay
   fact，不执行第二次写；effect 成功但 receipt commit 丢失时只允许 sealed effect-aware recovery。
 - File 不保存 Runtime continuation、FailureTarget、CWI 或 decision；Orchestrator receipt commit 成功后才向 caller 返回 committed receipt。

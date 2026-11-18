@@ -103,7 +103,9 @@ func (r runtimeStateRepository) SaveValidated(ctx context.Context, aggregate run
 	if r.hub == nil {
 		return common.ErrInvalidArgument
 	}
-	record := runtimeStateRecordFromAggregate(aggregate)
+	// Pass a shallow view: StoreRuntimeStateRecordCommand is synchronous and read-only,
+	// and the physical Run repository clones on commit before publishing.
+	record := runtimecontract.RuntimeStateRecord(aggregate)
 	revision := expectedRevision
 	command := runevents.StoreRuntimeStateRecordCommand{
 		RunID:                        aggregate.Facts.RunID,

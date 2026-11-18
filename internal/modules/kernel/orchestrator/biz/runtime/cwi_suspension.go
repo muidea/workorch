@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"fmt"
-	"reflect"
 	"sort"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -206,7 +205,7 @@ func runtimeSuspensionNewConsumers(previous, observed []runtimecontract.RuntimeC
 	for _, c := range observed {
 		found := false
 		for _, old := range previous {
-			found = found || old.PredecessorID == c.PredecessorID && reflect.DeepEqual(old.ReopenSource, c.ReopenSource)
+			found = found || old.PredecessorID == c.PredecessorID && runtimecontract.RuntimeRawEqual(old.ReopenSource, c.ReopenSource)
 		}
 		if !found {
 			additions = append(additions, c)
@@ -250,7 +249,7 @@ func resumeRuntimeSuspendedSuccessor(facts runtimecontract.RuntimeFacts) (runtim
 		if predecessor.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateSettled || predecessor.State != runtimecontract.RuntimeCoverageItemStateSatisfied || predecessor.CurrentBindingRef == nil || predecessor.LastAssessmentID == "" {
 			return facts, false, nil
 		}
-		if len(predecessor.ReopenLineage) == 0 || !reflect.DeepEqual(predecessor.ReopenLineage[len(predecessor.ReopenLineage)-1], consumer.ReopenSource) || runtimecontract.SameRuntimeCWIBindingRef(*predecessor.CurrentBindingRef, consumer.ReopenSource.PreviousBindingRef) {
+		if len(predecessor.ReopenLineage) == 0 || !runtimecontract.RuntimeRawEqual(predecessor.ReopenLineage[len(predecessor.ReopenLineage)-1], consumer.ReopenSource) || runtimecontract.SameRuntimeCWIBindingRef(*predecessor.CurrentBindingRef, consumer.ReopenSource.PreviousBindingRef) {
 			return runtimecontract.RuntimeFacts{}, false, fmt.Errorf("%w: suspension resume source drift", common.ErrConflict)
 		}
 		current := rows[pause.FrozenFocus.CoverageWorkItemIDs[0]]
@@ -299,7 +298,7 @@ func resumeRuntimeSuspendedSuccessor(facts runtimecontract.RuntimeFacts) (runtim
 		found := 0
 		for _, focus := range facts.RemainingFocuses {
 			if focus.ID == pause.FrozenFocus.ID {
-				if !reflect.DeepEqual(focus, pause.FrozenFocus) {
+				if !runtimecontract.RuntimeRawEqual(focus, pause.FrozenFocus) {
 					return runtimecontract.RuntimeFacts{}, false, common.ErrConflict
 				}
 				found++
@@ -350,7 +349,7 @@ func validateRuntimeCWISuspensionTransition(previous, next RuntimeAggregate) err
 		return fmt.Errorf("%w: CWI suspension history is append-only", common.ErrConflict)
 	}
 	for i, original := range before {
-		if reflect.DeepEqual(original, after[i]) {
+		if runtimecontract.RuntimeRawEqual(original, after[i]) {
 			continue
 		}
 		if !original.Active() || len(original.Consumers) > len(after[i].Consumers) {
@@ -368,10 +367,10 @@ func validateRuntimeCWISuspensionTransition(previous, next RuntimeAggregate) err
 			copy := after[i].CloneRaw()
 			additions := runtimeSuspensionNewConsumers(original.Consumers, observed)
 			copy.Consumers = copy.Consumers[:len(original.Consumers)]
-			if !reflect.DeepEqual(copy, original) || !reflect.DeepEqual(after[i].Consumers[len(original.Consumers):], additions) {
+			if !runtimecontract.RuntimeRawEqual(copy, original) || !runtimecontract.RuntimeRawEqual(after[i].Consumers[len(original.Consumers):], additions) {
 				return fmt.Errorf("%w: suspension consumer append has no exact current owner source", common.ErrConflict)
 			}
-			if !reflect.DeepEqual(previous.CompletedDispatches, next.CompletedDispatches) || !reflect.DeepEqual(previous.OperationReceipts, next.OperationReceipts) || !reflect.DeepEqual(previous.ExecutionBudget, next.ExecutionBudget) {
+			if !runtimecontract.RuntimeRawEqual(previous.CompletedDispatches, next.CompletedDispatches) || !runtimecontract.RuntimeRawEqual(previous.OperationReceipts, next.OperationReceipts) || !runtimecontract.RuntimeRawEqual(previous.ExecutionBudget, next.ExecutionBudget) {
 				return fmt.Errorf("%w: consumer append cannot change effects/receipts/budget", common.ErrConflict)
 			}
 			continue
@@ -381,7 +380,7 @@ func validateRuntimeCWISuspensionTransition(previous, next RuntimeAggregate) err
 		changed := 0
 		for j, old := range original.Consumers {
 			current := after[i].Consumers[j]
-			if reflect.DeepEqual(old, current) {
+			if runtimecontract.RuntimeRawEqual(old, current) {
 				continue
 			}
 			if old.ResumeBinding != nil || current.ResumeBinding == nil || len(previous.Facts.Focus.CoverageWorkItemIDs) != 1 || previous.Facts.Focus.CoverageWorkItemIDs[0] != old.PredecessorID {
@@ -390,14 +389,14 @@ func validateRuntimeCWISuspensionTransition(previous, next RuntimeAggregate) err
 			copy.Consumers[j].ResumeBinding, copy.Consumers[j].ResumeAssessmentID, copy.Consumers[j].ResumeEvidenceRevision, copy.Consumers[j].ResumeObservationCount = nil, "", "", 0
 			changed++
 		}
-		if changed != 1 || !reflect.DeepEqual(copy, original) {
+		if changed != 1 || !runtimecontract.RuntimeRawEqual(copy, original) {
 			return fmt.Errorf("%w: CWI resume rewrote original source", common.ErrConflict)
 		}
 		if previous.ActiveDispatch != nil || runtimeApplicabilityHasUnsettledProvider(previous) || previous.Termination != nil || previous.TerminalMaterialSeal != nil || isTerminalConvergenceState(previous.Decision.State) {
 			return fmt.Errorf("%w: CWI resume crossed in-flight responsibility", common.ErrConflict)
 		}
 		if !after[i].Active() {
-			if after[i].ResumedEvidenceRevision != next.Facts.EvidenceRevision || !reflect.DeepEqual(next.Facts.Focus, original.FrozenFocus) || !reflect.DeepEqual(next.Facts.Repair, original.Repair) || !reflect.DeepEqual(next.Facts.RepairDirective, original.RepairDirective) || !reflect.DeepEqual(next.Facts.Failure, original.Failure) {
+			if after[i].ResumedEvidenceRevision != next.Facts.EvidenceRevision || !runtimecontract.RuntimeRawEqual(next.Facts.Focus, original.FrozenFocus) || !runtimecontract.RuntimeRawEqual(next.Facts.Repair, original.Repair) || !runtimecontract.RuntimeRawEqual(next.Facts.RepairDirective, original.RepairDirective) || !runtimecontract.RuntimeRawEqual(next.Facts.Failure, original.Failure) {
 				return fmt.Errorf("%w: CWI resume lost frozen focus/repair budget", common.ErrConflict)
 			}
 		} else {
@@ -429,17 +428,17 @@ func validateRuntimeCWISuspensionTransition(previous, next RuntimeAggregate) err
 		if err != nil {
 			return err
 		}
-		if !reflect.DeepEqual(added.Consumers, expected) {
+		if !runtimecontract.RuntimeRawEqual(added.Consumers, expected) {
 			return fmt.Errorf("%w: suspension omitted or changed an affected consumer", common.ErrConflict)
 		}
 		prerequisites, observations := runtimeSuspensionFocusPrerequisites(previous.Facts)
-		if !reflect.DeepEqual(added.FrozenPrerequisites, prerequisites) || !reflect.DeepEqual(added.FrozenObservations, observations) {
+		if !runtimecontract.RuntimeRawEqual(added.FrozenPrerequisites, prerequisites) || !runtimecontract.RuntimeRawEqual(added.FrozenObservations, observations) {
 			return fmt.Errorf("%w: suspension prerequisite archive differs from original owner preimage", common.ErrConflict)
 		}
-		if added.SuspendedAtStateRevision != next.StateRevision || added.SuspendedEvidenceRevision != previous.Facts.EvidenceRevision || !reflect.DeepEqual(added.FrozenFocus, previous.Facts.Focus) || !reflect.DeepEqual(added.Repair, previous.Facts.Repair) || !reflect.DeepEqual(added.RepairDirective, previous.Facts.RepairDirective) || !reflect.DeepEqual(added.Failure, previous.Facts.Failure) {
+		if added.SuspendedAtStateRevision != next.StateRevision || added.SuspendedEvidenceRevision != previous.Facts.EvidenceRevision || !runtimecontract.RuntimeRawEqual(added.FrozenFocus, previous.Facts.Focus) || !runtimecontract.RuntimeRawEqual(added.Repair, previous.Facts.Repair) || !runtimecontract.RuntimeRawEqual(added.RepairDirective, previous.Facts.RepairDirective) || !runtimecontract.RuntimeRawEqual(added.Failure, previous.Facts.Failure) {
 			return fmt.Errorf("%w: CWI suspension has no exact original focus/repair preimage", common.ErrConflict)
 		}
-		if !reflect.DeepEqual(previous.CompletedDispatches, next.CompletedDispatches) || !reflect.DeepEqual(previous.OperationReceipts, next.OperationReceipts) || !reflect.DeepEqual(previous.ExecutionBudget, next.ExecutionBudget) {
+		if !runtimecontract.RuntimeRawEqual(previous.CompletedDispatches, next.CompletedDispatches) || !runtimecontract.RuntimeRawEqual(previous.OperationReceipts, next.OperationReceipts) || !runtimecontract.RuntimeRawEqual(previous.ExecutionBudget, next.ExecutionBudget) {
 			return fmt.Errorf("%w: CWI suspension cannot change effects/receipts/budget", common.ErrConflict)
 		}
 	}

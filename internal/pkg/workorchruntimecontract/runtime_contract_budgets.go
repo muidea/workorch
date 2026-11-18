@@ -1,11 +1,18 @@
 package workorchruntimecontract
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
-// RuntimeOwnerInventoryBudget bounds a complete capability-owner inventory or a
-// closed selector representation returned by acquisition. It is an SM-2 authority
-// budget: truncating inventory and treating it as complete is forbidden, and this
-// type must never be satisfied by borrowing CandidateContextBudget.
+// RuntimeOwnerInventoryBudget bounds a current focus/scope owner target
+// inventory projection (or a closed selector representation) returned by
+// operation-admissibility acquisition. Only TargetRefs consume target slots;
+// SelectorRefs and ConstraintRefs are contract vocabulary and do not count
+// against this budget. Required current-scope targets must never be truncated:
+// when required targets exceed MaxItems, acquisition and manifest admission
+// fail closed with RuntimeOwnerInventoryBudgetExceededError. This type must never
+// be satisfied by borrowing CandidateContextBudget.
 type RuntimeOwnerInventoryBudget struct {
 	MaxItems int
 }
@@ -117,10 +124,66 @@ func (b RuntimePrerequisiteRefreshBudget) Validate() error {
 	return nil
 }
 
-// RuntimeOwnerInventoryWithinBudget reports whether a complete inventory
-// representation fits the owner inventory budget. Callers must not use a
-// CandidateContextBudget value here.
+// RuntimeOwnerInventoryWithinBudget reports whether a complete target
+// inventory representation fits the owner inventory budget. SelectorRefs and
+// ConstraintRefs are contract vocabulary used to interpret targets; they are
+// not additional inventory members and must not be counted here.
 func RuntimeOwnerInventoryWithinBudget(budget RuntimeOwnerInventoryBudget, itemCount int) bool {
 	budget = budget.Normalized()
 	return itemCount >= 0 && itemCount <= budget.MaxItems
+}
+
+// RuntimeOwnerInventoryTargetCount is the single budget semantic shared by
+// owner acquisition and candidate-manifest compilation. The target set is the
+// bounded owner inventory; selectors and constraints describe how that set is
+// interpreted and therefore do not consume target inventory capacity.
+func RuntimeOwnerInventoryTargetCount(value RuntimeOperationAdmissibility) int {
+	return len(value.Normalized().TargetRefs)
+}
+
+// RuntimeOwnerInventoryAdmissibilityWithinBudget checks one complete owner
+// admissibility fact using the same target-only count used by acquisition.
+func RuntimeOwnerInventoryAdmissibilityWithinBudget(budget RuntimeOwnerInventoryBudget, value RuntimeOperationAdmissibility) bool {
+	return RuntimeOwnerInventoryWithinBudget(budget, RuntimeOwnerInventoryTargetCount(value))
+}
+
+// RuntimeOwnerInventoryBudgetExceededError identifies an owner fact whose
+// target inventory cannot be admitted under the current request budget. It is
+// a typed owner-fact deviation, not a business or Runtime-structure failure;
+// the Orchestrator may invalidate only this prerequisite and reacquire it.
+type RuntimeOwnerInventoryBudgetExceededError struct {
+	OwnerModuleID  string
+	PrerequisiteID string
+	ItemCount      int
+	MaxItems       int
+}
+
+func (e *RuntimeOwnerInventoryBudgetExceededError) Error() string {
+	if e == nil {
+		return "runtime owner inventory budget exceeded"
+	}
+	return fmt.Sprintf("runtime owner inventory budget exceeded: owner=%s prerequisite=%s targets=%d max=%d", strings.TrimSpace(e.OwnerModuleID), strings.TrimSpace(e.PrerequisiteID), e.ItemCount, e.MaxItems)
+}
+
+// ValidateRuntimeOwnerInventoryAdmissibilityBudget is the typed budget gate
+// shared by acquisition validation and candidate-manifest compilation.
+func ValidateRuntimeOwnerInventoryAdmissibilityBudget(budget RuntimeOwnerInventoryBudget, value RuntimeOperationAdmissibility) error {
+	budget = budget.Normalized()
+	value = value.Normalized()
+	if !RuntimeOwnerInventoryWithinBudget(budget, RuntimeOwnerInventoryTargetCount(value)) {
+		return &RuntimeOwnerInventoryBudgetExceededError{OwnerModuleID: value.OwnerModuleID, PrerequisiteID: value.PrerequisiteID, ItemCount: RuntimeOwnerInventoryTargetCount(value), MaxItems: budget.MaxItems}
+	}
+	return nil
+}
+
+// ValidateRuntimeRequiredTargetsWithinInventoryBudget guarantees that required
+// current-scope targets are never silently truncated to fit an owner inventory
+// projection. Duplicate or blank inputs are normalized before checking MaxItems.
+func ValidateRuntimeRequiredTargetsWithinInventoryBudget(budget RuntimeOwnerInventoryBudget, ownerModuleID, prerequisiteID string, requiredTargetRefs []string) error {
+	budget = budget.Normalized()
+	required := normalizeStrings(requiredTargetRefs)
+	if !RuntimeOwnerInventoryWithinBudget(budget, len(required)) {
+		return &RuntimeOwnerInventoryBudgetExceededError{OwnerModuleID: strings.TrimSpace(ownerModuleID), PrerequisiteID: strings.TrimSpace(prerequisiteID), ItemCount: len(required), MaxItems: budget.MaxItems}
+	}
+	return nil
 }

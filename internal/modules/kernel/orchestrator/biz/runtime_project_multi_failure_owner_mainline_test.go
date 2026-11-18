@@ -11,6 +11,7 @@ import (
 // process execution, receipt/raw storage, Run CAS and recovery are real owners.
 // An unrelated failure with no observed implementation remains fail-closed.
 func TestDriveRuntimeProjectMultiFailureOwnerMainline(t *testing.T) {
+	t.Parallel()
 	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol}
 	for _, mode := range []string{"consistent", "project_history_failure"} {
 		t.Run(mode, func(t *testing.T) {
@@ -31,6 +32,7 @@ func TestDriveRuntimeProjectMultiFailureOwnerMainline(t *testing.T) {
 }
 
 func TestDriveRuntimeProjectMultiFailureConfirmedRepair(t *testing.T) {
+	t.Parallel()
 	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol}
 	baseline := runValidationInputReviewMainline(t, "project_behavior_failure", "", options)
 	for _, cut := range []string{"after_review_binding", "after_project_receipt", "after_repair_receipt"} {
@@ -102,6 +104,7 @@ func assertMultiFailureConfirmedRepairFacts(t *testing.T, state runtimecontract.
 // The real producer/owners must retain a late assertion, confirm its repair,
 // obtain fresh all-of validation and assessment, and deliver all three ACKs.
 func TestDriveRuntimeProjectLargeOutputConfirmedRepair(t *testing.T) {
+	t.Parallel()
 	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, LargeProjectOutput: true}
 	baseline := runValidationInputReviewMainline(t, "project_behavior_failure", "", options)
 	for _, cut := range []string{"after_project_receipt", "after_repair_receipt"} {
@@ -123,6 +126,7 @@ func boolCount(v bool) int {
 // Four independent failures observe a complete nine-file surface. Two distinct
 // File edits are required: either alone still fails the original assertions.
 func TestDriveRuntimeNineTargetMultiFileRepairAndRecovery(t *testing.T) {
+	t.Parallel()
 	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, LargeProjectOutput: true, MultiFileProject: true}
 	baseline := runValidationInputReviewMainline(t, "project_behavior_failure", "", options)
 	for _, cut := range []string{"after_project_receipt", "after_repair_receipt"} {
@@ -135,6 +139,7 @@ func TestDriveRuntimeNineTargetMultiFileRepairAndRecovery(t *testing.T) {
 }
 
 func TestDriveRuntimeNineTargetMultiFileDeliveryRecovery(t *testing.T) {
+	t.Parallel()
 	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, LargeProjectOutput: true, MultiFileProject: true}
 	baseline := runValidationInputReviewMainline(t, "project_behavior_failure", "", options)
 	for _, cut := range []string{"after_result_persistence", "after_workspace_persistence", "after_run_persistence"} {
@@ -150,6 +155,7 @@ func TestDriveRuntimeNineTargetMultiFileDeliveryRecovery(t *testing.T) {
 // survive receipt loss, exact input re-review, confirmed File repair, fresh
 // ordinary all-of, assessment and ordered terminal delivery without extra calls.
 func TestDriveRuntimeDynamicObservationsRepairAndRecovery(t *testing.T) {
+	t.Parallel()
 	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, DynamicProjectObservations: true}
 	baseline := runValidationInputReviewMainline(t, "project_behavior_failure", "", options)
 	for _, cut := range []string{"after_project_receipt", "after_failure_input_review_document", "after_repair_receipt", "after_result_persistence", "after_workspace_persistence", "after_run_persistence"} {

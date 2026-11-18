@@ -51,6 +51,109 @@ func validateRuntimeSemanticBindingPreimages(a RuntimeAggregate) error {
 	return validateRuntimeSemanticBindingPreimagesInGate(a, nil)
 }
 
+func validateRuntimeSemanticBindingPreimagesTransitionInGate(
+	previous *RuntimeAggregate,
+	a RuntimeAggregate,
+	changedBindingFacts bool,
+	changedSemanticPlanning bool,
+	gate *runtimecontract.RuntimeOwnerInvariantSourceGate,
+) error {
+	if previous == nil || changedBindingFacts || changedSemanticPlanning ||
+		len(a.CandidateRequestSessions) < len(previous.CandidateRequestSessions) ||
+		len(a.CandidateAttempts) < len(previous.CandidateAttempts) ||
+		len(a.CompletedDispatches) < len(previous.CompletedDispatches) {
+		return validateRuntimeSemanticBindingPreimagesInGate(a, gate)
+	}
+	var changedSessions []int
+	for i, session := range a.CandidateRequestSessions {
+		if session.CandidateManifest == nil ||
+			!runtimeSemanticBindingProjectionState(runtimecontract.ConvergenceState(strings.TrimSpace(string(session.CandidateManifest.State)))) {
+			continue
+		}
+		if i < len(previous.CandidateRequestSessions) && runtimecontract.RuntimeRawEqual(session, previous.CandidateRequestSessions[i]) {
+			continue
+		}
+		changedSessions = append(changedSessions, i)
+	}
+	var changedAttempts []int
+	for i, attempt := range a.CandidateAttempts {
+		if attempt.State != runtimecontract.RuntimeCandidateAttemptStateAccepted ||
+			!runtimeSemanticBindingProjectionState(attempt.Transaction.State) {
+			continue
+		}
+		if i < len(previous.CandidateAttempts) && runtimecontract.RuntimeRawEqual(attempt, previous.CandidateAttempts[i]) {
+			continue
+		}
+		changedAttempts = append(changedAttempts, i)
+	}
+	activeChanged := a.ActiveDispatch != nil &&
+		runtimeSemanticBindingProjectionState(a.ActiveDispatch.Transaction.State) &&
+		(previous.ActiveDispatch == nil || !runtimecontract.RuntimeRawEqual(*a.ActiveDispatch, *previous.ActiveDispatch))
+	var changedDispatches []int
+	for i, dispatch := range a.CompletedDispatches {
+		if !runtimeSemanticBindingProjectionState(dispatch.Transaction.State) {
+			continue
+		}
+		if i < len(previous.CompletedDispatches) && runtimecontract.RuntimeRawEqual(dispatch, previous.CompletedDispatches[i]) {
+			continue
+		}
+		changedDispatches = append(changedDispatches, i)
+	}
+	if len(changedSessions) == 0 && len(changedAttempts) == 0 && !activeChanged && len(changedDispatches) == 0 {
+		return nil
+	}
+	inventory, err := buildRuntimeSemanticBindingPreimageInventoryInGate(a.SemanticPlanning, gate)
+	if err != nil {
+		return runtimeSemanticBindingPreimageViolation(err)
+	}
+	for _, index := range changedSessions {
+		if err := validateCandidateSessionBindingPreimage(index, a.CandidateRequestSessions[index], inventory); err != nil {
+			return err
+		}
+	}
+	for _, index := range changedAttempts {
+		attempt := a.CandidateAttempts[index]
+		if err := validateRuntimeSemanticBindingProjectionPreimage(
+			fmt.Sprintf("accepted candidate attempt %d", index), attempt.Transaction.FocusID, attempt.AdmissionCoverageBindings, inventory,
+		); err != nil {
+			return runtimeSemanticBindingPreimageViolation(err)
+		}
+	}
+	if activeChanged {
+		if err := validateRuntimeSemanticBindingProjectionPreimage(
+			"active dispatch", a.ActiveDispatch.Transaction.FocusID, a.ActiveDispatch.CoverageBindings, inventory,
+		); err != nil {
+			return runtimeSemanticBindingPreimageViolation(err)
+		}
+	}
+	for _, index := range changedDispatches {
+		dispatch := a.CompletedDispatches[index]
+		if err := validateRuntimeSemanticBindingProjectionPreimage(
+			fmt.Sprintf("completed dispatch %d", index), dispatch.Transaction.FocusID, dispatch.CoverageBindings, inventory,
+		); err != nil {
+			return runtimeSemanticBindingPreimageViolation(err)
+		}
+	}
+	return nil
+}
+
+func validateCandidateSessionBindingPreimage(index int, session runtimecontract.RuntimeCandidateRequestSession, inventory runtimeSemanticBindingPreimageInventory) error {
+	if session.CandidateManifest == nil ||
+		!runtimeSemanticBindingProjectionState(runtimecontract.ConvergenceState(strings.TrimSpace(string(session.CandidateManifest.State)))) {
+		return nil
+	}
+	manifest := session.CandidateManifest.Normalized()
+	if !runtimeSemanticBindingProjectionState(manifest.State) {
+		return nil
+	}
+	if err := validateRuntimeSemanticBindingProjectionPreimage(
+		fmt.Sprintf("candidate request session %d", index), session.Transaction.FocusID, manifest.Bindings, inventory,
+	); err != nil {
+		return runtimeSemanticBindingPreimageViolation(err)
+	}
+	return nil
+}
+
 func validateRuntimeSemanticBindingPreimagesInGate(a RuntimeAggregate, gate *runtimecontract.RuntimeOwnerInvariantSourceGate) error {
 	inventory, err := buildRuntimeSemanticBindingPreimageInventoryInGate(a.SemanticPlanning, gate)
 	if err != nil {
@@ -75,17 +178,8 @@ func validateRuntimeSemanticBindingPreimagesInGate(a RuntimeAggregate, gate *run
 		return runtimeSemanticBindingPreimageViolation(err)
 	}
 	for index, session := range a.CandidateRequestSessions {
-		if session.CandidateManifest == nil {
-			continue
-		}
-		manifest := session.CandidateManifest.Normalized()
-		if !runtimeSemanticBindingProjectionState(manifest.State) {
-			continue
-		}
-		if err := validateRuntimeSemanticBindingProjectionPreimage(
-			fmt.Sprintf("candidate request session %d", index), session.Transaction.FocusID, manifest.Bindings, inventory,
-		); err != nil {
-			return runtimeSemanticBindingPreimageViolation(err)
+		if err := validateCandidateSessionBindingPreimage(index, session, inventory); err != nil {
+			return err
 		}
 	}
 	for index, attempt := range a.CandidateAttempts {
@@ -169,16 +263,18 @@ func addRuntimeSemanticLedgerBindingPreimagesInGate(inventory *runtimeSemanticBi
 	if inventory == nil || ledger.Manifest == nil {
 		return nil
 	}
-	manifest := ledger.Manifest.Normalized()
+	rawManifest := *ledger.Manifest
+	manifestHash := strings.TrimSpace(rawManifest.Hash)
 	documents := make(map[string]runtimecontract.RuntimeSemanticPlanDocument, len(ledger.BatchDocuments))
 	for _, document := range ledger.BatchDocuments {
-		documents[document.BatchID] = document.Clone()
+		documents[document.BatchID] = document.Normalized()
 	}
 	results := make(map[string]runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult, len(ledger.BatchFeasibilityResults))
 	for _, result := range ledger.BatchFeasibilityResults {
 		results[result.BatchID] = result.Normalized()
 	}
 
+	isImplWork := len(rawManifest.ProofObligations) == 1 && rawManifest.ProofObligations[0].ImplementationWork != nil
 	for _, batch := range ledger.Batches {
 		batch = batch.Normalized()
 		if batch.State != runtimecontract.RuntimeSemanticPlanBatchAccepted {
@@ -195,24 +291,24 @@ func addRuntimeSemanticLedgerBindingPreimagesInGate(inventory *runtimeSemanticBi
 			// set). Any projection that tries to use it will fail the lookup below.
 			continue
 		}
-		if len(manifest.ProofObligations) == 1 && manifest.ProofObligations[0].ImplementationWork != nil {
+		if isImplWork {
 			// working proof 的 accepted provider/owner preimage 不编译 terminal binding。
 			// seal 后的 working authority 另由完整 ImplementationWork source join 验证。
-			if manifest.ProofObligations[0].ImplementationWork.PurposeChoiceOnly {
+			if rawManifest.ProofObligations[0].ImplementationWork.PurposeChoiceOnly {
 				return fmt.Errorf("implementation purpose-choice cannot contain an accepted proof batch")
 			}
-			if err := gate.ValidateDocument(manifest, document); err != nil {
+			if err := gate.ValidateDocument(rawManifest, document); err != nil {
 				return err
 			}
 			if document.BatchID != batch.BatchID || document.BatchSequence != batch.Sequence || batch.DocumentHash != runtimecontract.StableRuntimeSemanticPlanDocumentHash(document) || !sameCoverageIDs(document.BatchCoverageWorkItemIDs, batch.CoverageWorkItemIDs) {
 				return fmt.Errorf("implementation accepted batch differs from original provider document")
 			}
-			if err := gate.ValidateFeasibilities(manifest, document, feasibilities, true); err != nil {
+			if err := gate.ValidateFeasibilities(rawManifest, document, feasibilities, true); err != nil {
 				return err
 			}
 			continue
 		}
-		focuses, _, err := gate.CompileAcceptedBatch(manifest, batch, document, feasibilities)
+		focuses, _, err := gate.CompileAcceptedBatch(rawManifest, batch, document, feasibilities)
 		if err != nil {
 			return fmt.Errorf("runtime aggregate semantic binding preimage %s batch %q: %w", label, batch.BatchID, err)
 		}
@@ -220,7 +316,7 @@ func addRuntimeSemanticLedgerBindingPreimagesInGate(inventory *runtimeSemanticBi
 			focus := rawFocus.Normalized()
 			for _, rawBinding := range focus.CoverageEvidenceBindings {
 				binding := rawBinding.Normalized()
-				preimage := runtimeSemanticBindingPreimage{manifestHash: manifest.Hash, focus: focus, binding: binding}
+				preimage := runtimeSemanticBindingPreimage{manifestHash: manifestHash, focus: focus, binding: binding}
 				if previous, duplicate := inventory.byBindingID[binding.ID]; duplicate {
 					if previous.manifestHash != preimage.manifestHash ||
 						!reflect.DeepEqual(previous.focus, preimage.focus) ||

@@ -6,13 +6,17 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"maps"
 	"strconv"
 	"strings"
+	"sync"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const shellNativeFailureObservationRequirements = " Native case outcomes and raw output bytes remain exact and independent facts. Exclude an ordinary Log/Logf frame only when the sealed source and resolved static argument types prove the direct testing.T call is an observation; unresolved helpers, user formatting and ambiguous call sites remain potential assertions. Never classify by message words or erase raw output. Reproduction compares complete check/case/package/target/body identities (only owner-declared scratch noise may differ); helper decoration location/multiplicity is retained in raw diagnostics rather than an additional assertion identity. Changed values, failed cases or sources, missing/ambiguous frames, per-body/aggregate/count limits and complete serialized feedback capacity remain closed with exact causes."
+
+var shellObservationLinesCache sync.Map
 
 // Only a direct Log/Logf on a statically identified *testing.T parameter is
 // an observation. Helpers, aliases, shadowed receivers and mixed call sites
@@ -23,9 +27,19 @@ func shellNativeObservationLines(subject *runtimecontract.RuntimeValidationInput
 	if subject == nil {
 		return result
 	}
-	compilerImports := importer.Default()
+	var compilerImports types.Importer
 	for _, source := range subject.Files {
 		if !strings.HasSuffix(source.TargetRef, "_test.go") || source.ContentHash != runtimecontract.RuntimeValidationInputContentHash(source.Content) {
+			continue
+		}
+		if cached, ok := shellObservationLinesCache.Load(source.ContentHash); ok {
+			result[source.TargetRef] = maps.Clone(cached.(map[int]bool))
+			continue
+		}
+		if !strings.Contains(source.Content, ".Log") {
+			empty := map[int]bool{}
+			shellObservationLinesCache.Store(source.ContentHash, empty)
+			result[source.TargetRef] = map[int]bool{}
 			continue
 		}
 		positions := token.NewFileSet()
@@ -33,12 +47,6 @@ func shellNativeObservationLines(subject *runtimecontract.RuntimeValidationInput
 		if err != nil {
 			continue
 		}
-		// Missing delivery declarations/imports are allowed to leave type holes,
-		// never to guess a type. Only fully resolved primitive arguments (and
-		// closed standard-library value operations) can exclude a log frame.
-		info := &types.Info{Types: map[ast.Expr]types.TypeAndValue{}, Uses: map[*ast.Ident]types.Object{}, Selections: map[*ast.SelectorExpr]*types.Selection{}}
-		config := types.Config{Importer: compilerImports, Error: func(error) {}}
-		_, _ = config.Check(file.Name.Name, positions, []*ast.File{file}, info)
 		alias := ""
 		for _, im := range file.Imports {
 			value, err := strconv.Unquote(im.Path.Value)
@@ -50,6 +58,8 @@ func shellNativeObservationLines(subject *runtimecontract.RuntimeValidationInput
 			}
 		}
 		if alias == "" || alias == "." || alias == "_" {
+			empty := map[int]bool{}
+			shellObservationLinesCache.Store(source.ContentHash, empty)
 			continue
 		}
 		receivers := map[*ast.Object]bool{}
@@ -79,6 +89,36 @@ func shellNativeObservationLines(subject *runtimecontract.RuntimeValidationInput
 			}
 			return true
 		})
+		hasCandidateLog := false
+		if len(receivers) != 0 {
+			ast.Inspect(file, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return !hasCandidateLog
+				}
+				if selector, ok := call.Fun.(*ast.SelectorExpr); ok {
+					if receiver, ok := selector.X.(*ast.Ident); ok && receiver.Obj != nil && receivers[receiver.Obj] && (selector.Sel.Name == "Log" || selector.Sel.Name == "Logf") {
+						hasCandidateLog = true
+					}
+				}
+				return !hasCandidateLog
+			})
+		}
+		if !hasCandidateLog {
+			empty := map[int]bool{}
+			shellObservationLinesCache.Store(source.ContentHash, empty)
+			result[source.TargetRef] = map[int]bool{}
+			continue
+		}
+		if compilerImports == nil {
+			compilerImports = importer.Default()
+		}
+		// Missing delivery declarations/imports are allowed to leave type holes,
+		// never to guess a type. Only fully resolved primitive arguments (and
+		// closed standard-library value operations) can exclude a log frame.
+		info := &types.Info{Types: map[ast.Expr]types.TypeAndValue{}, Uses: map[*ast.Ident]types.Object{}, Selections: map[*ast.SelectorExpr]*types.Selection{}}
+		config := types.Config{Importer: compilerImports, Error: func(error) {}}
+		_, _ = config.Check(file.Name.Name, positions, []*ast.File{file}, info)
 		lines, blocked := map[int]bool{}, map[int]bool{}
 		ast.Inspect(file, func(node ast.Node) bool {
 			call, ok := node.(*ast.CallExpr)
@@ -109,6 +149,7 @@ func shellNativeObservationLines(subject *runtimecontract.RuntimeValidationInput
 		for line := range blocked {
 			delete(lines, line)
 		}
+		shellObservationLinesCache.Store(source.ContentHash, maps.Clone(lines))
 		result[source.TargetRef] = lines
 	}
 	return result

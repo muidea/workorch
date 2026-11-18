@@ -2,6 +2,7 @@ package workorchruntimecontract
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -1045,6 +1046,31 @@ func TestBuildRuntimeCandidateContractManifestCompilesOperationAdmissibility(t *
 		}
 		if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"kind":"mcp/tool_call","parameters":[{"name":"serverId","string":"server-a"},{"name":"tool","string":"repo.summary"}]}]}`)); err != nil {
 			t.Fatalf("binding-selected MCP tool_call without targetRefs must decode under selector-only inventory: %v", err)
+		}
+	})
+	t.Run("selector and constraint vocabulary does not consume target inventory budget", func(t *testing.T) {
+		decision := runtimeCandidateTestDecisionWithBindings(t, RuntimeDecision{State: ConvergenceStateNeedStateChange, RequiredOutput: base})
+		targets := make([]string, 0, 27)
+		for i := 0; i < 27; i++ {
+			targets = append(targets, fmt.Sprintf("file-%02d.go", i))
+		}
+		inventory := RuntimeOperationAdmissibility{
+			PrerequisiteID: "operation_admissibility:file-vocabulary", OwnerModuleID: RuntimeModuleFile,
+			OperationKinds: []string{StepKindFileEdit}, TargetRefs: targets,
+			SelectorRefs:     []string{"file/workspace_deliverable", "file/workspace_relative_existing"},
+			ConstraintRefs:   []string{"workspace-relative-path", "existing-target-must-be-listed", "regular-file-required", "owner-contract"},
+			ObservedRevision: "tree-vocabulary",
+		}
+		inventory.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+		manifest, err := BuildRuntimeCandidateContractManifest(decision, RuntimeCandidateManifestOwnerFacts{OperationAdmissibilities: []RuntimeOperationAdmissibility{inventory}})
+		if err != nil {
+			t.Fatalf("27 targets plus selector/constraint vocabulary must fit owner budget: %v", err)
+		}
+		if got := RuntimeOwnerInventoryTargetCount(inventory); got != 27 {
+			t.Fatalf("target inventory count = %d, want 27", got)
+		}
+		if len(manifest.Operations) != 1 {
+			t.Fatalf("manifest operations = %d, want one", len(manifest.Operations))
 		}
 	})
 	t.Run("oversized admissibility is typed pre-provider failure", func(t *testing.T) {

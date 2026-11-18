@@ -17,6 +17,12 @@ type runtimeWorkDefinitionValidationEntry struct {
 }
 
 func validateRuntimeWorkDefinitionSourcesInSession(seed RuntimeDefinitionSeed, focuses []RuntimeDefinitionFocus, profiles []RuntimeProfileContract, session *runtimeSemanticValidationSession) error {
+	if session != nil && session.committedPreimage != nil &&
+		runtimeRawEqual(seed, session.committedPreimage.Facts.DefinitionSeed) &&
+		runtimeRawEqual(focuses, session.committedPreimage.Facts.DefinitionFocuses) &&
+		runtimeRawEqual(profiles, session.committedPreimage.Facts.Activation.ExecutionContract.ProfileContracts) {
+		return nil
+	}
 	if session != nil {
 		for _, entry := range session.workDefinitions {
 			if runtimeRawEqual(entry.seed, seed) && runtimeRawEqual(entry.focuses, focuses) && runtimeRawEqual(entry.profiles, profiles) {

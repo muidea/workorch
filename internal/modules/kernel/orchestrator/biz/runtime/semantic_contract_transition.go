@@ -21,7 +21,7 @@ func (c *planningTransactionComponent) requireSemanticContract(ctx context.Conte
 	if aggregate.Facts.WorkspaceID != workspaceID || aggregate.Facts.RunID != runID {
 		return RuntimeAggregate{}, fmt.Errorf("%w: runtime semantic planning scope mismatch", common.ErrConflict)
 	}
-	ledger := aggregate.SemanticPlanning.CloneRaw()
+	ledger := runtimecontract.SnapshotSemanticPlanningLedgerWithSharedHistory(aggregate.SemanticPlanning)
 	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningRequired {
 		return replayRequiredSemanticContract(aggregate, ledger, feasibilityBatchID, refreshGeneration)
 	}
@@ -232,7 +232,7 @@ func (c *planningTransactionComponent) sealSemanticContract(ctx context.Context,
 	if aggregate.Facts.WorkspaceID != workspaceID || aggregate.Facts.RunID != runID {
 		return RuntimeAggregate{}, fmt.Errorf("%w: runtime semantic seal scope mismatch", common.ErrConflict)
 	}
-	ledger := aggregate.SemanticPlanning.CloneRaw()
+	ledger := runtimecontract.SnapshotSemanticPlanningLedgerWithSharedHistory(aggregate.SemanticPlanning)
 	if ledger.Manifest != nil {
 		gaps, current := semanticPlanningCatalogsCurrent(aggregate, *ledger.Manifest)
 		if current {
@@ -393,7 +393,7 @@ func (c *planningTransactionComponent) failSemanticContract(ctx context.Context,
 	if aggregate.Facts.WorkspaceID != workspaceID || aggregate.Facts.RunID != runID {
 		return RuntimeAggregate{}, fmt.Errorf("%w: runtime semantic failure scope mismatch", common.ErrConflict)
 	}
-	ledger := aggregate.SemanticPlanning.CloneRaw()
+	ledger := runtimecontract.SnapshotSemanticPlanningLedgerWithSharedHistory(aggregate.SemanticPlanning)
 	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningFailed && ledger.Failure != nil && ledger.Failure.Signature == failure.Signature && ledger.Failure.OriginalCode == failure.OriginalCode && ledger.Failure.OriginalMessage == failure.OriginalMessage {
 		return aggregate, nil
 	}
@@ -420,7 +420,7 @@ func applySemanticContractFailureToAggregate(aggregate RuntimeAggregate, termina
 	if err := failure.Validate(); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	ledger := aggregate.SemanticPlanning.CloneRaw()
+	ledger := runtimecontract.SnapshotSemanticPlanningLedgerWithSharedHistory(aggregate.SemanticPlanning)
 	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningSealed || ledger.Phase == runtimecontract.RuntimeSemanticPlanningFailed {
 		return RuntimeAggregate{}, fmt.Errorf("%w: semantic contract cannot fail from phase %q", common.ErrConflict, ledger.Phase)
 	}

@@ -693,8 +693,13 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		setCapabilityError(result, err)
 		return
 	}
-	if len(command.RequiredTargetRefs) > command.MaxItems {
-		setCapabilityError(result, fmt.Errorf("runtime Shell admissibility target inventory exceeds bounded item count"))
+	if err := runtimecontract.ValidateRuntimeRequiredTargetsWithinInventoryBudget(
+		runtimecontract.RuntimeOwnerInventoryBudget{MaxItems: command.MaxItems},
+		runtimecontract.RuntimeModuleShell,
+		command.PrerequisiteID,
+		command.RequiredTargetRefs,
+	); err != nil {
+		setCapabilityError(result, err)
 		return
 	}
 	if err := validateDeclaredValidationTargetScope(command.WorkspaceDeliverableDirectory, command.RequiredTargetRefs); err != nil {

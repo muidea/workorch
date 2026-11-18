@@ -2,9 +2,7 @@ package run
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"reflect"
 
@@ -38,31 +36,42 @@ func RuntimeStateWriteHash(item *Run) (string, error) {
 // buffer; neither a second state encoding nor a second full payload is needed.
 // This is encoding only, not adjudication of opaque Runtime business state.
 func AppendRuntimeStateWrite(dst *bytes.Buffer, item *Run) (string, error) {
+	digest, _, err := AppendRuntimeStateWriteWithPreimage(dst, item, nil, nil, nil)
+	return digest, err
+}
+
+// AppendRuntimeStateWriteWithPreimage appends exact canonical RuntimeState JSON
+// reusing verified byte spans from an immutable previous Run image when provided.
+func AppendRuntimeStateWriteWithPreimage(
+	dst *bytes.Buffer,
+	item *Run,
+	prev *runtimecontract.RuntimeStateRecord,
+	prevRaw []byte,
+	prevSpans *runtimecontract.RuntimeStateJSONSpans,
+) (string, *runtimecontract.RuntimeStateJSONSpans, error) {
 	if dst == nil {
-		return "", common.ErrInvalidArgument
+		return "", nil, common.ErrInvalidArgument
 	}
 	if item == nil || item.RuntimeState == nil {
 		digest, err := RuntimeStateWriteHash(item)
 		if err == nil {
 			dst.WriteString("null")
 		}
-		return digest, err
+		return digest, nil, err
 	}
 	start := dst.Len()
-	if err := json.NewEncoder(dst).Encode(item.RuntimeState); err != nil {
+	spans, err := runtimecontract.WriteRuntimeStateRecordJSONWithPreimage(dst, *item.RuntimeState, prev, prevRaw, prevSpans)
+	if err != nil {
 		dst.Truncate(start)
-		return "", ErrRuntimeStateIntegrity
+		return "", nil, ErrRuntimeStateIntegrity
 	}
-	// Encoder writes one framing newline after the JSON value. It is never
-	// part of the stored value or identity, including original escaped newlines.
-	dst.Truncate(dst.Len() - 1)
-	sum := sha256.Sum256(dst.Bytes()[start:])
+	sum := runtimecontract.SumRuntimeStateJSONWithPreimage(dst.Bytes()[start:], prevRaw, prevSpans, &spans)
 	digest, err := runtimeStateWriteHash(item, "runtime-state-"+hex.EncodeToString(sum[:]))
 	if err != nil {
 		dst.Truncate(start)
-		return "", err
+		return "", nil, err
 	}
-	return digest, nil
+	return digest, &spans, nil
 }
 
 func runtimeStateWriteHash(item *Run, digest string) (string, error) {
@@ -112,15 +121,15 @@ func ValidateOpaqueRuntimeStateCAS(current, next *Run, expectedRuntimeStateRevis
 	if next.RuntimeLifecycleFence != nil && !reflect.DeepEqual(*next.RuntimeLifecycleFence, next.RuntimeLifecycleFence.Normalized()) {
 		return common.ErrConflict
 	}
-	// Compare the two SM-1 images without copying a Runtime graph that is
-	// replaced by this CAS. DeepEqual is read-only; repository isolation remains.
 	before, after := *current, *next
 	before.RuntimeState, after.RuntimeState = nil, nil
 	before.RuntimeLifecycleFence, after.RuntimeLifecycleFence = nil, nil
-	// Preserve the Run metadata projection contract without copying Runtime.
-	before = *CloneRun(&before)
-	if !reflect.DeepEqual(before, after) {
-		return common.ErrConflict
+	if !runtimecontract.RuntimeRawEqual(before, after) {
+		// Preserve the Run metadata projection contract without copying Runtime.
+		before = *CloneRun(&before)
+		if !runtimecontract.RuntimeRawEqual(before, after) {
+			return common.ErrConflict
+		}
 	}
 	return nil
 }

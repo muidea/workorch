@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"math"
 	"strings"
 	"unicode/utf8"
 
@@ -48,6 +49,98 @@ func SanitizeAuditPayload(input workorcheventpayload.Payload) workorcheventpaylo
 		workorcheventpayload.IntField("payloadBytes", int64(len(input.CanonicalString()))),
 		workorcheventpayload.BoolField("auditPayloadTruncated", true),
 	)
+}
+
+var auditCredentialKeyReplacer = strings.NewReplacer("_", "", "-", "", ".", "", " ", "")
+
+// IsSanitizedAuditPayload checks whether input already satisfies the exact
+// SanitizeAuditPayload contract without cloning or JSON-marshaling clean, bounded
+// payloads, falling back to full SanitizeAuditPayload comparison on any edge case.
+func IsSanitizedAuditPayload(input workorcheventpayload.Payload) bool {
+	if len(input.Fields) == 0 {
+		return true
+	}
+	if auditPayloadContainsCredential(input.Fields, 0) {
+		return false
+	}
+	if auditPayloadAlreadyCleanWithinBudget(input) {
+		return true
+	}
+	return SanitizeAuditPayload(input).Equal(input)
+}
+
+func auditPayloadAlreadyCleanWithinBudget(input workorcheventpayload.Payload) bool {
+	usedBudget := 0
+	nodes := 0
+	if !auditFieldsAlreadyCleanWithinBudget(input.Fields, 0, &usedBudget, &nodes) {
+		return false
+	}
+	return nodes <= 64 && usedBudget <= 2048
+}
+
+func auditFieldsAlreadyCleanWithinBudget(fields []workorcheventpayload.Field, depth int, usedBudget, nodes *int) bool {
+	if depth > maxAuditPayloadDepth || len(fields) > maxAuditPayloadFields {
+		return false
+	}
+	prevName := ""
+	for i, field := range fields {
+		if field.Name == "" || strings.TrimSpace(field.Name) != field.Name {
+			return false
+		}
+		if i > 0 && field.Name <= prevName {
+			return false
+		}
+		prevName = field.Name
+		*nodes++
+		*usedBudget += len(field.Name) + 8
+		if *nodes > 64 || *usedBudget > 2048 {
+			return false
+		}
+		if !auditValueAlreadyCleanWithinBudget(field.Value, depth, usedBudget, nodes) {
+			return false
+		}
+	}
+	return true
+}
+
+func auditValueAlreadyCleanWithinBudget(value workorcheventpayload.Value, depth int, usedBudget, nodes *int) bool {
+	switch value.Kind {
+	case workorcheventpayload.ValueString:
+		if len(value.String) > maxAuditPayloadStringBytes {
+			return false
+		}
+		*usedBudget += len(value.String)
+	case workorcheventpayload.ValueObject:
+		if depth >= maxAuditPayloadDepth {
+			return false
+		}
+		if !auditFieldsAlreadyCleanWithinBudget(value.Object, depth+1, usedBudget, nodes) {
+			return false
+		}
+	case workorcheventpayload.ValueArray:
+		if depth >= maxAuditPayloadDepth || len(value.Array) > maxAuditPayloadArrayItems {
+			return false
+		}
+		for _, item := range value.Array {
+			*nodes++
+			if *nodes > 64 {
+				return false
+			}
+			if !auditValueAlreadyCleanWithinBudget(item, depth+1, usedBudget, nodes) {
+				return false
+			}
+		}
+	case workorcheventpayload.ValueNull, workorcheventpayload.ValueBool, workorcheventpayload.ValueInt, workorcheventpayload.ValueUint:
+		*usedBudget += 16
+	case workorcheventpayload.ValueFloat:
+		if math.IsNaN(value.Float) || math.IsInf(value.Float, 0) {
+			return false
+		}
+		*usedBudget += 16
+	default:
+		return false
+	}
+	return *usedBudget <= 2048
 }
 
 func PayloadSHA256(payload workorcheventpayload.Payload) string {
@@ -161,9 +254,7 @@ func auditPayloadContainsCredential(fields []workorcheventpayload.Field, depth i
 		return false
 	}
 	for _, field := range fields[:min(len(fields), maxAuditPayloadFields)] {
-		key := strings.NewReplacer("_", "", "-", "", ".", "", " ", "").Replace(strings.ToLower(field.Name))
-		switch key {
-		case "apikey", "apitoken", "accesstoken", "refreshtoken", "token", "password", "passwd", "secret", "clientsecret", "privatekey", "credential", "credentials", "authorization", "cookie", "setcookie":
+		if isAuditCredentialFieldName(field.Name) {
 			if field.Value.Kind == workorcheventpayload.ValueString && field.Value.String != "" ||
 				field.Value.Kind == workorcheventpayload.ValueObject && len(field.Value.Object) > 0 ||
 				field.Value.Kind == workorcheventpayload.ValueArray && len(field.Value.Array) > 0 {
@@ -190,4 +281,37 @@ func auditValueContainsCredential(value workorcheventpayload.Value, depth int) b
 		}
 	}
 	return false
+}
+
+func isAuditCredentialFieldName(name string) bool {
+	var buf [16]byte
+	n := 0
+	for i := 0; i < len(name); i++ {
+		b := name[i]
+		if b >= utf8.RuneSelf {
+			switch auditCredentialKeyReplacer.Replace(strings.ToLower(name)) {
+			case "apikey", "apitoken", "accesstoken", "refreshtoken", "token", "password", "passwd", "secret", "clientsecret", "privatekey", "credential", "credentials", "authorization", "cookie", "setcookie":
+				return true
+			default:
+				return false
+			}
+		}
+		if b == '_' || b == '-' || b == '.' || b == ' ' {
+			continue
+		}
+		if b >= 'A' && b <= 'Z' {
+			b += 'a' - 'A'
+		}
+		if n >= 13 {
+			return false
+		}
+		buf[n] = b
+		n++
+	}
+	switch string(buf[:n]) {
+	case "apikey", "apitoken", "accesstoken", "refreshtoken", "token", "password", "passwd", "secret", "clientsecret", "privatekey", "credential", "credentials", "authorization", "cookie", "setcookie":
+		return true
+	default:
+		return false
+	}
 }

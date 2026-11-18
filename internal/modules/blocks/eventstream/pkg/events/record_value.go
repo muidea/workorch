@@ -33,10 +33,10 @@ func (item EventRecordData) Validate() error {
 	if canonicalOccurredAt != item.OccurredAt {
 		return fmt.Errorf("%w: event record occurredAt must use canonical UTC RFC3339", common.ErrInvalidArgument)
 	}
-	if !recordpayload.SanitizeAuditPayload(item.Payload).Equal(item.Payload) {
+	if !recordpayload.IsSanitizedAuditPayload(item.Payload) {
 		return fmt.Errorf("%w: event record payload is not sanitized and bounded", common.ErrInvalidArgument)
 	}
-	if !recordpayload.SanitizeAuditPayload(item.PayloadSummary).Equal(item.PayloadSummary) {
+	if !recordpayload.IsSanitizedAuditPayload(item.PayloadSummary) {
 		return fmt.Errorf("%w: event record payload summary is not sanitized and bounded", common.ErrInvalidArgument)
 	}
 	return nil
@@ -47,10 +47,6 @@ func EventRecordDataFromModel(item *eventstreammodel.EventRecord) (EventRecordDa
 		return EventRecordData{}, common.ErrInvalidArgument
 	}
 	ret := EventRecordData(*item)
-	if !recordpayload.SanitizeAuditPayload(item.Payload).Equal(item.Payload) ||
-		!recordpayload.SanitizeAuditPayload(item.PayloadSummary).Equal(item.PayloadSummary) {
-		return EventRecordData{}, fmt.Errorf("%w: persisted event record payload is not sanitized and bounded", common.ErrInvalidArgument)
-	}
 	ret.Payload = item.Payload.Clone()
 	ret.PayloadSummary = item.PayloadSummary.Clone()
 	if err := ret.Validate(); err != nil {

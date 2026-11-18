@@ -49,6 +49,8 @@ func main() {
 		method := "value"
 		if field.Name == "RuntimeState" {
 			fmt.Fprintln(&out, "e.state(v)")
+		} else if field.Name == "RuntimeBootstrap" {
+			fmt.Fprintln(&out, "e.bootstrap(v)")
 		} else {
 			fmt.Fprintf(&out, "e.%s(v.%s)\n", method, field.Name)
 		}

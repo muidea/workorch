@@ -118,6 +118,9 @@ func (i RuntimeValidationInputReviewInformation) Validate() error {
 }
 
 func RuntimeSemanticInputReviewInformationForCatalogs(values []RuntimeValidationInputReviewInformation, catalogs []RuntimeOperationAdmissibility) []RuntimeValidationInputReviewInformation {
+	if len(values) == 0 {
+		return nil
+	}
 	subjects := make(map[string]bool)
 	for _, catalog := range catalogs {
 		for _, surface := range catalog.ValidationSurfaces {

@@ -156,3 +156,71 @@ func FuzzRuntimeOwnerRevisionApplicability(f *testing.F) {
 		}
 	})
 }
+
+func TestRuntimeOwnerRevisionSetWithHashFastPathMatchesFallback(t *testing.T) {
+	cases := []struct {
+		name string
+		set  RuntimeOwnerRevisionSet
+	}{
+		{
+			name: "nil_entries",
+			set:  RuntimeOwnerRevisionSet{DefinitionRevision: "def-1"},
+		},
+		{
+			name: "empty_entries",
+			set:  RuntimeOwnerRevisionSet{DefinitionRevision: "def-1", Entries: []RuntimeOwnerRevisionRef{}},
+		},
+		{
+			name: "ascii_entries",
+			set: RuntimeOwnerRevisionSet{
+				DefinitionRevision: "def-2",
+				Entries: []RuntimeOwnerRevisionRef{
+					{
+						OwnerKind: "capability", OwnerInstanceID: "file", ResourceKind: "workspace-target",
+						ResourceID: "internal/pkg/foo.go", SnapshotID: "snap-1", Revision: "rev-9",
+						Fence: 42, DependencyHash: "sha256:abc123",
+					},
+					{
+						OwnerKind: "capability", OwnerInstanceID: "shell", ResourceKind: "command",
+						ResourceID: "go test ./...", SnapshotID: "snap-2", Revision: "rev-10",
+						Fence: 7, DependencyHash: "sha256:def456",
+					},
+				},
+			},
+		},
+		{
+			name: "html_escape_fallback",
+			set: RuntimeOwnerRevisionSet{
+				DefinitionRevision: "def<3>&",
+				Entries: []RuntimeOwnerRevisionRef{{
+					OwnerKind: "capability", OwnerInstanceID: "web", ResourceKind: "url",
+					ResourceID: "https://example.com?a=1&b=2", SnapshotID: "snap<3>", Revision: "rev",
+					Fence: 1, DependencyHash: "hash",
+				}},
+			},
+		},
+		{
+			name: "nul_and_utf8_fallback",
+			set: RuntimeOwnerRevisionSet{
+				DefinitionRevision: "def-utf8",
+				Entries: []RuntimeOwnerRevisionRef{{
+					OwnerKind: "capability\x00file", OwnerInstanceID: "owner", ResourceKind: "fact",
+					ResourceID: "原资源", SnapshotID: "snap", Revision: "rev", Fence: 9, DependencyHash: "hash",
+				}},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			normalized := tc.set.Normalized()
+			want := stableFormalValueHash("runtime-owner-revision-set", struct {
+				DefinitionRevision string
+				Entries            []RuntimeOwnerRevisionRef
+			}{normalized.DefinitionRevision, normalized.Entries})
+			got := tc.set.WithHash().SetHash
+			if got != want {
+				t.Fatalf("WithHash() = %q, want %q", got, want)
+			}
+		})
+	}
+}

@@ -30,12 +30,12 @@ func committedProspectiveOwnerFactAcquisition(
 	facts runtimecontract.RuntimeFacts,
 	lineage []runtimecontract.RuntimeCoverageProofLineage,
 ) (runtimecontract.RuntimeOwnerFactConvergence, bool) {
-	facts = facts.Normalized()
-	lineage = runtimecontract.NormalizeRuntimeCoverageProofLineage(lineage)
 	focus := facts.Focus.Normalized()
 	if len(focus.CoverageWorkItemIDs) != 1 || len(focus.ProspectiveTargetRefs) != 1 || focus.TargetSelectorRef == "" {
 		return runtimecontract.RuntimeOwnerFactConvergence{}, false
 	}
+	facts = facts.Normalized()
+	lineage = runtimecontract.NormalizeRuntimeCoverageProofLineage(lineage)
 	coverageID := focus.CoverageWorkItemIDs[0]
 	item, bound := currentRuntimeCWIBindingForFocus(facts, coverageID)
 	if !bound || item.CurrentBindingRef == nil {

@@ -157,7 +157,7 @@ func (r *inMemoryRuntimeStateRepository) Load(_ context.Context, workspaceID com
 	// persisted aggregate through a shared slice/map backing array before their
 	// CAS succeeds. This matters for crash-boundary tests such as request
 	// content written before the session-fragment CAS.
-	return runtimeAggregateFromRecord(runtimeStateRecordFromAggregate(*r.aggregate)), nil
+	return runtime.RuntimeAggregate(runtimecontract.SnapshotRuntimeStateRecordFromStored((*runtimecontract.RuntimeStateRecord)(r.aggregate))), nil
 }
 
 func (r *inMemoryRuntimeStateRepository) Save(_ context.Context, aggregate runtime.RuntimeAggregate, expectedRevision uint64) error {
@@ -167,7 +167,7 @@ func (r *inMemoryRuntimeStateRepository) Save(_ context.Context, aggregate runti
 	if r.aggregate != nil && r.aggregate.StateRevision != expectedRevision {
 		return common.ErrConflict
 	}
-	copy := runtimeAggregateFromRecord(runtimeStateRecordFromAggregate(aggregate))
+	copy := runtime.RuntimeAggregate(runtimecontract.SnapshotRuntimeStateRecordWithSharedReadOnlyHistory((*runtimecontract.RuntimeStateRecord)(&aggregate)))
 	r.aggregate = &copy
 	return nil
 }

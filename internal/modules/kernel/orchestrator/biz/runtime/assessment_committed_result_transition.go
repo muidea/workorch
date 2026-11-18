@@ -2,9 +2,9 @@ package runtime
 
 import (
 	"fmt"
-	"reflect"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 // Committed SM-2 results are immutable history. New owner observations can
@@ -13,14 +13,14 @@ import (
 // CAS preimage; it never re-runs a historical classifier.
 func validateCommittedAssessmentResultTransition(previous, next RuntimeAggregate) error {
 	count := len(previous.Facts.Assessments)
-	if len(next.Facts.Assessments) < count || count > 0 && !reflect.DeepEqual(previous.Facts.Assessments, next.Facts.Assessments[:count]) {
+	if len(next.Facts.Assessments) < count || count > 0 && !runtimecontract.RuntimeRawEqual(previous.Facts.Assessments, next.Facts.Assessments[:count]) {
 		return fmt.Errorf("%w: committed runtime assessment facts are immutable", common.ErrConflict)
 	}
 	for i, original := range previous.CompletedDispatches {
 		if original.Candidate.Assessment == nil {
 			continue
 		}
-		if i >= len(next.CompletedDispatches) || !reflect.DeepEqual(original, next.CompletedDispatches[i]) {
+		if i >= len(next.CompletedDispatches) || !runtimecontract.RuntimeRawEqual(original, next.CompletedDispatches[i]) {
 			return fmt.Errorf("%w: committed runtime assessment dispatch %q is immutable", common.ErrConflict, original.ID)
 		}
 	}
@@ -36,7 +36,7 @@ func validateCommittedAssessmentResultTransition(previous, next RuntimeAggregate
 		return fmt.Errorf("%w: new runtime assessment result has no original active transaction", common.ErrConflict)
 	}
 	if next.ActiveDispatch != nil || len(next.CompletedDispatches) != len(previous.CompletedDispatches)+1 ||
-		len(previous.CompletedDispatches) > 0 && !reflect.DeepEqual(previous.CompletedDispatches, next.CompletedDispatches[:len(previous.CompletedDispatches)]) {
+		len(previous.CompletedDispatches) > 0 && !runtimecontract.RuntimeRawEqual(previous.CompletedDispatches, next.CompletedDispatches[:len(previous.CompletedDispatches)]) {
 		return fmt.Errorf("%w: new runtime assessment result must close its original dispatch", common.ErrConflict)
 	}
 	committed := cloneSealedDispatchRaw(next.CompletedDispatches[len(previous.CompletedDispatches)])
@@ -49,7 +49,7 @@ func validateCommittedAssessmentResultTransition(previous, next RuntimeAggregate
 	committed.State = previous.ActiveDispatch.State
 	committed.AssessmentAdjudication = nil
 	committed.AssessmentAdjudicationHash = ""
-	if !reflect.DeepEqual(committed, *previous.ActiveDispatch) {
+	if !runtimecontract.RuntimeRawEqual(committed, *previous.ActiveDispatch) {
 		return fmt.Errorf("%w: new runtime assessment result changed its sealed input", common.ErrConflict)
 	}
 	return nil

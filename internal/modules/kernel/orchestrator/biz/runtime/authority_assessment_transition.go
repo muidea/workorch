@@ -55,7 +55,7 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 	proofCompleteWithoutOwnerFacts := evaluation.ProofCompleteWithoutOwnerFacts()
 	// Keep this exact owner-private preimage for the post-adjudication owner-fact
 	// handoff. Advancing the assessment sequence is not a new owner observation.
-	assessmentProofPreimage := aggregate.CloneRaw()
+	assessmentProofPreimage := snapshotRuntimeAggregateWithSharedHistory(aggregate)
 	ownerFactAcquisitionSettled := hasOwnerFactAcquisition && len(missingOwnerFacts) == 0 && proofCompleteWithoutOwnerFacts
 	ownerFactOnlyGap := len(missingOwnerFacts) != 0 && proofCompleteWithoutOwnerFacts
 	canonicalCoverage := applyCanonicalAssessmentCoverage(aggregate, aggregate.ActiveDispatch.ID, evaluation)

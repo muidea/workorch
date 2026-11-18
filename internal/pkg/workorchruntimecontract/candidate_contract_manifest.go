@@ -1605,9 +1605,8 @@ func runtimeCandidateValidateAdmissibilityInventory(value RuntimeOperationAdmiss
 	if err := value.Validate(); err != nil {
 		return fmt.Errorf("candidate manifest operation admissibility is invalid: %w", err)
 	}
-	itemCount := len(value.TargetRefs) + len(value.SelectorRefs) + len(value.ConstraintRefs)
-	if !RuntimeOwnerInventoryWithinBudget(DefaultRuntimeOwnerInventoryBudget(), itemCount) {
-		return fmt.Errorf("candidate manifest operation admissibility exceeds owner inventory budget")
+	if err := ValidateRuntimeOwnerInventoryAdmissibilityBudget(DefaultRuntimeOwnerInventoryBudget(), value); err != nil {
+		return fmt.Errorf("candidate manifest operation admissibility exceeds owner inventory budget: %w", err)
 	}
 	// A non-empty TargetRefs set is a complete bounded inventory. Selector-only
 	// inventories are closed owner selectors and may seal without TargetRefs.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/user"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -223,8 +224,16 @@ func managedValidationHostCachePath(explicit, hostHome, homeRelative string) str
 	if value == "off" {
 		return ""
 	}
-	if value == "" && strings.TrimSpace(hostHome) != "" {
-		value = filepath.Join(hostHome, homeRelative)
+	if value == "" {
+		resolvedHome := strings.TrimSpace(hostHome)
+		if resolvedHome == "" {
+			if current, err := user.Current(); err == nil {
+				resolvedHome = strings.TrimSpace(current.HomeDir)
+			}
+		}
+		if resolvedHome != "" {
+			value = filepath.Join(resolvedHome, homeRelative)
+		}
 	}
 	if value == "" || !filepath.IsAbs(value) {
 		return ""

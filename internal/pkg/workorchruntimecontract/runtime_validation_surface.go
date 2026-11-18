@@ -327,7 +327,7 @@ func ValidateRuntimeValidationProofPreparations(values []RuntimeValidationProofP
 func validateAndNormalizeRuntimeValidationProofPreparations(values []RuntimeValidationProofPreparation) ([]RuntimeValidationProofPreparation, error) {
 	seenHash := make(map[string]struct{}, len(values))
 	seenCoverage := make(map[common.CoverageWorkItemID]struct{}, len(values))
-	var canonical []RuntimeValidationProofPreparation
+	canonical := make([]RuntimeValidationProofPreparation, 0, len(values))
 	for _, raw := range values {
 		value, err := validateAndNormalizeRuntimeValidationProofPreparation(raw)
 		if err != nil {

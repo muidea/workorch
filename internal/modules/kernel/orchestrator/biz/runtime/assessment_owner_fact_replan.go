@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -151,15 +150,15 @@ func replanRuntimeCWIForUnmetOwnerFacts(aggregate *RuntimeAggregate, assessmentI
 	if err := validateRuntimeOwnerFactAssessmentPreimage(*aggregate, assessmentID, preimage); err != nil {
 		return false, err
 	}
+	if err := requireCurrentRuntimeCWILedger(aggregate.Facts); err != nil {
+		return false, err
+	}
+	if !evaluation.ProofCompleteWithoutOwnerFacts() || evaluation.Adjudication.DispatchID != assessmentID || len(evaluation.MissingOwnerFacts) == 0 {
+		return false, nil
+	}
 	facts := aggregate.Facts.Normalized()
 	if err := requireCurrentRuntimeCWILedger(facts); err != nil {
 		return false, err
-	}
-	if !evaluation.ProofCompleteWithoutOwnerFacts() || evaluation.Adjudication.DispatchID != assessmentID {
-		return false, nil
-	}
-	if len(evaluation.MissingOwnerFacts) == 0 {
-		return false, nil
 	}
 	acquisition, acquisitionReady := runtimecontract.ResolveRuntimeOwnerFactAcquisition(facts.Focus.RequiredOwnerFacts, facts.Focus.OwnerFactConvergences, facts.Resources.OperationAdmissibilities)
 	if !acquisitionReady || runtimeOwnerFactReplanBudgetExhausted(facts, acquisition) {
@@ -187,16 +186,16 @@ func validateRuntimeOwnerFactAssessmentPreimage(aggregate RuntimeAggregate, asse
 		preimage.StateRevision != aggregate.StateRevision || preimage.EvidenceSequence+1 != aggregate.EvidenceSequence ||
 		aggregate.Facts.EvidenceRevision != nextEvidenceRevision(aggregate.EvidenceSequence) ||
 		preimage.Facts.WorkspaceID != aggregate.Facts.WorkspaceID || preimage.Facts.RunID != aggregate.Facts.RunID ||
-		!reflect.DeepEqual(preimage.Definition, aggregate.Definition) ||
-		!reflect.DeepEqual(preimage.Facts.DefinitionSeed, aggregate.Facts.DefinitionSeed) ||
-		!reflect.DeepEqual(preimage.Facts.Activation, aggregate.Facts.Activation) ||
-		!reflect.DeepEqual(preimage.Facts.Focus, aggregate.Facts.Focus) ||
-		!reflect.DeepEqual(preimage.SemanticPlanning, aggregate.SemanticPlanning) ||
-		!reflect.DeepEqual(preimage.OperationReceipts, aggregate.OperationReceipts) ||
-		!reflect.DeepEqual(preimage.CoverageProofLineage, aggregate.CoverageProofLineage) ||
-		!reflect.DeepEqual(preimage.Facts.Evidence, aggregate.Facts.Evidence) ||
-		!reflect.DeepEqual(preimage.Facts.EvidenceApplicabilityObservations, aggregate.Facts.EvidenceApplicabilityObservations) ||
-		!reflect.DeepEqual(preimage.Facts.Resources.OperationAdmissibilities, aggregate.Facts.Resources.OperationAdmissibilities) {
+		!runtimecontract.RuntimeRawEqual(preimage.Definition, aggregate.Definition) ||
+		!runtimecontract.RuntimeRawEqual(preimage.Facts.DefinitionSeed, aggregate.Facts.DefinitionSeed) ||
+		!runtimecontract.RuntimeRawEqual(preimage.Facts.Activation, aggregate.Facts.Activation) ||
+		!runtimecontract.RuntimeRawEqual(preimage.Facts.Focus, aggregate.Facts.Focus) ||
+		!runtimecontract.RuntimeRawEqual(preimage.SemanticPlanning, aggregate.SemanticPlanning) ||
+		!runtimecontract.RuntimeRawEqual(preimage.OperationReceipts, aggregate.OperationReceipts) ||
+		!runtimecontract.RuntimeRawEqual(preimage.CoverageProofLineage, aggregate.CoverageProofLineage) ||
+		!runtimecontract.RuntimeRawEqual(preimage.Facts.Evidence, aggregate.Facts.Evidence) ||
+		!runtimecontract.RuntimeRawEqual(preimage.Facts.EvidenceApplicabilityObservations, aggregate.Facts.EvidenceApplicabilityObservations) ||
+		!runtimecontract.RuntimeRawEqual(preimage.Facts.Resources.OperationAdmissibilities, aggregate.Facts.Resources.OperationAdmissibilities) {
 		return fmt.Errorf("%w: owner-fact assessment requires exact same-CAS proof preimage", common.ErrConflict)
 	}
 	dispatches, assessments := 0, 0
@@ -207,7 +206,7 @@ func validateRuntimeOwnerFactAssessmentPreimage(aggregate RuntimeAggregate, asse
 			original.State = preimage.ActiveDispatch.State
 			original.AssessmentAdjudication = nil
 			original.AssessmentAdjudicationHash = ""
-			if !reflect.DeepEqual(original, *preimage.ActiveDispatch) {
+			if !runtimecontract.RuntimeRawEqual(original, *preimage.ActiveDispatch) {
 				return fmt.Errorf("%w: owner-fact assessment changed its sealed dispatch preimage", common.ErrConflict)
 			}
 			adjudicationHash = dispatch.AssessmentAdjudicationHash
@@ -227,8 +226,8 @@ func validateRuntimeOwnerFactAssessmentPreimage(aggregate RuntimeAggregate, asse
 		}
 	}
 	if dispatches != 1 || assessments != 1 || len(aggregate.CompletedDispatches) != len(preimage.CompletedDispatches)+1 || len(aggregate.Facts.Assessments) != len(preimage.Facts.Assessments)+1 ||
-		(len(preimage.CompletedDispatches) != 0 && !reflect.DeepEqual(aggregate.CompletedDispatches[:len(preimage.CompletedDispatches)], preimage.CompletedDispatches)) ||
-		(len(preimage.Facts.Assessments) != 0 && !reflect.DeepEqual(aggregate.Facts.Assessments[:len(preimage.Facts.Assessments)], preimage.Facts.Assessments)) {
+		(len(preimage.CompletedDispatches) != 0 && !runtimecontract.RuntimeRawEqual(aggregate.CompletedDispatches[:len(preimage.CompletedDispatches)], preimage.CompletedDispatches)) ||
+		(len(preimage.Facts.Assessments) != 0 && !runtimecontract.RuntimeRawEqual(aggregate.Facts.Assessments[:len(preimage.Facts.Assessments)], preimage.Facts.Assessments)) {
 		return fmt.Errorf("%w: owner-fact assessment lacks unique just-adjudicated transaction", common.ErrConflict)
 	}
 	return nil

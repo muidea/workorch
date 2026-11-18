@@ -246,7 +246,7 @@ func InspectValidationScratchPrerequisite(facts runtimecontract.RuntimeFacts) (*
 
 func pendingPrerequisite(facts runtimecontract.RuntimeFacts, id string, kind runtimecontract.PrerequisiteKind) (runtimecontract.RuntimePrerequisite, error) {
 	id = strings.TrimSpace(id)
-	for _, item := range facts.Normalized().Prerequisites.Pending {
+	for _, item := range runtimecontract.NormalizeRuntimePrerequisites(facts.Prerequisites.Pending) {
 		if item.ID == id && item.Kind == kind {
 			return item, nil
 		}

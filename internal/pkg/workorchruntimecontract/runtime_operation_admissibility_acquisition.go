@@ -100,6 +100,15 @@ func (a RuntimeOperationAdmissibilityAcquisition) ValidateForRequest(request Run
 		return fmt.Errorf("runtime operation admissibility proof requirements: %w", err)
 	}
 	inventory := a.Admissibility.Normalized()
+	if err := ValidateRuntimeRequiredTargetsWithinInventoryBudget(RuntimeOwnerInventoryBudget{MaxItems: request.MaxItems}, inventory.OwnerModuleID, inventory.PrerequisiteID, request.RequiredTargetRefs); err != nil {
+		return fmt.Errorf("runtime operation admissibility request required targets exceed owner inventory budget: %w", err)
+	}
+	if err := ValidateRuntimeOwnerInventoryAdmissibilityBudget(RuntimeOwnerInventoryBudget{MaxItems: request.MaxItems}, inventory); err != nil {
+		return fmt.Errorf("runtime operation admissibility acquisition exceeds requested owner inventory budget: %w", err)
+	}
+	if err := validateRuntimeOperationAdmissibilityRequiredTargetsPreserved(request, inventory); err != nil {
+		return err
+	}
 	if inventory.PrerequisiteID != strings.TrimSpace(request.PrerequisiteID) || inventory.OwnerModuleID != strings.TrimSpace(request.OwnerModuleID) {
 		return fmt.Errorf("runtime operation admissibility acquisition inventory does not match request")
 	}
@@ -619,6 +628,9 @@ func ValidateRuntimeOperationAdmissibilityRequest(request RuntimeOperationAdmiss
 		request.MaxItems < 1 || request.MaxItems > RuntimeOwnerInventoryItemsMaxCount {
 		return common.ErrInvalidArgument
 	}
+	if err := ValidateRuntimeRequiredTargetsWithinInventoryBudget(RuntimeOwnerInventoryBudget{MaxItems: request.MaxItems}, ownerModuleID, request.PrerequisiteID, request.RequiredTargetRefs); err != nil {
+		return err
+	}
 	for _, kind := range request.RequiredKinds {
 		descriptor, ok := RuntimeOperationDescriptorForKind(kind)
 		if !ok || descriptor.OwnerModuleID != ownerModuleID {
@@ -677,4 +689,30 @@ func runtimeOperationAdmissibilityKindsContain(values []string, wanted string) b
 		}
 	}
 	return false
+}
+
+func validateRuntimeOperationAdmissibilityRequiredTargetsPreserved(request RuntimeOperationAdmissibilityRequest, inventory RuntimeOperationAdmissibility) error {
+	required := normalizeStrings(request.RequiredTargetRefs)
+	if len(required) == 0 {
+		return nil
+	}
+	switch inventory.OwnerModuleID {
+	case RuntimeModuleShell:
+		for _, target := range required {
+			if !containsString(inventory.TargetRefs, target) {
+				return fmt.Errorf("runtime Shell admissibility omitted required target %q", target)
+			}
+		}
+	case RuntimeModuleFile:
+		binding := request.WorkspaceManifestBinding.Normalized()
+		for _, target := range required {
+			if !binding.Empty() && !containsString(binding.Manifest.TargetRefs, target) {
+				continue
+			}
+			if !containsString(inventory.TargetRefs, target) {
+				return fmt.Errorf("runtime File admissibility omitted required target %q", target)
+			}
+		}
+	}
+	return nil
 }

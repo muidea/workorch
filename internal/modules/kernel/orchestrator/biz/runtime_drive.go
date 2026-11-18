@@ -276,7 +276,7 @@ func (m *Biz) driveRuntimeLocked(ctx context.Context, command orchestratorevents
 	stablePrefixHash := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
 	batchStartRevision := aggregate.StateRevision
 	for transition := 0; transition < runtimeDriveTransitionBatchSize; transition++ {
-		if transition != 0 {
+		if transition != 0 && runtimeDriveRequiresContinuationLifecycle(aggregate) {
 			// Runtime aggregate projection updates Run's opaque lifecycle fence on
 			// every persisted transition. Re-read that owner state before comparing
 			// a later aggregate revision; retaining the initialization pointer would
@@ -317,21 +317,34 @@ func runtimeDriveBatchYield(start, current uint64) error {
 	return &runtimePersistedDrivePendingError{Revision: current}
 }
 
+func runtimeDriveContinuationHandoff(aggregate runtime.RuntimeAggregate) (runtimeGovernanceLifecycleHandoff, bool, error) {
+	if aggregate.Termination != nil || runtimeConvergenceTerminal(aggregate.Decision.State) || aggregate.Decision.State == runtimecontract.ConvergenceStateNeedGovernance {
+		return runtimeGovernanceLifecycleHandoff{}, false, nil
+	}
+	record := runtimecontract.RuntimeStateRecord(aggregate)
+	handoff, governed, err := runtimeGovernanceLifecycleHandoffFromState(&record)
+	if err != nil {
+		return runtimeGovernanceLifecycleHandoff{}, false, err
+	}
+	if !governed || (handoff.Kind != runtimeGovernanceLifecycleContinuationDecision && handoff.Kind != runtimeGovernanceLifecycleContinuationApproval) {
+		return runtimeGovernanceLifecycleHandoff{}, false, nil
+	}
+	return handoff, true, nil
+}
+
+func runtimeDriveRequiresContinuationLifecycle(aggregate runtime.RuntimeAggregate) bool {
+	_, required, err := runtimeDriveContinuationHandoff(aggregate)
+	return err != nil || required
+}
+
 func runtimeDriveContinuationFence(aggregate runtime.RuntimeAggregate, run *runmodel.Run) error {
 	return runtimeDriveContinuationFenceFromLifecycle(aggregate, runtimeLifecycleView(run))
 }
 
 func runtimeDriveContinuationFenceFromLifecycle(aggregate runtime.RuntimeAggregate, lifecycle runmodel.RuntimeLifecycleState) error {
-	if aggregate.Termination != nil || runtimeConvergenceTerminal(aggregate.Decision.State) || aggregate.Decision.State == runtimecontract.ConvergenceStateNeedGovernance {
-		return nil
-	}
-	record := runtimecontract.RuntimeStateRecord(aggregate)
-	handoff, governed, err := runtimeGovernanceLifecycleHandoffFromState(&record)
-	if err != nil {
+	handoff, required, err := runtimeDriveContinuationHandoff(aggregate)
+	if err != nil || !required {
 		return err
-	}
-	if !governed || (handoff.Kind != runtimeGovernanceLifecycleContinuationDecision && handoff.Kind != runtimeGovernanceLifecycleContinuationApproval) {
-		return nil
 	}
 	fact, err := runContinuationEligibleFact(
 		aggregate.Facts.WorkspaceID,
@@ -374,7 +387,7 @@ func (m *Biz) driveOneRuntimeTransition(ctx context.Context, run *runmodel.Run, 
 	region := startRuntimeTraceRegion(ctx, "workorch.runtime.drive_transition")
 	defer region.End()
 	previousRevision := aggregate.StateRevision
-	previousConvergence := runtime.RuntimeConvergenceProgressSignature(aggregate)
+	previousAggregate := aggregate
 	if runtimeTerminalDeliveryReady(aggregate) {
 		return terminalRuntimeDriveTransition(aggregate), nil
 	}
@@ -427,7 +440,7 @@ func (m *Biz) driveOneRuntimeTransition(ctx context.Context, run *runmodel.Run, 
 	// A retired catalog's binding-free target-grounding terminal remains behind
 	// runtimeTerminalDeliveryReady's exact semantic re-drive fence.
 	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedGovernance && runtimeSemanticAuthorityPending(aggregate) {
-		return m.driveOneRuntimeSemanticTransition(ctx, aggregate, previousRevision, previousConvergence)
+		return m.driveOneRuntimeSemanticTransition(ctx, aggregate, previousRevision, previousAggregate)
 	}
 	if aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningFailed {
 		return terminalRuntimeDriveTransition(aggregate), nil
@@ -446,7 +459,7 @@ func (m *Biz) driveOneRuntimeTransition(ctx context.Context, run *runmodel.Run, 
 	if err != nil {
 		return runtimeDriveTransitionOutcome{}, err
 	}
-	return finishRuntimeConvergenceTransition(updated, previousRevision, previousConvergence)
+	return finishRuntimeConvergenceTransition(updated, previousRevision, previousAggregate)
 }
 
 func (m *Biz) driveRuntimeDefinitionClarification(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, error) {
@@ -502,7 +515,7 @@ func terminalRuntimeDriveTransition(aggregate runtime.RuntimeAggregate) runtimeD
 	return runtimeDriveTransitionOutcome{aggregate: aggregate, result: &result}
 }
 
-func (m *Biz) driveOneRuntimeSemanticTransition(ctx context.Context, aggregate runtime.RuntimeAggregate, previousRevision uint64, previousConvergence string) (runtimeDriveTransitionOutcome, error) {
+func (m *Biz) driveOneRuntimeSemanticTransition(ctx context.Context, aggregate runtime.RuntimeAggregate, previousRevision uint64, previousAggregate runtime.RuntimeAggregate) (runtimeDriveTransitionOutcome, error) {
 	updated, err := m.driveRuntimeSemanticPlanning(ctx, aggregate)
 	if err != nil {
 		return runtimeDriveTransitionOutcome{}, err
@@ -513,7 +526,7 @@ func (m *Biz) driveOneRuntimeSemanticTransition(ctx context.Context, aggregate r
 	if updated.StateRevision <= previousRevision {
 		return runtimeDriveTransitionOutcome{}, &runtimeInvariantError{Message: fmt.Sprintf("Runtime semantic planning made no persisted progress at revision %d", previousRevision)}
 	}
-	if runtime.RuntimeConvergenceProgressSignature(updated) == previousConvergence {
+	if runtime.RuntimeConvergenceProgressEqual(previousAggregate, updated) {
 		return runtimeDriveTransitionOutcome{}, &runtimePersistedDrivePendingError{Revision: updated.StateRevision}
 	}
 	return runtimeDriveTransitionOutcome{aggregate: updated}, nil
@@ -542,7 +555,7 @@ func (m *Biz) advanceRuntimeConvergence(ctx context.Context, aggregate runtime.R
 	}
 }
 
-func finishRuntimeConvergenceTransition(aggregate runtime.RuntimeAggregate, previousRevision uint64, previousConvergence string) (runtimeDriveTransitionOutcome, error) {
+func finishRuntimeConvergenceTransition(aggregate runtime.RuntimeAggregate, previousRevision uint64, previousAggregate runtime.RuntimeAggregate) (runtimeDriveTransitionOutcome, error) {
 	if _, waiting := runtimeCurrentRecoverableWait(aggregate); waiting {
 		result, err := runtimeRecoverableWaitDriveResult(aggregate)
 		return runtimeDriveTransitionOutcome{aggregate: aggregate, result: &result}, err
@@ -560,7 +573,7 @@ func finishRuntimeConvergenceTransition(aggregate runtime.RuntimeAggregate, prev
 	if aggregate.StateRevision <= previousRevision {
 		return runtimeDriveTransitionOutcome{}, &runtimeInvariantError{Message: fmt.Sprintf("Runtime drive made no persisted progress at revision %d", previousRevision)}
 	}
-	if runtime.RuntimeConvergenceProgressSignature(aggregate) == previousConvergence {
+	if runtime.RuntimeConvergenceProgressEqual(previousAggregate, aggregate) {
 		return runtimeDriveTransitionOutcome{}, &runtimePersistedDrivePendingError{Revision: aggregate.StateRevision}
 	}
 	return runtimeDriveTransitionOutcome{aggregate: aggregate}, nil

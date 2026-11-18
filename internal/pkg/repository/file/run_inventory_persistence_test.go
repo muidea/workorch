@@ -145,3 +145,131 @@ func TestExactRunReadKeepsUnselectedHistoryOpaque(t *testing.T) {
 		t.Fatal("materialization rewrote original")
 	}
 }
+
+func TestCompareAndSwapRuntimeStateKeepsHistoricalRunsUnmaterializedAndByteCanonical(t *testing.T) {
+	ctx := context.Background()
+	for _, indentCold := range []bool{false, true} {
+		name := "compact"
+		if indentCold {
+			name = "indented"
+		}
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "runs.json")
+			defer EvictMapFileCache(path)
+
+			seedRepo := NewRunRepository(path)
+			hist := &run.Run{
+				ID:           run.WorkspaceRunID(1),
+				WorkspaceID:  "ws-history",
+				State:        common.RunStateCompleted,
+				RuntimeState: &rc.RuntimeStateRecord{StateRevision: 5, ProcessedEventIDs: []string{"hist <&>\n中文"}},
+			}
+			active := &run.Run{
+				ID:           run.WorkspaceRunID(1),
+				WorkspaceID:  "ws-active",
+				State:        common.RunStateActive,
+				RuntimeState: &rc.RuntimeStateRecord{StateRevision: 1, ProcessedEventIDs: []string{"init"}},
+			}
+			// Give each run a unique ID across workspaces via distinct generation indices.
+			hist.ID = "run-history-1"
+			active.ID = "run-active-1"
+			if err := seedRepo.Create(ctx, hist); err != nil {
+				t.Fatalf("create hist: %v", err)
+			}
+			if err := seedRepo.Create(ctx, active); err != nil {
+				t.Fatalf("create active: %v", err)
+			}
+			histSnapshot := cloneRun(hist)
+
+			if indentCold {
+				all, err := loadRunMap(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				indented, err := json.MarshalIndent(all, "", "  ")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, indented, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			EvictMapFileCache(path)
+
+			repo := NewRunRepository(path)
+			wsRuns, err := repo.ListByWorkspaceID(ctx, "ws-active")
+			if err != nil {
+				t.Fatalf("ListByWorkspaceID: %v", err)
+			}
+			if len(wsRuns) != 1 || wsRuns[0].ID != active.ID {
+				t.Fatalf("wsRuns = %+v, want only %q", wsRuns, active.ID)
+			}
+
+			cache := mapCacheEntry(path)
+			cache.mu.RLock()
+			images, ok := cache.items.(runInventoryPhysicalMap)
+			if !ok || images[hist.ID].aggregate != nil || len(images[hist.ID].raw) == 0 || images[active.ID].aggregate == nil {
+				cache.mu.RUnlock()
+				t.Fatalf("cold ListByWorkspaceID improperly materialized history or missed active: ok=%v histAgg=%v activeAgg=%v", ok, images[hist.ID].aggregate != nil, images[active.ID].aggregate != nil)
+			}
+			cache.mu.RUnlock()
+
+			current := wsRuns[0]
+			for step := uint64(1); step <= 3; step++ {
+				next := cloneRun(current)
+				next.RuntimeState.StateRevision = step + 1
+				next.RuntimeState.ProcessedEventIDs = append(next.RuntimeState.ProcessedEventIDs, string([]rune{'s', rune('0' + step)})+" <&>\n中文")
+				if err := repo.CompareAndSwapRuntimeState(ctx, next, current.Revision, step); err != nil {
+					t.Fatalf("CAS step %d: %v", step, err)
+				}
+				current = next
+
+				cache.mu.RLock()
+				images, ok = cache.items.(runInventoryPhysicalMap)
+				histAggNil := images[hist.ID].aggregate == nil
+				histCanonical := images[hist.ID].rawCanonical
+				cache.mu.RUnlock()
+				if !ok || !histAggNil || !histCanonical {
+					t.Fatalf("CAS step %d unexpected cache state: physical=%v histAggNil=%v histCanonical=%v", step, ok, histAggNil, histCanonical)
+				}
+
+				gotBytes, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				expectedRef := cloneRun(current)
+				expectedItems := map[common.RunID]run.Run{
+					hist.ID:   *cloneRun(histSnapshot),
+					active.ID: *expectedRef,
+				}
+				wantBytes, err := marshalRunRuntimeWrite(expectedItems, expectedRef)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(gotBytes, wantBytes) {
+					t.Fatalf("CAS step %d on-disk JSON differs from canonical marshalRunRuntimeWrite (got %d bytes, want %d)", step, len(gotBytes), len(wantBytes))
+				}
+			}
+
+			EvictMapFileCache(path)
+			reloaded, err := NewRunRepository(path).List(ctx)
+			if err != nil || len(reloaded) != 2 {
+				t.Fatalf("cold List after CAS: len=%d err=%v", len(reloaded), err)
+			}
+			for _, item := range reloaded {
+				switch item.ID {
+				case hist.ID:
+					if !reflect.DeepEqual(item, histSnapshot) {
+						t.Fatalf("historical Run mutated:\ngot  %+v\nwant %+v", item, histSnapshot)
+					}
+				case active.ID:
+					if !reflect.DeepEqual(item, current) {
+						t.Fatalf("active Run mismatch:\ngot  %+v\nwant %+v", item, current)
+					}
+				default:
+					t.Fatalf("unexpected Run ID %q", item.ID)
+				}
+			}
+		})
+	}
+}

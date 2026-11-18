@@ -1,10 +1,22 @@
 package runtime
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"testing"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func assertConvergenceProgressEqualMatchesSignature(t *testing.T, left, right RuntimeAggregate) {
+	t.Helper()
+	gotEqual := RuntimeConvergenceProgressEqual(left, right)
+	wantEqual := RuntimeConvergenceProgressSignature(left) == RuntimeConvergenceProgressSignature(right)
+	if gotEqual != wantEqual {
+		t.Fatalf("RuntimeConvergenceProgressEqual=%t != signature equality=%t", gotEqual, wantEqual)
+	}
+}
 
 func TestRuntimeConvergenceProgressSignatureIgnoresRetryBookkeeping(t *testing.T) {
 	facts := controllerFacts()
@@ -27,6 +39,7 @@ func TestRuntimeConvergenceProgressSignatureIgnoresRetryBookkeeping(t *testing.T
 	if RuntimeConvergenceProgressSignature(left) != RuntimeConvergenceProgressSignature(right) {
 		t.Fatal("retry bookkeeping changed convergence progress signature")
 	}
+	assertConvergenceProgressEqualMatchesSignature(t, left, right)
 }
 
 func TestRuntimeConvergenceProgressSignatureTracksEvidenceAndDispatch(t *testing.T) {
@@ -41,11 +54,13 @@ func TestRuntimeConvergenceProgressSignatureTracksEvidenceAndDispatch(t *testing
 	if RuntimeConvergenceProgressSignature(base) == RuntimeConvergenceProgressSignature(withEvidence) {
 		t.Fatal("evidence progress did not change convergence signature")
 	}
+	assertConvergenceProgressEqualMatchesSignature(t, base, withEvidence)
 	withDispatch := base
 	withDispatch.ActiveDispatch = &runtimecontract.RuntimeDispatchRecord{CandidateHash: "candidate-1", State: DispatchStateSealed}
 	if RuntimeConvergenceProgressSignature(base) == RuntimeConvergenceProgressSignature(withDispatch) {
 		t.Fatal("sealed dispatch did not change convergence signature")
 	}
+	assertConvergenceProgressEqualMatchesSignature(t, base, withDispatch)
 }
 
 func TestRuntimeConvergenceProgressSignatureTracksRepairDirective(t *testing.T) {
@@ -62,6 +77,7 @@ func TestRuntimeConvergenceProgressSignatureTracksRepairDirective(t *testing.T) 
 	if RuntimeConvergenceProgressSignature(base) == RuntimeConvergenceProgressSignature(withDirective) {
 		t.Fatal("repair directive changed without changing convergence signature")
 	}
+	assertConvergenceProgressEqualMatchesSignature(t, base, withDirective)
 }
 
 func TestRuntimeConvergenceProgressSignatureTracksCandidateFeasibility(t *testing.T) {
@@ -81,5 +97,15 @@ func TestRuntimeConvergenceProgressSignatureTracksCandidateFeasibility(t *testin
 	}}
 	if RuntimeConvergenceProgressSignature(base) == RuntimeConvergenceProgressSignature(withFeasibility) {
 		t.Fatal("candidate feasibility changed without changing convergence signature")
+	}
+	assertConvergenceProgressEqualMatchesSignature(t, base, withFeasibility)
+
+	payload, err := json.Marshal(runtimeConvergenceProgressValue(withFeasibility))
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(payload)
+	if got, want := RuntimeConvergenceProgressSignature(withFeasibility), hex.EncodeToString(digest[:]); got != want {
+		t.Fatalf("streaming signature %q != marshaled digest %q", got, want)
 	}
 }

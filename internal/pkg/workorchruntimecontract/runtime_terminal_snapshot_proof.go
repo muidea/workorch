@@ -98,6 +98,13 @@ func (p RuntimeTerminalSnapshotProof) ValidateRaw() error {
 // substitutes a historical consistent review. Callers consume the formally
 // admitted owner aggregate; this source compiler does not re-admit its history.
 func CompileRuntimeTerminalSnapshotSources(source RuntimeStateRecord) ([]RuntimeTerminalSnapshotSource, error) {
+	return compileRuntimeTerminalSnapshotSourcesInSession(source, &runtimeHistoricalPreimageSession{semantic: newRuntimeSemanticValidationSession()})
+}
+
+func compileRuntimeTerminalSnapshotSourcesInSession(source RuntimeStateRecord, session *runtimeHistoricalPreimageSession) ([]RuntimeTerminalSnapshotSource, error) {
+	if session == nil {
+		session = &runtimeHistoricalPreimageSession{semantic: newRuntimeSemanticValidationSession()}
+	}
 	bindings, err := RuntimeDeliveryLineageBindingsFromState(source)
 	if err != nil {
 		return nil, err
@@ -116,11 +123,11 @@ func CompileRuntimeTerminalSnapshotSources(source RuntimeStateRecord) ([]Runtime
 			if rule.Kind != RuntimeLineageTerminalOwnerSnapshot {
 				continue
 			}
-			snapshot, receipt, _, err := runtimeTerminalSnapshotOperationSource(source, rule.ReceiptSourceScope, rule.ReceiptSourceID, &rule)
+			snapshot, receipt, _, err := runtimeTerminalSnapshotOperationSourceInSession(source, rule.ReceiptSourceScope, rule.ReceiptSourceID, &rule, session)
 			if err != nil {
 				return nil, err
 			}
-			validation, _, input, err := runtimeTerminalSnapshotOperationSource(source, rule.ValidationSourceScope, rule.ValidationSourceID, nil)
+			validation, _, input, err := runtimeTerminalSnapshotOperationSourceInSession(source, rule.ValidationSourceScope, rule.ValidationSourceID, nil, session)
 			if err != nil {
 				return nil, err
 			}
@@ -137,6 +144,13 @@ func CompileRuntimeTerminalSnapshotSources(source RuntimeStateRecord) ([]Runtime
 }
 
 func runtimeTerminalSnapshotOperationSource(source RuntimeStateRecord, scope, id string, rule *RuntimeLineageAssertionRule) (RuntimeTerminalSnapshotReceiptSource, RuntimeOperationReceipt, *RuntimeValidationProofRequirementBinding, error) {
+	return runtimeTerminalSnapshotOperationSourceInSession(source, scope, id, rule, &runtimeHistoricalPreimageSession{semantic: newRuntimeSemanticValidationSession()})
+}
+
+func runtimeTerminalSnapshotOperationSourceInSession(source RuntimeStateRecord, scope, id string, rule *RuntimeLineageAssertionRule, session *runtimeHistoricalPreimageSession) (RuntimeTerminalSnapshotReceiptSource, RuntimeOperationReceipt, *RuntimeValidationProofRequirementBinding, error) {
+	if session == nil {
+		session = &runtimeHistoricalPreimageSession{semantic: newRuntimeSemanticValidationSession()}
+	}
 	var item RuntimeCoverageItem
 	count := 0
 	for _, value := range source.Facts.DefinitionSeed.CoverageItems {
@@ -198,7 +212,7 @@ func runtimeTerminalSnapshotOperationSource(source RuntimeStateRecord, scope, id
 			selected = RuntimeTerminalSnapshotReceiptSource{DispatchID: dispatch.ID, OperationID: op.ID, ReceiptHash: execution.OwnerReceiptHash, ReceiptRef: fact.SourceRef, ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, EvidenceRef: string(fact.ID)}
 			selectedReceipt, count = receipt, count+1
 			if rule == nil {
-				input, err := CompileRuntimeBindingValidationInputReview(current, source.SemanticPlanning)
+				input, err := compileRuntimeBindingValidationInputReviewInSession(current, source.SemanticPlanning, session)
 				if err != nil {
 					return selected, receipt, nil, err
 				}
@@ -239,7 +253,28 @@ func ValidateRuntimeReviewedInputReads(input RuntimeValidationProofRequirementBi
 // ApplyRuntimeTerminalSnapshotProofs is shared by first CAS and fresh-load.
 // Material remains independently generated; callers cannot submit a Result body.
 func ApplyRuntimeTerminalSnapshotProofs(source RuntimeStateRecord, material RuntimeTerminalResultMaterial, proofs []RuntimeTerminalSnapshotProof) (RuntimeTerminalResultMaterial, error) {
-	expected, err := CompileRuntimeTerminalSnapshotSources(source)
+	return applyRuntimeTerminalSnapshotProofsInSession(source, material, proofs, &runtimeHistoricalPreimageSession{semantic: newRuntimeSemanticValidationSession()})
+}
+
+// ApplyAndValidateRuntimeTerminalProofMaterial applies snapshot proofs and validates
+// the completed-outcome terminal proof material in one shared historical session.
+func ApplyAndValidateRuntimeTerminalProofMaterial(source RuntimeStateRecord, material RuntimeTerminalResultMaterial, proofs []RuntimeTerminalSnapshotProof) (RuntimeTerminalResultMaterial, error) {
+	session := &runtimeHistoricalPreimageSession{semantic: newRuntimeSemanticValidationSession()}
+	applied, err := applyRuntimeTerminalSnapshotProofsInSession(source, material, proofs, session)
+	if err != nil {
+		return RuntimeTerminalResultMaterial{}, err
+	}
+	if err := validateRuntimeTerminalProofMaterialInSession(source, applied, session); err != nil {
+		return RuntimeTerminalResultMaterial{}, err
+	}
+	return applied, nil
+}
+
+func applyRuntimeTerminalSnapshotProofsInSession(source RuntimeStateRecord, material RuntimeTerminalResultMaterial, proofs []RuntimeTerminalSnapshotProof, session *runtimeHistoricalPreimageSession) (RuntimeTerminalResultMaterial, error) {
+	if session == nil {
+		session = &runtimeHistoricalPreimageSession{semantic: newRuntimeSemanticValidationSession()}
+	}
+	expected, err := compileRuntimeTerminalSnapshotSourcesInSession(source, session)
 	if err != nil {
 		return RuntimeTerminalResultMaterial{}, err
 	}
@@ -282,7 +317,7 @@ func ApplyRuntimeTerminalSnapshotProofs(source RuntimeStateRecord, material Runt
 				return RuntimeTerminalResultMaterial{}, fmt.Errorf("terminal snapshot does not contain original validation byte dependency")
 			}
 		}
-		_, _, input, err := runtimeTerminalSnapshotOperationSource(source, proof.Source.Assertion.Rule.ValidationSourceScope, proof.Source.Assertion.Rule.ValidationSourceID, nil)
+		_, _, input, err := runtimeTerminalSnapshotOperationSourceInSession(source, proof.Source.Assertion.Rule.ValidationSourceScope, proof.Source.Assertion.Rule.ValidationSourceID, nil, session)
 		if err != nil || input == nil || len(proof.InputMemberships) != len(input.InputReview.Files) {
 			return RuntimeTerminalResultMaterial{}, fmt.Errorf("terminal snapshot input membership incomplete")
 		}

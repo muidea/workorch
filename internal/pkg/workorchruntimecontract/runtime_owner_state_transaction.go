@@ -2,7 +2,6 @@ package workorchruntimecontract
 
 import (
 	"fmt"
-	"reflect"
 	"sync"
 )
 
@@ -104,7 +103,7 @@ func validateRuntimeOwnerStateSourceImage(image RuntimeOwnerStateSourceImage, se
 		}
 		return err
 	}
-	if image.Original != nil && !reflect.DeepEqual(*image.Original, *image.Converted) {
+	if image.Original != nil && !runtimeRawEqual(*image.Original, *image.Converted) {
 		return fmt.Errorf("runtime owner record conversion changed original data")
 	}
 	return runtimeProcessingRegion("aggregate_joins", func() error { return withRuntimeOwnerInvariantSourceGate(semantic, image.AggregateJoins) })

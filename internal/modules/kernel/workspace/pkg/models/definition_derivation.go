@@ -51,8 +51,12 @@ func (r DefinitionDerivationRequest) Clone() DefinitionDerivationRequest {
 }
 
 func (r DefinitionDerivationRequest) ExpectedPermitID() string {
+	return r.expectedPermitIDWithHashes(r.Input.InputHash(), WorkspaceTemplateSnapshotHash(&r.Template))
+}
+
+func (r DefinitionDerivationRequest) expectedPermitIDWithHashes(inputHash, templateSnapshotHash string) string {
 	h := sha256.New()
-	writeDefinitionHash(h, "workspace-derivation-permit-v2", r.RequestID, r.Input.InputHash(), WorkspaceTemplateSnapshotHash(&r.Template), r.ResourceSnapshotHash, r.ProviderBindingHash)
+	writeDefinitionHash(h, "workspace-derivation-permit-v2", r.RequestID, inputHash, templateSnapshotHash, r.ResourceSnapshotHash, r.ProviderBindingHash)
 
 	writeDefinitionHash(h, r.WireContractRef, r.WireContractHash)
 

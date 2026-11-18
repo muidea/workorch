@@ -101,7 +101,15 @@ func main(){
 }
 `
 
+var (
+	shellNativeRunnerCacheMu      sync.Mutex
+	shellNativeRunnerCachedBinary []byte
+)
+
 func prepareShellNativeRunner(ctx context.Context, scratch string, env []string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	dir, err := os.MkdirTemp(scratch, "native-runner-")
 	if err != nil {
 		return "", err
@@ -109,6 +117,14 @@ func prepareShellNativeRunner(ctx context.Context, scratch string, env []string)
 	source, binary := filepath.Join(dir, "main.go"), filepath.Join(dir, "observe")
 	if err = os.WriteFile(source, []byte(shellNativeClientSource), 0600); err != nil {
 		return "", err
+	}
+	shellNativeRunnerCacheMu.Lock()
+	cached := shellNativeRunnerCachedBinary
+	shellNativeRunnerCacheMu.Unlock()
+	if len(cached) > 0 {
+		if writeErr := os.WriteFile(binary, cached, 0o700); writeErr == nil {
+			return binary, nil
+		}
 	}
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", binary, source)
 	cmd.Dir, cmd.Env = dir, shellBehaviorEnvironment(env)
@@ -130,6 +146,11 @@ func prepareShellNativeRunner(ctx context.Context, scratch string, env []string)
 	}
 	if err != nil || output.Truncated() {
 		return "", fmt.Errorf("native source client preparation failed: %w", err)
+	}
+	if body, readErr := os.ReadFile(binary); readErr == nil && len(body) > 0 {
+		shellNativeRunnerCacheMu.Lock()
+		shellNativeRunnerCachedBinary = body
+		shellNativeRunnerCacheMu.Unlock()
 	}
 	return binary, nil
 }
@@ -432,11 +453,61 @@ func (c *shellNativeChannel) observe(conn *net.UnixConn) {
 	_ = json.NewEncoder(conn).Encode(status)
 }
 
+type shellResolvedGoTools struct {
+	test2json string
+	covdata   string
+}
+
+var resolvedGoToolPaths = sync.OnceValue(func() shellResolvedGoTools {
+	out, err := exec.Command("go", "env", "GOTOOLDIR").Output()
+	if err != nil {
+		return shellResolvedGoTools{}
+	}
+	toolDir := strings.TrimSpace(string(out))
+	if toolDir == "" {
+		return shellResolvedGoTools{}
+	}
+	var tools shellResolvedGoTools
+	for _, entry := range []struct {
+		name string
+		dst  *string
+	}{
+		{name: "test2json", dst: &tools.test2json},
+		{name: "covdata", dst: &tools.covdata},
+	} {
+		path := filepath.Join(toolDir, entry.name)
+		if info, statErr := os.Stat(path); statErr == nil && !info.IsDir() {
+			*entry.dst = path
+		}
+	}
+	return tools
+})
+
+func shellCanUseResolvedGoTool(command string, env []string) bool {
+	if command != "" && command != "go" {
+		return false
+	}
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "GOTOOLDIR=") ||
+			strings.HasPrefix(entry, "GOROOT=") ||
+			strings.HasPrefix(entry, "GOTOOLCHAIN=") {
+			return false
+		}
+	}
+	return true
+}
+
 func shellNativeJSONProjection(ctx context.Context, pkg string, env []string, raw shellProjectRawFact) ([]byte, error) {
 	if !shellProjectRawFactValid(raw) {
 		return nil, fmt.Errorf("native raw output incomplete")
 	}
-	cmd := exec.CommandContext(ctx, "go", "tool", "test2json", "-p", pkg)
+	tools := resolvedGoToolPaths()
+	var cmd *exec.Cmd
+	if tools.test2json != "" && shellCanUseResolvedGoTool("go", env) {
+		cmd = exec.CommandContext(ctx, tools.test2json, "-p", pkg)
+	} else {
+		cmd = exec.CommandContext(ctx, "go", "tool", "test2json", "-p", pkg)
+	}
 	cmd.Env = shellBehaviorEnvironment(env)
 	cmd.Stdin = bytes.NewReader(raw.Raw)
 	output, errors := newShellProjectRawBuffer(), newShellProjectRawBuffer()

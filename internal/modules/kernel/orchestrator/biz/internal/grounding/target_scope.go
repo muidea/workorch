@@ -131,8 +131,8 @@ func RepairTargets(facts runtimecontract.RuntimeFacts) []string {
 	if facts.Resources.FailureTarget != nil && len(facts.Resources.FailureTarget.TargetRefs) > 0 {
 		return append([]string(nil), facts.Resources.FailureTarget.TargetRefs...)
 	}
-	if len(facts.Focus.TargetRefs) > 0 {
-		return append([]string(nil), facts.Focus.TargetRefs...)
+	if focus := facts.Focus.Normalized(); len(focus.TargetRefs) > 0 {
+		return append([]string(nil), focus.TargetRefs...)
 	}
 	if selection := CurrentFocusTargetSelection(facts); selection != nil && TargetSelectionHasConcreteTarget(*selection) {
 		return append([]string(nil), selection.TargetRefs...)

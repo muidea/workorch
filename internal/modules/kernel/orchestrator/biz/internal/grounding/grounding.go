@@ -46,6 +46,13 @@ func CatalogCoversFocusTargets(catalog runtimecontract.RuntimeOperationAdmissibi
 	if TargetRefsContained(requiredTargets, catalog.TargetRefs) {
 		return true
 	}
+	policy := runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope
+	if len(focus.ProspectiveTargetRefs) != 0 {
+		policy = runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget
+	}
+	if policy == runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope && len(catalog.TargetRefs) != 0 {
+		return false
+	}
 	variantsByKind := make(map[string][]string)
 	for _, variant := range focus.AcceptedOperationVariants {
 		kind := runtimecontract.CanonicalRuntimeBlockKind(variant.Kind)
@@ -53,10 +60,6 @@ func CatalogCoversFocusTargets(catalog runtimecontract.RuntimeOperationAdmissibi
 			continue
 		}
 		variantsByKind[kind] = append(variantsByKind[kind], variant.VariantID)
-	}
-	policy := runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope
-	if len(focus.ProspectiveTargetRefs) != 0 {
-		policy = runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget
 	}
 	for _, rawKind := range focus.AcceptedStepKinds {
 		kind := runtimecontract.CanonicalRuntimeBlockKind(rawKind)

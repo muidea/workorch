@@ -16,9 +16,29 @@ func referenceSemanticGenerationBeforeSeedSession(raw, g RuntimeSemanticPlanning
 		return fmt.Errorf("runtime semantic planning generation requires retirement identity and reason")
 	}
 	switch g.Reason {
+	case RuntimeSemanticPlanningRetirementFailureInputReview, RuntimeSemanticPlanningRetirementFailureInputReviewed:
+		if g.InputReviewResolutionID != "" || len(g.InvalidationSignatures)+len(g.PrerequisiteIDs)+len(g.ReopenedCoverageIDs)+len(g.ReopenTriggerRefs)+len(g.ChangedCoverageIDs)+len(g.ClosureChangeTriggerRefs) != 0 {
+			return fmt.Errorf("failure input review retirement carries unrelated lineage")
+		}
+		if g.Reason == RuntimeSemanticPlanningRetirementFailureInputReview && (g.Snapshot.Phase != RuntimeSemanticPlanningSealed || g.Snapshot.FailureInputReview != nil) {
+			return fmt.Errorf("failure input review requires original sealed proof")
+		}
+		if g.Reason == RuntimeSemanticPlanningRetirementFailureInputReviewed {
+			d, ok := runtimeFailureInputReviewDocument(g.Snapshot)
+			if !ok || ValidateRuntimeSemanticInputReviewConsistency(d) != nil {
+				return fmt.Errorf("completed failure input review requires exact consistent report")
+			}
+		}
 	case RuntimeSemanticPlanningRetirementImplementationPurpose:
 		if len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 || len(g.ChangedCoverageIDs) != 0 || len(g.ClosureChangeTriggerRefs) != 0 || g.Snapshot.Phase != RuntimeSemanticPlanningOrderAccepted || g.Snapshot.CoverageOrderDocument == nil || g.Snapshot.CoverageOrderDocument.ImplementationPurpose == "" {
 			return fmt.Errorf("implementation purpose retirement requires exact original accepted order only")
+		}
+	case RuntimeSemanticPlanningRetirementInputRevision:
+		if g.InputReviewResolutionID != "" || len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 || len(g.ChangedCoverageIDs) != 0 || len(g.ClosureChangeTriggerRefs) != 0 {
+			return fmt.Errorf("input revision retirement cannot carry unrelated authority")
+		}
+		if _, err := CompileRuntimeValidationInputRevisionGeneration(g); err != nil {
+			return err
 		}
 	case RuntimeSemanticPlanningRetirementInputReviewInformation:
 		if g.InputReviewResolutionID == "" || len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 || len(g.ChangedCoverageIDs) != 0 || len(g.ClosureChangeTriggerRefs) != 0 {
@@ -32,9 +52,12 @@ func referenceSemanticGenerationBeforeSeedSession(raw, g RuntimeSemanticPlanning
 		if len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) == 0 || len(g.ReopenTriggerRefs) == 0 || len(g.ChangedCoverageIDs) != 0 || len(g.ClosureChangeTriggerRefs) != 0 {
 			return fmt.Errorf("runtime semantic CWI reopen retirement requires only CWI lineage")
 		}
-	case RuntimeSemanticPlanningRetirementEligibleClosureChanged:
+	case RuntimeSemanticPlanningRetirementEligibleClosureChanged, RuntimeSemanticPlanningRetirementFrontierCompleted:
 		if len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 || len(g.ChangedCoverageIDs) == 0 || len(g.ClosureChangeTriggerRefs) == 0 {
 			return fmt.Errorf("runtime semantic eligible-closure retirement requires only closure-change lineage")
+		}
+		if g.Reason == RuntimeSemanticPlanningRetirementFrontierCompleted && (g.Snapshot.Phase != RuntimeSemanticPlanningSealed || len(g.Snapshot.PendingCoverageIDs) != 0) {
+			return fmt.Errorf("runtime semantic frontier retirement requires a completely sealed frontier")
 		}
 	default:
 		return fmt.Errorf("runtime semantic planning generation has unsupported retirement reason %q", g.Reason)
@@ -42,8 +65,14 @@ func referenceSemanticGenerationBeforeSeedSession(raw, g RuntimeSemanticPlanning
 	if g.Reason != RuntimeSemanticPlanningRetirementInputReviewInformation && g.InputReviewResolutionID != "" {
 		return fmt.Errorf("runtime non-review retirement cannot carry an information resolution")
 	}
-	if g.Snapshot.History != nil {
+	if g.Snapshot.History != nil || g.Snapshot.HistoryArchive != nil {
 		return fmt.Errorf("runtime semantic planning generation snapshot must not contain nested history")
+	}
+	if g.OwnerInputRevision != nil {
+		if g.Reason != RuntimeSemanticPlanningRetirementInputRevision || g.OwnerInputRevision.OwnerObservation == nil || g.Snapshot.Phase != RuntimeSemanticPlanningRequired || g.Snapshot.Manifest != nil || g.Snapshot.DefinitionSeed.Hash != g.OwnerInputRevision.DefinitionSeedHash {
+			return fmt.Errorf("owner input revision requires only its exact observation and required semantic snapshot")
+		}
+		return referenceSemanticLedgerBeforeSeedSession(raw.Snapshot, g.Snapshot, session)
 	}
 	if g.Snapshot.Phase == RuntimeSemanticPlanningRequired || g.Snapshot.Phase == RuntimeSemanticPlanningFailed {
 		return fmt.Errorf("runtime semantic planning generation snapshot is not an active semantic generation")
@@ -70,7 +99,7 @@ func referenceSemanticGenerationBeforeSeedSession(raw, g RuntimeSemanticPlanning
 			return fmt.Errorf("runtime semantic planning generation prerequisite %q is outside snapshot manifest", prerequisiteID)
 		}
 	}
-	if g.Reason == RuntimeSemanticPlanningRetirementCWIReopened || g.Reason == RuntimeSemanticPlanningRetirementBindingContradiction || g.Reason == RuntimeSemanticPlanningRetirementEligibleClosureChanged {
+	if g.Reason == RuntimeSemanticPlanningRetirementCWIReopened || g.Reason == RuntimeSemanticPlanningRetirementBindingContradiction || g.Reason == RuntimeSemanticPlanningRetirementEligibleClosureChanged || g.Reason == RuntimeSemanticPlanningRetirementFrontierCompleted {
 		seedCoverage := make(map[common.CoverageWorkItemID]struct{}, len(g.Snapshot.DefinitionSeed.CoverageItems))
 		for _, item := range g.Snapshot.DefinitionSeed.CoverageItems {
 			seedCoverage[item.ID] = struct{}{}
@@ -90,7 +119,10 @@ func referenceSemanticGenerationBeforeSeedSession(raw, g RuntimeSemanticPlanning
 }
 
 func referenceSemanticLedgerBeforeSeedSession(raw, l RuntimeSemanticPlanningLedger, session *runtimeSemanticValidationSession) error {
-	rawHistory := append([]RuntimeSemanticPlanningGeneration(nil), raw.History...)
+	rawHistory := make([]RuntimeSemanticPlanningGeneration, 0, raw.HistoryCount())
+	for _, generation := range raw.AllHistory() {
+		rawHistory = append(rawHistory, generation)
+	}
 	if l.SchemaVersion != RuntimeSemanticPlanningLedgerSchemaCurrent {
 		return fmt.Errorf("runtime semantic planning ledger requires current schema")
 	}
@@ -103,30 +135,32 @@ func referenceSemanticLedgerBeforeSeedSession(raw, l RuntimeSemanticPlanningLedg
 		len(raw.History) != len(l.History) {
 		return fmt.Errorf("runtime semantic planning ledger contains duplicate or empty identity history")
 	}
-	if len(l.History) > RuntimeSemanticPlanningHistoryLimit {
-		return fmt.Errorf("runtime semantic planning history exceeds bounded limit %d", RuntimeSemanticPlanningHistoryLimit)
+	if err := raw.ValidateHistoryStorage(); err != nil {
+		return err
+	}
+	if raw.HistoryCount() != l.HistoryCount() {
+		return fmt.Errorf("runtime semantic history count changed")
 	}
 	type generationIdentity struct {
 		manifestHash     string
 		logicalRequestID string
 	}
-	seenHistory := make(map[generationIdentity]struct{}, len(l.History))
+	seenHistory := make(map[generationIdentity]struct{}, l.HistoryCount())
 	seenInvalidationSignatures := make(map[string]struct{})
 	lastRetiredRevision := uint64(0)
-	for idx := range l.History {
-		if idx >= len(rawHistory) || len(rawHistory[idx].InvalidationSignatures) != len(l.History[idx].InvalidationSignatures) || len(rawHistory[idx].PrerequisiteIDs) != len(l.History[idx].PrerequisiteIDs) ||
-			len(rawHistory[idx].ReopenedCoverageIDs) != len(l.History[idx].ReopenedCoverageIDs) || len(rawHistory[idx].ReopenTriggerRefs) != len(l.History[idx].ReopenTriggerRefs) ||
-			len(rawHistory[idx].ChangedCoverageIDs) != len(l.History[idx].ChangedCoverageIDs) || len(rawHistory[idx].ClosureChangeTriggerRefs) != len(l.History[idx].ClosureChangeTriggerRefs) {
+	for idx, history := range l.AllHistory() {
+		if idx >= len(rawHistory) || len(rawHistory[idx].InvalidationSignatures) != len(history.InvalidationSignatures) || len(rawHistory[idx].PrerequisiteIDs) != len(history.PrerequisiteIDs) ||
+			len(rawHistory[idx].ReopenedCoverageIDs) != len(history.ReopenedCoverageIDs) || len(rawHistory[idx].ReopenTriggerRefs) != len(history.ReopenTriggerRefs) ||
+			len(rawHistory[idx].ChangedCoverageIDs) != len(history.ChangedCoverageIDs) || len(rawHistory[idx].ClosureChangeTriggerRefs) != len(history.ClosureChangeTriggerRefs) {
 			return fmt.Errorf("runtime semantic planning history %d contains duplicate or empty lineage values", idx)
 		}
-		history := l.History[idx]
 		if err := referenceSemanticGenerationBeforeSeedSession(rawHistory[idx], history, session); err != nil {
 			return fmt.Errorf("runtime semantic planning history %d: %w", idx, err)
 		}
 		if history.Snapshot.DefinitionSeed.Hash != l.DefinitionSeed.Hash {
 			return fmt.Errorf("runtime semantic planning history %d definition seed mismatch", idx)
 		}
-		if lastRetiredRevision != 0 && history.RetiredAtStateRevision <= lastRetiredRevision {
+		if lastRetiredRevision != 0 && (history.RetiredAtStateRevision < lastRetiredRevision || (history.RetiredAtStateRevision == lastRetiredRevision && (history.OwnerInputRevision == nil || idx == 0 || rawHistory[idx-1].OwnerInputRevision != nil))) {
 			return fmt.Errorf("runtime semantic planning history is not append ordered")
 		}
 		lastRetiredRevision = history.RetiredAtStateRevision
@@ -141,7 +175,13 @@ func referenceSemanticLedgerBeforeSeedSession(raw, l RuntimeSemanticPlanningLedg
 		// second history entry.  A later request with the same catalog hash is
 		// allowed only when it has a distinct logical identity (resource rollback
 		// recovery); it cannot reuse the old snapshot's request/session lineage.
-		identity := generationIdentity{manifestHash: history.Snapshot.Manifest.Hash, logicalRequestID: history.Snapshot.LogicalRequestID}
+		identity := generationIdentity{}
+		if history.OwnerInputRevision != nil {
+			identity.manifestHash = history.OwnerInputRevision.OwnerObservation.Observation.ObservationID
+			identity.logicalRequestID = history.OwnerInputRevision.Binding.RequirementHash
+		} else {
+			identity = generationIdentity{manifestHash: history.Snapshot.Manifest.Hash, logicalRequestID: history.Snapshot.LogicalRequestID}
+		}
 		if _, duplicate := seenHistory[identity]; duplicate {
 			return fmt.Errorf("runtime semantic planning history duplicates generation %q", identity)
 		}
@@ -166,6 +206,9 @@ func referenceSemanticLedgerBeforeSeedSession(raw, l RuntimeSemanticPlanningLedg
 		}
 		validatedManifest = &validated
 		l.Manifest = &validated.manifest
+	}
+	if err := l.CompiledOrder.Validate(l.Manifest, l.CoverageOrderDocument); err != nil {
+		return err
 	}
 	if l.CoverageOrderDocument != nil {
 		if l.Manifest == nil {
@@ -406,6 +449,14 @@ func referenceSemanticLedgerBeforeSeedSession(raw, l RuntimeSemanticPlanningLedg
 		}
 		if l.FeasibilityGaps[idx].RefreshGeneration != idx {
 			return fmt.Errorf("runtime semantic feasibility gap generation %d is not contiguous", l.FeasibilityGaps[idx].RefreshGeneration)
+		}
+	}
+	if l.Manifest != nil && !runtimeRawEqual(l.FailureInputReview, l.Manifest.FailureInputReview) {
+		return fmt.Errorf("failure input review ledger/manifest mismatch")
+	}
+	if l.FailureInputReview != nil {
+		if err := l.FailureInputReview.Validate(); err != nil {
+			return err
 		}
 	}
 	switch l.Phase {

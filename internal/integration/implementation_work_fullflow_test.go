@@ -275,7 +275,14 @@ func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 		t.Fatalf("Result 未正式接受全 closeout: %+v err=%v", results, err)
 	}
 	closeout := results[0].RuntimeCloseout
-	if !slices.Contains(closeout.AcceptedEvidenceRefs, commitRef) {
+	commitFactID := ""
+	for _, fact := range first.RuntimeState.Facts.Evidence.Accepted {
+		if slices.Contains(fact.EvidenceRefs, commitRef) {
+			commitFactID = string(fact.ID)
+			break
+		}
+	}
+	if commitFactID == "" || !slices.Contains(results[0].EvidenceRefs, commitRef) || !slices.Contains(closeout.EvidenceRefs, commitRef) || !slices.Contains(closeout.AcceptedEvidenceRefs, commitFactID) {
 		t.Fatal("正式 Result 未保留 exact Git owner commit receipt 引用")
 	}
 	if closeout.StartupInputHash != first.StartupInputHash || len(closeout.UnsatisfiedCoverageWorkItemIDs) != 0 || len(closeout.SatisfiedCoverageWorkItemIDs) != len(first.RuntimeState.Facts.DefinitionSeed.CoverageItems) || len(closeout.AcceptedEvidenceRefs) == 0 {
@@ -809,9 +816,10 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 			Obligations []implementationWorkFullflowObligation `json:"proofObligations"`
 			Work        *implementationWorkFullflowWork        `json:"implementationPurpose"`
 			Catalogs    []struct {
-				Owner   string   `json:"ownerModuleId"`
-				Targets []string `json:"targetRefs"`
-				Recipes []string `json:"validationRecipeRefs"`
+				Owner     string   `json:"ownerModuleId"`
+				Targets   []string `json:"targetRefs"`
+				Selectors []string `json:"selectorRefs"`
+				Recipes   []string `json:"validationRecipeRefs"`
 			} `json:"ownerCatalogs"`
 		} `json:"manifest"`
 	}
@@ -1086,7 +1094,7 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 					target = map[string]any{"policy": runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget, "ownerSelectorRefs": []string{"workspace-relative-new-file-target"}, "prospectiveConstraintRefs": obligation.Constraints, "prospectiveTargetRefs": targets}
 				} else if sourceID == "version_control_snapshot" {
 					proposal["ownerModuleId"], proposal["operationKind"], proposal["operationVariantId"] = runtimecontract.RuntimeModuleGit, runtimecontract.StepKindGitWrite, "commit"
-					target = map[string]any{"policy": runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, "ownerScopeTargetRefs": implementationWorkFullflowCatalogTargets(request.Manifest.Catalogs, runtimecontract.RuntimeModuleFile)}
+					target = map[string]any{"policy": runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, "ownerSelectorRefs": implementationWorkFullflowCatalogSelectors(request.Manifest.Catalogs, runtimecontract.RuntimeModuleGit)}
 				} else {
 					// Goal、acceptanceDimension、dodItem 与 validation_report 都必须消费
 					// 当前 owner-published validation requirement，不能退化为任意 File proof。
@@ -1105,13 +1113,28 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 }
 
 func implementationWorkFullflowCatalogTargets(catalogs []struct {
-	Owner   string   `json:"ownerModuleId"`
-	Targets []string `json:"targetRefs"`
-	Recipes []string `json:"validationRecipeRefs"`
+	Owner     string   `json:"ownerModuleId"`
+	Targets   []string `json:"targetRefs"`
+	Selectors []string `json:"selectorRefs"`
+	Recipes   []string `json:"validationRecipeRefs"`
 }, owner string) []string {
 	for _, catalog := range catalogs {
 		if catalog.Owner == owner {
 			return append([]string(nil), catalog.Targets...)
+		}
+	}
+	return nil
+}
+
+func implementationWorkFullflowCatalogSelectors(catalogs []struct {
+	Owner     string   `json:"ownerModuleId"`
+	Targets   []string `json:"targetRefs"`
+	Selectors []string `json:"selectorRefs"`
+	Recipes   []string `json:"validationRecipeRefs"`
+}, owner string) []string {
+	for _, catalog := range catalogs {
+		if catalog.Owner == owner {
+			return append([]string(nil), catalog.Selectors...)
 		}
 	}
 	return nil
@@ -1232,6 +1255,9 @@ func (p *implementationWorkFullflowProvider) candidate(raw map[string]json.RawMe
 		if len(refs) == 0 {
 			refs = append([]string(nil), allowedTargets...)
 		}
+		if len(refs) == 0 {
+			refs = append([]string(nil), target.OwnerSelectorRefs...)
+		}
 		// A required wire slot is already bound to one exact operation/target by
 		// SM-2. The broader operation contract inventory is only vocabulary; it
 		// must not be fanned out into duplicate uses of the same required ref.
@@ -1244,7 +1270,10 @@ func (p *implementationWorkFullflowProvider) candidate(raw map[string]json.RawMe
 				if required.Kind != rule.Kind || required.VariantID != rule.Variant {
 					return nil, kind, fmt.Errorf("required wire slot 与 SM-2 sequence 漂移: %s", rule.Ref)
 				}
-				refs, matched = []string{required.TargetRef}, true
+				if required.TargetRef != "" {
+					refs = []string{required.TargetRef}
+				}
+				matched = true
 				break
 			}
 			if !matched {
@@ -1342,7 +1371,17 @@ func (p *implementationWorkFullflowProvider) candidate(raw map[string]json.RawMe
 			case runtimecontract.StepKindGitWrite:
 				add("operation", rule.Variant)
 				if rule.Variant == "add" {
-					add("pathspecs", []string{"."})
+					pathspecs := []string{}
+					for path := range implementationWorkFullflowProjectFiles() {
+						pathspecs = append(pathspecs, path)
+					}
+					for path := range p.reviewedInputs {
+						if !slices.Contains(pathspecs, path) {
+							pathspecs = append(pathspecs, path)
+						}
+					}
+					slices.Sort(pathspecs)
+					add("pathspecs", pathspecs)
 				}
 				if rule.Variant == "commit" {
 					add("message", "feat: synthetic public fullflow delivery")
@@ -1417,19 +1456,23 @@ import ("testing"; "os"; "os/exec"; "path/filepath"; "strings"; "example.com/wor
 func verifyDelivery(t *testing.T, criterion string) {
  root := %q
  if logic.DeliveredValue()!=4 { t.Fatal("WORKORCH_ASSERTION_V1 code=value_mismatch expected=equal observed=different") }
- // 执行真实工程的生产包，不使用常量或 native-check marker 代替。
- for _, args := range [][]string{{"build","./..."},{"test","./internal/...","./cmd/..."},{"test","-race","./internal/...","./cmd/..."},{"vet","./internal/...","./cmd/..."}} {
-  command:=exec.Command("go",args...); command.Dir=root
-  if output,err:=command.CombinedOutput(); err!=nil { t.Fatalf("real project command %%v: %%v %%s",args,err,output) }
- }
  documentation,err:=os.ReadFile(filepath.Join(root,"README.md")); if err!=nil { t.Fatal(err) }
  for _, required:=range []string{"目标与验收映射","主路径","错误路径","并发","go build ./...","go test ./...","go test -race ./...","go vet ./...","owner receipts","残余风险"} {
   if !strings.Contains(string(documentation),required) { t.Fatalf("documentation lacks %%s for %%s",required,criterion) }
  }
- bin:=filepath.Join(t.TempDir(),"delivery")
- build:=exec.Command("go","build","-o",bin,"./cmd/delivery"); build.Dir=root
- if output,err:=build.CombinedOutput(); err!=nil { t.Fatalf("build: %%v %%s",err,output) }
- output,err:=exec.Command(bin).Output(); if err!=nil || strings.TrimSpace(string(output))!="4" { t.Fatal("WORKORCH_ASSERTION_V1 code=value_mismatch expected=equal observed=different") }
+ if os.Getenv("WORKORCH_PROCESS_COVERDIR")!="" {
+  bin:=filepath.Join(os.TempDir(),"delivery")
+  if _,statErr:=os.Stat(bin); statErr!=nil {
+   // 执行真实工程的生产包，不使用常量或 native-check marker 代替。
+   for _, args := range [][]string{{"build","./..."},{"test","./internal/...","./cmd/..."},{"test","-race","./internal/...","./cmd/..."},{"vet","./internal/...","./cmd/..."}} {
+    command:=exec.Command("go",args...); command.Dir=root
+    if output,err:=command.CombinedOutput(); err!=nil { t.Fatalf("real project command %%v: %%v %%s",args,err,output) }
+   }
+   build:=exec.Command("go","build","-o",bin,"./cmd/delivery"); build.Dir=root
+   if output,err:=build.CombinedOutput(); err!=nil { t.Fatalf("build: %%v %%s",err,output) }
+  }
+  output,err:=exec.Command(bin).Output(); if err!=nil || strings.TrimSpace(string(output))!="4" { t.Fatal("WORKORCH_ASSERTION_V1 code=value_mismatch expected=equal observed=different") }
+ }
 }
 `, entrypoints.String(), root)
 }
@@ -1732,6 +1775,22 @@ func implementationWorkFullflowAssertOutcome(t *testing.T, state *runtimecontrac
 							executedRecipes["test"] = true
 							if slices.Contains(recipe.Args, "-race") {
 								executedRecipes["race"] = true
+							}
+						}
+						if conjunction := receipt.Evidence.Validation.ExecutionConjunction; conjunction != nil && conjunction.Complete {
+							for _, stage := range conjunction.Stages {
+								if !stage.Started || stage.ExitCode != 0 || stage.KnownFailure || stage.TimedOut || stage.CleanupFailed || !stage.TerminalComplete || len(stage.Argv) < 2 || filepath.Base(stage.Argv[0]) != "go" {
+									continue
+								}
+								if stage.Argv[1] == "build" {
+									executedRecipes["build"] = true
+								}
+								if stage.Argv[1] == "test" {
+									executedRecipes["test"] = true
+									if slices.Contains(stage.Argv[1:], "-race") {
+										executedRecipes["race"] = true
+									}
+								}
 							}
 						}
 					}

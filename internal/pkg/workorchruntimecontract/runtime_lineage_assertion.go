@@ -161,11 +161,7 @@ func (r RuntimeLineageAssertionRule) Validate() error {
 		}
 	case RuntimeLineageTerminalOwnerSnapshot:
 		descriptor, known := RuntimeOperationDescriptorForKind(r.OperationKind)
-		contract, found := RuntimeOperationContractForKind(r.OperationKind)
-		supported := false
-		for _, variant := range contract.Variants {
-			supported = supported || (variant.ID == r.OperationVariantID && variant.TerminalSnapshotProtocolRef == RuntimeTerminalOwnerSnapshotProtocol)
-		}
+		found, supported := runtimeStaticOperationSupportsTerminalSnapshotProtocol(r.OperationKind, r.OperationVariantID)
 		if r.MinCompletedRounds != 0 || !known || !found || !supported || descriptor.OwnerModuleID != r.OwnerModuleID || !descriptor.RequiresOwnerReceipt || CanonicalRuntimeBlockKind(r.OperationKind) != r.OperationKind || !runtimeLineageReceiptInventoryMatches(r, descriptor) || !runtimeTerminalReceiptSourceValid(r.ReceiptSourceScope, r.ReceiptSourceID) || !runtimeTerminalReceiptSourceValid(r.ValidationSourceScope, r.ValidationSourceID) {
 			return fmt.Errorf("terminal snapshot requires supported owner protocol and exact original receipt/validation sources")
 		}
@@ -182,27 +178,7 @@ func (r RuntimeLineageAssertionRule) Validate() error {
 // runtimeLineageReceiptInventoryMatches 只接受封闭 operation 库存声明的 variant/effect。
 // 动态 effect 的 kind 没有静态可证明的库存值，必须保持封闭，不能用规则替代 owner policy。
 func runtimeLineageReceiptInventoryMatches(rule RuntimeLineageAssertionRule, descriptor RuntimeOperationDescriptor) bool {
-	contract, found := RuntimeOperationContractForKind(rule.OperationKind)
-	if !found || contract.Kind != rule.OperationKind {
-		return false
-	}
-	if len(contract.Variants) == 0 {
-		return rule.OperationVariantID == "" && descriptor.DefaultEffectScope != RuntimeEffectUnknown && rule.RequiredEffectScope == descriptor.DefaultEffectScope
-	}
-	matches := 0
-	for _, variant := range contract.Variants {
-		if variant.ID != rule.OperationVariantID {
-			continue
-		}
-		effect := variant.EffectScope
-		if effect == "" {
-			effect = descriptor.DefaultEffectScope
-		}
-		if validSealedRuntimeEffectScope(effect) && effect == rule.RequiredEffectScope {
-			matches++
-		}
-	}
-	return rule.OperationVariantID != "" && matches == 1
+	return runtimeStaticLineageReceiptInventoryMatches(rule, descriptor)
 }
 
 func StableRuntimeLineageAssertionRuleHash(rule RuntimeLineageAssertionRule) string {

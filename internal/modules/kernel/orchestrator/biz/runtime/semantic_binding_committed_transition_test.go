@@ -47,4 +47,25 @@ func TestCommittedSemanticBindingConsumerKeepsExactProjectionBoundary(t *testing
 	if runtimeSemanticBindingProjectionsUnchanged(nil, after) {
 		t.Fatal("cold input claimed committed authority")
 	}
+
+	advanced := before.CloneRaw()
+	advanced.StateRevision++
+	nextFocus := advanced.Facts.Focus
+	nextFocus.ID = "focus-next"
+	advanced.Facts.CompletedFocuses = append(advanced.Facts.CompletedFocuses, advanced.Facts.Focus)
+	advanced.Facts.Focus = rc.CoverageFocus{
+		ID:                       nextFocus.ID,
+		CoverageEvidenceBindings: []rc.CoverageEvidenceBinding{},
+	}
+	if !runtimeSemanticBindingProjectionsUnchanged(&before, advanced) {
+		t.Fatal("pure focus-queue advancement with unchanged bindings should reuse committed bindings")
+	}
+	advanced.Facts.CompletedFocuses[len(advanced.Facts.CompletedFocuses)-1].CoverageEvidenceBindings = append(
+		[]rc.CoverageEvidenceBinding(nil),
+		before.Facts.Focus.CoverageEvidenceBindings...,
+	)
+	advanced.Facts.CompletedFocuses[len(advanced.Facts.CompletedFocuses)-1].CoverageEvidenceBindings[0].Hash = "tampered"
+	if runtimeSemanticBindingProjectionsUnchanged(&before, advanced) {
+		t.Fatal("modified focus binding in CompletedFocuses must trigger full semantic preimage check")
+	}
 }

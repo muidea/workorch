@@ -1,24 +1,85 @@
 package workorchruntimecontract
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"hash"
 	"strings"
+	"sync"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
+type runtimeStateHashCacheSlot struct {
+	mu        sync.Mutex
+	wsID      common.WorkspaceID
+	runID     common.RunID
+	state     *RuntimeStateRecord
+	raw       []byte
+	prevAlloc []byte
+	spans     *RuntimeStateJSONSpans
+	hash      string
+}
+
+var runtimeStateHashCache [8]runtimeStateHashCacheSlot
+
+func runtimeStateHashSlotIndex(wsID common.WorkspaceID, runID common.RunID) int {
+	var h uint32 = 2166136261
+	for i := 0; i < len(wsID); i++ {
+		h = (h ^ uint32(wsID[i])) * 16777619
+	}
+	h = (h ^ 0xff) * 16777619
+	for i := 0; i < len(runID); i++ {
+		h = (h ^ uint32(runID[i])) * 16777619
+	}
+	return int(h & 7)
+}
+
 func StableRuntimeStateRecordHash(state RuntimeStateRecord) string {
-	// Keep exactly the raw JSON value bytes, without Marshal's second full
-	// payload allocation. Encoder adds one framing newline, excluded below.
-	writer := runtimeJSONValueHashWriter{digest: sha256.New()}
-	if err := json.NewEncoder(&writer).Encode(state); err != nil || !writer.hasPending || writer.pending != '\n' {
+	wsID, runID := state.Facts.WorkspaceID, state.Facts.RunID
+	slot := &runtimeStateHashCache[runtimeStateHashSlotIndex(wsID, runID)]
+	slot.mu.Lock()
+	defer slot.mu.Unlock()
+
+	if slot.wsID == wsID && slot.runID == runID && slot.state != nil && slot.hash != "" && runtimeRawEqual(&state, slot.state) {
+		return slot.hash
+	}
+
+	var prev *RuntimeStateRecord
+	var prevRaw []byte
+	var prevSpans *RuntimeStateJSONSpans
+	if slot.wsID == wsID && slot.runID == runID && slot.state != nil && len(slot.raw) > 0 && slot.spans != nil {
+		prev, prevRaw, prevSpans = slot.state, slot.raw, slot.spans
+	}
+	buf := bytes.NewBuffer(slot.prevAlloc[:0])
+	if len(prevRaw) > 0 && buf.Cap() < len(prevRaw)+4096 {
+		buf.Grow(len(prevRaw) + 4096 - buf.Cap())
+	}
+	spans, err := WriteRuntimeStateRecordJSONWithPreimage(buf, state, prev, prevRaw, prevSpans)
+	if err != nil {
 		return ""
 	}
-	return "runtime-state-" + hex.EncodeToString(writer.digest.Sum(nil))
+	raw := buf.Bytes()
+	sum := SumRuntimeStateJSONWithPreimage(raw, prevRaw, prevSpans, &spans)
+	hash := "runtime-state-" + hex.EncodeToString(sum[:])
+
+	oldRaw := slot.raw
+	detached := SnapshotRuntimeStateRecordWithSharedReadOnlyHistory(&state)
+	slot.wsID = wsID
+	slot.runID = runID
+	slot.state = &detached
+	slot.raw = raw
+	slot.prevAlloc = nil
+	if cap(oldRaw) > 0 && (len(raw) == 0 || &oldRaw[:1][0] != &raw[:1][0]) {
+		slot.prevAlloc = oldRaw[:0]
+	}
+	spansCopy := spans
+	slot.spans = &spansCopy
+	slot.hash = hash
+	return hash
 }
 
 // Delay only the last byte, independently of Encoder's write chunking. The
@@ -44,7 +105,7 @@ func (w *runtimeJSONValueHashWriter) Write(body []byte) (int, error) {
 }
 
 func StableRuntimeBootstrapHash(bootstrap RuntimeBootstrap) string {
-	payload, _ := json.Marshal(bootstrap.Clone())
+	payload, _ := json.Marshal(bootstrap)
 	digest := sha256.Sum256(payload)
 	return "runtime-bootstrap-" + hex.EncodeToString(digest[:])
 }

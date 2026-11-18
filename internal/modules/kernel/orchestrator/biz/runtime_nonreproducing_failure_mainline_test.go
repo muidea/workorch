@@ -11,6 +11,7 @@ import (
 // confirmed File repair, fresh all-of, assessment and all terminal owners.
 // Only provider documents are scripted; no failure/target/receipt is injected.
 func TestDriveRuntimeNonReproducingFailureToAcceptanceAndRecovery(t *testing.T) {
+	t.Parallel()
 	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: rc.RuntimeValidationInputReviewProtocol, DynamicProjectObservations: true, SequentialProjectFailures: true, NativeProjectSources: true, IncrementalNativeSources: true, NonReproducingProjectFailures: true}
 	baseline := runValidationInputReviewMainline(t, "input_revision_after_failure", "", options)
 	for _, cut := range []string{"after_project_receipt", "after_result_persistence"} {
@@ -52,6 +53,7 @@ func assertNonReproducingFailureClosure(t *testing.T, s rc.RuntimeStateRecord) {
 // The same independent PASS must stop when it has no implementation behavior.
 // This uses real Shell raw/receipt persistence and all three terminal owners.
 func TestDriveRuntimeNonReproducingFailureWithoutBehaviorStops(t *testing.T) {
+	t.Parallel()
 	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: rc.RuntimeValidationInputReviewProtocol, NonReproducingProjectFailures: true}
 	baseline := runValidationInputReviewMainline(t, "project_history_failure", "", options)
 	if calls := runValidationInputReviewMainline(t, "project_history_failure", "after_project_receipt", options); calls != baseline {

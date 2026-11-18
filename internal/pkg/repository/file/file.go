@@ -1,7 +1,6 @@
 package file
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -135,9 +134,21 @@ type ArtifactRepository struct {
 	path string
 }
 
+type eventRecordSegmentLineSpan struct {
+	start int
+	end   int
+}
+
+type eventRecordSegmentCacheEntry struct {
+	rawPrefix []byte
+	spans     []eventRecordSegmentLineSpan
+	decoded   []*eventRecordLogLine
+}
+
 type EventRecordRepository struct {
-	mu   sync.RWMutex
-	path string
+	mu       sync.RWMutex
+	path     string
+	segments map[string]eventRecordSegmentCacheEntry
 
 	// eventRecordPurgeSwapCut is an owner-private crash-injection seam. It is
 	// nil in production and deliberately lives below the public repository
@@ -1140,7 +1151,10 @@ func (r *ArtifactRepository) list(matches func(resultmodel.Artifact) bool) ([]*r
 }
 
 func NewEventRecordRepository(path string) *EventRecordRepository {
-	return &EventRecordRepository{path: path}
+	return &EventRecordRepository{
+		path:     path,
+		segments: map[string]eventRecordSegmentCacheEntry{},
+	}
 }
 
 // NewEventStreamWorkspacePurger binds the low-level EventRecord compactor to
@@ -1269,7 +1283,7 @@ func (r *EventRecordRepository) eventRecordStreamPositionState() (eventRecordStr
 		return eventRecordStreamPositionState{}, err
 	}
 	state := eventRecordStreamPositionState{}
-	if scanErr := r.scanEventRecords(func(item *eventstream.EventRecord) error {
+	if scanErr := r.scanEventRecordsReadOnly(func(item *eventstream.EventRecord) error {
 		if item != nil && item.StreamPosition > state.Position {
 			state.Position = item.StreamPosition
 		}
@@ -1301,7 +1315,7 @@ func (r *EventRecordRepository) Get(_ context.Context, id common.EventRecordID) 
 		return nil, common.ErrNotFound
 	}
 	var found *eventstream.EventRecord
-	if err := r.scanEventRecords(func(item *eventstream.EventRecord) error {
+	if err := r.scanEventRecordsReadOnly(func(item *eventstream.EventRecord) error {
 		if item.ID == id {
 			found = cloneEventRecord(item)
 		}
@@ -1347,7 +1361,7 @@ func (r *EventRecordRepository) List(_ context.Context, query workorchquerycontr
 			return nil, err
 		}
 	} else {
-		if err := r.scanEventRecords(func(item *eventstream.EventRecord) error {
+		if err := r.scanEventRecordsReadOnly(func(item *eventstream.EventRecord) error {
 			if _, ok := deleted[item.ID]; ok {
 				return nil
 			}
@@ -1358,7 +1372,7 @@ func (r *EventRecordRepository) List(_ context.Context, query workorchquerycontr
 			if !matches {
 				return nil
 			}
-			ret = append(ret, item)
+			ret = append(ret, cloneEventRecordForQuery(item, query.IncludePayload))
 			return nil
 		}); err != nil {
 			return nil, err
@@ -1390,7 +1404,7 @@ func (r *EventRecordRepository) listLatestEventRecords(query workorchquerycontra
 		return nil, common.ErrInvalidArgument
 	}
 	ret := make([]*eventstream.EventRecord, 0, query.Limit)
-	if err := r.scanEventRecordsReverse(func(item *eventstream.EventRecord) (bool, error) {
+	if err := r.scanEventRecordsReverseReadOnly(func(item *eventstream.EventRecord) (bool, error) {
 		if _, ok := deleted[item.ID]; ok {
 			return false, nil
 		}
@@ -1401,7 +1415,7 @@ func (r *EventRecordRepository) listLatestEventRecords(query workorchquerycontra
 		if !matches {
 			return false, nil
 		}
-		ret = append(ret, item)
+		ret = append(ret, cloneEventRecordForQuery(item, query.IncludePayload))
 		return len(ret) >= query.Limit, nil
 	}); err != nil {
 		return nil, err
@@ -1574,7 +1588,7 @@ func (r *EventRecordRepository) eventExists(id common.EventRecordID) (bool, erro
 		return false, nil
 	}
 	found := false
-	if err := r.scanEventRecords(func(item *eventstream.EventRecord) error {
+	if err := r.scanEventRecordsReadOnly(func(item *eventstream.EventRecord) error {
 		if item.ID == id {
 			found = true
 		}
@@ -1663,6 +1677,14 @@ func eventRecordSegmentName(index int) string {
 }
 
 func (r *EventRecordRepository) scanEventRecords(fn func(*eventstream.EventRecord) error) error {
+	return r.scanEventRecordsWithClone(true, fn)
+}
+
+func (r *EventRecordRepository) scanEventRecordsReadOnly(fn func(*eventstream.EventRecord) error) error {
+	return r.scanEventRecordsWithClone(false, fn)
+}
+
+func (r *EventRecordRepository) scanEventRecordsWithClone(clone bool, fn func(*eventstream.EventRecord) error) error {
 	if fn == nil {
 		return common.ErrInvalidArgument
 	}
@@ -1672,14 +1694,14 @@ func (r *EventRecordRepository) scanEventRecords(fn func(*eventstream.EventRecor
 	}
 	sort.Strings(matches)
 	for _, path := range matches {
-		if err := r.scanEventRecordSegment(path, fn); err != nil {
+		if err := r.scanEventRecordSegmentWithClone(path, clone, fn); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (r *EventRecordRepository) scanEventRecordsReverse(fn func(*eventstream.EventRecord) (bool, error)) error {
+func (r *EventRecordRepository) scanEventRecordsReverseReadOnly(fn func(*eventstream.EventRecord) (bool, error)) error {
 	if fn == nil {
 		return common.ErrInvalidArgument
 	}
@@ -1689,7 +1711,7 @@ func (r *EventRecordRepository) scanEventRecordsReverse(fn func(*eventstream.Eve
 	}
 	sort.Strings(matches)
 	for i := len(matches) - 1; i >= 0; i-- {
-		stop, err := r.scanEventRecordSegmentReverse(matches[i], fn)
+		stop, err := r.scanEventRecordSegmentReverseWithClone(matches[i], false, fn)
 		if err != nil {
 			return err
 		}
@@ -1700,70 +1722,141 @@ func (r *EventRecordRepository) scanEventRecordsReverse(fn func(*eventstream.Eve
 	return nil
 }
 
-func (r *EventRecordRepository) scanEventRecordSegment(path string, fn func(*eventstream.EventRecord) error) error {
-	file, err := os.Open(path)
+func (r *EventRecordRepository) loadEventSegment(path string) ([]byte, []eventRecordSegmentLineSpan, []*eventRecordLogLine, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			delete(r.segments, path)
+			return nil, nil, nil, nil
 		}
+		return nil, nil, nil, err
+	}
+	var spans []eventRecordSegmentLineSpan
+	var decoded []*eventRecordLogLine
+	startOffset := 0
+	if r.segments != nil {
+		if cached, ok := r.segments[path]; ok && len(cached.rawPrefix) > 0 &&
+			len(data) >= len(cached.rawPrefix) && bytes.Equal(data[:len(cached.rawPrefix)], cached.rawPrefix) {
+			if len(data) == len(cached.rawPrefix) {
+				return cached.rawPrefix, cached.spans, cached.decoded, nil
+			}
+			spans = append([]eventRecordSegmentLineSpan(nil), cached.spans...)
+			decoded = append([]*eventRecordLogLine(nil), cached.decoded...)
+			startOffset = len(cached.rawPrefix)
+		}
+	}
+	if startOffset == 0 && len(data) > 0 {
+		spans = scanEventRecordLineSpans(data, 0)
+		decoded = make([]*eventRecordLogLine, len(spans))
+	} else if len(data) > startOffset {
+		added := scanEventRecordLineSpans(data, startOffset)
+		spans = append(spans, added...)
+		if len(added) > 0 {
+			grown := make([]*eventRecordLogLine, len(spans))
+			copy(grown, decoded)
+			decoded = grown
+		}
+	}
+	if len(data) == 0 || data[len(data)-1] == '\n' {
+		if r.segments == nil {
+			r.segments = map[string]eventRecordSegmentCacheEntry{}
+		}
+		r.segments[path] = eventRecordSegmentCacheEntry{
+			rawPrefix: append([]byte(nil), data...),
+			spans:     spans,
+			decoded:   decoded,
+		}
+	}
+	return data, spans, decoded, nil
+}
+
+func scanEventRecordLineSpans(data []byte, startOffset int) []eventRecordSegmentLineSpan {
+	var spans []eventRecordSegmentLineSpan
+	pos := startOffset
+	for pos < len(data) {
+		nl := bytes.IndexByte(data[pos:], '\n')
+		lineEnd := len(data)
+		nextPos := len(data)
+		if nl >= 0 {
+			lineEnd = pos + nl
+			nextPos = lineEnd + 1
+		}
+		s, e := pos, lineEnd
+		for s < e && (data[s] == ' ' || data[s] == '\t' || data[s] == '\r') {
+			s++
+		}
+		for e > s && (data[e-1] == ' ' || data[e-1] == '\t' || data[e-1] == '\r') {
+			e--
+		}
+		if s < e {
+			spans = append(spans, eventRecordSegmentLineSpan{start: s, end: e})
+		}
+		pos = nextPos
+	}
+	return spans
+}
+
+func decodeEventSegmentLine(data []byte, spans []eventRecordSegmentLineSpan, decoded []*eventRecordLogLine, idx int) (*eventstream.EventRecord, error) {
+	if decoded[idx] == nil {
+		var recordLine eventRecordLogLine
+		if err := decodeCurrentJSON(data[spans[idx].start:spans[idx].end], &recordLine); err != nil {
+			return nil, err
+		}
+		if recordLine.PayloadRef != "" {
+			recordLine.Record.PayloadRef = recordLine.PayloadRef
+			recordLine.Record.Payload = eventPayloadRef(recordLine.PayloadRef)
+		}
+		decoded[idx] = &recordLine
+	}
+	return &decoded[idx].Record, nil
+}
+
+func (r *EventRecordRepository) scanEventRecordSegment(path string, fn func(*eventstream.EventRecord) error) error {
+	return r.scanEventRecordSegmentWithClone(path, true, fn)
+}
+
+func (r *EventRecordRepository) scanEventRecordSegmentWithClone(path string, clone bool, fn func(*eventstream.EventRecord) error) error {
+	data, spans, decoded, err := r.loadEventSegment(path)
+	if err != nil {
 		return err
 	}
-	defer file.Close()
 	recordsScanned := 0
 	defer func() {
 		repository.RecordEventRecordMetadataScan(recordsScanned)
 	}()
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var recordLine eventRecordLogLine
-		if err := decodeCurrentJSON([]byte(line), &recordLine); err != nil {
+	for i := range spans {
+		item, err := decodeEventSegmentLine(data, spans, decoded, i)
+		if err != nil {
 			return err
 		}
 		recordsScanned++
-		item := cloneEventRecord(&recordLine.Record)
-		if recordLine.PayloadRef != "" {
-			item.PayloadRef = recordLine.PayloadRef
-			item.Payload = eventPayloadRef(recordLine.PayloadRef)
+		if clone {
+			item = cloneEventRecord(item)
 		}
 		if err := fn(item); err != nil {
 			return err
 		}
 	}
-	return scanner.Err()
+	return nil
 }
 
-func (r *EventRecordRepository) scanEventRecordSegmentReverse(path string, fn func(*eventstream.EventRecord) (bool, error)) (bool, error) {
-	data, err := os.ReadFile(path)
+func (r *EventRecordRepository) scanEventRecordSegmentReverseWithClone(path string, clone bool, fn func(*eventstream.EventRecord) (bool, error)) (bool, error) {
+	data, spans, decoded, err := r.loadEventSegment(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
 		return false, err
 	}
 	recordsScanned := 0
 	defer func() {
 		repository.RecordEventRecordMetadataScan(recordsScanned)
 	}()
-	lines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := bytes.TrimSpace(lines[i])
-		if len(line) == 0 {
-			continue
-		}
-		var recordLine eventRecordLogLine
-		if err := decodeCurrentJSON(line, &recordLine); err != nil {
+	for i := len(spans) - 1; i >= 0; i-- {
+		item, err := decodeEventSegmentLine(data, spans, decoded, i)
+		if err != nil {
 			return false, err
 		}
 		recordsScanned++
-		item := cloneEventRecord(&recordLine.Record)
-		if recordLine.PayloadRef != "" {
-			item.PayloadRef = recordLine.PayloadRef
-			item.Payload = eventPayloadRef(recordLine.PayloadRef)
+		if clone {
+			item = cloneEventRecord(item)
 		}
 		stop, err := fn(item)
 		if err != nil {
@@ -1774,6 +1867,20 @@ func (r *EventRecordRepository) scanEventRecordSegmentReverse(path string, fn fu
 		}
 	}
 	return false, nil
+}
+
+func cloneEventRecordForQuery(item *eventstream.EventRecord, includePayload bool) *eventstream.EventRecord {
+	if includePayload {
+		return cloneEventRecord(item)
+	}
+	cloned := *item
+	if len(item.Payload.Fields) != 0 && len(item.PayloadSummary.Fields) == 0 {
+		cloned.PayloadSummary = eventPayloadSummary(item.Payload)
+	} else {
+		cloned.PayloadSummary = item.PayloadSummary.Clone()
+	}
+	cloned.Payload = workorcheventpayload.Payload{}
+	return &cloned
 }
 
 func (r *EventRecordRepository) hydrateEventRecordPayload(item *eventstream.EventRecord) error {
@@ -2212,6 +2319,24 @@ func (r *WorkspaceRepository) Get(_ context.Context, id common.WorkspaceID) (*wo
 		return nil, common.ErrNotFound
 	}
 	return cloneWorkspace(&item), nil
+}
+
+// GetReadOnly returns a shallow copy of the immutable cached Workspace image
+// for strictly read-only owner queries that detach outputs before leaving the owner.
+func (r *WorkspaceRepository) GetReadOnly(_ context.Context, id common.WorkspaceID) (*workspace.Workspace, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items, err := loadWorkspacePersistenceMap(r.path)
+	if err != nil {
+		return nil, err
+	}
+	item, ok := items[id]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	item.AuthoringSummary = nil
+	return &item, nil
 }
 
 func (r *WorkspaceRepository) List(_ context.Context) ([]*workspace.Workspace, error) {
@@ -2869,8 +2994,9 @@ func (r *RunRepository) create(item *run.Run, allocatedGeneration uint64, genera
 	if item.Revision == 0 {
 		item.Revision = 1
 	}
-	items[item.ID] = *cloneRun(item)
-	if err := saveMap(r.path, items); err != nil {
+	stored := cloneRun(item)
+	items[item.ID] = *stored
+	if err := saveRunMapWithPhysicalCache(r.path, items, stored); err != nil {
 		item.WorkspaceRunGeneration = 0
 		return err
 	}
@@ -2911,11 +3037,16 @@ func loadRunMap(path string) (map[common.RunID]run.Run, error) {
 		cache.items, cache.loaded = items, true
 	}
 	if images, ok := cache.items.(runInventoryPhysicalMap); ok {
-		items, err := materializeRunInventoryImages(images)
-		if err != nil {
-			return nil, err
+		detached := make(map[common.RunID]run.Run, len(images))
+		for id, image := range images {
+			materialized, err := materializeRunPhysicalImage(id, image)
+			if err != nil {
+				return nil, err
+			}
+			images[id] = materialized
+			detached[id] = *cloneRun(materialized.aggregate)
 		}
-		cache.items = items
+		return detached, nil
 	}
 	items, ok := cache.items.(map[common.RunID]run.Run)
 	if !ok {
@@ -2953,6 +3084,10 @@ func validatePersistedRunGenerationWatermarks(items map[common.RunID]run.Run, he
 		}
 		workspaceSeen[item.WorkspaceRunGeneration] = struct{}{}
 	}
+	return validateRunGenerationHeads(heads)
+}
+
+func validateRunGenerationHeads(heads map[common.WorkspaceID]runWorkspacePersistenceHead) error {
 	for workspaceID, head := range heads {
 		if workspaceID == "" || (head.Generation == 0 && head.Retirement == nil) {
 			return fmt.Errorf("%w: Run workspace head is incomplete", common.ErrConflict)
@@ -2969,8 +3104,12 @@ func validatePersistedRunGenerationWatermarks(items map[common.RunID]run.Run, he
 
 func (r *RunRepository) Get(_ context.Context, id common.RunID) (*run.Run, error) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return loadRunByID(r.path, "", id)
+	original, err := loadRunOriginalByID(r.path, "", id)
+	r.mu.RUnlock()
+	if err != nil {
+		return nil, err
+	}
+	return cloneRun(original), nil
 }
 
 func (r *RunRepository) GetByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID, id common.RunID) (*run.Run, error) {
@@ -2978,56 +3117,102 @@ func (r *RunRepository) GetByWorkspaceID(_ context.Context, workspaceID common.W
 		return nil, common.ErrInvalidArgument
 	}
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return loadRunByID(r.path, workspaceID, id)
+	original, err := loadRunOriginalByID(r.path, workspaceID, id)
+	r.mu.RUnlock()
+	if err != nil {
+		return nil, err
+	}
+	return cloneRun(original), nil
+}
+
+// GetRuntimeStateSnapshot returns a detached Run whose append-only Runtime
+// history slices are capacity-clipped and shared without mutating the cached image.
+func (r *RunRepository) GetRuntimeStateSnapshot(_ context.Context, workspaceID common.WorkspaceID, id common.RunID) (*run.Run, error) {
+	if workspaceID == "" || id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	r.mu.RLock()
+	original, err := loadRunOriginalByID(r.path, workspaceID, id)
+	r.mu.RUnlock()
+	if err != nil {
+		return nil, err
+	}
+	return run.CloneRunWithSharedRuntimeHistory(original), nil
 }
 
 func (r *RunRepository) List(_ context.Context) ([]*run.Run, error) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	items, err := loadRunMap(r.path)
+	originals, err := listRunOriginalsFromInventory(r.path, false, "")
+	r.mu.RUnlock()
 	if err != nil {
 		return nil, err
 	}
-
-	ids := make([]string, 0, len(items))
-	for id := range items {
-		ids = append(ids, string(id))
-	}
-	sort.Strings(ids)
-
-	ret := make([]*run.Run, 0, len(ids))
-	for _, id := range ids {
-		item := items[common.RunID(id)]
-		ret = append(ret, cloneRun(&item))
+	ret := make([]*run.Run, len(originals))
+	for i, original := range originals {
+		ret[i] = run.CloneRunWithSharedRuntimeHistory(original)
 	}
 	return ret, nil
 }
 
 func (r *RunRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*run.Run, error) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	items, err := loadRunMap(r.path)
+	originals, err := listRunOriginalsFromInventory(r.path, true, workspaceID)
+	r.mu.RUnlock()
 	if err != nil {
 		return nil, err
 	}
-
-	ids := make([]string, 0, len(items))
-	for id, item := range items {
-		if item.WorkspaceID == workspaceID {
-			ids = append(ids, string(id))
-		}
-	}
-	sort.Strings(ids)
-
-	ret := make([]*run.Run, 0, len(ids))
-	for _, id := range ids {
-		item := items[common.RunID(id)]
-		ret = append(ret, cloneRun(&item))
+	ret := make([]*run.Run, len(originals))
+	for i, original := range originals {
+		ret[i] = run.CloneRunWithSharedRuntimeHistory(original)
 	}
 	return ret, nil
+}
+
+func listRunOriginalsFromInventory(path string, filterWorkspace bool, workspaceID common.WorkspaceID) ([]*run.Run, error) {
+	if _, err := loadRunInventory(path); err != nil {
+		return nil, err
+	}
+	cache := mapCacheEntry(path)
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+
+	switch items := cache.items.(type) {
+	case map[common.RunID]run.Run:
+		ids := make([]string, 0, len(items))
+		for id, item := range items {
+			if !filterWorkspace || item.WorkspaceID == workspaceID {
+				ids = append(ids, string(id))
+			}
+		}
+		sort.Strings(ids)
+		ret := make([]*run.Run, 0, len(ids))
+		for _, id := range ids {
+			item := items[common.RunID(id)]
+			ret = append(ret, &item)
+		}
+		return ret, nil
+	case runInventoryPhysicalMap:
+		ids := make([]string, 0, len(items))
+		for id, image := range items {
+			if !filterWorkspace || image.metadata.WorkspaceID == workspaceID {
+				ids = append(ids, string(id))
+			}
+		}
+		sort.Strings(ids)
+		ret := make([]*run.Run, 0, len(ids))
+		for _, id := range ids {
+			runID := common.RunID(id)
+			image, err := materializeRunPhysicalImage(runID, items[runID])
+			if err != nil {
+				return nil, err
+			}
+			items[runID] = image
+			ret = append(ret, image.aggregate)
+		}
+		return ret, nil
+	default:
+		return nil, fmt.Errorf("file repository cache type mismatch for %s", path)
+	}
 }
 
 func (r *RunRepository) Update(_ context.Context, item *run.Run) error {
@@ -3075,8 +3260,9 @@ func (r *RunRepository) Update(_ context.Context, item *run.Run) error {
 	if err := run.ValidateRuntimeStatePreserved(&current, item); err != nil {
 		return err
 	}
-	items[item.ID] = *cloneRun(item)
-	return saveMap(r.path, items)
+	stored := cloneRun(item)
+	items[item.ID] = *stored
+	return saveRunMapWithPhysicalCache(r.path, items, stored)
 }
 
 func (r *RunRepository) CompareAndSwap(_ context.Context, item *run.Run, expectedRevision uint64) error {
@@ -3124,39 +3310,35 @@ func (r *RunRepository) CompareAndSwap(_ context.Context, item *run.Run, expecte
 		return err
 	}
 	item.Revision = expectedRevision + 1
-	items[item.ID] = *cloneRun(item)
-	return saveMap(r.path, items)
+	stored := cloneRun(item)
+	items[item.ID] = *stored
+	return saveRunMapWithPhysicalCache(r.path, items, stored)
 }
 
 func (r *RunRepository) CompareAndSwapRuntimeState(ctx context.Context, item *run.Run, expectedRevision, expectedRuntimeStateRevision uint64) error {
 	if r == nil || item == nil || item.ID == "" || item.WorkspaceID == "" || expectedRevision == 0 {
 		return common.ErrInvalidArgument
 	}
-	if err := run.ValidateRunRuntimeBootstrapsRaw(item); err != nil {
-		return err
-	}
 	if err := validateRuntimeWorkspaceScope(ctx, item.WorkspaceID); err != nil {
 		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	items, err := loadRunMap(r.path)
+	if !hasCachedValidatedRunBootstraps(r.path, item) {
+		if err := run.ValidateRunRuntimeBootstrapsRaw(item); err != nil {
+			return err
+		}
+	}
+	images, current, err := loadRunPhysicalImagesForCAS(r.path, item.WorkspaceID, item.ID, expectedRevision)
 	if err != nil {
 		return err
-	}
-	current, ok := items[item.ID]
-	if !ok {
-		return common.ErrNotFound
-	}
-	if current.WorkspaceID != item.WorkspaceID || current.Revision != expectedRevision {
-		return common.ErrConflict
 	}
 	heads, err := loadMap[common.WorkspaceID, runWorkspacePersistenceHead](r.workspaceGenerationPath())
 	if err != nil {
 		return err
 	}
 	if len(heads) > 0 {
-		if err := validatePersistedRunGenerationWatermarks(items, heads); err != nil {
+		if err := validatePersistedRunGenerationWatermarksPhysical(images, heads); err != nil {
 			return err
 		}
 		if fence := heads[current.WorkspaceID].Retirement; fence != nil {
@@ -3169,16 +3351,15 @@ func (r *RunRepository) CompareAndSwapRuntimeState(ctx context.Context, item *ru
 		return err
 	}
 	// Take the sole stored copy before encoding. The hash and canonical file
-	// consume this exact frozen value; no second Runtime serialization occurs.
-	stored := cloneRun(item)
+	// consume this exact frozen value; only the target Run is serialized.
+	stored := cloneRunWithSharedRuntimeHistoryAndStoredBootstrap(item, &current)
 	stored.Revision = expectedRevision + 1
-	body, err := marshalRunRuntimeWrite(items, stored)
+	body, err := marshalRunInventoryPhysicalWrite(images, stored)
 	if err != nil {
 		return err
 	}
 	item.RuntimeStateHash, item.Revision = stored.RuntimeStateHash, stored.Revision
-	items[item.ID] = *stored
-	return publishMapBytes(r.path, items, body, 0o644, commitFileAtomically)
+	return publishMapBytes(r.path, images, body, 0o644, commitFileAtomically)
 }
 
 func (r *RunRepository) Delete(_ context.Context, id common.RunID) error {
@@ -4797,8 +4978,8 @@ func EvictMapFileCache(path string) {
 	entry.mu.Unlock()
 }
 
-func cloneStoredMap[K comparable, V any](items map[K]V) map[K]V {
-	cloned := make(map[K]V, len(items))
+func cloneStoredMap[M ~map[K]V, K comparable, V any](items M) M {
+	cloned := make(M, len(items))
 	for key, value := range items {
 		cloned[key] = value
 	}

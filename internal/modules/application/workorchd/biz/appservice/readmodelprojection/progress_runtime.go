@@ -162,9 +162,11 @@ func runtimeImplementationProgress(state runtimecontract.RuntimeStateRecord) *pr
 	if archive := state.SemanticPlanning.HistoryArchive; archive != nil {
 		ret.ArchivedSegments = len(archive.Segments)
 	}
-	dispatches := append([]runtimecontract.RuntimeDispatchRecord(nil), state.CompletedDispatches...)
+	dispatches := state.CompletedDispatches
 	if state.ActiveDispatch != nil {
-		dispatches = append(dispatches, *state.ActiveDispatch)
+		dispatches = make([]runtimecontract.RuntimeDispatchRecord, len(state.CompletedDispatches)+1)
+		copy(dispatches, state.CompletedDispatches)
+		dispatches[len(state.CompletedDispatches)] = *state.ActiveDispatch
 	}
 	for _, round := range state.ImplementationWork.Rounds {
 		if ret.CurrentWorkItemID != "" && string(round.CoverageWorkItemID) == ret.CurrentWorkItemID {
@@ -326,8 +328,8 @@ func applyRuntimeProgressToRepairLoop(progress *projectioncontract.TaskProgress,
 		return
 	}
 	loop := progress.RepairLoop
-	facts := state.Facts.Normalized()
-	repairAttempts := facts.Repair.RepairAttempts
+	repair := state.Facts.Repair.Normalized()
+	repairAttempts := repair.RepairAttempts
 	loop.AttemptCount = repairAttempts
 	loop.LastAttempt = repairAttempts
 	loop.LastFailureClass = ""
@@ -348,7 +350,7 @@ func applyRuntimeProgressToRepairLoop(progress *projectioncontract.TaskProgress,
 		} else {
 			loop.State = "inactive"
 		}
-	case repairAttempts > 0 && (facts.Repair.ActiveGap != nil || facts.Failure != nil):
+	case repairAttempts > 0 && (repair.ActiveGap != nil || state.Facts.Failure != nil):
 		loop.State = "active"
 	default:
 		loop.State = "inactive"
@@ -359,13 +361,13 @@ func applyRuntimeProgressToRepairLoop(progress *projectioncontract.TaskProgress,
 	if strings.TrimSpace(summary.FailureSignature) != "" {
 		loop.LastFailureSignature = summary.FailureSignature
 	}
-	for _, repeated := range facts.Repair.SignatureCounts {
+	for _, repeated := range repair.SignatureCounts {
 		if repeated.Signature == summary.FailureSignature && repeated.Signature != "" && repeated.Count > 1 {
 			loop.RepeatedFailureReason = summary.FailureMessage
 			break
 		}
 	}
-	if summary.ValidationFailureOccurrences > 1 && facts.Failure != nil {
+	if summary.ValidationFailureOccurrences > 1 && state.Facts.Failure != nil {
 		loop.RepeatedFailureReason = "same validation check failure recurred across repair transactions"
 	}
 	progress.RepairLoop = loop
@@ -382,9 +384,11 @@ func latestRuntimeAcceptedEvidenceAt(state runtimecontract.RuntimeStateRecord) s
 func runtimeOwnerEvidenceProgress(state runtimecontract.RuntimeStateRecord) (string, string, int) {
 	latest, effectAt := "", ""
 	effects := make(map[string]struct{})
-	dispatches := append([]runtimecontract.RuntimeDispatchRecord(nil), state.CompletedDispatches...)
+	dispatches := state.CompletedDispatches
 	if state.ActiveDispatch != nil {
-		dispatches = append(dispatches, *state.ActiveDispatch)
+		dispatches = make([]runtimecontract.RuntimeDispatchRecord, len(state.CompletedDispatches)+1)
+		copy(dispatches, state.CompletedDispatches)
+		dispatches[len(state.CompletedDispatches)] = *state.ActiveDispatch
 	}
 	for _, fact := range state.Facts.Evidence.Accepted {
 		for _, dispatch := range dispatches {

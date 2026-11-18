@@ -133,9 +133,6 @@ func TerminalDeliveryFullyAcknowledged(aggregate RuntimeAggregate) bool {
 	if aggregate.TerminalMaterialSeal == nil {
 		return false
 	}
-	if err := runtimecontract.ValidateRuntimeTerminalMaterialSeal(aggregate.TerminalMaterialSeal, terminalMaterialSource(aggregate)); err != nil {
-		return false
-	}
 	if aggregate.Decision.AuthoritySnapshot.WorkspaceID != aggregate.Facts.WorkspaceID || aggregate.Decision.AuthoritySnapshot.RunID != aggregate.Facts.RunID {
 		return false
 	}
@@ -158,12 +155,18 @@ func TerminalDeliveryFullyAcknowledged(aggregate RuntimeAggregate) bool {
 	if err != nil {
 		return false
 	}
-	for _, binding := range bindings {
-		state, err := EvaluateRuntimeDeliveryLineageAssertion(aggregate, binding)
+	if len(bindings) == 0 {
+		return runtimecontract.ValidateRuntimeTerminalMaterialSeal(aggregate.TerminalMaterialSeal, terminalMaterialSource(aggregate)) == nil
+	}
+	states, err := EvaluateRuntimeDeliveryLineageAssertions(aggregate, bindings)
+	if err != nil {
+		return false
+	}
+	for _, state := range states {
 		// A faithfully delivered failure is complete delivery, never fulfilled
 		// success-material obligations. Do not re-drive an impossible proof.
 		failedMaterial := outcome.Kind != runtimecontract.TerminalOutcomeKindCompleted && state == runtimecontract.RuntimeDeliveryLineageUnsatisfied
-		if err != nil || (state != runtimecontract.RuntimeDeliveryLineageSatisfied && !failedMaterial) {
+		if state != runtimecontract.RuntimeDeliveryLineageSatisfied && !failedMaterial {
 			return false
 		}
 	}

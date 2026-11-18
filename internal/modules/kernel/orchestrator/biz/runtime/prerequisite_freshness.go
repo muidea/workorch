@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"fmt"
-	"reflect"
 	"sort"
 	"strings"
 
@@ -42,19 +41,23 @@ type RuntimeSemanticCatalogScopeGap struct {
 // focus participate. A settled CWI's binding/effect/evidence is deliberately
 // outside this comparison and remains immutable lineage.
 func NextRuntimeSemanticCatalogScopeGap(aggregate RuntimeAggregate) (RuntimeSemanticCatalogScopeGap, bool) {
-	facts := aggregate.Facts.Normalized()
 	if aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired ||
-		len(facts.Focus.CoverageEvidenceBindings) != 0 || len(facts.Focus.TargetRefs) == 0 {
+		len(aggregate.Facts.Focus.CoverageEvidenceBindings) != 0 || len(aggregate.Facts.Focus.TargetRefs) == 0 {
 		return RuntimeSemanticCatalogScopeGap{}, false
 	}
-	requiredTargets := normalizeRuntimeTargetRefs(facts.Focus.TargetRefs)
-	acceptedKinds := make(map[string]struct{}, len(facts.Focus.AcceptedStepKinds))
-	for _, kind := range facts.Focus.AcceptedStepKinds {
+	focus := aggregate.Facts.Focus.Normalized()
+	if len(focus.CoverageEvidenceBindings) != 0 || len(focus.TargetRefs) == 0 {
+		return RuntimeSemanticCatalogScopeGap{}, false
+	}
+	requiredTargets := normalizeRuntimeTargetRefs(focus.TargetRefs)
+	acceptedKinds := make(map[string]struct{}, len(focus.AcceptedStepKinds))
+	for _, kind := range focus.AcceptedStepKinds {
 		if canonical := runtimecontract.CanonicalRuntimeBlockKind(kind); canonical != "" {
 			acceptedKinds[canonical] = struct{}{}
 		}
 	}
-	for _, catalog := range facts.Resources.OperationAdmissibilities {
+	resources := aggregate.Facts.Resources.Normalized()
+	for _, catalog := range resources.OperationAdmissibilities {
 		catalog = catalog.Normalized()
 		relevant := false
 		for _, kind := range catalog.OperationKinds {
@@ -63,10 +66,10 @@ func NextRuntimeSemanticCatalogScopeGap(aggregate RuntimeAggregate) (RuntimeSema
 				break
 			}
 		}
-		if !relevant || grounding.CatalogCoversFocusTargets(catalog, facts.Focus, requiredTargets) {
+		if !relevant || grounding.CatalogCoversFocusTargets(catalog, focus, requiredTargets) {
 			continue
 		}
-		observation, found := runtimecontract.RuntimePrerequisiteObservationForID(facts.Resources.PrerequisiteObservations, catalog.PrerequisiteID)
+		observation, found := runtimecontract.RuntimePrerequisiteObservationForID(resources.PrerequisiteObservations, catalog.PrerequisiteID)
 		if !found || observation.Kind != runtimecontract.PrerequisiteKindOperationAdmissibility ||
 			observation.OwnerModuleID != catalog.OwnerModuleID || observation.ContentHash != catalog.SnapshotID {
 			continue
@@ -74,7 +77,7 @@ func NextRuntimeSemanticCatalogScopeGap(aggregate RuntimeAggregate) (RuntimeSema
 		return RuntimeSemanticCatalogScopeGap{
 			PrerequisiteID: catalog.PrerequisiteID, ObservationID: observation.ObservationID,
 			OwnerModuleID: catalog.OwnerModuleID, CatalogSnapshotID: catalog.SnapshotID,
-			FocusID: facts.Focus.ID, RequiredTargetRefs: requiredTargets,
+			FocusID: focus.ID, RequiredTargetRefs: requiredTargets,
 		}, true
 	}
 	return RuntimeSemanticCatalogScopeGap{}, false
@@ -272,7 +275,7 @@ func validateRuntimeBindingContradictionObservation(record runtimecontract.Runti
 	if record.Proposal == nil || !observation.SealedTargetAuthorizationContradicted() || observation.Feedback == nil || observation.Feedback.OriginalDiagnostic == nil || feasibility.Observation == nil {
 		return common.ErrInvalidArgument
 	}
-	if !reflect.DeepEqual(feasibility.Observation.Clone(), observation) || strings.TrimSpace(feasibility.AdmissibilitySnapshotID) != observation.OwnerPolicy.CatalogSnapshotID {
+	if !runtimecontract.RuntimeRawEqual(feasibility.Observation.Clone(), observation) || strings.TrimSpace(feasibility.AdmissibilitySnapshotID) != observation.OwnerPolicy.CatalogSnapshotID {
 		return common.ErrInvalidArgument
 	}
 	manifestHash := strings.TrimSpace(feasibility.CandidateManifestHash)
@@ -355,7 +358,7 @@ func sameRuntimeStringSet(left, right []string) bool {
 	right = append([]string(nil), right...)
 	sort.Strings(left)
 	sort.Strings(right)
-	return reflect.DeepEqual(left, right)
+	return runtimecontract.RuntimeRawEqual(left, right)
 }
 
 func candidateOperationByID(candidate runtimecontract.RuntimeCandidate, operationID string) (runtimecontract.RuntimeOperation, bool) {
@@ -478,7 +481,7 @@ func validatePrerequisiteInvalidationChronologyTransition(previous, next Runtime
 	}
 	seen := make(map[string]bool, len(after))
 	for index, record := range after {
-		if index < len(before) && !reflect.DeepEqual(record, before[index]) {
+		if index < len(before) && !runtimecontract.RuntimeRawEqual(record, before[index]) {
 			return fmt.Errorf("%w: prerequisite invalidation chronology cannot be reordered or rewritten", common.ErrConflict)
 		}
 		if seen[record.Signature] {
@@ -583,7 +586,7 @@ func receiptProvesFreshnessChange(record runtimecontract.RuntimePrerequisiteInva
 		return false
 	}
 	receipt, found := receipts[record.ReceiptHash]
-	return found && receipt.OperationID == record.OperationID && reflect.DeepEqual(receipt.ResourceChanges, record.ResourceChanges)
+	return found && receipt.OperationID == record.OperationID && runtimecontract.RuntimeRawEqual(receipt.ResourceChanges, record.ResourceChanges)
 }
 
 func containsFreshnessString(values []string, value string) bool {

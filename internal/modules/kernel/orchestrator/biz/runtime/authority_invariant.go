@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"sort"
+	"strings"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -61,7 +62,19 @@ type RuntimeAuthorityInvariantReport struct {
 // only reads the aggregate and does not invoke owners, the provider, or the
 // reducer.
 func InspectRuntimeAuthorityInvariants(aggregate RuntimeAggregate) RuntimeAuthorityInvariantReport {
-	facts := aggregate.Facts.Normalized()
+	facts := aggregate.Facts
+	facts.Focus.ID = strings.TrimSpace(facts.Focus.ID)
+	facts.Repair = facts.Repair.Normalized()
+	facts.Recovery = facts.Recovery.Normalized()
+	facts.Prerequisites.Pending = runtimecontract.NormalizeRuntimePrerequisites(facts.Prerequisites.Pending)
+	facts.Prerequisites.Satisfied = runtimecontract.NormalizeRuntimePrerequisites(facts.Prerequisites.Satisfied)
+	facts.Prerequisites.Retired = runtimecontract.NormalizeRuntimePrerequisites(facts.Prerequisites.Retired)
+	facts.Resources = runtimecontract.RuntimeResourceFacts{
+		TargetSelection:                 facts.Resources.TargetSelection,
+		ProviderCeiling:                 facts.Resources.ProviderCeiling,
+		PrerequisiteObservations:        facts.Resources.PrerequisiteObservations,
+		RetiredPrerequisiteObservations: facts.Resources.RetiredPrerequisiteObservations,
+	}.Normalized()
 	report := newRuntimeAuthorityInvariantReport(aggregate, facts)
 	active, satisfied := report.inspectActivePrerequisites(facts)
 	retired := report.inspectRetiredPrerequisites(facts, active)
@@ -197,25 +210,28 @@ func runtimeDecisionRequestsCandidate(state runtimecontract.ConvergenceState) bo
 // in the aggregate. It deliberately does not invent a fallback byte ceiling:
 // bootstrap is the sole source that declares the provider requirement.
 func activeProviderCeilingRequirements(facts runtimecontract.RuntimeFacts) []runtimecontract.RuntimeRequirement {
-	facts = facts.Normalized()
 	values := make([]runtimecontract.RuntimeRequirement, 0, 1)
 	seen := make(map[string]struct{})
-	for _, prerequisite := range append(append([]runtimecontract.RuntimePrerequisite(nil), facts.Prerequisites.Pending...), facts.Prerequisites.Satisfied...) {
-		if prerequisite.Kind != runtimecontract.PrerequisiteKindProviderCeiling {
-			continue
+	collect := func(items []runtimecontract.RuntimePrerequisite) {
+		for _, prerequisite := range items {
+			if prerequisite.Kind != runtimecontract.PrerequisiteKindProviderCeiling {
+				continue
+			}
+			requirement := runtimecontract.RuntimeRequirement{
+				Kind: prerequisite.Kind, Scope: prerequisite.Scope, FocusID: prerequisite.FocusID,
+				OwnerModuleID: prerequisite.OwnerModuleID, SubjectRef: prerequisite.SubjectRef,
+				MinimumBytes: prerequisite.MinimumBytes, Reason: prerequisite.Reason,
+			}
+			key := runtimePrerequisiteID(requirement)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			values = append(values, requirement)
 		}
-		requirement := runtimecontract.RuntimeRequirement{
-			Kind: prerequisite.Kind, Scope: prerequisite.Scope, FocusID: prerequisite.FocusID,
-			OwnerModuleID: prerequisite.OwnerModuleID, SubjectRef: prerequisite.SubjectRef,
-			MinimumBytes: prerequisite.MinimumBytes, Reason: prerequisite.Reason,
-		}
-		key := runtimePrerequisiteID(requirement)
-		if _, exists := seen[key]; exists {
-			continue
-		}
-		seen[key] = struct{}{}
-		values = append(values, requirement)
 	}
+	collect(runtimecontract.NormalizeRuntimePrerequisites(facts.Prerequisites.Pending))
+	collect(runtimecontract.NormalizeRuntimePrerequisites(facts.Prerequisites.Satisfied))
 	return normalizeRuntimeRequirements(values)
 }
 

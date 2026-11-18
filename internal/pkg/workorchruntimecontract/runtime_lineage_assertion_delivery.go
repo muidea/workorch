@@ -84,6 +84,35 @@ func runtimeDeliveryLineageBinding(item RuntimeCoverageItem, profiles []RuntimeP
 
 // EvaluateRuntimeDeliveryLineageAssertionFromState 不调用 aggregate/state Validate，也不改变终态或材料。
 func EvaluateRuntimeDeliveryLineageAssertionFromState(source RuntimeStateRecord, binding RuntimeDeliveryLineageBinding) (RuntimeDeliveryLineageState, error) {
+	session := &runtimeHistoricalPreimageSession{semantic: newRuntimeSemanticValidationSession()}
+	var sealValidated bool
+	var snapshotSources []RuntimeTerminalSnapshotSource
+	var snapshotSourcesLoaded bool
+	return evaluateRuntimeDeliveryLineageAssertionInSession(source, binding, session, &sealValidated, &snapshotSources, &snapshotSourcesLoaded)
+}
+
+// EvaluateRuntimeDeliveryLineageAssertionsFromState evaluates all supplied bindings
+// against the sealed source state within one shared historical validation session.
+func EvaluateRuntimeDeliveryLineageAssertionsFromState(source RuntimeStateRecord, bindings []RuntimeDeliveryLineageBinding) ([]RuntimeDeliveryLineageState, error) {
+	session := &runtimeHistoricalPreimageSession{semantic: newRuntimeSemanticValidationSession()}
+	var sealValidated bool
+	var snapshotSources []RuntimeTerminalSnapshotSource
+	var snapshotSourcesLoaded bool
+	states := make([]RuntimeDeliveryLineageState, 0, len(bindings))
+	for _, binding := range bindings {
+		state, err := evaluateRuntimeDeliveryLineageAssertionInSession(source, binding, session, &sealValidated, &snapshotSources, &snapshotSourcesLoaded)
+		if err != nil {
+			return nil, err
+		}
+		states = append(states, state)
+	}
+	return states, nil
+}
+
+func evaluateRuntimeDeliveryLineageAssertionInSession(source RuntimeStateRecord, binding RuntimeDeliveryLineageBinding, session *runtimeHistoricalPreimageSession, sealValidated *bool, snapshotSources *[]RuntimeTerminalSnapshotSource, snapshotSourcesLoaded *bool) (RuntimeDeliveryLineageState, error) {
+	if session == nil {
+		session = &runtimeHistoricalPreimageSession{semantic: newRuntimeSemanticValidationSession()}
+	}
 	if err := ValidateRuntimeDefinitionLineageAssertions(source.Facts.DefinitionFocuses, source.Facts.Activation.ExecutionContract.ProfileContracts); err != nil {
 		return "", err
 	}
@@ -107,8 +136,13 @@ func EvaluateRuntimeDeliveryLineageAssertionFromState(source RuntimeStateRecord,
 	if len(expected.Assertions) == 0 {
 		return RuntimeDeliveryLineageNotApplicable, nil
 	}
-	if err := ValidateRuntimeTerminalMaterialSeal(source.TerminalMaterialSeal, source); err != nil {
-		return "", err
+	if sealValidated == nil || !*sealValidated {
+		if err := validateRuntimeTerminalMaterialSealInSession(source.TerminalMaterialSeal, source, session); err != nil {
+			return "", err
+		}
+		if sealValidated != nil {
+			*sealValidated = true
+		}
 	}
 	_, terminal, err := DeriveRuntimeTerminalOutcome(source.Decision, source.Termination)
 	if err != nil {
@@ -127,7 +161,7 @@ func EvaluateRuntimeDeliveryLineageAssertionFromState(source RuntimeStateRecord,
 		if source.TerminalMaterialSeal.Identity.Outcome.Kind != TerminalOutcomeKindCompleted {
 			return RuntimeDeliveryLineageUnsatisfied, nil
 		}
-		if err := runtimeTerminalMaterialAssertion(source, source.TerminalMaterialSeal.Material, assertion.Rule); err != nil {
+		if err := runtimeTerminalMaterialAssertionInSession(source, source.TerminalMaterialSeal.Material, assertion.Rule, session, snapshotSources, snapshotSourcesLoaded); err != nil {
 			// Material obligations are a post-seal success consumer. A failed
 			// terminal remains faithfully deliverable; it is unsatisfied, not a
 			// malformed delivery ledger that should trap SM-4 recovery.

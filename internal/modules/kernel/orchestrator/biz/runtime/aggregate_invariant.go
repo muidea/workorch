@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"fmt"
-	"reflect"
 	"sort"
 	"strings"
 
@@ -92,14 +91,24 @@ func validateRuntimeValidationProofApplicability(facts runtimecontract.RuntimeFa
 // Definition inputs take the complete gate; current recipe coverage is always
 // checked against the complete current collection, never the filtered delta.
 func validateRuntimeAggregateValidationProofApplicabilityTransition(previous *RuntimeAggregate, a RuntimeAggregate) error {
-	current := a.Facts.Resources.OperationAdmissibilities
-	history := runtimeValidationProofSealedCatalogs(a)
 	if previous != nil && a.Facts.DefinitionRevision == previous.Facts.DefinitionRevision &&
-		reflect.DeepEqual(a.Facts.DefinitionSeed.CoverageItems, previous.Facts.DefinitionSeed.CoverageItems) &&
-		reflect.DeepEqual(a.Facts.DefinitionFocuses, previous.Facts.DefinitionFocuses) {
+		runtimecontract.RuntimeRawEqual(a.Facts.DefinitionSeed.CoverageItems, previous.Facts.DefinitionSeed.CoverageItems) &&
+		runtimecontract.RuntimeRawEqual(a.Facts.DefinitionFocuses, previous.Facts.DefinitionFocuses) {
+		semanticUnchanged := runtimecontract.RuntimeRawEqual(a.SemanticPlanning, previous.SemanticPlanning)
+		if semanticUnchanged && runtimecontract.RuntimeRawEqual(a.Facts.Resources.OperationAdmissibilities, previous.Facts.Resources.OperationAdmissibilities) {
+			return validateRuntimeCurrentValidationRecipeCoverage(a.Facts)
+		}
+		current := a.Facts.Resources.OperationAdmissibilities
+		var history []runtimecontract.RuntimeOperationAdmissibility
+		if !semanticUnchanged {
+			history = runtimeValidationProofSealedCatalogs(a)
+		}
 		originals := make(map[string][]runtimecontract.RuntimeOperationAdmissibility)
-		for _, values := range [][]runtimecontract.RuntimeOperationAdmissibility{previous.Facts.Resources.OperationAdmissibilities, runtimeValidationProofSealedCatalogs(*previous)} {
-			for _, catalog := range values {
+		for _, catalog := range previous.Facts.Resources.OperationAdmissibilities {
+			originals[catalog.SnapshotID] = append(originals[catalog.SnapshotID], catalog)
+		}
+		if !semanticUnchanged {
+			for _, catalog := range runtimeValidationProofSealedCatalogs(*previous) {
 				originals[catalog.SnapshotID] = append(originals[catalog.SnapshotID], catalog)
 			}
 		}
@@ -108,7 +117,7 @@ func validateRuntimeAggregateValidationProofApplicabilityTransition(previous *Ru
 			for _, catalog := range values {
 				found := false
 				for _, original := range originals[catalog.SnapshotID] {
-					if reflect.DeepEqual(catalog, original) {
+					if runtimecontract.RuntimeRawEqual(catalog, original) {
 						found = true
 						break
 					}
@@ -123,8 +132,9 @@ func validateRuntimeAggregateValidationProofApplicabilityTransition(previous *Ru
 		if len(current) == 0 && len(history) == 0 {
 			return validateRuntimeCurrentValidationRecipeCoverage(a.Facts)
 		}
+		return validateRuntimeValidationProofCatalogInputs(a.Facts, current, history)
 	}
-	return validateRuntimeValidationProofCatalogInputs(a.Facts, current, history)
+	return validateRuntimeValidationProofCatalogInputs(a.Facts, a.Facts.Resources.OperationAdmissibilities, runtimeValidationProofSealedCatalogs(a))
 }
 
 func validateRuntimeValidationProofCatalogInputs(facts runtimecontract.RuntimeFacts, current, sealedCatalogs []runtimecontract.RuntimeOperationAdmissibility) error {
@@ -199,13 +209,13 @@ func runtimeManagedValidationShellCatalogs(values []runtimecontract.RuntimeOpera
 // only to recover the exact per-CWI purpose; they never authorize a candidate,
 // operation, dispatch, or transition.
 
-func validateRuntimeSemanticBindingPurposeInvariantInGate(a RuntimeAggregate, gate *runtimecontract.RuntimeOwnerInvariantSourceGate) error {
-	type bindingPurposeKey struct {
-		manifestHash string
-		coverageID   string
-	}
+type runtimeBindingPurposeKey struct {
+	manifestHash string
+	coverageID   string
+}
 
-	purposes := make(map[bindingPurposeKey]runtimecontract.RuntimeSemanticEvidenceObligationPurpose)
+func validateRuntimeSemanticBindingPurposeInvariantInGate(a RuntimeAggregate, gate *runtimecontract.RuntimeOwnerInvariantSourceGate) error {
+	purposes := make(map[runtimeBindingPurposeKey]runtimecontract.RuntimeSemanticEvidenceObligationPurpose)
 	addManifest := func(manifest runtimecontract.RuntimeSemanticPlanManifest) error {
 		// This join consumes only manifest identity and proof purpose. Source
 		// admission already owns the complete manifest/catalog contract; copying
@@ -217,7 +227,7 @@ func validateRuntimeSemanticBindingPurposeInvariantInGate(a RuntimeAggregate, ga
 			if err != nil {
 				return fmt.Errorf("runtime aggregate semantic binding purpose: %w", err)
 			}
-			key := bindingPurposeKey{manifestHash: manifest.Hash, coverageID: string(obligation.CoverageWorkItemID)}
+			key := runtimeBindingPurposeKey{manifestHash: manifest.Hash, coverageID: string(obligation.CoverageWorkItemID)}
 			if existing, found := purposes[key]; found && existing != resolved.Purpose {
 				return fmt.Errorf("runtime aggregate semantic binding purpose conflicts for manifest %q coverage %q", manifest.Hash, obligation.CoverageWorkItemID)
 			}
@@ -251,7 +261,133 @@ func validateRuntimeSemanticBindingPurposeInvariantInGate(a RuntimeAggregate, ga
 	if len(purposes) == 0 {
 		return nil
 	}
+	return validateRuntimeSemanticBindingPurposeCoverageRefs(a, purposes)
+}
 
+func runtimeActiveDispatchCompletedOpsUnchanged(prev, curr *runtimecontract.RuntimeDispatchRecord) bool {
+	if (prev == nil || len(prev.CompletedOperationIDs) == 0) && (curr == nil || len(curr.CompletedOperationIDs) == 0) {
+		return true
+	}
+	if prev == nil || curr == nil {
+		return false
+	}
+	return prev.ID == curr.ID && runtimecontract.RuntimeRawEqual(prev.CompletedOperationIDs, curr.CompletedOperationIDs)
+}
+
+func validateRuntimeSemanticBindingPurposeInvariantTransitionInGate(previous *RuntimeAggregate, a RuntimeAggregate, gate *runtimecontract.RuntimeOwnerInvariantSourceGate) error {
+	if previous == nil || gate == nil || !runtimecontract.SemanticPlanningPreservesCommittedPreimages(previous.SemanticPlanning, a.SemanticPlanning) {
+		return validateRuntimeSemanticBindingPurposeInvariantInGate(a, gate)
+	}
+	prevHistCount := previous.SemanticPlanning.HistoryCount()
+	bothManifestsNil := a.SemanticPlanning.Manifest == nil && previous.SemanticPlanning.Manifest == nil
+	activeUnchanged := a.SemanticPlanning.Manifest != nil && previous.SemanticPlanning.Manifest != nil &&
+		runtimecontract.RuntimeRawEqual(*a.SemanticPlanning.Manifest, *previous.SemanticPlanning.Manifest)
+	if prevHistCount == a.SemanticPlanning.HistoryCount() && (bothManifestsNil || activeUnchanged) &&
+		runtimecontract.RuntimeRawEqual(a.RepairSurfaceConfirmations, previous.RepairSurfaceConfirmations) &&
+		runtimeActiveDispatchCompletedOpsUnchanged(previous.ActiveDispatch, a.ActiveDispatch) &&
+		runtimecontract.RuntimeRawEqual(a.Facts.Coverage, previous.Facts.Coverage) &&
+		runtimecontract.RuntimeRawEqual(a.Facts.Focus, previous.Facts.Focus) &&
+		runtimecontract.RuntimeRawEqual(a.Facts.RemainingFocuses, previous.Facts.RemainingFocuses) &&
+		runtimecontract.RuntimeRawEqual(a.Facts.CompletedFocuses, previous.Facts.CompletedFocuses) &&
+		runtimecontract.RuntimeRawEqual(a.Facts.RepairDirective, previous.Facts.RepairDirective) {
+		return nil
+	}
+	hasAnyObligation := a.SemanticPlanning.Manifest != nil && len(a.SemanticPlanning.Manifest.ProofObligations) > 0
+	if !hasAnyObligation {
+		for _, generation := range a.SemanticPlanning.AllHistory() {
+			if generation.Snapshot.Manifest != nil && len(generation.Snapshot.Manifest.ProofObligations) > 0 {
+				hasAnyObligation = true
+				break
+			}
+		}
+	}
+	if !hasAnyObligation {
+		return nil
+	}
+	anyBindingRef := false
+	neededHashes := make(map[string]struct{})
+	for _, item := range a.Facts.Coverage {
+		if item.CurrentBindingRef == nil {
+			continue
+		}
+		anyBindingRef = true
+		if hash := strings.TrimSpace(item.CurrentBindingRef.SemanticManifestHash); hash != "" {
+			neededHashes[hash] = struct{}{}
+		}
+	}
+	purposes := make(map[runtimeBindingPurposeKey]runtimecontract.RuntimeSemanticEvidenceObligationPurpose)
+	addManifest := func(manifest runtimecontract.RuntimeSemanticPlanManifest) error {
+		manifest = runtimeSemanticPurposeManifest(manifest)
+		for _, obligation := range manifest.ProofObligations {
+			resolved, err := gate.ResolveObligation(obligation)
+			if err != nil {
+				return fmt.Errorf("runtime aggregate semantic binding purpose: %w", err)
+			}
+			key := runtimeBindingPurposeKey{manifestHash: manifest.Hash, coverageID: string(obligation.CoverageWorkItemID)}
+			if existing, found := purposes[key]; found && existing != resolved.Purpose {
+				return fmt.Errorf("runtime aggregate semantic binding purpose conflicts for manifest %q coverage %q", manifest.Hash, obligation.CoverageWorkItemID)
+			}
+			purposes[key] = resolved.Purpose
+		}
+		return nil
+	}
+	historyIdx := 0
+	for _, generation := range a.SemanticPlanning.AllHistory() {
+		if historyIdx >= prevHistCount && generation.Snapshot.Manifest != nil {
+			if err := addManifest(*generation.Snapshot.Manifest); err != nil {
+				return err
+			}
+		}
+		historyIdx++
+	}
+	if a.SemanticPlanning.Manifest != nil && !activeUnchanged {
+		if err := addManifest(*a.SemanticPlanning.Manifest); err != nil {
+			return err
+		}
+	}
+	if !anyBindingRef && len(purposes) == 0 {
+		return nil
+	}
+	newHashes := make(map[string]struct{}, len(purposes))
+	for k := range purposes {
+		newHashes[k.manifestHash] = struct{}{}
+	}
+	addCommittedManifest := func(manifest runtimecontract.RuntimeSemanticPlanManifest) error {
+		if len(manifest.ProofObligations) == 0 {
+			return nil
+		}
+		hash := strings.TrimSpace(manifest.Hash)
+		_, needed := neededHashes[hash]
+		_, collision := newHashes[hash]
+		if !needed && !collision {
+			return nil
+		}
+		return addManifest(manifest)
+	}
+	historyIdx = 0
+	for _, generation := range a.SemanticPlanning.AllHistory() {
+		if historyIdx >= prevHistCount {
+			break
+		}
+		if generation.Snapshot.Manifest != nil {
+			if err := addCommittedManifest(*generation.Snapshot.Manifest); err != nil {
+				return err
+			}
+		}
+		historyIdx++
+	}
+	if activeUnchanged {
+		if err := addCommittedManifest(*a.SemanticPlanning.Manifest); err != nil {
+			return err
+		}
+	}
+	if !anyBindingRef {
+		return nil
+	}
+	return validateRuntimeSemanticBindingPurposeCoverageRefs(a, purposes)
+}
+
+func validateRuntimeSemanticBindingPurposeCoverageRefs(a RuntimeAggregate, purposes map[runtimeBindingPurposeKey]runtimecontract.RuntimeSemanticEvidenceObligationPurpose) error {
 	focuses := make(map[string]runtimecontract.CoverageFocus, 1+len(a.Facts.RemainingFocuses)+len(a.Facts.CompletedFocuses))
 	for _, focus := range append(append([]runtimecontract.CoverageFocus{a.Facts.Focus}, a.Facts.RemainingFocuses...), a.Facts.CompletedFocuses...) {
 		focus = focus.Normalized()
@@ -262,7 +398,7 @@ func validateRuntimeSemanticBindingPurposeInvariantInGate(a RuntimeAggregate, ga
 			continue
 		}
 		ref := item.CurrentBindingRef.Normalized()
-		key := bindingPurposeKey{manifestHash: ref.SemanticManifestHash, coverageID: string(item.ID)}
+		key := runtimeBindingPurposeKey{manifestHash: ref.SemanticManifestHash, coverageID: string(item.ID)}
 		purpose, found := purposes[key]
 		if !found {
 			activeManifestHash := ""
@@ -317,83 +453,145 @@ func runtimeSemanticPurposeManifest(manifest runtimecontract.RuntimeSemanticPlan
 // failed exit, so a later successful effect cannot rewrite rejection lineage.
 func validateRuntimeCandidateFeasibilityBindings(a RuntimeAggregate) error {
 	for _, attempt := range a.CandidateAttempts {
+		if err := validateRuntimeCandidateAttemptFeasibilityBindings(a, attempt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRuntimeCandidateFeasibilityBindingsTransition(previous *RuntimeAggregate, a RuntimeAggregate) error {
+	if previous == nil ||
+		a.Facts.WorkspaceID != previous.Facts.WorkspaceID ||
+		a.Facts.RunID != previous.Facts.RunID ||
+		len(a.CandidateRequestSessions) < len(previous.CandidateRequestSessions) ||
+		len(a.CandidateAttempts) < len(previous.CandidateAttempts) {
+		return validateRuntimeCandidateFeasibilityBindings(a)
+	}
+	hasFeasibilities := false
+	for i := range a.CandidateAttempts {
+		if len(a.CandidateAttempts[i].Feasibilities) != 0 {
+			hasFeasibilities = true
+			break
+		}
+	}
+	if !hasFeasibilities {
+		return nil
+	}
+	unchangedPrereqs := runtimecontract.RuntimeRawEqual(a.Facts.Prerequisites, previous.Facts.Prerequisites) &&
+		runtimecontract.RuntimeRawEqual(a.Facts.Resources.OperationAdmissibilities, previous.Facts.Resources.OperationAdmissibilities)
+	changedSessionIDs := make(map[string]struct{})
+	for i := range previous.CandidateRequestSessions {
+		if runtimecontract.RuntimeRawEqual(a.CandidateRequestSessions[i], previous.CandidateRequestSessions[i]) {
+			continue
+		}
+		if id := strings.TrimSpace(previous.CandidateRequestSessions[i].LogicalRequestID); id != "" {
+			changedSessionIDs[id] = struct{}{}
+		}
+		if id := strings.TrimSpace(a.CandidateRequestSessions[i].LogicalRequestID); id != "" {
+			changedSessionIDs[id] = struct{}{}
+		}
+	}
+	for i := len(previous.CandidateRequestSessions); i < len(a.CandidateRequestSessions); i++ {
+		if id := strings.TrimSpace(a.CandidateRequestSessions[i].LogicalRequestID); id != "" {
+			changedSessionIDs[id] = struct{}{}
+		}
+	}
+	for i, attempt := range a.CandidateAttempts {
 		if len(attempt.Feasibilities) == 0 {
 			continue
 		}
-		if attempt.Proposal == nil {
-			return fmt.Errorf("runtime candidate feasibility ledger has no persisted proposal")
+		if i < len(previous.CandidateAttempts) &&
+			runtimecontract.RuntimeRawEqual(attempt, previous.CandidateAttempts[i]) &&
+			(attempt.State == runtimecontract.RuntimeCandidateAttemptStateFailed || unchangedPrereqs) {
+			if _, sessionChanged := changedSessionIDs[strings.TrimSpace(attempt.LogicalRequestID)]; !sessionChanged {
+				continue
+			}
 		}
-		manifest, err := persistedCandidateAttemptManifest(a, attempt)
-		if err != nil {
-			return fmt.Errorf("runtime candidate feasibility manifest: %w", err)
+		if err := validateRuntimeCandidateAttemptFeasibilityBindings(a, attempt); err != nil {
+			return err
 		}
-		catalogs := a.Facts.Resources.OperationAdmissibilities
-		historical := attempt.State == runtimecontract.RuntimeCandidateAttemptStateFailed
-		if historical {
-			catalogs = attempt.FeasibilityCatalogs
+	}
+	return nil
+}
+
+func validateRuntimeCandidateAttemptFeasibilityBindings(a RuntimeAggregate, attempt runtimecontract.RuntimeCandidateAttemptRecord) error {
+	if len(attempt.Feasibilities) == 0 {
+		return nil
+	}
+	if attempt.Proposal == nil {
+		return fmt.Errorf("runtime candidate feasibility ledger has no persisted proposal")
+	}
+	manifest, err := persistedCandidateAttemptManifest(a, attempt)
+	if err != nil {
+		return fmt.Errorf("runtime candidate feasibility manifest: %w", err)
+	}
+	catalogs := a.Facts.Resources.OperationAdmissibilities
+	historical := attempt.State == runtimecontract.RuntimeCandidateAttemptStateFailed
+	if historical {
+		catalogs = attempt.FeasibilityCatalogs
+	}
+	for _, feasibility := range attempt.Feasibilities {
+		operation, found := candidateOperationByID(*attempt.Proposal, feasibility.OperationID)
+		if !found {
+			return fmt.Errorf("runtime candidate feasibility operation %q is absent from its proposal", feasibility.OperationID)
 		}
-		for _, feasibility := range attempt.Feasibilities {
-			operation, found := candidateOperationByID(*attempt.Proposal, feasibility.OperationID)
-			if !found {
-				return fmt.Errorf("runtime candidate feasibility operation %q is absent from its proposal", feasibility.OperationID)
+		operation = operation.Normalized()
+		if feasibility.CandidateManifestHash != attempt.ManifestHash {
+			return fmt.Errorf("runtime candidate feasibility operation %q has stale manifest identity", operation.ID)
+		}
+		descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+		if !known || descriptor.OwnerModuleID == "" {
+			return fmt.Errorf("runtime candidate feasibility operation %q has no canonical owner", operation.ID)
+		}
+		if !historical && !runtimecontract.RuntimeOperationAdmissibilityRequiredForOperation(a.Facts.Prerequisites, descriptor.OwnerModuleID, operation.Kind) {
+			return fmt.Errorf("runtime candidate feasibility operation %q has no current admissibility requirement", operation.ID)
+		}
+		inventory, found := runtimeOperationAdmissibilityForKind(catalogs, descriptor.OwnerModuleID, operation.Kind)
+		if !found || inventory.SnapshotID != feasibility.AdmissibilitySnapshotID || inventory.AcquisitionBinding != feasibility.AcquisitionBinding {
+			if historical {
+				return fmt.Errorf("runtime candidate feasibility operation %q does not match historical owner admissibility", operation.ID)
 			}
-			operation = operation.Normalized()
-			if feasibility.CandidateManifestHash != attempt.ManifestHash {
-				return fmt.Errorf("runtime candidate feasibility operation %q has stale manifest identity", operation.ID)
+			return fmt.Errorf("runtime candidate feasibility operation %q does not match current owner admissibility", operation.ID)
+		}
+		if !candidateManifestBindsFeasibilityCatalog(manifest, operation.Kind, inventory.SnapshotID) {
+			return fmt.Errorf("runtime candidate feasibility operation %q catalog is absent from its sealed manifest", operation.ID)
+		}
+		if feasibility.Observation == nil {
+			return fmt.Errorf("runtime candidate feasibility operation %q has no owner observation", operation.ID)
+		}
+		observation := feasibility.Observation.Normalized()
+		ownerPolicy := observation.OwnerPolicy.Normalized()
+		if ownerPolicy.OwnerModuleID != "" || ownerPolicy.PolicyRevision != "" || ownerPolicy.CatalogSnapshotID != "" {
+			if err := ownerPolicy.Validate(); err != nil || ownerPolicy.OwnerModuleID != descriptor.OwnerModuleID || ownerPolicy.CatalogSnapshotID != inventory.SnapshotID {
+				return fmt.Errorf("runtime candidate feasibility operation %q owner policy does not match its descriptor and catalog", operation.ID)
 			}
-			descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
-			if !known || descriptor.OwnerModuleID == "" {
-				return fmt.Errorf("runtime candidate feasibility operation %q has no canonical owner", operation.ID)
+		}
+		if observation.Feedback != nil {
+			feedback := observation.Feedback.Normalized()
+			if feedback.WorkspaceID != a.Facts.WorkspaceID || feedback.RunID != a.Facts.RunID || feedback.OriginalDiagnostic == nil ||
+				feedback.OriginalDiagnostic.OwnerModuleID != descriptor.OwnerModuleID {
+				return fmt.Errorf("runtime candidate feasibility operation %q feedback does not match aggregate scope and owner", operation.ID)
 			}
-			if !historical && !runtimecontract.RuntimeOperationAdmissibilityRequiredForOperation(a.Facts.Prerequisites, descriptor.OwnerModuleID, operation.Kind) {
-				return fmt.Errorf("runtime candidate feasibility operation %q has no current admissibility requirement", operation.ID)
+		}
+		if observation.Stale != nil && observation.Stale.Normalized().OwnerModuleID != descriptor.OwnerModuleID {
+			return fmt.Errorf("runtime candidate feasibility operation %q stale fact has the wrong owner", operation.ID)
+		}
+		if observation.PrerequisiteRequest != nil {
+			request := observation.PrerequisiteRequest.Normalized()
+			if request.OwnerModuleID != descriptor.OwnerModuleID || request.OperationID != operation.ID {
+				return fmt.Errorf("runtime candidate feasibility operation %q prerequisite request has the wrong identity", operation.ID)
 			}
-			inventory, found := runtimeOperationAdmissibilityForKind(catalogs, descriptor.OwnerModuleID, operation.Kind)
-			if !found || inventory.SnapshotID != feasibility.AdmissibilitySnapshotID || inventory.AcquisitionBinding != feasibility.AcquisitionBinding {
-				if historical {
-					return fmt.Errorf("runtime candidate feasibility operation %q does not match historical owner admissibility", operation.ID)
-				}
-				return fmt.Errorf("runtime candidate feasibility operation %q does not match current owner admissibility", operation.ID)
-			}
-			if !candidateManifestBindsFeasibilityCatalog(manifest, operation.Kind, inventory.SnapshotID) {
-				return fmt.Errorf("runtime candidate feasibility operation %q catalog is absent from its sealed manifest", operation.ID)
-			}
-			if feasibility.Observation == nil {
-				return fmt.Errorf("runtime candidate feasibility operation %q has no owner observation", operation.ID)
-			}
-			observation := feasibility.Observation.Normalized()
-			ownerPolicy := observation.OwnerPolicy.Normalized()
-			if ownerPolicy.OwnerModuleID != "" || ownerPolicy.PolicyRevision != "" || ownerPolicy.CatalogSnapshotID != "" {
-				if err := ownerPolicy.Validate(); err != nil || ownerPolicy.OwnerModuleID != descriptor.OwnerModuleID || ownerPolicy.CatalogSnapshotID != inventory.SnapshotID {
-					return fmt.Errorf("runtime candidate feasibility operation %q owner policy does not match its descriptor and catalog", operation.ID)
-				}
-			}
-			if observation.Feedback != nil {
-				feedback := observation.Feedback.Normalized()
-				if feedback.WorkspaceID != a.Facts.WorkspaceID || feedback.RunID != a.Facts.RunID || feedback.OriginalDiagnostic == nil ||
-					feedback.OriginalDiagnostic.OwnerModuleID != descriptor.OwnerModuleID {
-					return fmt.Errorf("runtime candidate feasibility operation %q feedback does not match aggregate scope and owner", operation.ID)
-				}
-			}
-			if observation.Stale != nil && observation.Stale.Normalized().OwnerModuleID != descriptor.OwnerModuleID {
-				return fmt.Errorf("runtime candidate feasibility operation %q stale fact has the wrong owner", operation.ID)
-			}
-			if observation.PrerequisiteRequest != nil {
-				request := observation.PrerequisiteRequest.Normalized()
-				if request.OwnerModuleID != descriptor.OwnerModuleID || request.OperationID != operation.ID {
-					return fmt.Errorf("runtime candidate feasibility operation %q prerequisite request has the wrong identity", operation.ID)
-				}
-			}
-			if err := validateCandidateFeasibilityObservationBinding(catalogs, operation, feasibility, manifest, attempt.Transaction); err != nil {
-				return err
-			}
-			if feasibility.ReplayProof != nil {
-				proof := feasibility.ReplayProof.Normalized()
-				if proof.OwnerModuleID != descriptor.OwnerModuleID || proof.OperationID != operation.ID ||
-					proof.AdmissibilitySnapshotID != inventory.SnapshotID || proof.AcquisitionBinding != inventory.AcquisitionBinding ||
-					!sameStringSet(proof.TargetRefs, operation.TargetRefs) {
-					return fmt.Errorf("runtime candidate feasibility operation %q replay proof does not match sealed owner facts", operation.ID)
-				}
+		}
+		if err := validateCandidateFeasibilityObservationBinding(catalogs, operation, feasibility, manifest, attempt.Transaction); err != nil {
+			return err
+		}
+		if feasibility.ReplayProof != nil {
+			proof := feasibility.ReplayProof.Normalized()
+			if proof.OwnerModuleID != descriptor.OwnerModuleID || proof.OperationID != operation.ID ||
+				proof.AdmissibilitySnapshotID != inventory.SnapshotID || proof.AcquisitionBinding != inventory.AcquisitionBinding ||
+				!sameStringSet(proof.TargetRefs, operation.TargetRefs) {
+				return fmt.Errorf("runtime candidate feasibility operation %q replay proof does not match sealed owner facts", operation.ID)
 			}
 		}
 	}
@@ -491,7 +689,7 @@ func runtimeReceiptJoinInputs(a RuntimeAggregate) RuntimeAggregate {
 
 func validateRuntimeReceiptJoinTransition(previous *RuntimeAggregate, a RuntimeAggregate) error {
 	inputs := runtimeReceiptJoinInputs(a)
-	if previous != nil && reflect.DeepEqual(runtimeReceiptJoinInputs(*previous), inputs) {
+	if previous != nil && runtimecontract.RuntimeRawEqual(runtimeReceiptJoinInputs(*previous), inputs) {
 		return nil
 	}
 	return validateRuntimeAggregateReceiptJoins(inputs)
@@ -611,9 +809,7 @@ func runtimeEvidenceCommitFactProjectionForID(a RuntimeAggregate, id common.Evid
 		return runtimeEvidenceCommitFactProjection{}, fmt.Errorf("evidence fact %q must exist exactly once across accepted/rejected ledgers", id)
 	}
 	// 原始 cardinality 已反证，只规范化本条证据；不复制无关的 authority、catalog 或 prerequisite。
-	facts := (runtimecontract.RuntimeFacts{Evidence: runtimecontract.EvidenceLedger{
-		Accepted: []runtimecontract.EvidenceFact{selected},
-	}}).Normalized().Evidence.Accepted
+	facts := runtimecontract.NormalizeEvidenceFacts([]runtimecontract.EvidenceFact{selected})
 	projection := runtimeEvidenceCommitFactProjection{fact: facts[0], rejected: rejectedRaw == 1}
 	processed := 0
 	for _, eventID := range a.ProcessedEventIDs {
@@ -682,12 +878,12 @@ func validateRuntimeAggregateEvidenceCommitFact(
 	}
 	receiptEvidence := receipt.Normalized().Evidence
 	if fact.Summary != receiptEvidence.Summary || fact.ContentHash != receiptEvidence.ContentHash ||
-		!reflect.DeepEqual(fact.OwnerRevisionSet, receiptEvidence.OwnerRevisionSet) ||
-		!reflect.DeepEqual(fact.ApplicabilityDependencies, receiptEvidence.ApplicabilityDependencies) ||
-		!reflect.DeepEqual(fact.ContentAddress, receiptEvidence.ContentAddress) || !reflect.DeepEqual(fact.ExitCode, receiptEvidence.ExitCode) ||
+		!runtimecontract.RuntimeRawEqual(fact.OwnerRevisionSet, receiptEvidence.OwnerRevisionSet) ||
+		!runtimecontract.RuntimeRawEqual(fact.ApplicabilityDependencies, receiptEvidence.ApplicabilityDependencies) ||
+		!runtimecontract.RuntimeRawEqual(fact.ContentAddress, receiptEvidence.ContentAddress) || !runtimecontract.RuntimeRawEqual(fact.ExitCode, receiptEvidence.ExitCode) ||
 		!sameRuntimeTargetRefs(fact.EvidenceRefs, receiptEvidence.EvidenceRefs) || fact.Quality != receiptEvidence.Quality ||
 		fact.ZeroWork != receiptEvidence.ZeroWork || !sameRuntimeTargetRefs(fact.EvidenceTags, receiptEvidence.EvidenceTags) ||
-		!reflect.DeepEqual(fact.Validation, receiptEvidence.Validation) {
+		!runtimecontract.RuntimeRawEqual(fact.Validation, receiptEvidence.Validation) {
 		return fmt.Errorf("evidence fact payload does not match its exact owner receipt")
 	}
 	credit := findExecutionEvidenceCredit(dispatch.CoverageBindings, operation, expectedKind, &receipt)
@@ -810,6 +1006,146 @@ func operationReceiptFeedbackDispatch(a RuntimeAggregate, receipt runtimecontrac
 		return runtimecontract.RuntimeDispatchRecord{}, fmt.Errorf("feedback dispatch %q has ambiguous committed execution projections", feedbackDispatchID)
 	}
 	return matched, nil
+}
+
+func validateRuntimeAggregateRepairJoinsTransition(previous *RuntimeAggregate, a RuntimeAggregate) error {
+	if previous == nil ||
+		a.StateRevision < previous.StateRevision ||
+		a.Facts.WorkspaceID != previous.Facts.WorkspaceID ||
+		a.Facts.RunID != previous.Facts.RunID ||
+		!runtimecontract.RuntimeRawEqual(a.Facts.Failure, previous.Facts.Failure) ||
+		(a.Facts.Failure != nil && (a.Facts.Failure.TargetObservation != nil ||
+			runtimeValidationFailureObservationFromFailure(a.Facts.Failure) != nil ||
+			(a.Facts.Failure.OriginalDiagnostic != nil && a.Facts.Failure.OriginalDiagnostic.TargetObservation != nil))) ||
+		a.Facts.RepairDirective != nil || previous.Facts.RepairDirective != nil ||
+		a.Facts.Resources.FailureTarget != nil || previous.Facts.Resources.FailureTarget != nil ||
+		len(a.RepairSurfaceConfirmations) != len(previous.RepairSurfaceConfirmations) ||
+		!runtimecontract.RuntimeRawEqual(a.RepairSurfaceConfirmations, previous.RepairSurfaceConfirmations) ||
+		(a.ActiveDispatch != nil && a.ActiveDispatch.RepairCommitment != nil) ||
+		!runtimecontract.RuntimeRawEqual(a.Facts.Evidence.Rejected, previous.Facts.Evidence.Rejected) ||
+		len(a.PrerequisiteInvalidations) < len(previous.PrerequisiteInvalidations) ||
+		(len(previous.PrerequisiteInvalidations) > 0 && !runtimecontract.RuntimeRawEqual(a.PrerequisiteInvalidations[:len(previous.PrerequisiteInvalidations)], previous.PrerequisiteInvalidations)) ||
+		len(a.OperationReceipts) < len(previous.OperationReceipts) ||
+		len(a.CompletedDispatches) < len(previous.CompletedDispatches) ||
+		!runtimecontract.RuntimeRawEqual(a.OperationReceipts[:len(previous.OperationReceipts)], previous.OperationReceipts) ||
+		!runtimecontract.RuntimeRawEqual(a.CompletedDispatches[:len(previous.CompletedDispatches)], previous.CompletedDispatches) {
+		return validateRuntimeAggregateRepairJoins(a)
+	}
+	for i := len(previous.PrerequisiteInvalidations); i < len(a.PrerequisiteInvalidations); i++ {
+		if err := a.PrerequisiteInvalidations[i].Validate(); err != nil {
+			return fmt.Errorf("runtime aggregate prerequisite invalidation %d: %w", i, err)
+		}
+	}
+	for i := len(previous.CompletedDispatches); i < len(a.CompletedDispatches); i++ {
+		if a.CompletedDispatches[i].RepairCommitment != nil {
+			return validateRuntimeAggregateRepairJoins(a)
+		}
+	}
+	for i := len(previous.OperationReceipts); i < len(a.OperationReceipts); i++ {
+		rawReceipt := a.OperationReceipts[i]
+		if rawReceipt.Outcome.Normalized() == runtimecontract.RuntimeOperationOutcomeRejected &&
+			rawReceipt.Feedback != nil && rawReceipt.Feedback.OriginalDiagnostic != nil &&
+			rawReceipt.Feedback.OriginalDiagnostic.TargetObservation != nil {
+			return validateRuntimeAggregateRepairJoins(a)
+		}
+	}
+	if len(a.Facts.Evidence.Rejected) != 0 {
+		newCompletedIDs := make(map[string]struct{}, len(a.CompletedDispatches)-len(previous.CompletedDispatches))
+		for i := len(previous.CompletedDispatches); i < len(a.CompletedDispatches); i++ {
+			newCompletedIDs[a.CompletedDispatches[i].ID] = struct{}{}
+		}
+		if len(newCompletedIDs) > 0 {
+			for _, fact := range a.Facts.Evidence.Rejected {
+				if _, ok := newCompletedIDs[fact.DispatchID]; ok {
+					return validateRuntimeAggregateRepairJoins(a)
+				}
+			}
+		}
+		var rejected []runtimecontract.EvidenceFact
+		checkMandatory := func(dispatch runtimecontract.RuntimeDispatchRecord) error {
+			if dispatch.Candidate.StateChange == nil || dispatch.Transaction.State != runtimecontract.ConvergenceStateNeedStateChange {
+				return nil
+			}
+			if rejected == nil {
+				rejected = runtimecontract.NormalizeEvidenceFacts(a.Facts.Evidence.Rejected)
+			}
+			required, err := confirmedRepairCommitmentRequiredFromRejectedEvidence(a, dispatch, rejected)
+			if err != nil {
+				return err
+			}
+			if required && dispatch.RepairCommitment == nil {
+				return fmt.Errorf("runtime aggregate confirmed owner repair dispatch %q omitted its mandatory rejected-validation commitment", dispatch.ID)
+			}
+			return nil
+		}
+		for i := len(previous.CompletedDispatches); i < len(a.CompletedDispatches); i++ {
+			if err := checkMandatory(a.CompletedDispatches[i]); err != nil {
+				return err
+			}
+		}
+		if a.ActiveDispatch != nil {
+			activeBaselineUnchanged := previous.ActiveDispatch != nil &&
+				a.ActiveDispatch.ID == previous.ActiveDispatch.ID &&
+				a.ActiveDispatch.DispatchAuthorityHash == previous.ActiveDispatch.DispatchAuthorityHash &&
+				runtimecontract.RuntimeRawEqual(a.ActiveDispatch.Candidate, previous.ActiveDispatch.Candidate) &&
+				runtimecontract.RuntimeRawEqual(a.ActiveDispatch.Transaction, previous.ActiveDispatch.Transaction) &&
+				a.ActiveDispatch.FocusTargetRole == previous.ActiveDispatch.FocusTargetRole &&
+				runtimecontract.RuntimeRawEqual(a.ActiveDispatch.RepairCommitment, previous.ActiveDispatch.RepairCommitment) &&
+				len(a.CompletedDispatches) == len(previous.CompletedDispatches) &&
+				len(a.OperationReceipts) == len(previous.OperationReceipts)
+			if !activeBaselineUnchanged {
+				if err := checkMandatory(*a.ActiveDispatch); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	focusOrCoverageOrStateChanged := !runtimecontract.RuntimeRawEqual(a.Facts.Focus, previous.Facts.Focus) ||
+		!runtimecontract.RuntimeRawEqual(a.Facts.Coverage, previous.Facts.Coverage) ||
+		a.Decision.State != previous.Decision.State ||
+		(a.Decision.Terminal == nil) != (previous.Decision.Terminal == nil)
+	if focusOrCoverageOrStateChanged {
+		if len(a.RepairSurfaceConfirmations) != 0 && hasConfirmedRepairCommitmentForFocus(a) {
+			if err := validateConfirmedRepairFreshValidationContinuation(a); err != nil {
+				return err
+			}
+		}
+		if len(a.Facts.Evidence.Rejected) != 0 ||
+			len(a.RepairSurfaceConfirmations) != 0 ||
+			a.Facts.RepairDirective != nil ||
+			previous.Facts.RepairDirective != nil ||
+			focusHasSettledValidationRepairReopen(a.Facts) {
+			if _, err := semanticRepairFreshValidationEvidenceRevision(a); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func focusHasSettledValidationRepairReopen(facts runtimecontract.RuntimeFacts) bool {
+	if len(facts.Focus.CoverageWorkItemIDs) != 1 {
+		return false
+	}
+	index := runtimeCWICoverageIndex(facts.Coverage, facts.Focus.CoverageWorkItemIDs[0])
+	return index >= 0 && runtimeValidationFailureRepairReopenReason(facts.Coverage[index]) == runtimeCWIReopenReasonValidationFailureRepairSettled
+}
+
+func hasConfirmedRepairCommitmentForFocus(a RuntimeAggregate) bool {
+	focusIDs := normalizeCoverageIDs(a.Facts.Focus.CoverageWorkItemIDs)
+	for i := range a.CompletedDispatches {
+		dispatch := &a.CompletedDispatches[i]
+		if dispatch.State != DispatchStateCommitted || dispatch.Candidate.StateChange == nil || dispatch.RepairCommitment == nil {
+			continue
+		}
+		if len(dispatch.CompletedOperationIDs) != candidateOperationCount(dispatch.Candidate) {
+			continue
+		}
+		if sameCoverageIDs(dispatch.RepairCommitment.Closure.Normalized().CoverageWorkItemIDs, focusIDs) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateRuntimeAggregateRepairJoins(a RuntimeAggregate) error {
@@ -1010,8 +1346,13 @@ func validateRuntimeUnobservedFailureTargetAuthority(a RuntimeAggregate) error {
 	validReceiptLineages := 0
 	var receiptLineageErr error
 	for _, rawReceipt := range a.OperationReceipts {
+		if rawReceipt.Outcome.Normalized() != runtimecontract.RuntimeOperationOutcomeRejected ||
+			rawReceipt.Feedback == nil || rawReceipt.Feedback.OriginalDiagnostic == nil ||
+			rawReceipt.Feedback.OriginalDiagnostic.TargetObservation != nil {
+			continue
+		}
 		receipt := rawReceipt.Normalized()
-		if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || receipt.Feedback == nil || receipt.Feedback.OriginalDiagnostic == nil ||
+		if receipt.Feedback == nil || receipt.Feedback.OriginalDiagnostic == nil ||
 			receipt.Feedback.OriginalDiagnostic.TargetObservation != nil ||
 			!sameRuntimeTargetRefs(receipt.Feedback.OriginalDiagnostic.TargetRefs, target.TargetRefs) {
 			continue
@@ -1164,7 +1505,7 @@ func validateRuntimeReceiptEvidenceFailureTargetAuthorities(a RuntimeAggregate) 
 		}
 		failure := item.failure.Normalized()
 		if err := validateRuntimeReceiptEvidenceTargetProvenance(a, item.subject, observation, func(expected runtimecontract.FailureFact) bool {
-			return reflect.DeepEqual(failure, expected.Normalized())
+			return runtimecontract.RuntimeRawEqual(failure, expected.Normalized())
 		}); err != nil {
 			return err
 		}
@@ -1194,8 +1535,13 @@ func validateRuntimeReceiptEvidenceFailureTargetAuthorities(a RuntimeAggregate) 
 func validateRuntimeReceiptEvidenceFailureTargetAuthorityDowngrades(a RuntimeAggregate) error {
 	expectedFailures := make([]runtimecontract.FailureFact, 0)
 	for _, rawReceipt := range a.OperationReceipts {
+		if rawReceipt.Outcome.Normalized() != runtimecontract.RuntimeOperationOutcomeRejected ||
+			rawReceipt.Feedback == nil || rawReceipt.Feedback.OriginalDiagnostic == nil ||
+			rawReceipt.Feedback.OriginalDiagnostic.TargetObservation == nil {
+			continue
+		}
 		receipt := rawReceipt.Normalized()
-		if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || receipt.Feedback == nil || receipt.Feedback.OriginalDiagnostic == nil ||
+		if receipt.Feedback == nil || receipt.Feedback.OriginalDiagnostic == nil ||
 			receipt.Feedback.OriginalDiagnostic.TargetObservation == nil {
 			continue
 		}
@@ -1298,8 +1644,12 @@ func validateRuntimeReceiptEvidenceTargetProvenance(
 	matchedReceipt := false
 	validLineages := 0
 	for _, rawReceipt := range a.OperationReceipts {
+		if rawReceipt.Outcome.Normalized() != runtimecontract.RuntimeOperationOutcomeRejected ||
+			rawReceipt.Feedback == nil || rawReceipt.Feedback.OriginalDiagnostic == nil {
+			continue
+		}
 		receipt := rawReceipt.Normalized()
-		if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || receipt.Feedback == nil || receipt.Feedback.OriginalDiagnostic == nil {
+		if receipt.Feedback == nil || receipt.Feedback.OriginalDiagnostic == nil {
 			continue
 		}
 		expected := failureFactFromOperationReceiptFeedback(receipt)
@@ -1364,18 +1714,16 @@ func validateRuntimeReceiptEvidenceTargetLineage(a RuntimeAggregate, receipt run
 }
 
 func validateRuntimeReceiptEvidenceRejectedLineage(a RuntimeAggregate, dispatch runtimecontract.RuntimeDispatchRecord, operation runtimecontract.RuntimeOperation, execution runtimecontract.RuntimeOperationExecutionRecord, receipt runtimecontract.RuntimeOperationReceipt, receiptHash string) error {
-	facts := a.Facts.Normalized()
 	var evidence runtimecontract.EvidenceFact
 	evidenceMatches := 0
 	for _, fact := range a.Facts.Evidence.Rejected {
 		if fact.ID == execution.EvidenceFactID {
+			if evidenceMatches == 0 {
+				if normalized := runtimecontract.NormalizeEvidenceFacts([]runtimecontract.EvidenceFact{fact}); len(normalized) == 1 {
+					evidence = normalized[0]
+				}
+			}
 			evidenceMatches++
-		}
-	}
-	for _, fact := range facts.Evidence.Rejected {
-		if fact.ID == execution.EvidenceFactID {
-			evidence = fact
-			break
 		}
 	}
 	acceptedMatches := 0
@@ -1407,12 +1755,12 @@ func validateRuntimeReceiptEvidenceRejectedLineage(a RuntimeAggregate, dispatch 
 	}
 	receiptEvidence := receipt.Normalized().Evidence
 	if evidence.Summary != receiptEvidence.Summary || evidence.ContentHash != receiptEvidence.ContentHash ||
-		!reflect.DeepEqual(evidence.OwnerRevisionSet, receiptEvidence.OwnerRevisionSet) ||
-		!reflect.DeepEqual(evidence.ApplicabilityDependencies, receiptEvidence.ApplicabilityDependencies) ||
-		!reflect.DeepEqual(evidence.ContentAddress, receiptEvidence.ContentAddress) ||
-		!reflect.DeepEqual(evidence.ExitCode, receiptEvidence.ExitCode) || !sameRuntimeTargetRefs(evidence.EvidenceRefs, receiptEvidence.EvidenceRefs) ||
+		!runtimecontract.RuntimeRawEqual(evidence.OwnerRevisionSet, receiptEvidence.OwnerRevisionSet) ||
+		!runtimecontract.RuntimeRawEqual(evidence.ApplicabilityDependencies, receiptEvidence.ApplicabilityDependencies) ||
+		!runtimecontract.RuntimeRawEqual(evidence.ContentAddress, receiptEvidence.ContentAddress) ||
+		!runtimecontract.RuntimeRawEqual(evidence.ExitCode, receiptEvidence.ExitCode) || !sameRuntimeTargetRefs(evidence.EvidenceRefs, receiptEvidence.EvidenceRefs) ||
 		evidence.Quality != receiptEvidence.Quality || evidence.ZeroWork != receiptEvidence.ZeroWork ||
-		evidence.EvidenceReason != receiptEvidence.EvidenceReason || !sameRuntimeTargetRefs(evidence.EvidenceTags, receiptEvidence.EvidenceTags) || !reflect.DeepEqual(evidence.Validation, receiptEvidence.Validation) {
+		evidence.EvidenceReason != receiptEvidence.EvidenceReason || !sameRuntimeTargetRefs(evidence.EvidenceTags, receiptEvidence.EvidenceTags) || !runtimecontract.RuntimeRawEqual(evidence.Validation, receiptEvidence.Validation) {
 		return fmt.Errorf("receipt-derived rejected evidence payload drifted from its owner receipt")
 	}
 	if execution.EvidenceFactID != evidence.ID || execution.EvidenceFactHash != runtimecontract.StableRuntimeEvidenceFactHash(evidence) {

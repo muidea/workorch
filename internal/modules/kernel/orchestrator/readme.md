@@ -1381,6 +1381,14 @@ File 输入修改、review 或执行 credit。脚本化 provider 主线只能证
   `runtime_prospective_manifest_projection_test.go` 使用优化前完整规范化 oracle 对照首个错误、raw/重复/空值、
   accepted/stale、JSON 重载、原值保全、后续变化、返回隔离、fuzz 和分配；此片不改变 SM-1～SM-4 transition 或预算。
 
+- `OperationAdmissibility` 采用绑定当前 focus/scope 的有界投影合同：`OwnerInventoryBudget.MaxItems = 32` 仅计数
+  `TargetRefs`，`SelectorRefs` 与 `ConstraintRefs` 不消耗 target 名额；请求编译期先校验
+  `ValidateRuntimeRequiredTargetsWithinInventoryBudget` 并保持当前 scope 所需 `RequiredTargetRefs` 100% 不可截断
+  （超限时在 provider/owner 执行前 fail-closed 返回 `RuntimeOwnerInventoryBudgetExceededError`），Shell 采集在保留全部
+  active focus 目标前提下仅按剩余名额合并 File `TargetRefs`。对于枚举了 `TargetRefs` 的 `existing_owner_scope`
+  catalog（`len(TargetRefs) != 0`），当 focus 切换至当前 32 项投影之外的目标时，`CatalogCoversFocusTargets`
+  拒绝被 selector 掩盖并触发 `semantic_catalog_focus_scope` 零预算重采集。
+
 - capability owner 只返回 factual catalog/feasibility/receipt。receipt 必须绑定 exact dispatch、operation、execution key/fence、
   target authorization、effect、binding 与 recipe/check；只有 SM-2 private event 可以裁决 evidence kind、credit、CWI settlement
   或 terminal。

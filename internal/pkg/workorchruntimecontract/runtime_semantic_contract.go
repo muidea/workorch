@@ -865,6 +865,8 @@ type runtimeSemanticValidationSession struct {
 	committedPreimage    *RuntimeStateRecord
 	committedGenerations map[runtimeCommittedGenerationIdentity][]RuntimeSemanticPlanningGeneration
 	committedWorkRounds  map[string][]RuntimeImplementationWorkRound
+	committedCatalogs    []*RuntimeOperationAdmissibility
+	candidateAdmissions  *runtimeCandidateAdmissionsCache
 
 	manifests         map[string][]runtimeSemanticManifestValidationEntry
 	catalogs          map[string][]runtimeSemanticCatalogValidationEntry
@@ -908,6 +910,47 @@ func validateRuntimeSemanticPlanManifestInSession(m RuntimeSemanticPlanManifest,
 			entry.used = true
 			return entry.validated, nil
 		}
+	}
+	if session != nil && session.committedManifest(m) {
+		ownerCatalogValues, err := validateRuntimeSemanticOwnerCatalogCollectionInSession(m.OwnerCatalogs, session)
+		if err != nil {
+			return runtimeValidatedSemanticManifest{}, err
+		}
+		dependencyCatalogValues, err := validateRuntimeSemanticOwnerCatalogCollectionInSession(m.OwnerFactDependencyCatalogs, session)
+		if err != nil {
+			return runtimeValidatedSemanticManifest{}, err
+		}
+		rawManifest := m
+		m.OwnerCatalogs = nil
+		m.OwnerFactDependencyCatalogs = nil
+		m = m.Normalized()
+		m.OwnerCatalogs = ownerCatalogValues
+		m.OwnerFactDependencyCatalogs = dependencyCatalogValues
+		coverage := make(map[common.CoverageWorkItemID]RuntimeCoverageItem, len(m.CoverageItems))
+		for _, item := range m.CoverageItems {
+			coverage[item.ID] = item
+		}
+		ownerCatalogs := make(map[string]RuntimeOperationAdmissibility, len(m.OwnerCatalogs))
+		for _, catalog := range m.OwnerCatalogs {
+			ownerCatalogs[catalog.OwnerModuleID] = catalog
+		}
+		dependencyCatalogs := make(map[string]RuntimeOperationAdmissibility, len(m.OwnerFactDependencyCatalogs))
+		for _, catalog := range m.OwnerFactDependencyCatalogs {
+			dependencyCatalogs[catalog.OwnerModuleID] = catalog
+		}
+		obligationCoverage := make(map[common.CoverageWorkItemID]RuntimeSemanticProofObligation, len(m.ProofObligations))
+		for _, obligation := range m.ProofObligations {
+			obligationCoverage[obligation.CoverageWorkItemID] = obligation
+		}
+		validated := runtimeValidatedSemanticManifest{
+			manifest: m, coverageByID: coverage, obligationByCoverage: obligationCoverage,
+			ownerCatalogByOwner: ownerCatalogs, dependencyCatalogByOwner: dependencyCatalogs,
+			documents: &runtimeSemanticDocumentValidationSession{},
+		}
+		session.manifests[manifestKey] = append(session.manifests[manifestKey], runtimeSemanticManifestValidationEntry{
+			raw: rawManifest, validated: validated, used: true,
+		})
+		return validated, nil
 	}
 	seenCoverage := make(map[common.CoverageWorkItemID]struct{}, len(m.CoverageItems))
 	for _, raw := range m.CoverageItems {
@@ -1132,6 +1175,22 @@ func validateRuntimeSemanticPlanManifestInSession(m RuntimeSemanticPlanManifest,
 	return validated, nil
 }
 
+func (s *runtimeSemanticValidationSession) committedManifest(raw RuntimeSemanticPlanManifest) bool {
+	if s == nil || s.committedPreimage == nil || raw.Hash == "" {
+		return false
+	}
+	prev := s.committedPreimage.SemanticPlanning
+	if prev.Manifest != nil && prev.Manifest.Hash == raw.Hash && runtimeRawEqual(*prev.Manifest, raw) {
+		return true
+	}
+	for _, gen := range prev.AllHistory() {
+		if gen.Snapshot.Manifest != nil && gen.Snapshot.Manifest.Hash == raw.Hash && runtimeRawEqual(*gen.Snapshot.Manifest, raw) {
+			return true
+		}
+	}
+	return false
+}
+
 func validateRuntimeSemanticOwnerCatalogCollectionInSession(catalogs []RuntimeOperationAdmissibility, session *runtimeSemanticValidationSession) ([]RuntimeOperationAdmissibility, error) {
 	return compileRuntimeCatalogCollectionInSession(catalogs, session, runtimeSemanticCatalogCollection)
 }
@@ -1144,9 +1203,17 @@ func validateRuntimeAdmissibilityInSemanticSession(raw RuntimeOperationAdmissibi
 	// of unrelated Facts changes. Its normal form is a pure read projection;
 	// new or changed bodies still enter the full catalog gate below.
 	if previous := session.committedPreimage; previous != nil {
-		for _, catalog := range previous.Facts.Resources.OperationAdmissibilities {
+		for idx, catalog := range previous.Facts.Resources.OperationAdmissibilities {
 			if catalog.SnapshotID == raw.SnapshotID && runtimeRawEqual(catalog, raw) {
-				return raw.Normalized(), nil
+				if idx < len(session.committedCatalogs) && session.committedCatalogs[idx] != nil {
+					return *session.committedCatalogs[idx], nil
+				}
+				normalized := raw.Normalized()
+				if len(session.committedCatalogs) < len(previous.Facts.Resources.OperationAdmissibilities) {
+					session.committedCatalogs = make([]*RuntimeOperationAdmissibility, len(previous.Facts.Resources.OperationAdmissibilities))
+				}
+				session.committedCatalogs[idx] = &normalized
+				return normalized, nil
 			}
 		}
 	}
@@ -1156,6 +1223,21 @@ func validateRuntimeAdmissibilityInSemanticSession(raw RuntimeOperationAdmissibi
 		if runtimeRawEqual(entry.raw, raw) {
 			entry.used = true
 			return entry.normalized, nil
+		}
+	}
+	if previous := session.committedPreimage; previous != nil && previous.SemanticPlanning.Manifest != nil {
+		manifest := previous.SemanticPlanning.Manifest
+		for _, catalogCollection := range [][]RuntimeOperationAdmissibility{manifest.OwnerCatalogs, manifest.OwnerFactDependencyCatalogs} {
+			for _, catalog := range catalogCollection {
+				if catalog.SnapshotID == raw.SnapshotID && runtimeRawEqual(catalog, raw) {
+					normalized := raw.Normalized()
+					if session.catalogs == nil {
+						session.catalogs = make(map[string][]runtimeSemanticCatalogValidationEntry)
+					}
+					session.catalogs[key] = append(session.catalogs[key], runtimeSemanticCatalogValidationEntry{raw: catalog, normalized: normalized, used: true})
+					return normalized, nil
+				}
+			}
 		}
 	}
 	value, err := validateAndNormalizeRuntimeOperationAdmissibility(raw)
@@ -2630,8 +2712,70 @@ func (g RuntimeSemanticPlanningGeneration) Validate() error {
 	return validateRuntimeSemanticPlanningGenerationNormalized(g, g.Normalized(), newRuntimeSemanticValidationSession())
 }
 
+func sameRuntimeSemanticPlanningGenerationShallow(a, b RuntimeSemanticPlanningGeneration) bool {
+	if a.InputReviewResolutionID != b.InputReviewResolutionID ||
+		a.OwnerInputRevision != b.OwnerInputRevision ||
+		a.RetiredAtStateRevision != b.RetiredAtStateRevision ||
+		a.Reason != b.Reason ||
+		!sameSlicePtrHeader(a.InvalidationSignatures, b.InvalidationSignatures) ||
+		!sameSlicePtrHeader(a.PrerequisiteIDs, b.PrerequisiteIDs) ||
+		!sameSlicePtrHeader(a.ReopenedCoverageIDs, b.ReopenedCoverageIDs) ||
+		!sameSlicePtrHeader(a.ReopenTriggerRefs, b.ReopenTriggerRefs) ||
+		!sameSlicePtrHeader(a.ChangedCoverageIDs, b.ChangedCoverageIDs) ||
+		!sameSlicePtrHeader(a.ClosureChangeTriggerRefs, b.ClosureChangeTriggerRefs) {
+		return false
+	}
+	sa, sb := a.Snapshot, b.Snapshot
+	return sa.SchemaVersion == sb.SchemaVersion &&
+		sa.Phase == sb.Phase &&
+		sa.Attempt == sb.Attempt &&
+		sa.StablePrefixHash == sb.StablePrefixHash &&
+		sa.LogicalRequestID == sb.LogicalRequestID &&
+		sa.DocumentHash == sb.DocumentHash &&
+		sa.ActiveBatchID == sb.ActiveBatchID &&
+		sa.NextBatchSequence == sb.NextBatchSequence &&
+		sa.MergedDocumentHash == sb.MergedDocumentHash &&
+		sa.FeasibilityBatchID == sb.FeasibilityBatchID &&
+		sa.FeasibilitySetHash == sb.FeasibilitySetHash &&
+		sa.SealedBindingSetHash == sb.SealedBindingSetHash &&
+		sa.CatalogRefreshAttempts == sb.CatalogRefreshAttempts &&
+		sa.DefinitionSeed.SchemaVersion == sb.DefinitionSeed.SchemaVersion &&
+		sa.DefinitionSeed.Hash == sb.DefinitionSeed.Hash &&
+		sa.DefinitionSeed.DefinitionRevision == sb.DefinitionSeed.DefinitionRevision &&
+		sa.DefinitionSeed.PolicyHash == sb.DefinitionSeed.PolicyHash &&
+		sa.DefinitionSeed.SourceObligations == sb.DefinitionSeed.SourceObligations &&
+		sameSlicePtrHeader(sa.DefinitionSeed.CoverageItems, sb.DefinitionSeed.CoverageItems) &&
+		sameSlicePtrHeader(sa.DefinitionSeed.Slices, sb.DefinitionSeed.Slices) &&
+		sa.Manifest == sb.Manifest &&
+		sa.HistoryArchive == sb.HistoryArchive &&
+		sameSlicePtrHeader(sa.History, sb.History) &&
+		sa.FailureInputReview == sb.FailureInputReview &&
+		sa.CorrectionDirective == sb.CorrectionDirective &&
+		sa.CompiledOrder == sb.CompiledOrder &&
+		sa.CoverageOrderDocument == sb.CoverageOrderDocument &&
+		sa.Document == sb.Document &&
+		sa.MergedDocument == sb.MergedDocument &&
+		sa.Failure == sb.Failure &&
+		sameSlicePtrHeader(sa.Batches, sb.Batches) &&
+		sameSlicePtrHeader(sa.PendingCoverageIDs, sb.PendingCoverageIDs) &&
+		sameSlicePtrHeader(sa.CompletedBatchIDs, sb.CompletedBatchIDs) &&
+		sameSlicePtrHeader(sa.BatchFeasibilityResults, sb.BatchFeasibilityResults) &&
+		sameSlicePtrHeader(sa.BatchDocuments, sb.BatchDocuments) &&
+		sameSlicePtrHeader(sa.Feasibilities, sb.Feasibilities) &&
+		sameSlicePtrHeader(sa.SealedLineageRefs, sb.SealedLineageRefs) &&
+		sameSlicePtrHeader(sa.Rejections, sb.Rejections) &&
+		sameSlicePtrHeader(sa.FeasibilityGaps, sb.FeasibilityGaps)
+}
+
+func sameSlicePtrHeader[T any](a, b []T) bool {
+	if len(a) != len(b) || (a == nil) != (b == nil) {
+		return false
+	}
+	return len(a) == 0 || &a[0] == &b[0]
+}
+
 func validateRuntimeSemanticPlanningGenerationNormalized(raw, g RuntimeSemanticPlanningGeneration, session *runtimeSemanticValidationSession) error {
-	if session.committedGeneration(raw) && runtimeRawEqual(raw, g) {
+	if session.committedGeneration(raw) && (sameRuntimeSemanticPlanningGenerationShallow(raw, g) || runtimeRawEqual(raw, g)) {
 		return nil
 	}
 	return validateRuntimeSemanticPlanningGenerationComplete(raw, g, session)
@@ -2753,18 +2897,16 @@ func validateRuntimeSemanticPlanningGenerationComplete(raw, g RuntimeSemanticPla
 // RuntimeSemanticPlanningLedger is persisted owner data.  pkg validates its
 // value shape only; Orchestrator private internal events own every transition.
 type RuntimeSemanticPlanningLedger struct {
-	FailureInputReview *RuntimeValidationFailureInputReview `json:",omitempty"`
-	SchemaVersion      string
-	Phase              RuntimeSemanticPlanningPhase
-	DefinitionSeed     RuntimeDefinitionSeed
-	Manifest           *RuntimeSemanticPlanManifest
-	Attempt            int
-	StablePrefixHash   string
-	// LogicalRequestID is the current provider request-session cursor. During an
-	// attempt-1 correction it intentionally differs from the active batch's
-	// immutable RequestLogicalID and is never a sealed binding preimage by itself.
-	LogicalRequestID    string
-	CorrectionDirective *RuntimeSemanticCorrectionDirective
+	SchemaVersion  string
+	DefinitionSeed RuntimeDefinitionSeed
+	// History is the recent immutable semantic-generation tail. Complete older
+	// bodies remain in HistoryArchive. All consumers use AllHistory in original
+	// order; neither tier participates in the current provider request or grants
+	// authority. Orchestrator SM-2 owns retirement, with a fresh Required ledger.
+	HistoryArchive   *RuntimeSemanticHistoryArchive `json:",omitempty"`
+	History          []RuntimeSemanticPlanningGeneration
+	Manifest         *RuntimeSemanticPlanManifest
+	StablePrefixHash string
 	// CoverageOrderDocument is the immutable full CWI order. CompiledOrder
 	// explicitly distinguishes deterministic compilation from provider authorship.
 	// It survives current-focus proof sealing so the Orchestrator can admit the
@@ -2772,32 +2914,34 @@ type RuntimeSemanticPlanningLedger struct {
 	// It is lineage only: it never grants a binding, operation, or transition.
 	CompiledOrder           *RuntimeSemanticCompiledOrder `json:",omitempty"`
 	CoverageOrderDocument   *RuntimeSemanticPlanDocument
-	Document                *RuntimeSemanticPlanDocument
-	DocumentHash            string
-	Batches                 []RuntimeSemanticPlanBatch
-	ActiveBatchID           string
-	NextBatchSequence       int
-	PendingCoverageIDs      []common.CoverageWorkItemID
-	CompletedBatchIDs       []string
-	BatchFeasibilityResults []RuntimeSemanticPlanBatchFeasibilityResult
+	FailureInputReview      *RuntimeValidationFailureInputReview `json:",omitempty"`
 	BatchDocuments          []RuntimeSemanticPlanDocument
+	BatchFeasibilityResults []RuntimeSemanticPlanBatchFeasibilityResult
 	MergedDocument          *RuntimeSemanticPlanDocument
 	MergedDocumentHash      string
-	FeasibilityBatchID      string
+	Document                *RuntimeSemanticPlanDocument
+	DocumentHash            string
 	Feasibilities           []RuntimeSemanticProofFeasibility
 	FeasibilitySetHash      string
 	SealedBindingSetHash    string
 	SealedLineageRefs       []string
-	Rejections              []RuntimeOriginalDiagnostic
-	FeasibilityGaps         []RuntimeSemanticFeasibilityGap
-	CatalogRefreshAttempts  int
-	Failure                 *RuntimeOriginalDiagnostic
-	// History is the recent immutable semantic-generation tail. Complete older
-	// bodies remain in HistoryArchive. All consumers use AllHistory in original
-	// order; neither tier participates in the current provider request or grants
-	// authority. Orchestrator SM-2 owns retirement, with a fresh Required ledger.
-	History        []RuntimeSemanticPlanningGeneration
-	HistoryArchive *RuntimeSemanticHistoryArchive `json:",omitempty"`
+	Batches                 []RuntimeSemanticPlanBatch
+	Phase                   RuntimeSemanticPlanningPhase
+	Attempt                 int
+	// LogicalRequestID is the current provider request-session cursor. During an
+	// attempt-1 correction it intentionally differs from the active batch's
+	// immutable RequestLogicalID and is never a sealed binding preimage by itself.
+	LogicalRequestID       string
+	CorrectionDirective    *RuntimeSemanticCorrectionDirective
+	ActiveBatchID          string
+	NextBatchSequence      int
+	PendingCoverageIDs     []common.CoverageWorkItemID
+	CompletedBatchIDs      []string
+	FeasibilityBatchID     string
+	Rejections             []RuntimeOriginalDiagnostic
+	FeasibilityGaps        []RuntimeSemanticFeasibilityGap
+	CatalogRefreshAttempts int
+	Failure                *RuntimeOriginalDiagnostic
 }
 
 func NewRuntimeSemanticPlanningLedger(seed RuntimeDefinitionSeed) (RuntimeSemanticPlanningLedger, error) {
@@ -2810,24 +2954,30 @@ func NewRuntimeSemanticPlanningLedger(seed RuntimeDefinitionSeed) (RuntimeSemant
 
 func (l RuntimeSemanticPlanningLedger) Normalized() RuntimeSemanticPlanningLedger {
 	l.FailureInputReview = l.FailureInputReview.Clone()
-	return l.normalizedForValidation(nil)
+	return l.normalizedForValidationWithPreimage(nil, nil)
+}
+
+func (l RuntimeSemanticPlanningLedger) normalizedForValidation(session *runtimeSemanticValidationSession) RuntimeSemanticPlanningLedger {
+	return l.normalizedForValidationWithPreimage(session, nil)
 }
 
 // Only the private validator may borrow a retained generation. It consumes
 // history read-only and never returns this graph. Public Normalized/Clone must
 // still detach every generation. The complete ledger and cross-generation
 // gates run below on every invocation, including a normalization hit.
-func (l RuntimeSemanticPlanningLedger) normalizedForValidation(session *runtimeSemanticValidationSession) RuntimeSemanticPlanningLedger {
+func (l RuntimeSemanticPlanningLedger) normalizedForValidationWithPreimage(session *runtimeSemanticValidationSession, prev *RuntimeSemanticPlanningLedger) RuntimeSemanticPlanningLedger {
 	l.SchemaVersion = strings.TrimSpace(l.SchemaVersion)
 	l.Phase = RuntimeSemanticPlanningPhase(strings.TrimSpace(string(l.Phase)))
-	l.DefinitionSeed = l.DefinitionSeed.Clone()
+	if prev == nil || !runtimeRawEqual(l.DefinitionSeed, prev.DefinitionSeed) {
+		l.DefinitionSeed = l.DefinitionSeed.Clone()
+	}
 	l.StablePrefixHash = strings.TrimSpace(l.StablePrefixHash)
 	l.LogicalRequestID = strings.TrimSpace(l.LogicalRequestID)
-	if l.CorrectionDirective != nil {
+	if l.CorrectionDirective != nil && (prev == nil || prev.CorrectionDirective == nil || !runtimeRawEqual(l.CorrectionDirective, prev.CorrectionDirective)) {
 		value := l.CorrectionDirective.Clone()
 		l.CorrectionDirective = &value
 	}
-	if l.Manifest != nil {
+	if l.Manifest != nil && session == nil {
 		value := l.Manifest.Clone()
 		l.Manifest = &value
 	}
@@ -2835,31 +2985,43 @@ func (l RuntimeSemanticPlanningLedger) normalizedForValidation(session *runtimeS
 		value := *l.CompiledOrder
 		l.CompiledOrder = &value
 	}
-	if l.CoverageOrderDocument != nil {
+	if l.CoverageOrderDocument != nil && (prev == nil || prev.CoverageOrderDocument == nil || !runtimeRawEqual(l.CoverageOrderDocument, prev.CoverageOrderDocument)) {
 		value := l.CoverageOrderDocument.Clone()
 		l.CoverageOrderDocument = &value
 	}
-	if l.Document != nil {
+	if l.Document != nil && (prev == nil || prev.Document == nil || !runtimeRawEqual(l.Document, prev.Document)) {
 		value := l.Document.Clone()
 		l.Document = &value
 	}
 	l.DocumentHash = strings.TrimSpace(l.DocumentHash)
-	l.Batches = normalizeRuntimeSemanticPlanBatches(l.Batches)
+	if prev == nil || !runtimeRawEqual(l.Batches, prev.Batches) {
+		l.Batches = normalizeRuntimeSemanticPlanBatches(l.Batches)
+	}
 	l.ActiveBatchID = strings.TrimSpace(l.ActiveBatchID)
 	if l.NextBatchSequence < 0 {
 		l.NextBatchSequence = 0
 	}
-	l.PendingCoverageIDs = normalizeOrderedCoverageWorkItemIDs(l.PendingCoverageIDs)
-	l.CompletedBatchIDs = normalizeStrings(l.CompletedBatchIDs)
-	l.BatchFeasibilityResults = normalizeRuntimeSemanticPlanBatchFeasibilityResults(l.BatchFeasibilityResults)
-	l.BatchDocuments = normalizeRuntimeSemanticPlanDocuments(l.BatchDocuments)
-	if l.MergedDocument != nil {
+	if prev == nil || !runtimeRawEqual(l.PendingCoverageIDs, prev.PendingCoverageIDs) {
+		l.PendingCoverageIDs = normalizeOrderedCoverageWorkItemIDs(l.PendingCoverageIDs)
+	}
+	if prev == nil || !runtimeRawEqual(l.CompletedBatchIDs, prev.CompletedBatchIDs) {
+		l.CompletedBatchIDs = normalizeStrings(l.CompletedBatchIDs)
+	}
+	if prev == nil || !runtimeRawEqual(l.BatchFeasibilityResults, prev.BatchFeasibilityResults) {
+		l.BatchFeasibilityResults = normalizeRuntimeSemanticPlanBatchFeasibilityResults(l.BatchFeasibilityResults)
+	}
+	if prev == nil || !runtimeRawEqual(l.BatchDocuments, prev.BatchDocuments) {
+		l.BatchDocuments = normalizeRuntimeSemanticPlanDocuments(l.BatchDocuments)
+	}
+	if l.MergedDocument != nil && (prev == nil || prev.MergedDocument == nil || !runtimeRawEqual(l.MergedDocument, prev.MergedDocument)) {
 		value := l.MergedDocument.Clone()
 		l.MergedDocument = &value
 	}
 	l.MergedDocumentHash = strings.TrimSpace(l.MergedDocumentHash)
 	l.FeasibilityBatchID = strings.TrimSpace(l.FeasibilityBatchID)
-	l.Feasibilities = normalizeRuntimeSemanticFeasibilities(l.Feasibilities)
+	if prev == nil || !runtimeRawEqual(l.Feasibilities, prev.Feasibilities) {
+		l.Feasibilities = normalizeRuntimeSemanticFeasibilities(l.Feasibilities)
+	}
 	l.FeasibilitySetHash = strings.TrimSpace(l.FeasibilitySetHash)
 	l.SealedBindingSetHash = strings.TrimSpace(l.SealedBindingSetHash)
 	// Sealed lineage is a positional chain (manifest → order → document →
@@ -2880,8 +3042,15 @@ func (l RuntimeSemanticPlanningLedger) normalizedForValidation(session *runtimeS
 		archive := &RuntimeSemanticHistoryArchive{ProtocolRef: l.HistoryArchive.ProtocolRef, GenerationCount: l.HistoryArchive.GenerationCount}
 		if l.HistoryArchive.Segments != nil {
 			archive.Segments = make([][]RuntimeSemanticPlanningGeneration, len(l.HistoryArchive.Segments))
+			archiveUnchanged := session != nil && session.committedPreimage != nil &&
+				session.committedPreimage.SemanticPlanning.HistoryArchive != nil &&
+				runtimeRawEqual(l.HistoryArchive, session.committedPreimage.SemanticPlanning.HistoryArchive)
 			for i, segment := range l.HistoryArchive.Segments {
 				if segment != nil {
+					if archiveUnchanged {
+						archive.Segments[i] = append([]RuntimeSemanticPlanningGeneration(nil), segment...)
+						continue
+					}
 					archive.Segments[i] = make([]RuntimeSemanticPlanningGeneration, len(segment))
 					for j, generation := range segment {
 						archive.Segments[i][j] = normalizeRuntimeSemanticGenerationForValidation(generation, session)
@@ -2994,13 +3163,21 @@ func validateRuntimeSemanticPlanningLedger(l RuntimeSemanticPlanningLedger) erro
 }
 
 func validateRuntimeSemanticPlanningLedgerInSession(l RuntimeSemanticPlanningLedger, session *runtimeSemanticValidationSession) error {
+	var prev *RuntimeSemanticPlanningLedger
+	if session != nil && session.committedPreimage != nil {
+		prev = &session.committedPreimage.SemanticPlanning
+	}
 	raw := l
 	return runtimeProcessingRegion("semantic_ledger", func() error {
-		return validateRuntimeSemanticPlanningLedgerNormalized(raw, l.normalizedForValidation(session), session)
+		return validateRuntimeSemanticPlanningLedgerNormalizedWithPreimage(raw, l.normalizedForValidationWithPreimage(session, prev), session, prev)
 	})
 }
 
 func validateRuntimeSemanticPlanningLedgerNormalized(raw, l RuntimeSemanticPlanningLedger, session *runtimeSemanticValidationSession) error {
+	return validateRuntimeSemanticPlanningLedgerNormalizedWithPreimage(raw, l, session, nil)
+}
+
+func validateRuntimeSemanticPlanningLedgerNormalizedWithPreimage(raw, l RuntimeSemanticPlanningLedger, session *runtimeSemanticValidationSession, prev *RuntimeSemanticPlanningLedger) error {
 	rawHistory := make([]RuntimeSemanticPlanningGeneration, 0, raw.HistoryCount())
 	for _, generation := range raw.AllHistory() {
 		rawHistory = append(rawHistory, generation)
@@ -3077,8 +3254,10 @@ func validateRuntimeSemanticPlanningLedgerNormalized(raw, l RuntimeSemanticPlann
 			return fmt.Errorf("runtime semantic planning batch %d contains duplicate or empty identity values", idx)
 		}
 	}
-	if err := validateRuntimeSemanticSeedInSession(l.DefinitionSeed, session); err != nil {
-		return err
+	if prev == nil || !runtimeRawEqual(l.DefinitionSeed, prev.DefinitionSeed) {
+		if err := validateRuntimeSemanticSeedInSession(l.DefinitionSeed, session); err != nil {
+			return err
+		}
 	}
 	var validatedManifest *runtimeValidatedSemanticManifest
 	if raw.Manifest != nil {
@@ -3089,20 +3268,27 @@ func validateRuntimeSemanticPlanningLedgerNormalized(raw, l RuntimeSemanticPlann
 		validatedManifest = &validated
 		l.Manifest = &validated.manifest
 	}
+	sameManifest := prev != nil && l.Manifest != nil && prev.Manifest != nil && runtimeRawEqual(l.Manifest, prev.Manifest)
 	if err := l.CompiledOrder.Validate(l.Manifest, l.CoverageOrderDocument); err != nil {
 		return err
 	}
+	var orderHash string
 	if l.CoverageOrderDocument != nil {
 		if l.Manifest == nil {
 			return fmt.Errorf("runtime semantic coverage order has no manifest")
 		}
-		order := l.CoverageOrderDocument.Clone()
-		if order.PlanStep != RuntimeSemanticPlanStepCoverageOrder || order.BatchID != "" ||
-			order.ManifestHash != l.Manifest.Hash || order.DefinitionSeedHash != l.Manifest.DefinitionSeedHash {
-			return fmt.Errorf("runtime semantic coverage order lineage does not match manifest")
-		}
-		if err := validateRuntimeSemanticPlanDocumentAgainstValidatedManifest(order, *validatedManifest); err != nil {
-			return err
+		if sameManifest && prev.CoverageOrderDocument != nil && runtimeRawEqual(l.CoverageOrderDocument, prev.CoverageOrderDocument) {
+			orderHash = StableRuntimeSemanticPlanCoverageOrderHash(*l.CoverageOrderDocument)
+		} else {
+			order := l.CoverageOrderDocument.Clone()
+			if order.PlanStep != RuntimeSemanticPlanStepCoverageOrder || order.BatchID != "" ||
+				order.ManifestHash != l.Manifest.Hash || order.DefinitionSeedHash != l.Manifest.DefinitionSeedHash {
+				return fmt.Errorf("runtime semantic coverage order lineage does not match manifest")
+			}
+			if err := validateRuntimeSemanticPlanDocumentAgainstValidatedManifest(order, *validatedManifest); err != nil {
+				return err
+			}
+			orderHash = StableRuntimeSemanticPlanCoverageOrderHash(order)
 		}
 	}
 	if len(l.PendingCoverageIDs) != 0 {
@@ -3148,11 +3334,13 @@ func validateRuntimeSemanticPlanningLedgerNormalized(raw, l RuntimeSemanticPlann
 			maxBatchSequence = batch.Sequence
 		}
 		if l.Manifest != nil {
-			if err := validateRuntimeSemanticPlanBatchAgainstValidatedManifest(batch, *validatedManifest); err != nil {
-				return err
+			if !(sameManifest && idx < len(prev.Batches) && runtimeRawEqual(batch, prev.Batches[idx])) {
+				if err := validateRuntimeSemanticPlanBatchAgainstValidatedManifest(batch, *validatedManifest); err != nil {
+					return err
+				}
 			}
 		}
-		if l.CoverageOrderDocument != nil && batch.CoverageOrderHash != StableRuntimeSemanticPlanCoverageOrderHash(*l.CoverageOrderDocument) {
+		if l.CoverageOrderDocument != nil && batch.CoverageOrderHash != orderHash {
 			return fmt.Errorf("runtime semantic batch %q is not bound to the immutable coverage order", batch.BatchID)
 		}
 	}
@@ -3191,7 +3379,7 @@ func validateRuntimeSemanticPlanningLedgerNormalized(raw, l RuntimeSemanticPlann
 		}
 	}
 	batchDocuments := make(map[string]RuntimeSemanticPlanDocument, len(l.BatchDocuments))
-	for _, document := range l.BatchDocuments {
+	for idx, document := range l.BatchDocuments {
 		if _, duplicate := batchDocuments[document.BatchID]; duplicate {
 			return fmt.Errorf("runtime semantic planning duplicates batch document %q", document.BatchID)
 		}
@@ -3199,7 +3387,19 @@ func validateRuntimeSemanticPlanningLedgerNormalized(raw, l RuntimeSemanticPlann
 		if !found {
 			return fmt.Errorf("runtime semantic batch document has no matching batch")
 		}
-		if document.PlanStep != RuntimeSemanticPlanStepProofBatch || document.BatchSequence != batch.Sequence ||
+		docMatchesPrev := prev != nil && idx < len(prev.BatchDocuments) && runtimeRawEqual(document, prev.BatchDocuments[idx])
+		var prevBatch *RuntimeSemanticPlanBatch
+		if docMatchesPrev {
+			for bIdx := range prev.Batches {
+				if prev.Batches[bIdx].BatchID == document.BatchID {
+					prevBatch = &prev.Batches[bIdx]
+					break
+				}
+			}
+		}
+		if docMatchesPrev && prevBatch != nil && runtimeRawEqual(batch, *prevBatch) {
+			// Batch document alignment and hash were already checked in prev.
+		} else if document.PlanStep != RuntimeSemanticPlanStepProofBatch || document.BatchSequence != batch.Sequence ||
 			!sameOrderedRuntimeCoverageIDs(document.BatchCoverageWorkItemIDs, batch.CoverageWorkItemIDs) ||
 			batch.DocumentHash != StableRuntimeSemanticPlanDocumentHash(document) {
 			return fmt.Errorf("runtime semantic batch document identity is not bound to batch")
@@ -3207,15 +3407,21 @@ func validateRuntimeSemanticPlanningLedgerNormalized(raw, l RuntimeSemanticPlann
 		if l.Manifest == nil {
 			return fmt.Errorf("runtime semantic batch document has no manifest")
 		}
-		if err := validateRuntimeSemanticPlanDocumentAgainstValidatedManifest(document, *validatedManifest); err != nil {
-			return err
+		if !(sameManifest && docMatchesPrev) {
+			if err := validateRuntimeSemanticPlanDocumentAgainstValidatedManifest(document, *validatedManifest); err != nil {
+				return err
+			}
 		}
 		correctionBaseline := (l.Phase == RuntimeSemanticPlanningCorrectionRequired || l.Phase == RuntimeSemanticPlanningFailed) && l.Attempt == 1 &&
 			document.BatchID == l.ActiveBatchID && batch.State == RuntimeSemanticPlanBatchRequesting
 		if batch.State == RuntimeSemanticPlanBatchPending || (batch.State == RuntimeSemanticPlanBatchRequesting && !correctionBaseline) || batch.State == RuntimeSemanticPlanBatchFailed {
 			return fmt.Errorf("runtime semantic batch document %q is not in a document-bearing batch state", document.BatchID)
 		}
-		batchDocuments[document.BatchID] = document.Clone()
+		if docMatchesPrev {
+			batchDocuments[document.BatchID] = document
+		} else {
+			batchDocuments[document.BatchID] = document.Clone()
+		}
 	}
 	if l.ActiveBatchID != "" {
 		if _, found := batchIDs[l.ActiveBatchID]; !found {
@@ -3226,7 +3432,7 @@ func validateRuntimeSemanticPlanningLedgerNormalized(raw, l RuntimeSemanticPlann
 		}
 	}
 	seenBatchResults := make(map[string]struct{}, len(l.BatchFeasibilityResults))
-	for _, result := range l.BatchFeasibilityResults {
+	for idx, result := range l.BatchFeasibilityResults {
 		if l.Manifest == nil {
 			return fmt.Errorf("runtime semantic planning batch feasibility has no manifest")
 		}
@@ -3242,8 +3448,30 @@ func validateRuntimeSemanticPlanningLedgerNormalized(raw, l RuntimeSemanticPlann
 		if !found {
 			return fmt.Errorf("runtime semantic planning batch feasibility has no matching document")
 		}
-		if err := validateRuntimeSemanticPlanBatchFeasibilityResultWithValidatedManifest(result, batch, document, *validatedManifest); err != nil {
-			return err
+		skipResultCheck := false
+		if sameManifest && idx < len(prev.BatchFeasibilityResults) && runtimeRawEqual(result, prev.BatchFeasibilityResults[idx]) {
+			var prevBatch *RuntimeSemanticPlanBatch
+			for bIdx := range prev.Batches {
+				if prev.Batches[bIdx].BatchID == result.BatchID {
+					prevBatch = &prev.Batches[bIdx]
+					break
+				}
+			}
+			var prevDoc *RuntimeSemanticPlanDocument
+			for dIdx := range prev.BatchDocuments {
+				if prev.BatchDocuments[dIdx].BatchID == result.BatchID {
+					prevDoc = &prev.BatchDocuments[dIdx]
+					break
+				}
+			}
+			if prevBatch != nil && prevDoc != nil && runtimeRawEqual(batch, *prevBatch) && runtimeRawEqual(document, *prevDoc) {
+				skipResultCheck = true
+			}
+		}
+		if !skipResultCheck {
+			if err := validateRuntimeSemanticPlanBatchFeasibilityResultWithValidatedManifest(result, batch, document, *validatedManifest); err != nil {
+				return err
+			}
 		}
 	}
 	completed := make(map[string]struct{}, len(l.CompletedBatchIDs))

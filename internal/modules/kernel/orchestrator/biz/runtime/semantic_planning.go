@@ -193,7 +193,7 @@ func retireSemanticPlanningGeneration(aggregate *RuntimeAggregate, reason runtim
 	if aggregate == nil {
 		return common.ErrInvalidArgument
 	}
-	ledger := aggregate.SemanticPlanning.CloneRaw()
+	ledger := runtimecontract.SnapshotSemanticPlanningLedgerWithSharedHistory(aggregate.SemanticPlanning)
 	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningRequired {
 		return nil
 	}
@@ -308,7 +308,7 @@ func retireSemanticPlanningGenerationForCWIReopen(aggregate *RuntimeAggregate, r
 	if aggregate == nil {
 		return common.ErrInvalidArgument
 	}
-	ledger := aggregate.SemanticPlanning.CloneRaw()
+	ledger := runtimecontract.SnapshotSemanticPlanningLedgerWithSharedHistory(aggregate.SemanticPlanning)
 	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningRequired {
 		return nil
 	}
@@ -383,7 +383,7 @@ func retireSemanticPlanningGenerationForBindingContradiction(aggregate *RuntimeA
 	if aggregate == nil || coverageID == "" || strings.TrimSpace(causationRef) == "" {
 		return common.ErrInvalidArgument
 	}
-	ledger := aggregate.SemanticPlanning.CloneRaw()
+	ledger := runtimecontract.SnapshotSemanticPlanningLedgerWithSharedHistory(aggregate.SemanticPlanning)
 	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningRequired {
 		return nil
 	}
@@ -435,7 +435,7 @@ func retireSemanticPlanningGenerationForEligibilityChange(aggregate *RuntimeAggr
 	if aggregate == nil {
 		return common.ErrInvalidArgument
 	}
-	ledger := aggregate.SemanticPlanning.CloneRaw()
+	ledger := runtimecontract.SnapshotSemanticPlanningLedgerWithSharedHistory(aggregate.SemanticPlanning)
 	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningRequired {
 		return nil
 	}
@@ -790,29 +790,41 @@ func SemanticPlanningPrerequisitesPending(values []runtimecontract.RuntimePrereq
 }
 
 func currentRuntimeCWIBindingExecutionLocked(aggregate RuntimeAggregate) bool {
+	if len(aggregate.Facts.Focus.CoverageWorkItemIDs) != 1 {
+		return false
+	}
 	focus := aggregate.Facts.Focus.Normalized()
 	if len(focus.CoverageWorkItemIDs) != 1 {
 		return false
 	}
 	coverageID := focus.CoverageWorkItemIDs[0]
-	probe := aggregate.Facts.Normalized()
-	for index := range probe.Coverage {
-		item := &probe.Coverage[index]
-		if item.ID != coverageID || item.CurrentBindingRef == nil {
+	for index := range aggregate.Facts.Coverage {
+		rawItem := &aggregate.Facts.Coverage[index]
+		if rawItem.ID != coverageID || rawItem.CurrentBindingRef == nil {
 			continue
 		}
-		item.BindingRetirementLineage = append(item.BindingRetirementLineage, runtimecontract.RuntimeCWIBindingRetirementLineage{
-			RetiredBindingRef: item.CurrentBindingRef.Clone(), CausationRef: "read-only/execution-lock-probe", Reason: "read-only execution lock probe",
-		})
-		var active *runtimecontract.RuntimeDispatchRecord
-		if aggregate.ActiveDispatch != nil {
-			value := (*aggregate.ActiveDispatch)
-			active = &value
+		probe := runtimecontract.RuntimeFacts{
+			Coverage: runtimecontract.NormalizeRuntimeCoverageFacts(aggregate.Facts.Coverage),
+			Evidence: aggregate.Facts.Evidence,
 		}
-		return runtimecontract.ValidateRuntimeCWIBindingRetirementsAgainstExecution(
-			probe, active,
-			(aggregate.CompletedDispatches), aggregate.OperationReceipts,
-		) != nil
+		for probeIdx := range probe.Coverage {
+			item := &probe.Coverage[probeIdx]
+			if item.ID != coverageID || item.CurrentBindingRef == nil {
+				continue
+			}
+			item.BindingRetirementLineage = append(item.BindingRetirementLineage, runtimecontract.RuntimeCWIBindingRetirementLineage{
+				RetiredBindingRef: item.CurrentBindingRef.Clone(), CausationRef: "read-only/execution-lock-probe", Reason: "read-only execution lock probe",
+			})
+			var active *runtimecontract.RuntimeDispatchRecord
+			if aggregate.ActiveDispatch != nil {
+				value := (*aggregate.ActiveDispatch)
+				active = &value
+			}
+			return runtimecontract.ValidateRuntimeCWIBindingRetirementsAgainstExecution(
+				probe, active,
+				(aggregate.CompletedDispatches), aggregate.OperationReceipts,
+			) != nil
+		}
 	}
 	return false
 }
@@ -1100,7 +1112,7 @@ func runtimeSemanticDependencyCatalogForOwner(manifest runtimecontract.RuntimeSe
 
 func semanticCatalogPrerequisiteObservation(facts runtimecontract.RuntimeFacts, catalog runtimecontract.RuntimeOperationAdmissibility, observationID string) (runtimecontract.RuntimePrerequisiteObservation, bool) {
 	observationID = strings.TrimSpace(observationID)
-	for _, observation := range facts.Normalized().Resources.PrerequisiteObservations {
+	for _, observation := range runtimecontract.NormalizeRuntimePrerequisiteObservations(facts.Resources.PrerequisiteObservations) {
 		if observation.PrerequisiteID == catalog.PrerequisiteID && observation.ObservationID == observationID &&
 			observation.OwnerModuleID == catalog.OwnerModuleID && observation.ContentHash == catalog.SnapshotID {
 			return observation, true
@@ -1439,7 +1451,7 @@ func (c *planningTransactionComponent) observeSemanticFeasibility(ctx context.Co
 				return RuntimeAggregate{}, reduceErr
 			}
 			transaction.aggregate.Facts, transaction.aggregate.Decision = facts, decision
-			transaction.ledger = transaction.aggregate.SemanticPlanning.CloneRaw()
+			transaction.ledger = runtimecontract.SnapshotSemanticPlanningLedgerWithSharedHistory(transaction.aggregate.SemanticPlanning)
 			catalogRetired = true
 		}
 	}
@@ -1765,7 +1777,7 @@ func prepareSemanticPlanningForAdvancedFocus(aggregate *RuntimeAggregate) (err e
 	if aggregate == nil || len(aggregate.Facts.Focus.CoverageEvidenceBindings) != 0 {
 		return nil
 	}
-	ledger := aggregate.SemanticPlanning.CloneRaw()
+	ledger := runtimecontract.SnapshotSemanticPlanningLedgerWithSharedHistory(aggregate.SemanticPlanning)
 	if ledger.Phase != runtimecontract.RuntimeSemanticPlanningSealed {
 		return nil
 	}
@@ -1807,7 +1819,7 @@ func prepareSemanticPlanningForAdvancedFocus(aggregate *RuntimeAggregate) (err e
 	if retired {
 		return nil
 	}
-	ledger = aggregate.SemanticPlanning.CloneRaw()
+	ledger = runtimecontract.SnapshotSemanticPlanningLedgerWithSharedHistory(aggregate.SemanticPlanning)
 	if ledger.Phase != runtimecontract.RuntimeSemanticPlanningSealed {
 		return nil
 	}

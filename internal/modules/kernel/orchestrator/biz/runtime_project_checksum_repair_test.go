@@ -48,6 +48,7 @@ func shippedChecksumRepairConvergence(t *testing.T) runtimecontract.RuntimeValid
 // All resource owners and native build/test/race/behavior stages are real.
 // Only the provider's semantic/candidate/assessment responses are scripted.
 func TestDriveRuntimeProjectChecksumRepair(t *testing.T) {
+	t.Parallel()
 	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1}
 	for _, mode := range []string{"project_checksum_missing", "project_checksum_existing"} {
 		t.Run(mode, func(t *testing.T) {

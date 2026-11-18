@@ -9,16 +9,23 @@ import (
 // invalidation reason. The owner-private CAS separately proves the old current
 // transaction and zero unresolved allocation retirement.
 func ValidateRuntimeApplicabilityCandidateInvalidations(observations []RuntimeEvidenceApplicabilityObservation, attempts []RuntimeCandidateAttemptRecord, sessions []RuntimeCandidateRequestSession) error {
-	requests := make(map[string]RuntimeEvidenceApplicabilityRequest, len(observations))
-	for _, observation := range observations {
-		requests[observation.Request.RequestID] = observation.Request
+	var requests map[string]RuntimeEvidenceApplicabilityRequest
+	ensureRequests := func() map[string]RuntimeEvidenceApplicabilityRequest {
+		if requests != nil {
+			return requests
+		}
+		requests = make(map[string]RuntimeEvidenceApplicabilityRequest, len(observations))
+		for _, observation := range observations {
+			requests[observation.Request.RequestID] = observation.Request
+		}
+		return requests
 	}
 	for _, attempt := range attempts {
 		if attempt.ApplicabilityInvalidationRequest == nil {
 			continue
 		}
 		request := *attempt.ApplicabilityInvalidationRequest
-		original, found := requests[request.RequestID]
+		original, found := ensureRequests()[request.RequestID]
 		if !found || !reflect.DeepEqual(original, request) || attempt.State != RuntimeCandidateAttemptStateInvalidated || attempt.Transaction.EvidenceRevision != request.EvidenceRevision {
 			return fmt.Errorf("candidate applicability invalidation has no exact original SM-2 observation")
 		}
@@ -27,7 +34,7 @@ func ValidateRuntimeApplicabilityCandidateInvalidations(observations []RuntimeEv
 		if session.LastOutcome.Code != "evidence_applicability_changed" {
 			continue
 		}
-		request, found := requests[session.LastOutcome.Signature]
+		request, found := ensureRequests()[session.LastOutcome.Signature]
 		if !found || session.State != RuntimeCandidateRequestSessionTerminal || session.ProviderSubmitted || session.LastOutcome.Class != RuntimeCandidateRequestOutcomePrerequisiteStale || session.Transaction.EvidenceRevision != request.EvidenceRevision {
 			return fmt.Errorf("request applicability retirement has no exact original SM-2 observation")
 		}

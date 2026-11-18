@@ -16,6 +16,15 @@ type orchestratorTestBoundRuns struct {
 	binding repository.RunOwnerRepositoryBinding
 }
 
+func (r orchestratorTestBoundRuns) GetRuntimeStateSnapshot(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (*runmodel.Run, error) {
+	if snapRepo, ok := r.RunRepository.(interface {
+		GetRuntimeStateSnapshot(context.Context, common.WorkspaceID, common.RunID) (*runmodel.Run, error)
+	}); ok {
+		return snapRepo.GetRuntimeStateSnapshot(ctx, workspaceID, runID)
+	}
+	return r.RunRepository.GetByWorkspaceID(ctx, workspaceID, runID)
+}
+
 func (r orchestratorTestBoundRuns) RunOwnerRepositoryBinding() repository.RunOwnerRepositoryBinding {
 	return r.binding
 }

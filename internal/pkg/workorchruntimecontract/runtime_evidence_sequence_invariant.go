@@ -88,6 +88,198 @@ func ValidateRuntimeEvidenceLedgerSequence(
 		assessmentsByID[assessment.ID] = assessment
 	}
 
+	return validateRuntimeEvidenceLedgerConsumption(
+		sequence,
+		facts,
+		active,
+		completed,
+		resolutions,
+		factsByID,
+		assessmentsByID,
+	)
+}
+
+func validateRuntimeEvidenceLedgerSequenceTransition(state RuntimeStateRecord, previous *RuntimeStateRecord) error {
+	if previous == nil ||
+		state.Facts.DefinitionRevision != previous.Facts.DefinitionRevision ||
+		len(state.CompletedDispatches) < len(previous.CompletedDispatches) {
+		return ValidateRuntimeEvidenceLedgerSequence(
+			state.EvidenceSequence,
+			state.Facts,
+			state.ActiveDispatch,
+			state.CompletedDispatches,
+			state.GovernanceResolutions,
+		)
+	}
+	if !runtimeRawEqual(state.GovernanceResolutions, previous.GovernanceResolutions) {
+		if err := ValidateRuntimeGovernanceResolutionRecords(state.GovernanceResolutions); err != nil {
+			return err
+		}
+	}
+	factsByID := make(map[common.EvidenceRecordID]EvidenceFact, len(state.Facts.Evidence.Accepted)+len(state.Facts.Evidence.Rejected))
+	okAccepted, err := validateRuntimeEvidenceFactsTransition(
+		"accepted",
+		state.Facts.Evidence.Accepted,
+		previous.Facts.Evidence.Accepted,
+		state.Facts.DefinitionRevision,
+		factsByID,
+	)
+	if err != nil {
+		return err
+	}
+	if !okAccepted {
+		return ValidateRuntimeEvidenceLedgerSequence(
+			state.EvidenceSequence,
+			state.Facts,
+			state.ActiveDispatch,
+			state.CompletedDispatches,
+			state.GovernanceResolutions,
+		)
+	}
+	okRejected, err := validateRuntimeEvidenceFactsTransition(
+		"rejected",
+		state.Facts.Evidence.Rejected,
+		previous.Facts.Evidence.Rejected,
+		state.Facts.DefinitionRevision,
+		factsByID,
+	)
+	if err != nil {
+		return err
+	}
+	if !okRejected {
+		return ValidateRuntimeEvidenceLedgerSequence(
+			state.EvidenceSequence,
+			state.Facts,
+			state.ActiveDispatch,
+			state.CompletedDispatches,
+			state.GovernanceResolutions,
+		)
+	}
+	assessmentsByID := make(map[string]RuntimeAssessmentFact, len(state.Facts.Assessments))
+	if !validateRuntimeAssessmentFactsTransition(state.Facts.Assessments, previous.Facts.Assessments, assessmentsByID) {
+		return ValidateRuntimeEvidenceLedgerSequence(
+			state.EvidenceSequence,
+			state.Facts,
+			state.ActiveDispatch,
+			state.CompletedDispatches,
+			state.GovernanceResolutions,
+		)
+	}
+	return validateRuntimeEvidenceLedgerConsumption(
+		state.EvidenceSequence,
+		state.Facts,
+		state.ActiveDispatch,
+		state.CompletedDispatches,
+		state.GovernanceResolutions,
+		factsByID,
+		assessmentsByID,
+	)
+}
+
+func validateRuntimeEvidenceFactsTransition(
+	ledger string,
+	curr []EvidenceFact,
+	prev []EvidenceFact,
+	definitionRevision string,
+	factsByID map[common.EvidenceRecordID]EvidenceFact,
+) (bool, error) {
+	j := 0
+	for i := range curr {
+		fact := curr[i]
+		if fact.ID == "" || (i > 0 && !(curr[i-1].ID < fact.ID)) {
+			return false, nil
+		}
+		for j < len(prev) && prev[j].ID < fact.ID {
+			j++
+		}
+		if j < len(prev) && runtimeRawEqual(fact, prev[j]) {
+			if _, duplicate := factsByID[fact.ID]; duplicate {
+				return false, nil
+			}
+			factsByID[fact.ID] = fact
+			continue
+		}
+		norm := normalizeEvidenceFacts([]EvidenceFact{fact})
+		if len(norm) != 1 || !reflect.DeepEqual(norm[0], fact) {
+			return false, nil
+		}
+		if err := ValidateRuntimeEvidencePurposeKind(fact.ApplicabilityDependencies, fact.Kind); err != nil {
+			return true, err
+		}
+		if err := ValidateRuntimeEvidenceDependencyPair(fact.OwnerRevisionSet, fact.ApplicabilityDependencies, definitionRevision); err != nil {
+			return true, fmt.Errorf("runtime %s evidence dependency pair: %w", ledger, err)
+		}
+		if err := validateRuntimeOwnerRevisionSetRaw(fact.OwnerRevisionSet); err != nil {
+			return true, fmt.Errorf("runtime %s evidence owner dependencies: %w", ledger, err)
+		}
+		if fact.OwnerRevisionSet != nil && fact.OwnerRevisionSet.DefinitionRevision != definitionRevision {
+			return true, fmt.Errorf("runtime %s evidence owner dependencies definition mismatch", ledger)
+		}
+		if fact.Revision == "" {
+			return true, fmt.Errorf("runtime %s evidence fact requires identity and revision", ledger)
+		}
+		if fact.Kind == EvidenceKindAssessment {
+			return true, fmt.Errorf("runtime %s evidence fact %q cannot use assessment kind; assessments require their typed ledger", ledger, fact.ID)
+		}
+		if fact.Kind != EvidenceKindGovernance && fact.FocusID == "" {
+			return true, fmt.Errorf("ordinary runtime %s evidence fact %q requires immutable focus lineage", ledger, fact.ID)
+		}
+		if _, duplicate := factsByID[fact.ID]; duplicate {
+			return false, nil
+		}
+		factsByID[fact.ID] = fact
+	}
+	return true, nil
+}
+
+func validateRuntimeAssessmentFactsTransition(
+	curr []RuntimeAssessmentFact,
+	prev []RuntimeAssessmentFact,
+	assessmentsByID map[string]RuntimeAssessmentFact,
+) bool {
+	j := 0
+	for i := range curr {
+		a := curr[i]
+		if a.ID == "" || a.Revision == "" || a.FocusID == "" {
+			return false
+		}
+		if i > 0 {
+			prevItem := curr[i-1]
+			if a.Revision < prevItem.Revision || (a.Revision == prevItem.Revision && !(prevItem.ID < a.ID)) {
+				return false
+			}
+		}
+		for j < len(prev) && (prev[j].Revision < a.Revision || (prev[j].Revision == a.Revision && prev[j].ID < a.ID)) {
+			j++
+		}
+		if j < len(prev) && runtimeRawEqual(a, prev[j]) {
+			if _, duplicate := assessmentsByID[a.ID]; duplicate {
+				return false
+			}
+			assessmentsByID[a.ID] = a
+			continue
+		}
+		norm := normalizeRuntimeAssessmentFacts([]RuntimeAssessmentFact{a})
+		if len(norm) != 1 || !reflect.DeepEqual(norm[0], a) {
+			return false
+		}
+		if _, duplicate := assessmentsByID[a.ID]; duplicate {
+			return false
+		}
+		assessmentsByID[a.ID] = a
+	}
+	return true
+}
+
+func validateRuntimeEvidenceLedgerConsumption(
+	sequence uint64,
+	facts RuntimeFacts,
+	active *RuntimeDispatchRecord,
+	completed []RuntimeDispatchRecord,
+	resolutions []RuntimeGovernanceResolutionRecord,
+	factsByID map[common.EvidenceRecordID]EvidenceFact,
+	assessmentsByID map[string]RuntimeAssessmentFact,
+) error {
 	consumedFacts := make(map[common.EvidenceRecordID]int, len(factsByID))
 	consumedAssessments := make(map[string]int, len(assessmentsByID))
 	consumedResolutions := make(map[int]int, len(resolutions))
@@ -349,9 +541,9 @@ func RuntimeAssessmentSourceProjection(facts RuntimeFacts, focusID string, cover
 	coverageID := coverageWorkItemIDs[0]
 	var seedItem RuntimeCoverageItem
 	seedMatches := 0
-	for _, item := range facts.DefinitionSeed.Clone().CoverageItems {
-		if item.ID == coverageID {
-			seedItem = item
+	for _, item := range facts.DefinitionSeed.CoverageItems {
+		if common.CoverageWorkItemID(strings.TrimSpace(string(item.ID))) == coverageID {
+			seedItem = item.Normalized()
 			seedMatches++
 		}
 	}
@@ -360,9 +552,8 @@ func RuntimeAssessmentSourceProjection(facts RuntimeFacts, focusID string, cover
 	}
 	definitionMatches := make([]RuntimeDefinitionFocus, 0, 1)
 	for _, declaration := range facts.DefinitionFocuses {
-		declaration = declaration.Normalized()
 		if sameCoverageWorkItemIDs(declaration.CoverageWorkItemIDs, []common.CoverageWorkItemID{coverageID}) {
-			definitionMatches = append(definitionMatches, declaration)
+			definitionMatches = append(definitionMatches, declaration.Normalized())
 		}
 	}
 	if len(definitionMatches) != 1 {

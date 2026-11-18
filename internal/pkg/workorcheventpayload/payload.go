@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 var ErrInvalidPayload = errors.New("invalid event payload")
@@ -235,9 +236,15 @@ func (payload Payload) Equal(other Payload) bool {
 }
 
 func (payload Payload) CanonicalString() string {
-	var encoder canonicalEncoder
+	encoder := canonicalEncoderPool.Get().(*canonicalEncoder)
+	encoder.buf = encoder.buf[:0]
 	encoder.appendFields(payload.sortedFields())
-	return encoder.builder.String()
+	result := string(encoder.buf)
+	if cap(encoder.buf) <= 64*1024 {
+		encoder.buf = encoder.buf[:0]
+		canonicalEncoderPool.Put(encoder)
+	}
+	return result
 }
 
 func (payload Payload) Map() map[string]any {
@@ -312,6 +319,15 @@ func (value Value) Equal(other Value) bool {
 func FromMap(input map[string]any) (Payload, error) {
 	if len(input) == 0 {
 		return Payload{}, nil
+	}
+	if len(input) == 1 {
+		for key, raw := range input {
+			value, err := fromAny(raw)
+			if err != nil {
+				return Payload{}, fmt.Errorf("payload field %s: %w", key, err)
+			}
+			return Payload{Fields: []Field{{Name: key, Value: value}}}, nil
+		}
 	}
 	keys := make([]string, 0, len(input))
 	for key := range input {
@@ -395,40 +411,15 @@ func fromAny(input any) (Value, error) {
 		payload, err := FromMap(value)
 		return Value{Kind: ValueObject, Object: payload.Fields}, err
 	case map[string]string:
-		mapped := make(map[string]any, len(value))
-		for key, item := range value {
-			mapped[key] = item
-		}
-		payload, err := FromMap(mapped)
-		return Value{Kind: ValueObject, Object: payload.Fields}, err
+		return Value{Kind: ValueObject, Object: mapFields(value, func(item string) Value { return Value{Kind: ValueString, String: item} })}, nil
 	case map[string]bool:
-		mapped := make(map[string]any, len(value))
-		for key, item := range value {
-			mapped[key] = item
-		}
-		payload, err := FromMap(mapped)
-		return Value{Kind: ValueObject, Object: payload.Fields}, err
+		return Value{Kind: ValueObject, Object: mapFields(value, func(item bool) Value { return Value{Kind: ValueBool, Bool: item} })}, nil
 	case map[string]int:
-		mapped := make(map[string]any, len(value))
-		for key, item := range value {
-			mapped[key] = item
-		}
-		payload, err := FromMap(mapped)
-		return Value{Kind: ValueObject, Object: payload.Fields}, err
+		return Value{Kind: ValueObject, Object: mapFields(value, func(item int) Value { return Value{Kind: ValueInt, Int: int64(item)} })}, nil
 	case map[string]int64:
-		mapped := make(map[string]any, len(value))
-		for key, item := range value {
-			mapped[key] = item
-		}
-		payload, err := FromMap(mapped)
-		return Value{Kind: ValueObject, Object: payload.Fields}, err
+		return Value{Kind: ValueObject, Object: mapFields(value, func(item int64) Value { return Value{Kind: ValueInt, Int: item} })}, nil
 	case map[string]float64:
-		mapped := make(map[string]any, len(value))
-		for key, item := range value {
-			mapped[key] = item
-		}
-		payload, err := FromMap(mapped)
-		return Value{Kind: ValueObject, Object: payload.Fields}, err
+		return Value{Kind: ValueObject, Object: mapFields(value, func(item float64) Value { return Value{Kind: ValueFloat, Float: item} })}, nil
 	case []string:
 		items := make([]Value, 0, len(value))
 		for _, item := range value {
@@ -484,6 +475,20 @@ func fromAny(input any) (Value, error) {
 	}
 }
 
+func mapFields[V any](input map[string]V, convert func(V) Value) []Field {
+	if len(input) == 0 {
+		return nil
+	}
+	fields := make([]Field, 0, len(input))
+	for key, item := range input {
+		fields = append(fields, Field{Name: key, Value: convert(item)})
+	}
+	if len(fields) > 1 {
+		sort.Slice(fields, func(i, j int) bool { return fields[i].Name < fields[j].Name })
+	}
+	return fields
+}
+
 func cloneFields(fields []Field) []Field {
 	if fields == nil {
 		return nil
@@ -517,60 +522,74 @@ func cloneValues(values []Value) []Value {
 
 func (payload Payload) sortedFields() []Field {
 	// 排序只修改本层副本；嵌套值由只读比较／编码递归消费，无需重复深拷贝。
+	if len(payload.Fields) <= 1 {
+		return payload.Fields
+	}
+	isSorted := true
+	for i := 1; i < len(payload.Fields); i++ {
+		if payload.Fields[i].Name < payload.Fields[i-1].Name {
+			isSorted = false
+			break
+		}
+	}
+	if isSorted {
+		return payload.Fields
+	}
 	fields := append([]Field(nil), payload.Fields...)
 	sort.Slice(fields, func(i, j int) bool { return fields[i].Name < fields[j].Name })
 	return fields
 }
 
-// One encoding owns its scratch buffer. Reusing scalar encoding storage avoids
-// allocating a quoted string for every key/value without retaining any input or
-// result between calls. strconv still defines the exact canonical scalar bytes.
+// One encoding owns its scratch buffer. Reusing scalar encoding storage via
+// canonicalEncoderPool avoids allocating a quoted string or intermediate builder
+// per CanonicalString call without retaining oversized buffers or leaking state.
 type canonicalEncoder struct {
-	builder strings.Builder
-	scratch []byte
+	buf []byte
+}
+
+var canonicalEncoderPool = sync.Pool{
+	New: func() any {
+		return &canonicalEncoder{buf: make([]byte, 0, 1024)}
+	},
 }
 
 func (e *canonicalEncoder) writeQuoted(value string) {
-	e.scratch = strconv.AppendQuote(e.scratch[:0], value)
-	e.builder.Write(e.scratch)
+	e.buf = strconv.AppendQuote(e.buf, value)
 }
 
 func (e *canonicalEncoder) appendFields(fields []Field) {
 	for _, field := range fields {
 		e.writeQuoted(field.Name)
-		e.builder.WriteByte(':')
+		e.buf = append(e.buf, ':')
 		e.appendValue(field.Value)
-		e.builder.WriteByte(';')
+		e.buf = append(e.buf, ';')
 	}
 }
 
 func (e *canonicalEncoder) appendValue(value Value) {
-	e.builder.WriteString(string(value.Kind))
-	e.builder.WriteByte('=')
+	e.buf = append(e.buf, string(value.Kind)...)
+	e.buf = append(e.buf, '=')
 	switch value.Kind {
 	case ValueString:
 		e.writeQuoted(value.String)
 	case ValueBool:
-		e.builder.WriteString(strconv.FormatBool(value.Bool))
+		e.buf = strconv.AppendBool(e.buf, value.Bool)
 	case ValueInt:
-		e.scratch = strconv.AppendInt(e.scratch[:0], value.Int, 10)
-		e.builder.Write(e.scratch)
+		e.buf = strconv.AppendInt(e.buf, value.Int, 10)
 	case ValueUint:
-		e.scratch = strconv.AppendUint(e.scratch[:0], value.Uint, 10)
-		e.builder.Write(e.scratch)
+		e.buf = strconv.AppendUint(e.buf, value.Uint, 10)
 	case ValueFloat:
-		e.scratch = strconv.AppendFloat(e.scratch[:0], value.Float, 'g', -1, 64)
-		e.builder.Write(e.scratch)
+		e.buf = strconv.AppendFloat(e.buf, value.Float, 'g', -1, 64)
 	case ValueObject:
-		e.builder.WriteByte('{')
+		e.buf = append(e.buf, '{')
 		e.appendFields(Payload{Fields: value.Object}.sortedFields())
-		e.builder.WriteByte('}')
+		e.buf = append(e.buf, '}')
 	case ValueArray:
-		e.builder.WriteByte('[')
+		e.buf = append(e.buf, '[')
 		for _, item := range value.Array {
 			e.appendValue(item)
-			e.builder.WriteByte(',')
+			e.buf = append(e.buf, ',')
 		}
-		e.builder.WriteByte(']')
+		e.buf = append(e.buf, ']')
 	}
 }

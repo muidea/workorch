@@ -141,7 +141,7 @@ func shellBehaviorEnvironment(env []string) []string {
 		}
 		ret = append(ret, value)
 	}
-	return append(ret, "GOFLAGS=", "GOWORK=off")
+	return append(ret, "GOFLAGS=-trimpath", "GOWORK=off")
 }
 
 // The coverage file is tool-produced inside the owner session, not stdout or

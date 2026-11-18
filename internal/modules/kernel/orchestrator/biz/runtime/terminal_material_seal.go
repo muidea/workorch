@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"reflect"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -35,11 +34,8 @@ func terminalMaterialSealFromAggregate(previous RuntimeAggregate, observations .
 	if len(observations) == 1 {
 		proofs = observations[0]
 	}
-	material, err = runtimecontract.ApplyRuntimeTerminalSnapshotProofs(terminalMaterialSource(source), material, proofs)
+	material, err = runtimecontract.ApplyAndValidateRuntimeTerminalProofMaterial(terminalMaterialSource(source), material, proofs)
 	if err != nil {
-		return runtimecontract.RuntimeTerminalMaterialSeal{}, err
-	}
-	if err := runtimecontract.ValidateRuntimeTerminalProofMaterial(terminalMaterialSource(source), material); err != nil {
 		return runtimecontract.RuntimeTerminalMaterialSeal{}, err
 	}
 	hash, err := material.CanonicalHash()
@@ -79,7 +75,7 @@ func (c *driveDeliveryComponent) sealTerminalMaterial(ctx context.Context, works
 	}
 
 	if aggregate.TerminalMaterialSeal != nil {
-		if proofs != nil && !reflect.DeepEqual(proofs, aggregate.TerminalMaterialSeal.Material.RuntimeCloseout.TerminalSnapshotProofs) {
+		if proofs != nil && !runtimecontract.RuntimeRawEqual(proofs, aggregate.TerminalMaterialSeal.Material.RuntimeCloseout.TerminalSnapshotProofs) {
 			return RuntimeAggregate{}, common.ErrConflict
 		}
 		return aggregate, nil
@@ -122,7 +118,7 @@ func terminalMaterialSource(aggregate RuntimeAggregate) runtimecontract.RuntimeS
 // validateTerminalMaterialSealTransition 反查独立持久前像，不接受 caller 提供的历史快照。
 func validateTerminalMaterialSealTransition(previous, next RuntimeAggregate) error {
 	if previous.TerminalMaterialSeal != nil {
-		if !reflect.DeepEqual(previous.TerminalMaterialSeal, next.TerminalMaterialSeal) {
+		if !runtimecontract.RuntimeRawEqual(previous.TerminalMaterialSeal, next.TerminalMaterialSeal) {
 			return fmt.Errorf("%w: terminal material seal is immutable", common.ErrConflict)
 		}
 		return nil
@@ -137,13 +133,13 @@ func validateTerminalMaterialSealTransition(previous, next RuntimeAggregate) err
 	if err != nil {
 		return err
 	}
-	if !reflect.DeepEqual(expected, *next.TerminalMaterialSeal) {
+	if !runtimecontract.RuntimeRawEqual(expected, *next.TerminalMaterialSeal) {
 		return fmt.Errorf("%w: terminal material seal does not match independent generation preimage", common.ErrConflict)
 	}
 	withoutSeal := next
 	withoutSeal.TerminalMaterialSeal = nil
 	withoutSeal.StateRevision = previous.StateRevision
-	if !reflect.DeepEqual(previous, withoutSeal) {
+	if !runtimecontract.RuntimeRawEqual(previous, withoutSeal) {
 		return fmt.Errorf("%w: terminal material generation must not change authority or recovery", common.ErrConflict)
 	}
 	return nil

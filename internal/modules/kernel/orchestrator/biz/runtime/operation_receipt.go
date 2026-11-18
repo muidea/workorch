@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/governancecheck"
@@ -277,16 +278,20 @@ func (c *candidateDispatchComponent) commitArchivedImplementationWorkReceipt(ctx
 			return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
 		}
 	}
-	for i := range dispatch.OperationExecutions {
-		if dispatch.OperationExecutions[i].OperationID == execution.OperationID {
-			dispatch.OperationExecutions[i] = execution
+	dispatchExecutions := slices.Clone(dispatch.OperationExecutions)
+	for i := range dispatchExecutions {
+		if dispatchExecutions[i].OperationID == execution.OperationID {
+			dispatchExecutions[i] = execution
 		}
 	}
-	for i := range aggregate.CompletedDispatches {
-		if aggregate.CompletedDispatches[i].ID == dispatch.ID {
-			aggregate.CompletedDispatches[i] = dispatch
+	dispatch.OperationExecutions = dispatchExecutions
+	completedDispatches := slices.Clone(aggregate.CompletedDispatches)
+	for i := range completedDispatches {
+		if completedDispatches[i].ID == dispatch.ID {
+			completedDispatches[i] = dispatch
 		}
 	}
+	aggregate.CompletedDispatches = completedDispatches
 	aggregate.OperationReceipts = append(aggregate.OperationReceipts, receipt.Clone())
 	if _, err := applyReceiptResourceChangeInvalidation(&aggregate, dispatch.ID, operation.ID, receipt); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err

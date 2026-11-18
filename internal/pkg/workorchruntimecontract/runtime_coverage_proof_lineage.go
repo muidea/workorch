@@ -358,7 +358,7 @@ func FirstCoverageEvidenceProofIdentityDifference(left, right CoverageEvidencePr
 
 // RuntimeCoverageProofLineageLimit bounds the aggregate-local source and
 // resolution records. Overflow is a contract error; records are never pruned.
-const RuntimeCoverageProofLineageLimit = 512
+const RuntimeCoverageProofLineageLimit = 4096
 
 type RuntimeCoverageProofLineageKind string
 

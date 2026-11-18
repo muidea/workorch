@@ -19,12 +19,22 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
+type formalDefinitionReadCacheEntry struct {
+	workspaceRevision uint64
+	historyLen        int
+	goal              workspaceModel.Goal
+	dod               workspaceModel.DoD
+	goals             []*workspaceModel.Goal
+	dods              []*workspaceModel.DoD
+}
+
 type goalDoDManager struct {
-	workspaces   repository.WorkspaceRepository
-	goals        repository.GoalRepository
-	dods         repository.DoDRepository
-	publish      func(magicevent.Event)
-	definitionMu sync.Mutex
+	workspaces      repository.WorkspaceRepository
+	goals           repository.GoalRepository
+	dods            repository.DoDRepository
+	publish         func(magicevent.Event)
+	definitionMu    sync.Mutex
+	formalReadCache map[common.WorkspaceID]formalDefinitionReadCacheEntry
 }
 
 func (m *goalDoDManager) requireMutableWorkspace(ctx context.Context, workspaceID common.WorkspaceID) error {

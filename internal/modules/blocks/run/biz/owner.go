@@ -19,6 +19,10 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
+type runtimeStateSnapshotRepository interface {
+	GetRuntimeStateSnapshot(context.Context, common.WorkspaceID, common.RunID) (*runmodel.Run, error)
+}
+
 const ModuleID = modulecommon.ModuleID
 
 type Dependencies struct {
@@ -335,7 +339,12 @@ func (m *Biz) handleRuntimeStateRecord(ev magicevent.Event, result magicevent.Re
 		result.Set(nil, &cd.Error{Code: cd.NotFound, Message: common.ErrNotFound.Error(), Cause: common.ErrNotFound})
 		return
 	}
-	run, err := m.runs.GetByWorkspaceID(ctx, cmd.WorkspaceID, cmd.RunID)
+	var run *runmodel.Run
+	if snapRepo, ok := m.runs.(runtimeStateSnapshotRepository); ok {
+		run, err = snapRepo.GetRuntimeStateSnapshot(ctx, cmd.WorkspaceID, cmd.RunID)
+	} else {
+		run, err = m.runs.GetByWorkspaceID(ctx, cmd.WorkspaceID, cmd.RunID)
+	}
 	if err != nil {
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 		return

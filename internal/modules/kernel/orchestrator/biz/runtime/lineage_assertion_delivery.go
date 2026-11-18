@@ -11,3 +11,9 @@ func EvaluateRuntimeDeliveryLineageAssertion(aggregate RuntimeAggregate, binding
 	source.TerminalMaterialSeal = aggregate.TerminalMaterialSeal
 	return runtimecontract.EvaluateRuntimeDeliveryLineageAssertionFromState(source, binding)
 }
+
+func EvaluateRuntimeDeliveryLineageAssertions(aggregate RuntimeAggregate, bindings []runtimecontract.RuntimeDeliveryLineageBinding) ([]runtimecontract.RuntimeDeliveryLineageState, error) {
+	source := terminalMaterialSource(aggregate)
+	source.TerminalMaterialSeal = aggregate.TerminalMaterialSeal
+	return runtimecontract.EvaluateRuntimeDeliveryLineageAssertionsFromState(source, bindings)
+}

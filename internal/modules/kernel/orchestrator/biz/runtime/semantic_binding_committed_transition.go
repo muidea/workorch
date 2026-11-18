@@ -1,8 +1,6 @@
 package runtime
 
 import (
-	"reflect"
-
 	rc "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -16,9 +14,8 @@ func runtimeSemanticBindingProjectionsUnchanged(previous *RuntimeAggregate, curr
 	}
 	before, after := previous.Facts, current.Facts
 	if before.WorkspaceID != after.WorkspaceID || before.RunID != after.RunID || before.DefinitionRevision != after.DefinitionRevision ||
-		!reflect.DeepEqual(before.DefinitionSeed, after.DefinitionSeed) || !reflect.DeepEqual(before.DefinitionFocuses, after.DefinitionFocuses) ||
-		!reflect.DeepEqual(before.Focus, after.Focus) || !reflect.DeepEqual(before.RemainingFocuses, after.RemainingFocuses) || !reflect.DeepEqual(before.CompletedFocuses, after.CompletedFocuses) ||
-		!reflect.DeepEqual(before.CWISuspensions, after.CWISuspensions) || !reflect.DeepEqual(before.ReconciliationContract, after.ReconciliationContract) {
+		!rc.RuntimeRawEqual(before.DefinitionSeed, after.DefinitionSeed) || !rc.RuntimeRawEqual(before.DefinitionFocuses, after.DefinitionFocuses) ||
+		!rc.RuntimeRawEqual(before.CWISuspensions, after.CWISuspensions) || !rc.RuntimeRawEqual(before.ReconciliationContract, after.ReconciliationContract) {
 		return false
 	}
 	if len(before.Coverage) != len(after.Coverage) {
@@ -26,28 +23,62 @@ func runtimeSemanticBindingProjectionsUnchanged(previous *RuntimeAggregate, curr
 	}
 	for i, row := range after.Coverage {
 		prior := before.Coverage[i]
-		if prior.ID != row.ID || !reflect.DeepEqual(prior.CurrentBindingRef, row.CurrentBindingRef) || !reflect.DeepEqual(prior.BindingLineage, row.BindingLineage) {
+		if prior.ID != row.ID || !rc.RuntimeRawEqual(prior.CurrentBindingRef, row.CurrentBindingRef) || !rc.RuntimeRawEqual(prior.BindingLineage, row.BindingLineage) {
 			return false
 		}
 	}
-	// New candidate/dispatch projections may consume the same owner-committed
-	// binding. They cannot introduce another binding by retaining only its hash.
-	known := map[string][]rc.CoverageEvidenceBinding{}
-	for _, f := range append(append([]rc.CoverageFocus{before.Focus}, before.RemainingFocuses...), before.CompletedFocuses...) {
-		if old, found := known[f.ID]; found && !reflect.DeepEqual(old, f.CoverageEvidenceBindings) {
+	// New candidate/dispatch projections or pure focus-queue advancements may
+	// consume the same owner-committed binding. They cannot introduce another
+	// binding without entering the complete source gate.
+	known := make(map[string][]rc.CoverageEvidenceBinding, 1+len(before.RemainingFocuses)+len(before.CompletedFocuses))
+	recordBeforeFocus := func(f rc.CoverageFocus) bool {
+		if old, found := known[f.ID]; found && !rc.RuntimeRawEqual(old, f.CoverageEvidenceBindings) {
 			return false
 		}
 		known[f.ID] = f.CoverageEvidenceBindings
+		return true
+	}
+	if !recordBeforeFocus(before.Focus) {
+		return false
+	}
+	for _, f := range before.RemainingFocuses {
+		if !recordBeforeFocus(f) {
+			return false
+		}
+	}
+	for _, f := range before.CompletedFocuses {
+		if !recordBeforeFocus(f) {
+			return false
+		}
 	}
 	matches := func(id string, bindings []rc.CoverageEvidenceBinding) bool {
 		original, found := known[id]
-		return found && reflect.DeepEqual(original, bindings)
+		return found && rc.RuntimeRawEqual(original, bindings)
+	}
+	checkAfterFocus := func(f rc.CoverageFocus) bool {
+		if len(f.CoverageEvidenceBindings) == 0 {
+			return true
+		}
+		return matches(f.ID, f.CoverageEvidenceBindings)
+	}
+	if !checkAfterFocus(after.Focus) {
+		return false
+	}
+	for _, f := range after.RemainingFocuses {
+		if !checkAfterFocus(f) {
+			return false
+		}
+	}
+	for _, f := range after.CompletedFocuses {
+		if !checkAfterFocus(f) {
+			return false
+		}
 	}
 	for _, s := range current.CandidateRequestSessions {
 		if s.CandidateManifest != nil && runtimeSemanticBindingProjectionState(s.CandidateManifest.State) && !matches(s.Transaction.FocusID, s.CandidateManifest.Bindings) {
 			found := false
 			for _, old := range previous.CandidateRequestSessions {
-				if reflect.DeepEqual(old, s) {
+				if old.LogicalRequestID == s.LogicalRequestID && rc.RuntimeRawEqual(old, s) {
 					found = true
 					break
 				}
@@ -61,7 +92,7 @@ func runtimeSemanticBindingProjectionsUnchanged(previous *RuntimeAggregate, curr
 		if a.State == rc.RuntimeCandidateAttemptStateAccepted && runtimeSemanticBindingProjectionState(a.Transaction.State) && !matches(a.Transaction.FocusID, a.AdmissionCoverageBindings) {
 			found := false
 			for _, old := range previous.CandidateAttempts {
-				if reflect.DeepEqual(old, a) {
+				if old.LogicalRequestID == a.LogicalRequestID && old.Attempt == a.Attempt && rc.RuntimeRawEqual(old, a) {
 					found = true
 					break
 				}
@@ -75,11 +106,11 @@ func runtimeSemanticBindingProjectionsUnchanged(previous *RuntimeAggregate, curr
 		if !runtimeSemanticBindingProjectionState(d.Transaction.State) || matches(d.Transaction.FocusID, d.CoverageBindings) {
 			return true
 		}
-		if previous.ActiveDispatch != nil && previous.ActiveDispatch.ID == d.ID && reflect.DeepEqual(previous.ActiveDispatch.CoverageBindings, d.CoverageBindings) && reflect.DeepEqual(previous.ActiveDispatch.Transaction, d.Transaction) {
+		if previous.ActiveDispatch != nil && previous.ActiveDispatch.ID == d.ID && rc.RuntimeRawEqual(previous.ActiveDispatch.CoverageBindings, d.CoverageBindings) && rc.RuntimeRawEqual(previous.ActiveDispatch.Transaction, d.Transaction) {
 			return true
 		}
 		for _, old := range previous.CompletedDispatches {
-			if old.ID == d.ID && reflect.DeepEqual(old.Transaction, d.Transaction) && reflect.DeepEqual(old.CoverageBindings, d.CoverageBindings) {
+			if old.ID == d.ID && rc.RuntimeRawEqual(old.Transaction, d.Transaction) && rc.RuntimeRawEqual(old.CoverageBindings, d.CoverageBindings) {
 				return true
 			}
 		}

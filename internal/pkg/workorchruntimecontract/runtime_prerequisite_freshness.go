@@ -74,7 +74,74 @@ func runtimeFreshnessDependencyIdentity(value RuntimeFreshnessDependency) string
 	return string(value.Domain) + "|" + value.OwnerModuleID + "|" + value.SubjectRef
 }
 
+func compareRuntimeFreshnessDependencyIdentity(a, b RuntimeFreshnessDependency) int {
+	if a.Domain == b.Domain {
+		if a.OwnerModuleID == b.OwnerModuleID {
+			return strings.Compare(a.SubjectRef, b.SubjectRef)
+		}
+		if !strings.ContainsRune(a.OwnerModuleID, '|') && !strings.ContainsRune(b.OwnerModuleID, '|') {
+			return strings.Compare(a.OwnerModuleID, b.OwnerModuleID)
+		}
+	} else if !strings.ContainsRune(string(a.Domain), '|') && !strings.ContainsRune(string(b.Domain), '|') {
+		return strings.Compare(string(a.Domain), string(b.Domain))
+	}
+	return strings.Compare(runtimeFreshnessDependencyIdentity(a), runtimeFreshnessDependencyIdentity(b))
+}
+
+func isCanonicalRuntimeFreshnessDependencies(values []RuntimeFreshnessDependency) bool {
+	if len(values) == 0 {
+		return values == nil
+	}
+	for i := range values {
+		d := &values[i]
+		if d.Domain == "" || d.OwnerModuleID == "" || d.SubjectRef == "" {
+			return false
+		}
+		if d.Domain != d.Domain.Normalized() ||
+			d.OwnerModuleID != strings.TrimSpace(d.OwnerModuleID) ||
+			d.SubjectRef != strings.TrimSpace(d.SubjectRef) ||
+			d.Revision != strings.TrimSpace(d.Revision) {
+			return false
+		}
+		if i > 0 && compareRuntimeFreshnessDependencyIdentity(values[i-1], *d) >= 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func isCanonicalRuntimePrerequisiteObservations(values []RuntimePrerequisiteObservation) bool {
+	if len(values) == 0 {
+		return values == nil
+	}
+	for i := range values {
+		v := &values[i]
+		if v.PrerequisiteID == "" ||
+			v.PrerequisiteID != strings.TrimSpace(v.PrerequisiteID) ||
+			v.Kind != PrerequisiteKind(strings.TrimSpace(string(v.Kind))) ||
+			v.OwnerModuleID != strings.TrimSpace(v.OwnerModuleID) ||
+			v.ObservationID != strings.TrimSpace(v.ObservationID) ||
+			v.ContentHash != strings.TrimSpace(v.ContentHash) ||
+			v.ObservedAt != strings.TrimSpace(v.ObservedAt) {
+			return false
+		}
+		if !isCanonicalRuntimeFreshnessDependencies(v.Dependencies) {
+			return false
+		}
+		if i > 0 && values[i-1].PrerequisiteID >= v.PrerequisiteID {
+			return false
+		}
+	}
+	return true
+}
+
 func NormalizeRuntimeFreshnessDependencies(values []RuntimeFreshnessDependency) []RuntimeFreshnessDependency {
+	if len(values) == 0 {
+		return nil
+	}
+	if isCanonicalRuntimeFreshnessDependencies(values) {
+		return append([]RuntimeFreshnessDependency(nil), values...)
+	}
 	byIdentity := make(map[string]RuntimeFreshnessDependency, len(values))
 	for _, value := range values {
 		value = value.Normalized()
@@ -152,6 +219,12 @@ func (o RuntimePrerequisiteObservation) Validate() error {
 }
 
 func NormalizeRuntimePrerequisiteObservations(values []RuntimePrerequisiteObservation) []RuntimePrerequisiteObservation {
+	if len(values) == 0 {
+		return nil
+	}
+	if isCanonicalRuntimePrerequisiteObservations(values) {
+		return append([]RuntimePrerequisiteObservation(nil), values...)
+	}
 	byPrerequisite := make(map[string]RuntimePrerequisiteObservation, len(values))
 	for _, value := range values {
 		value = value.Normalized()
@@ -174,9 +247,8 @@ func NormalizeRuntimePrerequisiteObservations(values []RuntimePrerequisiteObserv
 func RuntimePrerequisiteObservationForID(values []RuntimePrerequisiteObservation, prerequisiteID string) (RuntimePrerequisiteObservation, bool) {
 	prerequisiteID = strings.TrimSpace(prerequisiteID)
 	for _, value := range values {
-		value = value.Normalized()
-		if value.PrerequisiteID == prerequisiteID {
-			return value, true
+		if strings.TrimSpace(value.PrerequisiteID) == prerequisiteID {
+			return value.Normalized(), true
 		}
 	}
 	return RuntimePrerequisiteObservation{}, false
@@ -420,7 +492,9 @@ func RuntimeFreshnessDependencyIntersectsChange(dependency RuntimeFreshnessDepen
 // observations to an authority transaction. The empty observation set is a
 // concrete current-contract value and therefore has its own stable hash.
 func StableRuntimePrerequisiteFreshnessHash(values []RuntimePrerequisiteObservation) string {
-	values = NormalizeRuntimePrerequisiteObservations(values)
+	if !isCanonicalRuntimePrerequisiteObservations(values) {
+		values = NormalizeRuntimePrerequisiteObservations(values)
+	}
 	h := sha256.New()
 	for _, value := range values {
 		writeHashString(h, value.PrerequisiteID)

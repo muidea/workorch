@@ -278,7 +278,7 @@ func runtimeInputReviewResolutionMatches(a RuntimeAggregate, ledger runtimecontr
 }
 
 func retireRuntimeInputReviewForInformation(a *RuntimeAggregate, resolution runtimecontract.RuntimeGovernanceResolution) error {
-	ledger := a.SemanticPlanning.CloneRaw()
+	ledger := runtimecontract.SnapshotSemanticPlanningLedgerWithSharedHistory(a.SemanticPlanning)
 	if !runtimeInputReviewResolutionMatches(*a, ledger, resolution) || resolution.Outcome != runtimecontract.RuntimeGovernanceResolutionOutcomeContinue ||
 		ledger.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted || a.ActiveDispatch != nil {
 		return fmt.Errorf("%w: input review information cannot reopen this semantic transaction", common.ErrConflict)

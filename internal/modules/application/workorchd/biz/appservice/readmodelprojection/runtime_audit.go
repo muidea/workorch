@@ -16,8 +16,14 @@ func mapRuntimeAudit(runtimeState *runtimecontract.RuntimeStateRecord) *projecti
 	if runtimeState == nil {
 		return nil
 	}
-	state := runtimeState.Clone()
-	facts := state.Facts.Normalized()
+	return mapRuntimeAuditWithFacts(runtimeState, runtimeState.Facts.Normalized())
+}
+
+func mapRuntimeAuditWithFacts(runtimeState *runtimecontract.RuntimeStateRecord, facts runtimecontract.RuntimeFacts) *projectioncontract.RuntimeAudit {
+	if runtimeState == nil {
+		return nil
+	}
+	state := *runtimeState
 	ret := &projectioncontract.RuntimeAudit{
 		WorkspaceID: string(facts.WorkspaceID), RunID: string(facts.RunID),
 		StateRevision: state.StateRevision, EvidenceSequence: state.EvidenceSequence,
@@ -425,9 +431,11 @@ func runtimeAuditCandidateAttempts(values []runtimecontract.RuntimeCandidateAtte
 }
 
 func runtimeAuditDispatches(state runtimecontract.RuntimeStateRecord) []projectioncontract.RuntimeAuditDispatch {
-	dispatches := append([]runtimecontract.RuntimeDispatchRecord(nil), state.CompletedDispatches...)
+	dispatches := state.CompletedDispatches
 	if state.ActiveDispatch != nil {
-		dispatches = append(dispatches, state.ActiveDispatch.Clone())
+		dispatches = make([]runtimecontract.RuntimeDispatchRecord, len(state.CompletedDispatches)+1)
+		copy(dispatches, state.CompletedDispatches)
+		dispatches[len(state.CompletedDispatches)] = state.ActiveDispatch.Clone()
 	}
 	ret := make([]projectioncontract.RuntimeAuditDispatch, 0, len(dispatches))
 	for _, dispatch := range dispatches {

@@ -119,7 +119,7 @@ func reduceRuntimeStateWithLineage(
 	lineage *RuntimeAggregate,
 	proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage,
 ) (runtimecontract.RuntimeFacts, runtimecontract.RuntimeDecision, error) {
-	facts = facts.Normalized()
+	facts = facts.NormalizedPreservingEqual()
 	// Every SM-2 reduction is a defensive repair-ledger boundary. Focus changes
 	// normally reset this state atomically, while semantic re-seal, retirement,
 	// and delayed facts can reach the reducer through a different persisted
@@ -155,7 +155,7 @@ func reduceRuntimeStateWithLineage(
 	// hint. Restrict this to the boundary between acquisition batches so an
 	// existing persisted owner acquisition can never be erased.
 	if len(facts.Prerequisites.Pending) == 0 {
-		facts = preflightRuntimeFactsPreservingPending(facts, runtimeTargetGroundingRequirements(facts, proofLineages...))
+		facts = preflightRuntimeFactsPreservingPendingNormalized(facts, runtimeTargetGroundingRequirementsNormalized(facts, proofLineages...))
 	}
 	// Standalone raw-input reductions have their own admission. Aggregate-backed
 	// owner events instead validate their complete changed postimage once at CAS.
@@ -174,7 +174,7 @@ func reduceRuntimeStateWithLineage(
 		// or directive merely to keep the remaining physical operation runnable.
 		return facts, decision, nil
 	}
-	facts = syncRepairDirective(facts, decision, proofLineages...)
+	facts = syncRepairDirectiveNormalized(facts, decision, proofLineages...)
 	// Creating a repair closure or advancing an accepted repair state-change to
 	// its mandatory validation changes the action-level candidate authority.
 	// Re-seal from the persisted directive so neither the first repair dispatch
@@ -188,7 +188,7 @@ func reduceRuntimeStateWithLineage(
 		if err != nil {
 			return facts, runtimecontract.RuntimeDecision{}, err
 		}
-		facts = syncRepairDirective(facts, decision, proofLineages...)
+		facts = syncRepairDirectiveNormalized(facts, decision, proofLineages...)
 	}
 	return facts, decision, nil
 }
@@ -372,8 +372,27 @@ func sealedDispatchRequiredOperationSequence(dispatch runtimecontract.RuntimeDis
 // request, candidate attempt, operation, or projection can observe the stale
 // fact as current authority.
 func retireNonCurrentFocusScopedPrerequisites(facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
+	currentFocusID := strings.TrimSpace(facts.Focus.ID)
+	hasNonCurrent := false
+	for _, p := range facts.Prerequisites.Pending {
+		if strings.TrimSpace(string(p.Scope)) == string(runtimecontract.RuntimePrerequisiteScopeFocus) && strings.TrimSpace(p.FocusID) != currentFocusID {
+			hasNonCurrent = true
+			break
+		}
+	}
+	if !hasNonCurrent {
+		for _, p := range facts.Prerequisites.Satisfied {
+			if strings.TrimSpace(string(p.Scope)) == string(runtimecontract.RuntimePrerequisiteScopeFocus) && strings.TrimSpace(p.FocusID) != currentFocusID {
+				hasNonCurrent = true
+				break
+			}
+		}
+	}
+	if !hasNonCurrent {
+		return facts
+	}
 	facts = facts.Normalized()
-	currentFocusID := facts.Focus.ID
+	currentFocusID = facts.Focus.ID
 	retired := make(map[string]runtimecontract.RuntimePrerequisite)
 	filter := func(values []runtimecontract.RuntimePrerequisite) []runtimecontract.RuntimePrerequisite {
 		kept := make([]runtimecontract.RuntimePrerequisite, 0, len(values))
@@ -1232,7 +1251,7 @@ func currentRepairPurpose(facts runtimecontract.RuntimeFacts) runtimecontract.Ru
 // shared contract package only carry observations; SM-2 owns the terminal.
 func targetGroundingDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, allowAcceptedStateChangeLineage bool, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, bool, error) {
 	_, groundingRequired := runtimeCurrentTargetGroundingFocus(facts)
-	if !groundingRequired || runtimeTargetAuthorityPlanForFacts(facts).grounded() ||
+	if !groundingRequired || runtimeTargetAuthorityPlanForNormalizedFacts(facts).grounded() ||
 		(allowAcceptedStateChangeLineage && hasCurrentFocusTargetBoundStateChangeEvidence(facts, proofLineages...)) {
 		return runtimecontract.RuntimeDecision{}, false, nil
 	}
@@ -1396,7 +1415,7 @@ func runtimeProofAllowsOperationVariants(proof runtimecontract.CoverageEvidenceP
 }
 
 func hasOwnerGroundedProspectiveCreationScope(facts runtimecontract.RuntimeFacts) bool {
-	return runtimeTargetAuthorityPlanForFacts(facts).hasProspectiveTargets()
+	return runtimeTargetAuthorityPlanForNormalizedFacts(facts).hasProspectiveTargets()
 }
 
 func runtimeStringsContain(values []string, wanted string) bool {
@@ -1482,6 +1501,9 @@ func governanceDecision(base runtimecontract.RuntimeDecision, facts runtimecontr
 // is derived from the sealed provider ceiling. It never turns a summary,
 // focus, target, feasibility result, or retry exhaustion into a ticket.
 func governanceDependencyForFacts(facts runtimecontract.RuntimeFacts) (runtimecontract.ExternalDependency, bool) {
+	if facts.Failure == nil {
+		return runtimecontract.ExternalDependency{}, false
+	}
 	facts = facts.Normalized()
 	if facts.Failure != nil && facts.Failure.GovernanceDependency != nil {
 		dependency := facts.Failure.GovernanceDependency.Normalized()
@@ -1532,9 +1554,10 @@ func missingEvidenceKinds(facts runtimecontract.RuntimeFacts, proofLineages ...[
 	if len(proofLineage) == 0 {
 		return runtimecontract.MissingRequiredEvidenceKinds(facts)
 	}
-	facts = facts.Normalized()
-	missing := make([]string, 0, len(facts.Focus.RequiredEvidenceKinds))
-	for _, evidenceKind := range facts.Focus.RequiredEvidenceKinds {
+	focus := facts.Focus.Normalized()
+	facts.Evidence.Accepted = runtimecontract.NormalizeEvidenceFactsPreservingEqual(facts.Evidence.Accepted)
+	missing := make([]string, 0, len(focus.RequiredEvidenceKinds))
+	for _, evidenceKind := range focus.RequiredEvidenceKinds {
 		evidenceKind = strings.TrimSpace(evidenceKind)
 		if evidenceKind == "" || runtimeCurrentFocusHasEvidenceKindWithLineage(facts, evidenceKind, proofLineage) {
 			continue

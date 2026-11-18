@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"reflect"
+	"slices"
 
 	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/proof"
 	orchestratorcommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
@@ -22,7 +22,7 @@ func (event RuntimeInternalEvent) validateEvidenceApplicabilityEnvelope() error 
 	observation := payload.EvidenceApplicability
 	payload.EvidenceApplicability = nil
 	if event.Kind == RuntimeInternalEventEvidenceApplicabilityObserved {
-		if observation == nil || !reflect.DeepEqual(payload, RuntimeInternalAuthorityPayload{}) {
+		if observation == nil || !runtimecontract.RuntimeRawEqual(payload, RuntimeInternalAuthorityPayload{}) {
 			return fmt.Errorf("%w: evidence applicability accepts exactly one owner observation", common.ErrInvalidArgument)
 		}
 		return observation.ValidateRaw()
@@ -33,15 +33,37 @@ func (event RuntimeInternalEvent) validateEvidenceApplicabilityEnvelope() error 
 	return nil
 }
 
+func evidenceApplicabilityObservationChangesSemanticSet(
+	before []runtimecontract.RuntimeEvidenceApplicabilityObservation,
+	added runtimecontract.RuntimeEvidenceApplicabilityObservation,
+) bool {
+	if added.Request.PurposeRef == runtimecontract.RuntimeHistoricalEffectProofV1 {
+		return false
+	}
+	for i := len(before) - 1; i >= 0; i-- {
+		existing := &before[i]
+		if existing.Request.PurposeRef == runtimecontract.RuntimeHistoricalEffectProofV1 ||
+			existing.Request.SourceEvidenceID != added.Request.SourceEvidenceID {
+			continue
+		}
+		if existing.Request.SourceEvidenceHash == added.Request.SourceEvidenceHash &&
+			existing.Request.SourceReceiptHash == added.Request.SourceReceiptHash &&
+			existing.Missing == added.Missing &&
+			runtimecontract.RuntimeRawEqual(existing.CurrentDependencies, added.CurrentDependencies) {
+			return false
+		}
+	}
+	after := append(slices.Clone(before), added)
+	return runtimecontract.StableRuntimeEvidenceApplicabilitySemanticHash(before) != runtimecontract.StableRuntimeEvidenceApplicabilitySemanticHash(after)
+}
+
 func validateEvidenceApplicabilityObservationTransition(previous, next RuntimeAggregate) error {
 	before, after := previous.Facts.EvidenceApplicabilityObservations, next.Facts.EvidenceApplicabilityObservations
 	if len(after) < len(before) || len(after) > len(before)+1 {
 		return fmt.Errorf("%w: applicability observations are append-only single-CAS facts", common.ErrConflict)
 	}
-	for index, value := range before {
-		if !reflect.DeepEqual(value, after[index]) {
-			return fmt.Errorf("%w: original applicability observation cannot be rewritten", common.ErrConflict)
-		}
+	if len(before) > 0 && !runtimecontract.RuntimeRawEqual(before, after[:len(before)]) {
+		return fmt.Errorf("%w: original applicability observation cannot be rewritten", common.ErrConflict)
 	}
 	if len(after) == len(before)+1 {
 		added := after[len(before)]
@@ -53,27 +75,32 @@ func validateEvidenceApplicabilityObservationTransition(previous, next RuntimeAg
 			return fmt.Errorf("%w: applicability cannot retire unsettled provider responsibility", common.ErrConflict)
 		}
 		if added.Request.PurposeRef == runtimecontract.RuntimeHistoricalEffectProofV1 {
-			expected := previous.CloneRaw()
+			expected := snapshotRuntimeAggregateWithSharedHistory(previous)
 			expected.StateRevision = next.StateRevision
 			expected.Facts.EvidenceApplicabilityObservations = runtimecontract.CloneRuntimeEvidenceApplicabilityObservations(after)
-			if !reflect.DeepEqual(expected, next) {
+			if !runtimecontract.RuntimeRawEqual(expected, next) {
 				return fmt.Errorf("%w: historical audit can only append its original observation", common.ErrConflict)
 			}
 		}
-		if runtimecontract.StableRuntimeEvidenceApplicabilitySemanticHash(before) != runtimecontract.StableRuntimeEvidenceApplicabilitySemanticHash(after) {
-			expected := previous.CloneRaw()
+		// Historical effect audit observations are ignored by StableRuntimeEvidenceApplicabilitySemanticHash,
+		// so only non-historical observations can alter the semantic applicability hash.
+		if evidenceApplicabilityObservationChangesSemanticSet(before, added) {
+			expected := RuntimeAggregate{
+				CandidateAttempts:        slices.Clone(previous.CandidateAttempts),
+				CandidateRequestSessions: slices.Clone(previous.CandidateRequestSessions),
+			}
 			transaction := previous.Decision.AuthorityTransaction()
 			retireUnsealedCandidateForApplicability(&expected, transaction, added.Request)
 			if len(next.CandidateAttempts) != len(expected.CandidateAttempts) || len(next.CandidateRequestSessions) != len(expected.CandidateRequestSessions) {
 				return fmt.Errorf("%w: applicability retirement cannot add or discard candidate history", common.ErrConflict)
 			}
 			for index, attempt := range previous.CandidateAttempts {
-				if attempt.Transaction == transaction && !reflect.DeepEqual(next.CandidateAttempts[index], expected.CandidateAttempts[index]) {
+				if attempt.Transaction == transaction && !runtimecontract.RuntimeRawEqual(next.CandidateAttempts[index], expected.CandidateAttempts[index]) {
 					return fmt.Errorf("%w: applicability retirement has incomplete candidate write set", common.ErrConflict)
 				}
 			}
 			for index, session := range previous.CandidateRequestSessions {
-				if session.Transaction == transaction && !reflect.DeepEqual(next.CandidateRequestSessions[index], expected.CandidateRequestSessions[index]) {
+				if session.Transaction == transaction && !runtimecontract.RuntimeRawEqual(next.CandidateRequestSessions[index], expected.CandidateRequestSessions[index]) {
 					return fmt.Errorf("%w: applicability retirement has incomplete request write set", common.ErrConflict)
 				}
 			}
@@ -114,7 +141,7 @@ func compileRuntimeEvidenceApplicabilitySource(aggregate RuntimeAggregate, evide
 	if err != nil {
 		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, RuntimeOperationReadSource{}, err
 	}
-	if !reflect.DeepEqual(source.ApplicabilitySource, fact.ApplicabilityDependencies) || !reflect.DeepEqual(&source.OriginalDependencies, fact.OwnerRevisionSet) {
+	if !runtimecontract.RuntimeRawEqual(source.ApplicabilitySource, fact.ApplicabilityDependencies) || !runtimecontract.RuntimeRawEqual(&source.OriginalDependencies, fact.OwnerRevisionSet) {
 		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, RuntimeOperationReadSource{}, fmt.Errorf("%w: applicability source payload mismatch", common.ErrConflict)
 	}
 	request := (runtimecontract.RuntimeEvidenceApplicabilityRequest{
@@ -140,10 +167,7 @@ func compileRuntimeEvidenceApplicabilityRead(aggregate RuntimeAggregate) (runtim
 		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, RuntimeOperationReadSource{}, false, nil
 	}
 	for _, fact := range aggregate.Facts.Evidence.Accepted {
-		if fact.ApplicabilityDependencies == nil || runtimecontract.RuntimeEvidenceIsHistoricalEffect(fact) || runtimecontract.RuntimeEvidenceHasStaleApplicability(fact, aggregate.Facts.EvidenceApplicabilityObservations, aggregate.Facts.EvidenceRevision) {
-			continue
-		}
-		if !runtimeApplicabilityEvidenceAttributable(aggregate.Facts, fact, aggregate.CoverageProofLineage) {
+		if fact.ApplicabilityDependencies == nil || runtimecontract.RuntimeEvidenceIsHistoricalEffect(fact) {
 			continue
 		}
 		observed := false
@@ -160,7 +184,10 @@ func compileRuntimeEvidenceApplicabilityRead(aggregate RuntimeAggregate) (runtim
 				break
 			}
 		}
-		if observed {
+		if observed || runtimecontract.RuntimeEvidenceHasStaleApplicability(fact, aggregate.Facts.EvidenceApplicabilityObservations, aggregate.Facts.EvidenceRevision) {
+			continue
+		}
+		if !runtimeApplicabilityEvidenceAttributable(aggregate.Facts, fact, aggregate.CoverageProofLineage) {
 			continue
 		}
 		request, source, err := compileRuntimeEvidenceApplicabilitySource(aggregate, fact.ID)
@@ -185,9 +212,10 @@ func runtimeApplicabilityEvidenceAttributable(facts runtimecontract.RuntimeFacts
 // the exact Resume/reconciliation generation.
 func runtimeApplicabilityRevisionPending(facts runtimecontract.RuntimeFacts, lineage []runtimecontract.RuntimeCoverageProofLineage) bool {
 	for _, fact := range facts.Evidence.Accepted {
-		if fact.ApplicabilityDependencies != nil && !runtimecontract.RuntimeEvidenceIsHistoricalEffect(fact) && runtimeApplicabilityEvidenceAttributable(facts, fact, lineage) &&
+		if fact.ApplicabilityDependencies != nil && !runtimecontract.RuntimeEvidenceIsHistoricalEffect(fact) &&
+			!runtimecontract.RuntimeEvidenceHasObservedApplicabilityAtRevision(fact, facts.EvidenceApplicabilityObservations, facts.EvidenceRevision) &&
 			!runtimecontract.RuntimeEvidenceHasStaleApplicability(fact, facts.EvidenceApplicabilityObservations, facts.EvidenceRevision) &&
-			!runtimecontract.RuntimeEvidenceHasObservedApplicabilityAtRevision(fact, facts.EvidenceApplicabilityObservations, facts.EvidenceRevision) {
+			runtimeApplicabilityEvidenceAttributable(facts, fact, lineage) {
 			return true
 		}
 	}
@@ -199,9 +227,10 @@ func runtimeApplicabilityRevisionPending(facts runtimecontract.RuntimeFacts, lin
 // be inferred from an old observation or added to immutable evidence facts.
 func runtimeApplicabilityGenerationPending(facts runtimecontract.RuntimeFacts, lineage []runtimecontract.RuntimeCoverageProofLineage, reconciliationRequestHash string) bool {
 	for _, fact := range facts.Evidence.Accepted {
-		if fact.ApplicabilityDependencies != nil && !runtimecontract.RuntimeEvidenceIsHistoricalEffect(fact) && runtimeApplicabilityEvidenceAttributable(facts, fact, lineage) &&
+		if fact.ApplicabilityDependencies != nil && !runtimecontract.RuntimeEvidenceIsHistoricalEffect(fact) &&
+			!runtimecontract.RuntimeEvidenceHasFreshApplicability(fact, facts.EvidenceApplicabilityObservations, facts.EvidenceRevision, reconciliationRequestHash) &&
 			!runtimecontract.RuntimeEvidenceHasStaleApplicability(fact, facts.EvidenceApplicabilityObservations, facts.EvidenceRevision) &&
-			!runtimecontract.RuntimeEvidenceHasFreshApplicability(fact, facts.EvidenceApplicabilityObservations, facts.EvidenceRevision, reconciliationRequestHash) {
+			runtimeApplicabilityEvidenceAttributable(facts, fact, lineage) {
 			return true
 		}
 	}
@@ -214,16 +243,21 @@ func runtimeApplicabilityGenerationPending(facts runtimecontract.RuntimeFacts, l
 // concrete original-owner query and EvidenceApplicabilityObserved transaction.
 func runtimeApplicabilityPrerequisiteDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, lineage *RuntimeAggregate, proofLineage []runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, bool, error) {
 	for _, fact := range facts.Evidence.Accepted {
-		if fact.ApplicabilityDependencies == nil || runtimecontract.RuntimeEvidenceIsHistoricalEffect(fact) || !runtimeApplicabilityEvidenceAttributable(facts, fact, proofLineage) {
+		if fact.ApplicabilityDependencies == nil || runtimecontract.RuntimeEvidenceIsHistoricalEffect(fact) {
 			continue
 		}
-		fresh := runtimecontract.RuntimeEvidenceHasObservedApplicabilityAtRevision(fact, facts.EvidenceApplicabilityObservations, facts.EvidenceRevision)
+		var fresh bool
 		generation := ""
 		if lineage != nil {
 			generation = lineage.Reconciliation.RequestHash
 			fresh = runtimecontract.RuntimeEvidenceHasFreshApplicability(fact, facts.EvidenceApplicabilityObservations, facts.EvidenceRevision, generation)
+		} else {
+			fresh = runtimecontract.RuntimeEvidenceHasObservedApplicabilityAtRevision(fact, facts.EvidenceApplicabilityObservations, facts.EvidenceRevision)
 		}
 		if fresh || runtimecontract.RuntimeEvidenceHasStaleApplicability(fact, facts.EvidenceApplicabilityObservations, facts.EvidenceRevision) {
+			continue
+		}
+		if !runtimeApplicabilityEvidenceAttributable(facts, fact, proofLineage) {
 			continue
 		}
 		id := runtimeApplicabilityPrerequisiteID(fact, facts.EvidenceRevision, generation)
@@ -266,7 +300,7 @@ func validateRuntimeApplicabilityPrerequisiteProjection(aggregate RuntimeAggrega
 			for _, generation := range generations {
 				id := runtimeApplicabilityPrerequisiteID(fact, aggregate.Decision.AuthoritySnapshot.EvidenceRevision, generation)
 				expected := runtimecontract.RuntimePrerequisite{ID: id, Kind: runtimecontract.RuntimeEvidenceApplicabilityPrerequisiteV1, Scope: runtimecontract.RuntimePrerequisiteScopeGlobal, OwnerModuleID: orchestratorcommon.ModuleID, SubjectRef: string(fact.ID), Reason: "observe original owner dependencies before current proof consumption"}
-				if reflect.DeepEqual(prerequisite, expected) {
+				if runtimecontract.RuntimeRawEqual(prerequisite, expected) {
 					return nil
 				}
 			}
@@ -287,7 +321,7 @@ func (c *authorityComponent) recordEvidenceApplicability(ctx context.Context, wo
 
 	for _, existing := range aggregate.Facts.EvidenceApplicabilityObservations {
 		if existing.Request.RequestID == observation.Request.RequestID {
-			if !reflect.DeepEqual(existing, observation) {
+			if !runtimecontract.RuntimeRawEqual(existing, observation) {
 				return RuntimeAggregate{}, fmt.Errorf("%w: duplicate applicability result changed body", common.ErrConflict)
 			}
 			return aggregate, nil
@@ -301,7 +335,7 @@ func (c *authorityComponent) recordEvidenceApplicability(ctx context.Context, wo
 	// The complete owner gate above admitted this unchanged image. Reuse its
 	// private continuation; independent callers still enter the public gate.
 	expected, err := compileRuntimeEvidenceApplicabilityRequest(aggregate, observation.Request.SourceEvidenceID)
-	if err != nil || !reflect.DeepEqual(expected, observation.Request) {
+	if err != nil || !runtimecontract.RuntimeRawEqual(expected, observation.Request) {
 		return RuntimeAggregate{}, fmt.Errorf("%w: applicability request does not match original source: %v", common.ErrConflict, err)
 	}
 	if len(aggregate.Facts.EvidenceApplicabilityObservations) >= runtimecontract.RuntimeEvidenceApplicabilityObservationLimit {
@@ -311,11 +345,15 @@ func (c *authorityComponent) recordEvidenceApplicability(ctx context.Context, wo
 		return RuntimeAggregate{}, err
 	}
 	expectedRevision := aggregate.StateRevision
-	previousObservationHash := runtimecontract.StableRuntimeEvidenceApplicabilitySemanticHash(aggregate.Facts.EvidenceApplicabilityObservations)
 	previousTransaction := aggregate.Decision.AuthorityTransaction()
-	aggregate.Facts.EvidenceApplicabilityObservations = append(aggregate.Facts.EvidenceApplicabilityObservations, observation.CloneRaw())
-	if previousObservationHash != runtimecontract.StableRuntimeEvidenceApplicabilitySemanticHash(aggregate.Facts.EvidenceApplicabilityObservations) {
-		retireUnsealedCandidateForApplicability(&aggregate, previousTransaction, observation.Request)
+	if observation.Request.PurposeRef == runtimecontract.RuntimeHistoricalEffectProofV1 {
+		aggregate.Facts.EvidenceApplicabilityObservations = append(aggregate.Facts.EvidenceApplicabilityObservations, observation.CloneRaw())
+	} else {
+		semanticChanged := evidenceApplicabilityObservationChangesSemanticSet(aggregate.Facts.EvidenceApplicabilityObservations, observation)
+		aggregate.Facts.EvidenceApplicabilityObservations = append(aggregate.Facts.EvidenceApplicabilityObservations, observation.CloneRaw())
+		if semanticChanged {
+			retireUnsealedCandidateForApplicability(&aggregate, previousTransaction, observation.Request)
+		}
 	}
 	var fact runtimecontract.EvidenceFact
 	for _, value := range aggregate.Facts.Evidence.Accepted {

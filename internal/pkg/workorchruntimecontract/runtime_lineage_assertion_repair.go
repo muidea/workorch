@@ -225,7 +225,7 @@ func runtimeRepairThenFreshValidationInSession(binding CoverageEvidenceBinding, 
 				if dispatch.State != RuntimeDispatchStateCommitted || dispatch.Candidate.Validation == nil || dispatch.RepairCommitment != nil || !RuntimeCoverageEvidenceBindingProjectionsEqual(dispatch.CoverageBindings, []CoverageEvidenceBinding{binding}) {
 					continue
 				}
-				closure, found := runtimeRepairClosureForLineage(sources, binding.CoverageWorkItemID, lineage)
+				closure, found := runtimeRepairClosureForLineageWithEntries(sources, entries, binding.CoverageWorkItemID, lineage)
 				if !found {
 					continue
 				}
@@ -285,6 +285,10 @@ func runtimeRepairClosureForLineage(sources RuntimeLineageAssertionSources, cove
 	if err != nil {
 		return RuntimeRepairClosure{}, false
 	}
+	return runtimeRepairClosureForLineageWithEntries(sources, entries, coverageID, lineage)
+}
+
+func runtimeRepairClosureForLineageWithEntries(sources RuntimeLineageAssertionSources, entries []runtimeAssessmentPurposeBindingPreimage, coverageID common.CoverageWorkItemID, lineage RuntimeCWIReopenLineage) (RuntimeRepairClosure, bool) {
 	var matched runtimeAssessmentPurposeBindingPreimage
 	var binding CoverageEvidenceBinding
 	matches := 0

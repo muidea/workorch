@@ -80,7 +80,7 @@ func (e *runPhysicalJSONEncoder) run(v *run.Run) {
 	}
 	first = false
 	e.text("\"RuntimeBootstrap\":")
-	e.value(v.RuntimeBootstrap)
+	e.bootstrap(v)
 	if !first {
 		e.text(",")
 	}

@@ -13,6 +13,7 @@ import (
 // conflict maintenance, changed implementation failures, fresh all-of and
 // assessment, then retain receipts across owner reconstruction/response loss.
 func TestDriveRuntimeNativeSourcesSequentialAcceptanceAndRecovery(t *testing.T) {
+	t.Parallel()
 	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: rc.RuntimeValidationInputReviewProtocol, DynamicProjectObservations: true, SequentialProjectFailures: true, NativeProjectSources: true}
 	baseline := runValidationInputReviewMainline(t, "input_revision_after_failure", "", options)
 	for _, cut := range []string{"after_project_receipt", "after_result_persistence"} {

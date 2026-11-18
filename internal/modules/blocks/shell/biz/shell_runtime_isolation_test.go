@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -208,5 +209,52 @@ func TestManagedValidationEnvironmentIsolatesSessionAndKeepsTechnicalGoCaches(t 
 	}
 	if environment["GOCACHE"] != "/host/cache/go-build" || environment["GOMODCACHE"] != "/host/go/pkg/mod" {
 		t.Fatalf("managed validation discarded owner technical Go caches: %+v", environment)
+	}
+}
+
+func TestManagedValidationHostCachePathFallbackAndOptOut(t *testing.T) {
+	if got := managedValidationHostCachePath("off", "/host/home", filepath.Join(".cache", "go-build")); got != "" {
+		t.Fatalf("managedValidationHostCachePath(off) = %q, want empty", got)
+	}
+	if got := managedValidationHostCachePath("", "/host/home", filepath.Join(".cache", "go-build")); got != filepath.Join("/host/home", ".cache", "go-build") {
+		t.Fatalf("managedValidationHostCachePath(hostHome) = %q", got)
+	}
+	if got := managedValidationHostCachePath("/custom/go-build", "/host/home", filepath.Join(".cache", "go-build")); got != "/custom/go-build" {
+		t.Fatalf("managedValidationHostCachePath(explicit) = %q", got)
+	}
+	if current, err := user.Current(); err == nil && strings.TrimSpace(current.HomeDir) != "" {
+		want := filepath.Join(strings.TrimSpace(current.HomeDir), ".cache", "go-build")
+		if got := managedValidationHostCachePath("", "", filepath.Join(".cache", "go-build")); got != want {
+			t.Fatalf("managedValidationHostCachePath(empty) = %q, want %q", got, want)
+		}
+		scratch := t.TempDir()
+		values := managedValidationEnvironment([]string{"PATH=/usr/bin"}, scratch)
+		wantLine := "GOCACHE=" + want
+		found := false
+		for _, value := range values {
+			if value == wantLine {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("managed validation without HOME/GOCACHE did not reuse host build cache %q: %v", wantLine, values)
+		}
+	}
+	scratch := t.TempDir()
+	values := managedValidationEnvironment([]string{
+		"PATH=/usr/bin",
+		"GOCACHE=off",
+	}, scratch)
+	wantScratch := "GOCACHE=" + filepath.Join(scratch, "cache", "go-build")
+	foundScratch := false
+	for _, value := range values {
+		if value == wantScratch {
+			foundScratch = true
+			break
+		}
+	}
+	if !foundScratch {
+		t.Fatalf("managed validation with GOCACHE=off did not isolate GOCACHE to scratch %q: %v", wantScratch, values)
 	}
 }

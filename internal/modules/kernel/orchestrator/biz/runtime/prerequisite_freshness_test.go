@@ -2158,3 +2158,79 @@ func TestPrerequisiteInvalidationChronologyCannotBeRewritten(t *testing.T) {
 		t.Fatal("legitimate append rejected", err)
 	}
 }
+
+func TestRuntimeSemanticCatalogScopeGapDetectsMissingFocusTargetInBoundedExistingCatalog(t *testing.T) {
+	prerequisite := runtimecontract.RuntimePrerequisite{
+		ID: "operation_admissibility:file", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileRead},
+	}
+	catalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID,
+		OperationKinds: []string{runtimecontract.StepKindFileRead},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind: runtimecontract.StepKindFileRead, VariantID: "read",
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+				runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+				runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+			},
+			SelectorRefs: []string{"file/workspace_relative_path"},
+		}},
+		TargetRefs:       []string{"file_01.txt", "file_02.txt"},
+		SelectorRefs:     []string{"file/workspace_relative_path"},
+		ObservedRevision: "tree-1",
+	}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID,
+		ContentHash: catalog.SnapshotID,
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+
+	aggregate := RuntimeAggregate{
+		ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent,
+		SemanticPlanning:      runtimecontract.RuntimeSemanticPlanningLedger{Phase: runtimecontract.RuntimeSemanticPlanningRequired},
+		Facts: runtimecontract.RuntimeFacts{
+			Focus: runtimecontract.CoverageFocus{
+				ID: "focus-tail", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-tail"},
+				TargetRefs:        []string{"file_33.txt"},
+				AcceptedStepKinds: []string{runtimecontract.StepKindFileRead},
+				AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{
+					Kind: runtimecontract.StepKindFileRead, VariantID: "read",
+				}},
+			},
+			Resources: runtimecontract.RuntimeResourceFacts{
+				OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{catalog},
+				PrerequisiteObservations: []runtimecontract.RuntimePrerequisiteObservation{observation},
+			},
+		},
+	}
+	aggregate.Facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prerequisite}
+
+	gap, found := NextRuntimeSemanticCatalogScopeGap(aggregate)
+	if !found {
+		t.Fatal("expected scope gap when bounded target-enumerated catalog omits focus existing target file_33.txt")
+	}
+	if gap.OwnerModuleID != runtimecontract.RuntimeModuleFile || gap.PrerequisiteID != prerequisite.ID || len(gap.RequiredTargetRefs) != 1 || gap.RequiredTargetRefs[0] != "file_33.txt" {
+		t.Fatalf("unexpected scope gap = %+v", gap)
+	}
+
+	covered := aggregate.CloneRaw()
+	coveredCatalog := catalog
+	coveredCatalog.TargetRefs = []string{"file_01.txt", "file_33.txt"}
+	coveredCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(coveredCatalog)
+	coveredObs := observation
+	coveredObs.ContentHash = coveredCatalog.SnapshotID
+	coveredObs.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(coveredObs)
+	covered.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{coveredCatalog}
+	covered.Facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{coveredObs}
+	if _, found := NextRuntimeSemanticCatalogScopeGap(covered); found {
+		t.Fatal("scope gap remained after bounded catalog covered focus target")
+	}
+
+	prospective := aggregate.CloneRaw()
+	prospective.Facts.Focus.TargetRefs = nil
+	prospective.Facts.Focus.ProspectiveTargetRefs = []string{"new_file.txt"}
+	if gap, found := NextRuntimeSemanticCatalogScopeGap(prospective); found {
+		t.Fatalf("prospective focus with ProspectiveOwnerTarget selector unexpectedly reported scope gap: %+v", gap)
+	}
+}

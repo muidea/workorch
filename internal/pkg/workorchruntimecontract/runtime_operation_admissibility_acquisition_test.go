@@ -1,6 +1,9 @@
 package workorchruntimecontract
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestRuntimeWorkspaceManifestBindingAcceptsOnlyCanonicalOwner(t *testing.T) {
 	const syntheticOwner = "blocks/synthetic-manifest-owner"
@@ -195,5 +198,82 @@ func TestShellValidationAdmissibilityAcceptsOnlyOwnerResolutionOfAdapterDeclarat
 	drifted.Observation.ObservationID = StableRuntimePrerequisiteObservationID(drifted.Observation)
 	if err := drifted.ValidateForRequest(request); err == nil {
 		t.Fatal("Shell acquisition accepted a recipe resolved by a different adapter")
+	}
+}
+
+func TestRuntimeOperationAdmissibilityRejectsOverBudgetAndMissingRequiredTargets(t *testing.T) {
+	manifestObservation := RuntimePrerequisiteObservation{
+		PrerequisiteID: "manifest-scoped", Kind: PrerequisiteKindManifest, OwnerModuleID: RuntimeModuleFile,
+		ContentHash: "tree-scoped", Dependencies: []RuntimeFreshnessDependency{{
+			Domain: RuntimeResourceWorkspaceTree, OwnerModuleID: RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: "tree-scoped",
+		}},
+	}
+	manifestObservation.ObservationID = StableRuntimePrerequisiteObservationID(manifestObservation)
+	binding := RuntimeWorkspaceManifestBinding{
+		Manifest:    WorkspaceManifest{Revision: "tree-scoped", TargetRefs: []string{"extra1.go", "extra2.go", "go.mod", "z_last.go"}},
+		Observation: manifestObservation,
+	}
+
+	makeInventoryAndObs := func(targets []string) (RuntimeOperationAdmissibility, RuntimePrerequisiteObservation) {
+		inv := RuntimeOperationAdmissibility{
+			PrerequisiteID:   "admissibility-scoped",
+			OwnerModuleID:    RuntimeModuleFile,
+			OperationKinds:   []string{StepKindFileRead},
+			TargetRefs:       targets,
+			SelectorRefs:     []string{"file/workspace_relative_path", "file/existing_target"},
+			ConstraintRefs:   []string{"file/workspace_relative_path", "file/regular_existing_target"},
+			ObservedRevision: binding.Manifest.Revision,
+		}
+		inv.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(inv)
+		obs := RuntimePrerequisiteObservation{
+			PrerequisiteID: "admissibility-scoped",
+			Kind:           PrerequisiteKindOperationAdmissibility,
+			OwnerModuleID:  RuntimeModuleFile,
+			ContentHash:    inv.SnapshotID,
+			Dependencies: []RuntimeFreshnessDependency{{
+				Domain: RuntimeResourceWorkspaceTree, OwnerModuleID: RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: binding.Manifest.Revision,
+			}},
+		}
+		obs.ObservationID = StableRuntimePrerequisiteObservationID(obs)
+		return inv, obs
+	}
+
+	overBudgetReq := RuntimeOperationAdmissibilityRequest{
+		WorkspaceID: "ws-scoped", RunID: "run-scoped", AuthoritySnapshotID: "authority-scoped",
+		PrerequisiteID: "admissibility-scoped", OwnerModuleID: RuntimeModuleFile,
+		WorkspaceDeliverableDirectory: t.TempDir(), RequiredKinds: []string{StepKindFileRead},
+		RequiredTargetRefs: []string{"extra1.go", "extra2.go", "go.mod"}, WorkspaceManifestBinding: binding, MaxItems: 2,
+	}
+	err := ValidateRuntimeOperationAdmissibilityRequest(overBudgetReq, RuntimeModuleFile)
+	var budgetErr *RuntimeOwnerInventoryBudgetExceededError
+	if !errors.As(err, &budgetErr) || budgetErr.ItemCount != 3 || budgetErr.MaxItems != 2 {
+		t.Fatalf("over-budget request err = %v, want RuntimeOwnerInventoryBudgetExceededError(3/2)", err)
+	}
+	truncatedInv, truncatedObs := makeInventoryAndObs([]string{"extra1.go", "extra2.go"})
+	if err := (RuntimeOperationAdmissibilityAcquisition{
+		WorkspaceID: overBudgetReq.WorkspaceID, RunID: overBudgetReq.RunID, AuthoritySnapshotID: overBudgetReq.AuthoritySnapshotID,
+		Admissibility: truncatedInv, Observation: truncatedObs,
+	}).ValidateForRequest(overBudgetReq); !errors.As(err, &budgetErr) {
+		t.Fatalf("ValidateForRequest over-budget err = %v, want RuntimeOwnerInventoryBudgetExceededError", err)
+	}
+
+	scopedReq := overBudgetReq
+	scopedReq.RequiredTargetRefs = []string{"go.mod", "z_last.go"}
+	scopedReq.MaxItems = 3
+
+	missingRequiredInv, missingRequiredObs := makeInventoryAndObs([]string{"extra1.go", "extra2.go", "go.mod"})
+	if err := (RuntimeOperationAdmissibilityAcquisition{
+		WorkspaceID: scopedReq.WorkspaceID, RunID: scopedReq.RunID, AuthoritySnapshotID: scopedReq.AuthoritySnapshotID,
+		Admissibility: missingRequiredInv, Observation: missingRequiredObs,
+	}).ValidateForRequest(scopedReq); err == nil {
+		t.Fatal("ValidateForRequest accepted inventory omitting required target z_last.go")
+	}
+
+	validInv, validObs := makeInventoryAndObs([]string{"extra1.go", "go.mod", "z_last.go"})
+	if err := (RuntimeOperationAdmissibilityAcquisition{
+		WorkspaceID: scopedReq.WorkspaceID, RunID: scopedReq.RunID, AuthoritySnapshotID: scopedReq.AuthoritySnapshotID,
+		Admissibility: validInv, Observation: validObs,
+	}).ValidateForRequest(scopedReq); err != nil {
+		t.Fatalf("ValidateForRequest rejected valid scoped inventory (selectors/constraints must not consume target budget): %v", err)
 	}
 }

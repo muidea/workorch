@@ -208,11 +208,14 @@ func openRuntimeValidationFailureRepairGeneration(aggregate *RuntimeAggregate, f
 }
 
 func matchRuntimeValidationFailureRepairTrigger(aggregate RuntimeAggregate, fact runtimecontract.EvidenceFact, operation runtimecontract.RuntimeOperation) (runtimeValidationFailureRepairTrigger, bool, error) {
+	if fact.Kind != runtimecontract.EvidenceKindValidation || aggregate.Facts.Failure == nil ||
+		aggregate.Facts.Resources.FailureTarget != nil || len(aggregate.Facts.Focus.CoverageWorkItemIDs) != 1 {
+		return runtimeValidationFailureRepairTrigger{}, false, nil
+	}
 	facts := aggregate.Facts.Normalized()
 	operation = operation.Normalized()
-	if fact.Kind != runtimecontract.EvidenceKindValidation || facts.Failure == nil ||
-		facts.Resources.FailureTarget != nil || needsStateChangeForOwnerGroundedFailure(facts) ||
-		len(facts.Focus.CoverageWorkItemIDs) != 1 {
+	if facts.Failure == nil || facts.Resources.FailureTarget != nil ||
+		needsStateChangeForOwnerGroundedFailure(facts) || len(facts.Focus.CoverageWorkItemIDs) != 1 {
 		return runtimeValidationFailureRepairTrigger{}, false, nil
 	}
 	coverageID := facts.Focus.CoverageWorkItemIDs[0]
@@ -302,6 +305,11 @@ func markRuntimeValidationFailureRepairSurfaceUnavailable(aggregate *RuntimeAggr
 func markRuntimeValidationFailureRepairRouteUnavailable(aggregate *RuntimeAggregate, fact runtimecontract.EvidenceFact, operation runtimecontract.RuntimeOperation) (bool, error) {
 	if aggregate == nil {
 		return false, common.ErrInvalidArgument
+	}
+	if aggregate.ActiveDispatch != nil || fact.Kind != runtimecontract.EvidenceKindValidation ||
+		aggregate.Facts.Failure == nil || aggregate.Facts.Resources.FailureTarget != nil ||
+		len(aggregate.Facts.Focus.CoverageWorkItemIDs) != 1 {
+		return false, nil
 	}
 	facts := aggregate.Facts.Normalized()
 	operation = operation.Normalized()
@@ -417,6 +425,9 @@ func runtimeValidationFailureRepairPendingDirective(facts runtimecontract.Runtim
 }
 
 func runtimeValidationFailureRepairAwaitsSemanticBinding(facts runtimecontract.RuntimeFacts) bool {
+	if facts.RepairDirective == nil {
+		return false
+	}
 	facts = facts.Normalized()
 	if facts.RepairDirective == nil || facts.RepairDirective.FocusID != facts.Focus.ID ||
 		facts.RepairDirective.Trigger != runtimecontract.RuntimeRepairTriggerRejectedValidation ||
@@ -437,6 +448,9 @@ func runtimeValidationFailureRepairAwaitsSemanticBinding(facts runtimecontract.R
 // after a target-snapshot interlude: its binding, exact prospective target and
 // ordered fresh-validation closure are the SM-2 authority being resumed.
 func runtimeValidationFailureRepairOwnsSealedDirective(facts runtimecontract.RuntimeFacts) bool {
+	if facts.RepairDirective == nil {
+		return false
+	}
 	facts = facts.Normalized()
 	if facts.RepairDirective == nil || len(facts.Focus.CoverageWorkItemIDs) != 1 {
 		return false
@@ -476,6 +490,9 @@ func runtimeValidationFailureRepairOwnsSealedDirective(facts runtimecontract.Run
 // may retain its settled semantic reopen lineage after a later, same-binding
 // confirmed repair. That newer handoff belongs to the confirmed consumer.
 func runtimeValidationFailureRepairOwnsFreshValidationDirective(facts runtimecontract.RuntimeFacts) bool {
+	if facts.RepairDirective == nil {
+		return false
+	}
 	facts = facts.Normalized()
 	if facts.RepairDirective == nil || len(facts.Focus.CoverageWorkItemIDs) != 1 {
 		return false
@@ -525,6 +542,10 @@ func runtimeValidationFailureRepairOwnsFreshValidationDirective(facts runtimecon
 // use this detached value only to call the pure shared compiler; it cannot
 // mutate the CWI, choose an operation or infer a target from diagnostics.
 func CurrentRuntimeValidationFailureRepairGenerationInput(aggregate RuntimeAggregate) (runtimecontract.RuntimeValidationFailureRepairGenerationInput, bool, error) {
+	if len(aggregate.Facts.Focus.CoverageWorkItemIDs) != 1 || aggregate.Facts.RepairDirective == nil ||
+		aggregate.Facts.Resources.FailureTarget != nil || aggregate.Facts.Failure == nil {
+		return runtimecontract.RuntimeValidationFailureRepairGenerationInput{}, false, nil
+	}
 	facts := aggregate.Facts.Normalized()
 	if len(facts.Focus.CoverageWorkItemIDs) != 1 || facts.RepairDirective == nil ||
 		facts.RepairDirective.Trigger != runtimecontract.RuntimeRepairTriggerRejectedValidation ||
@@ -618,6 +639,9 @@ func CurrentRuntimeValidationFailureRepairGenerationInput(aggregate RuntimeAggre
 }
 
 func runtimeValidationFailureRepairContinuationForSemanticSeal(aggregate RuntimeAggregate, manifest runtimecontract.RuntimeSemanticPlanManifest) (runtimeValidationFailureRepairSealContinuation, bool, error) {
+	if len(aggregate.Facts.Focus.CoverageWorkItemIDs) != 1 || aggregate.Facts.RepairDirective == nil {
+		return runtimeValidationFailureRepairSealContinuation{}, false, nil
+	}
 	facts := aggregate.Facts.Normalized()
 	manifest = manifest.Normalized()
 	if len(facts.Focus.CoverageWorkItemIDs) != 1 || facts.RepairDirective == nil {

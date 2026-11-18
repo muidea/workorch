@@ -61,6 +61,7 @@ func sequentialProjectPurposeBootstrap(t *testing.T, b runtimecontract.RuntimeBo
 // terminal owners remain real. No diagnostic, repair commitment or credit is
 // injected to move the fixture to its next phase.
 func TestDriveRuntimeSequentialFailuresToAcceptanceAndRecovery(t *testing.T) {
+	t.Parallel()
 	options := validationInputReviewMainlineOptions{
 		Adapter:         shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic,
 		ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol,

@@ -484,6 +484,50 @@ func ValidateRuntimeAssessmentAdjudications(facts RuntimeFacts, completed []Runt
 	})
 }
 
+func validateRuntimeAssessmentAdjudicationsInSession(facts RuntimeFacts, completed []RuntimeDispatchRecord, session *runtimeSemanticValidationSession) error {
+	return runtimeProcessingRegion("assessment_adjudications", func() error {
+		if session == nil || session.committedPreimage == nil {
+			return validateRuntimeCommittedAssessmentResults(facts, completed)
+		}
+		previous := session.committedPreimage
+		if facts.WorkspaceID != previous.Facts.WorkspaceID ||
+			facts.RunID != previous.Facts.RunID ||
+			facts.DefinitionRevision != previous.Facts.DefinitionRevision ||
+			!runtimeRawEqual(facts.DefinitionSeed, previous.Facts.DefinitionSeed) ||
+			!runtimeRawEqual(facts.DefinitionFocuses, previous.Facts.DefinitionFocuses) ||
+			len(facts.Evidence.Accepted) < len(previous.Facts.Evidence.Accepted) ||
+			!runtimeRawEqual(facts.Evidence.Accepted[:len(previous.Facts.Evidence.Accepted)], previous.Facts.Evidence.Accepted) ||
+			len(facts.Assessments) < len(previous.Facts.Assessments) ||
+			!runtimeRawEqual(facts.Assessments[:len(previous.Facts.Assessments)], previous.Facts.Assessments) {
+			return validateRuntimeCommittedAssessmentResults(facts, completed)
+		}
+		prevAssessed := make(map[string]bool, len(previous.Facts.Assessments))
+		for _, fact := range previous.Facts.Assessments {
+			prevAssessed[fact.ID] = true
+		}
+		byID := make(map[string]RuntimeAssessmentFact, len(facts.Assessments))
+		for _, fact := range facts.Assessments {
+			byID[fact.ID] = fact
+		}
+		for i, dispatch := range completed {
+			if dispatch.Candidate.Assessment == nil || dispatch.State != RuntimeDispatchStateCommitted {
+				continue
+			}
+			if i < len(previous.CompletedDispatches) && prevAssessed[dispatch.ID] && runtimeRawEqual(dispatch, previous.CompletedDispatches[i]) {
+				continue
+			}
+			fact, found := byID[dispatch.ID]
+			if !found {
+				return fmt.Errorf("committed runtime assessment dispatch %q has no assessment fact", dispatch.ID)
+			}
+			if err := ValidateRuntimeAssessmentAdjudication(dispatch, fact, facts); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func validateRuntimeCommittedAssessmentResults(facts RuntimeFacts, completed []RuntimeDispatchRecord) error {
 	byID := make(map[string]RuntimeAssessmentFact, len(facts.Assessments))
 	for _, fact := range facts.Assessments {
@@ -515,52 +559,81 @@ func validateRuntimeCommittedAssessmentResults(facts RuntimeFacts, completed []R
 // mutable DefinitionFocus projection to manufacture different assessment
 // authority across restart.
 func ValidateRuntimeAssessmentAuthoritySources(facts RuntimeFacts, active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord) error {
-	validate := func(dispatch RuntimeDispatchRecord) error {
-		if dispatch.Candidate.Assessment == nil {
-			return nil
-		}
-		if dispatch.AssessmentAuthorityInput == nil {
-			return fmt.Errorf("runtime assessment dispatch %q has no authority source", dispatch.ID)
-		}
-		candidate := dispatch.Candidate.Assessment.Normalized()
-		source, err := RuntimeAssessmentSourceProjection(facts, dispatch.Transaction.FocusID, candidate.CoverageWorkItemIDs)
-		if err != nil {
-			return err
-		}
-		authority := dispatch.AssessmentAuthorityInput.Normalized()
-		// Evidence revision is not a temporal cutoff: an invalidated assessment
-		// can be followed by new observations without a new evidence fact. Match
-		// the original append-only prefix and its independently sealed semantic
-		// authority instead of pulling future observations into historical proof.
-		count := len(authority.ApplicabilityObservations)
-		if count > len(facts.EvidenceApplicabilityObservations) {
-			return fmt.Errorf("runtime assessment dispatch %q applicability prefix is missing", dispatch.ID)
-		}
-		var originalObservations []RuntimeEvidenceApplicabilityObservation
-		if count > 0 {
-			originalObservations = facts.EvidenceApplicabilityObservations[:count]
-		}
-		if !reflect.DeepEqual(authority.ApplicabilityObservations, originalObservations) {
-			return fmt.Errorf("runtime assessment dispatch %q applicability prefix does not match original SM-2 observations", dispatch.ID)
-		}
-		if StableRuntimeEvidenceApplicabilitySemanticHash(originalObservations) != authority.AuthorityInput.ApplicabilityObservationHash {
-			return fmt.Errorf("runtime assessment dispatch %q applicability authority identity mismatch", dispatch.ID)
-		}
-		if authority.SourceSliceID != source.SliceID || authority.SourceScope != source.AssessmentScope ||
-			authority.SourceID != source.AssessmentID || authority.SourceText != source.AssessmentText {
-			return fmt.Errorf("runtime assessment dispatch %q authority source does not match definition seed", dispatch.ID)
-		}
-		return nil
-	}
 	if active != nil {
-		if err := validate(*active); err != nil {
+		if err := validateRuntimeAssessmentAuthorityDispatch(facts, *active); err != nil {
 			return err
 		}
 	}
 	for _, dispatch := range completed {
-		if err := validate(dispatch); err != nil {
+		if err := validateRuntimeAssessmentAuthorityDispatch(facts, dispatch); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateRuntimeAssessmentAuthoritySourcesInSession(facts RuntimeFacts, active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord, session *runtimeSemanticValidationSession) error {
+	if session == nil || session.committedPreimage == nil {
+		return ValidateRuntimeAssessmentAuthoritySources(facts, active, completed)
+	}
+	previous := session.committedPreimage
+	if !runtimeRawEqual(facts.DefinitionSeed, previous.Facts.DefinitionSeed) ||
+		!runtimeRawEqual(facts.DefinitionFocuses, previous.Facts.DefinitionFocuses) ||
+		len(facts.EvidenceApplicabilityObservations) < len(previous.Facts.EvidenceApplicabilityObservations) ||
+		!runtimeRawEqual(facts.EvidenceApplicabilityObservations[:len(previous.Facts.EvidenceApplicabilityObservations)], previous.Facts.EvidenceApplicabilityObservations) {
+		return ValidateRuntimeAssessmentAuthoritySources(facts, active, completed)
+	}
+	if active != nil && (!runtimeRawEqual(active, previous.ActiveDispatch) || active.AssessmentAuthorityInput == nil || len(active.AssessmentAuthorityInput.ApplicabilityObservations) > len(previous.Facts.EvidenceApplicabilityObservations)) {
+		if err := validateRuntimeAssessmentAuthorityDispatch(facts, *active); err != nil {
+			return err
+		}
+	}
+	for i, dispatch := range completed {
+		if i < len(previous.CompletedDispatches) && runtimeRawEqual(dispatch, previous.CompletedDispatches[i]) &&
+			(dispatch.Candidate.Assessment == nil || (dispatch.AssessmentAuthorityInput != nil && len(dispatch.AssessmentAuthorityInput.ApplicabilityObservations) <= len(previous.Facts.EvidenceApplicabilityObservations))) {
+			continue
+		}
+		if err := validateRuntimeAssessmentAuthorityDispatch(facts, dispatch); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRuntimeAssessmentAuthorityDispatch(facts RuntimeFacts, dispatch RuntimeDispatchRecord) error {
+	if dispatch.Candidate.Assessment == nil {
+		return nil
+	}
+	if dispatch.AssessmentAuthorityInput == nil {
+		return fmt.Errorf("runtime assessment dispatch %q has no authority source", dispatch.ID)
+	}
+	candidate := dispatch.Candidate.Assessment.Normalized()
+	source, err := RuntimeAssessmentSourceProjection(facts, dispatch.Transaction.FocusID, candidate.CoverageWorkItemIDs)
+	if err != nil {
+		return err
+	}
+	authority := dispatch.AssessmentAuthorityInput.Normalized()
+	// Evidence revision is not a temporal cutoff: an invalidated assessment
+	// can be followed by new observations without a new evidence fact. Match
+	// the original append-only prefix and its independently sealed semantic
+	// authority instead of pulling future observations into historical proof.
+	count := len(authority.ApplicabilityObservations)
+	if count > len(facts.EvidenceApplicabilityObservations) {
+		return fmt.Errorf("runtime assessment dispatch %q applicability prefix is missing", dispatch.ID)
+	}
+	var originalObservations []RuntimeEvidenceApplicabilityObservation
+	if count > 0 {
+		originalObservations = facts.EvidenceApplicabilityObservations[:count]
+	}
+	if !runtimeRawEqual(authority.ApplicabilityObservations, originalObservations) {
+		return fmt.Errorf("runtime assessment dispatch %q applicability prefix does not match original SM-2 observations", dispatch.ID)
+	}
+	if StableRuntimeEvidenceApplicabilitySemanticHash(originalObservations) != authority.AuthorityInput.ApplicabilityObservationHash {
+		return fmt.Errorf("runtime assessment dispatch %q applicability authority identity mismatch", dispatch.ID)
+	}
+	if authority.SourceSliceID != source.SliceID || authority.SourceScope != source.AssessmentScope ||
+		authority.SourceID != source.AssessmentID || authority.SourceText != source.AssessmentText {
+		return fmt.Errorf("runtime assessment dispatch %q authority source does not match definition seed", dispatch.ID)
 	}
 	return nil
 }

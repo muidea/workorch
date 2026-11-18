@@ -17,7 +17,10 @@ import (
 // has to return to the sealed repair action rather than infer a new action
 // from raw missing-evidence kinds.
 func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecontract.RuntimeDecision, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) runtimecontract.RuntimeFacts {
-	facts = facts.Normalized()
+	return syncRepairDirectiveNormalized(facts.Normalized(), decision, proofLineages...)
+}
+
+func syncRepairDirectiveNormalized(facts runtimecontract.RuntimeFacts, decision runtimecontract.RuntimeDecision, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) runtimecontract.RuntimeFacts {
 	proofLineage := runtimeCoverageProofLineageArgument(proofLineages)
 	decision.RequiredOutput = decision.RequiredOutput.Normalized()
 	focusID := strings.TrimSpace(facts.Focus.ID)
@@ -110,6 +113,9 @@ func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecon
 // owner query is eligible; that phase decision belongs exclusively to
 // CurrentRuntimeRepairSurfaceConfirmationPlan.
 func runtimeValidationFailureObservationIsTargetless(facts runtimecontract.RuntimeFacts) bool {
+	if facts.Failure == nil || facts.Failure.ValidationFailureObservation == nil {
+		return false
+	}
 	facts = facts.Normalized()
 	if facts.Failure == nil || facts.Failure.ValidationFailureObservation == nil {
 		return false
@@ -148,11 +154,11 @@ func repairDirectiveRequired(facts runtimecontract.RuntimeFacts) bool {
 }
 
 func applyRepairDirectiveAction(facts runtimecontract.RuntimeFacts, base runtimecontract.RuntimeDecision, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, bool, error) {
-	facts = facts.Normalized()
-	proofLineage := runtimeCoverageProofLineageArgument(proofLineages)
 	if facts.RepairDirective == nil {
 		return base, false, nil
 	}
+	facts = facts.Normalized()
+	proofLineage := runtimeCoverageProofLineageArgument(proofLineages)
 	directive := facts.RepairDirective.Normalized()
 	if directive.FocusID != facts.Focus.ID || repairDirectiveEvidenceSatisfied(facts, directive, proofLineage) {
 		return base, false, nil
@@ -334,11 +340,11 @@ func confirmedRepairDirectivePurpose(facts runtimecontract.RuntimeFacts, require
 }
 
 func confirmedValidationRepairRoute(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeValidationFailureRepairRoute, bool) {
-	facts = facts.Normalized()
 	if facts.Failure == nil || facts.Failure.ValidationDiagnostic == nil || facts.Failure.OriginalDiagnostic == nil ||
 		len(facts.Focus.CoverageWorkItemIDs) != 1 {
 		return runtimecontract.RuntimeValidationFailureRepairRoute{}, false
 	}
+	facts = facts.Normalized()
 	declaration, found, err := runtimeDefinitionFocusForCoverage(facts.DefinitionFocuses, facts.Focus.CoverageWorkItemIDs[0])
 	if err != nil || !found || declaration.ValidationFailureRepairConvergence == nil {
 		return runtimecontract.RuntimeValidationFailureRepairRoute{}, false

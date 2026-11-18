@@ -2,9 +2,14 @@ package workspace
 
 import (
 	"fmt"
-	"github.com/muidea/workorch/internal/pkg/common"
+	"maps"
+	"math"
 	"reflect"
+	"slices"
 	"strings"
+
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
 // ReadCommittedConfirmation authenticates an owner-committed confirmation's
@@ -12,7 +17,14 @@ import (
 // derives DoD, or re-adjudicates the six semantic reviews. New commands and
 // independent external admission must continue to use Validate.
 func (c DefinitionAuthoringConfirmation) ReadCommitted(record *DefinitionAuthoringRecord, workspaceID common.WorkspaceID) error {
-	if record == nil || workspaceID == "" || record.Input.WorkspaceID != workspaceID || record.InputHash != record.Input.InputHash() || c.InputHash != record.InputHash || c.TemplateSnapshotHash != record.TemplateSnapshotHash || record.TemplateSnapshotHash != WorkspaceTemplateSnapshotHash(&record.TemplateSnapshot) || c.ConfigurationHash == "" || (c.Phase != DefinitionAuthoringConfirmationPrepared && c.Phase != DefinitionAuthoringConfirmationMaterialized) {
+	return c.readCommitted(record, workspaceID, false)
+}
+
+func (c DefinitionAuthoringConfirmation) readCommitted(record *DefinitionAuthoringRecord, workspaceID common.WorkspaceID, recordAlreadyVerified bool) error {
+	if record == nil || workspaceID == "" || record.Input.WorkspaceID != workspaceID || c.InputHash != record.InputHash || c.TemplateSnapshotHash != record.TemplateSnapshotHash || c.ConfigurationHash == "" || (c.Phase != DefinitionAuthoringConfirmationPrepared && c.Phase != DefinitionAuthoringConfirmationMaterialized) {
+		return common.ErrConflict
+	}
+	if !recordAlreadyVerified && (record.InputHash != record.Input.InputHash() || record.TemplateSnapshotHash != WorkspaceTemplateSnapshotHash(&record.TemplateSnapshot)) {
 		return common.ErrConflict
 	}
 	var derivation *DefinitionDerivationRequest
@@ -25,7 +37,13 @@ func (c DefinitionAuthoringConfirmation) ReadCommitted(record *DefinitionAuthori
 			derivation = d
 		}
 	}
-	if derivation == nil || derivation.Proposal == nil || derivation.FailureCode != "" || derivation.ResourceSnapshotHash != c.ResourceSnapshotHash || derivation.Input.InputHash() != c.InputHash || WorkspaceTemplateSnapshotHash(&derivation.Template) != c.TemplateSnapshotHash {
+	if derivation == nil || derivation.Proposal == nil || derivation.FailureCode != "" || derivation.ResourceSnapshotHash != c.ResourceSnapshotHash {
+		return common.ErrConflict
+	}
+	if !sameDefinitionAuthoringInput(&derivation.Input, &record.Input) && derivation.Input.InputHash() != c.InputHash {
+		return common.ErrConflict
+	}
+	if !sameWorkspaceTemplate(&derivation.Template, &record.TemplateSnapshot) && WorkspaceTemplateSnapshotHash(&derivation.Template) != c.TemplateSnapshotHash {
 		return common.ErrConflict
 	}
 	var proposal *GoalSpecification
@@ -152,7 +170,7 @@ func (w *Workspace) readCommittedAuthoring(view bool) error {
 		if h.Record.readCommittedRecord(view) != nil {
 			return common.ErrConflict
 		}
-		if h.Confirmation.Phase != DefinitionAuthoringConfirmationMaterialized || h.Confirmation.ReadCommitted(&h.Record, w.ID) != nil || i >= len(w.DefinitionAdmissionCandidates) || w.DefinitionAdmissionCandidates[i].CandidateRevision != uint64(i+1) || readCommittedCandidateConfirmation(w.DefinitionAdmissionCandidates[i], h.Confirmation) != nil {
+		if h.Confirmation.Phase != DefinitionAuthoringConfirmationMaterialized || h.Confirmation.readCommitted(&h.Record, w.ID, true) != nil || i >= len(w.DefinitionAdmissionCandidates) || w.DefinitionAdmissionCandidates[i].CandidateRevision != uint64(i+1) || readCommittedCandidateConfirmation(w.DefinitionAdmissionCandidates[i], h.Confirmation) != nil {
 			return common.ErrConflict
 		}
 		if i > 0 && (h.Confirmation.ValidateSuccessor(w.DefinitionAuthoringHistory[i-1].Confirmation) != nil || h.Record.Input.Revision <= w.DefinitionAuthoringHistory[i-1].Record.Input.Revision) {
@@ -163,7 +181,7 @@ func (w *Workspace) readCommittedAuthoring(view bool) error {
 		return common.ErrConflict
 	}
 	if c := w.DefinitionAuthoringConfirmation; c != nil {
-		if c.ReadCommitted(w.DefinitionAuthoring, w.ID) != nil {
+		if c.readCommitted(w.DefinitionAuthoring, w.ID, w.DefinitionAuthoring != nil) != nil {
 			return common.ErrConflict
 		}
 		sequence := c.FormalSequence
@@ -260,12 +278,22 @@ func ValidateCommittedPreparationDefinition(w *Workspace, a WorkspacePreparation
 func (r DefinitionAuthoringRecord) ReadCommittedRecord() error { return r.readCommittedRecord(false) }
 func (r DefinitionAuthoringRecord) ReadCommittedView() error   { return r.readCommittedRecord(true) }
 func (r DefinitionAuthoringRecord) readCommittedRecord(view bool) error {
-	if r.InputHash != r.Input.InputHash() || r.TemplateSnapshotHash != WorkspaceTemplateSnapshotHash(&r.TemplateSnapshot) || r.Input.Validate() != nil || len(r.DerivationRequests) > DefinitionDerivationRequestLimit || len(r.SpecificationRequests) > DefinitionAuthoringSpecificationRequestLimit {
+	inputHash := r.Input.InputHash()
+	templateHash := WorkspaceTemplateSnapshotHash(&r.TemplateSnapshot)
+	if r.InputHash != inputHash || r.TemplateSnapshotHash != templateHash || r.Input.Validate() != nil || len(r.DerivationRequests) > DefinitionDerivationRequestLimit || len(r.SpecificationRequests) > DefinitionAuthoringSpecificationRequestLimit {
 		return common.ErrConflict
 	}
 	seen := map[string]bool{}
 	for _, d := range r.DerivationRequests {
-		if d.Input.WorkspaceID != r.Input.WorkspaceID || d.Template.ID != d.Input.TemplateID || d.PermitID == "" || seen[d.PermitID] || d.PermitID != d.ExpectedPermitID() || d.ResourceSnapshotHash != DefinitionAuthoringResourcesHash(d.Resources) {
+		dInputHash := inputHash
+		if !sameDefinitionAuthoringInput(&d.Input, &r.Input) {
+			dInputHash = d.Input.InputHash()
+		}
+		dTemplateHash := templateHash
+		if !sameWorkspaceTemplate(&d.Template, &r.TemplateSnapshot) {
+			dTemplateHash = WorkspaceTemplateSnapshotHash(&d.Template)
+		}
+		if d.Input.WorkspaceID != r.Input.WorkspaceID || d.Template.ID != d.Input.TemplateID || d.PermitID == "" || seen[d.PermitID] || d.PermitID != d.expectedPermitIDWithHashes(dInputHash, dTemplateHash) || d.ResourceSnapshotHash != DefinitionAuthoringResourcesHash(d.Resources) {
 			return common.ErrConflict
 		}
 		seen[d.PermitID] = true
@@ -520,4 +548,68 @@ func (r DefinitionAuthoringRecord) CommittedDerivation(permit string) (Definitio
 		}
 	}
 	return DefinitionDerivationRequest{}, common.ErrConflict
+}
+
+func sameDefinitionAuthoringInput(a, b *DefinitionAuthoringInput) bool {
+	return a.Version == b.Version &&
+		a.WorkspaceID == b.WorkspaceID &&
+		a.Revision == b.Revision &&
+		a.GoalText == b.GoalText &&
+		a.TemplateID == b.TemplateID &&
+		slices.Equal(a.AcceptanceRequirements, b.AcceptanceRequirements) &&
+		slices.Equal(a.ResourceRefs, b.ResourceRefs)
+}
+
+func sameWorkspaceTemplate(a, b *WorkspaceTemplate) bool {
+	if a.Builtin != b.Builtin ||
+		a.ID != b.ID ||
+		a.Name != b.Name ||
+		a.Description != b.Description ||
+		a.GoalText != b.GoalText ||
+		a.DefaultSoulID != b.DefaultSoulID ||
+		!slices.Equal(a.ParentTemplateIDs, b.ParentTemplateIDs) ||
+		!slices.Equal(a.EffectiveSources, b.EffectiveSources) ||
+		!slices.Equal(a.DoDItems, b.DoDItems) ||
+		!maps.Equal(a.SoulBindings, b.SoulBindings) ||
+		!samePayloadExact(a.ContextHints, b.ContextHints) ||
+		len(a.EvidencePolicies) != len(b.EvidencePolicies) {
+		return false
+	}
+	for i := range a.EvidencePolicies {
+		if !samePayloadExact(a.EvidencePolicies[i], b.EvidencePolicies[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func samePayloadExact(a, b workorcheventpayload.Payload) bool {
+	return samePayloadFieldsExact(a.Fields, b.Fields)
+}
+
+func samePayloadFieldsExact(a, b []workorcheventpayload.Field) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Name != b[i].Name || !samePayloadValueExact(a[i].Value, b[i].Value) {
+			return false
+		}
+	}
+	return true
+}
+
+func samePayloadValueExact(a, b workorcheventpayload.Value) bool {
+	if a.Kind != b.Kind || a.String != b.String || a.Bool != b.Bool || a.Int != b.Int || a.Uint != b.Uint || math.Float64bits(a.Float) != math.Float64bits(b.Float) {
+		return false
+	}
+	if !samePayloadFieldsExact(a.Object, b.Object) || len(a.Array) != len(b.Array) {
+		return false
+	}
+	for i := range a.Array {
+		if !samePayloadValueExact(a.Array[i], b.Array[i]) {
+			return false
+		}
+	}
+	return true
 }

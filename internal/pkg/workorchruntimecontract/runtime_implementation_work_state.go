@@ -163,17 +163,29 @@ func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinition
 		return err
 	}
 	if preview := ledger.ScopePreview; preview != nil {
-		previewSources := RuntimeImplementationWorkScopeSources{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: preview.Request.AuthoritySnapshotID, Seed: facts.DefinitionSeed, Focuses: facts.DefinitionFocuses, Profiles: facts.Activation.ExecutionContract.ProfileContracts, CoverageWorkItemID: preview.Request.CoverageWorkItemID, ManifestBinding: preview.Request.ManifestBinding, InputRevision: preview.Request.InputRevision}
-		if err := validateRuntimeWorkScopeInSession(preview.Request, previewSources, semanticSession); err != nil {
-			return err
-		}
-		if preview.Observation != nil {
-			if err := preview.Observation.ValidateForRequest(preview.Request); err != nil {
+		if semanticSession == nil ||
+			semanticSession.committedPreimage == nil ||
+			semanticSession.committedPreimage.ImplementationWork.ScopePreview == nil ||
+			facts.Resources.Manifest == nil ||
+			facts.Resources.Manifest.Revision != preview.Request.ManifestBinding.Manifest.Revision ||
+			!runtimeRawEqual(*preview, *semanticSession.committedPreimage.ImplementationWork.ScopePreview) ||
+			facts.WorkspaceID != semanticSession.committedPreimage.Facts.WorkspaceID ||
+			facts.RunID != semanticSession.committedPreimage.Facts.RunID ||
+			!runtimeRawEqual(facts.DefinitionSeed, semanticSession.committedPreimage.Facts.DefinitionSeed) ||
+			!runtimeRawEqual(facts.DefinitionFocuses, semanticSession.committedPreimage.Facts.DefinitionFocuses) ||
+			!runtimeRawEqual(facts.Activation.ExecutionContract.ProfileContracts, semanticSession.committedPreimage.Facts.Activation.ExecutionContract.ProfileContracts) {
+			previewSources := RuntimeImplementationWorkScopeSources{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: preview.Request.AuthoritySnapshotID, Seed: facts.DefinitionSeed, Focuses: facts.DefinitionFocuses, Profiles: facts.Activation.ExecutionContract.ProfileContracts, CoverageWorkItemID: preview.Request.CoverageWorkItemID, ManifestBinding: preview.Request.ManifestBinding, InputRevision: preview.Request.InputRevision}
+			if err := validateRuntimeWorkScopeInSession(preview.Request, previewSources, semanticSession); err != nil {
 				return err
 			}
-		}
-		if facts.Resources.Manifest == nil || facts.Resources.Manifest.Revision != preview.Request.ManifestBinding.Manifest.Revision {
-			return fmt.Errorf("implementation purpose preview requires current owner manifest")
+			if preview.Observation != nil {
+				if err := preview.Observation.ValidateForRequest(preview.Request); err != nil {
+					return err
+				}
+			}
+			if facts.Resources.Manifest == nil || facts.Resources.Manifest.Revision != preview.Request.ManifestBinding.Manifest.Revision {
+				return fmt.Errorf("implementation purpose preview requires current owner manifest")
+			}
 		}
 	}
 	seenChoices := map[string]bool{}
@@ -258,9 +270,11 @@ func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinition
 	}
 	sources := RuntimeImplementationWorkLedgerSources{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, StartupInputHash: definition.StartupInputHash,
 		Seed: facts.DefinitionSeed, Focuses: facts.DefinitionFocuses, Profiles: facts.Activation.ExecutionContract.ProfileContracts}
-	dispatches := append([]RuntimeDispatchRecord(nil), completed...)
+	dispatches := completed
 	if active != nil {
-		dispatches = append(dispatches, *active)
+		dispatches = make([]RuntimeDispatchRecord, len(completed)+1)
+		copy(dispatches, completed)
+		dispatches[len(completed)] = *active
 	}
 	joined := map[string]bool{}
 	outstanding := 0

@@ -10,7 +10,9 @@ import (
 // the current focus has no accepted binding-derived CWI proof. Diagnostic
 // observations without reducer-derived CWI credit never satisfy this gate.
 func MissingRequiredEvidenceKinds(facts RuntimeFacts) []string {
-	facts = facts.Normalized()
+	facts.EvidenceRevision = strings.TrimSpace(facts.EvidenceRevision)
+	facts.Focus = facts.Focus.Normalized()
+	facts.Evidence.Accepted = NormalizeEvidenceFactsPreservingEqual(facts.Evidence.Accepted)
 	missing := make([]string, 0, len(facts.Focus.RequiredEvidenceKinds))
 	for _, kind := range facts.Focus.RequiredEvidenceKinds {
 		kind = strings.TrimSpace(kind)
@@ -53,8 +55,8 @@ func currentFocusHasEvidenceKind(facts RuntimeFacts, evidenceKind string) bool {
 // use EvidenceAppliesToCoverageWorkItem so an accepted fact additionally has
 // the sealed binding proof required by C12.
 func EvidenceBelongsToCurrentFocusForDiagnosticLineage(facts RuntimeFacts, evidence EvidenceFact) bool {
-	facts = facts.Normalized()
-	return evidence.FocusID != "" && evidence.FocusID == facts.Focus.ID
+	focusID := strings.TrimSpace(facts.Focus.ID)
+	return evidence.FocusID != "" && evidence.FocusID == focusID
 }
 
 // EvidenceAppliesToCoverageWorkItem is the pure attribution predicate shared

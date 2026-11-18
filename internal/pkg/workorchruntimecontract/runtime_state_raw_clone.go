@@ -4,6 +4,8 @@
 package workorchruntimecontract
 
 import (
+	"slices"
+
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
@@ -2313,4 +2315,419 @@ func cloneWorkspaceManifestRaw(in WorkspaceManifest) WorkspaceManifest {
 	out := in
 	out.TargetRefs = cloneRuntimeStateRawSlice(in.TargetRefs, func(item string) string { return item })
 	return out
+}
+
+func clipRuntimeStateRawSliceCap[T any](items []T) []T {
+	if items == nil {
+		return nil
+	}
+	return items[:len(items):len(items)]
+}
+
+// SnapshotSemanticPlanningLedgerWithSharedHistory copies the active semantic
+// planning wrapper while capacity-clipping append-only manifest catalogs,
+// batch results/documents, feasibilities, rejections, and history segments so
+// active-ledger transitions share immutable backing arrays across copies.
+func SnapshotSemanticPlanningLedgerWithSharedHistory(in RuntimeSemanticPlanningLedger) RuntimeSemanticPlanningLedger {
+	out := in
+	out.FailureInputReview = in.FailureInputReview.Clone()
+	out.CompiledOrder = cloneRuntimeStateRawPointer(in.CompiledOrder, func(v RuntimeSemanticCompiledOrder) RuntimeSemanticCompiledOrder { return v })
+	if in.Manifest != nil {
+		manifestCopy := *in.Manifest
+		manifestCopy.FailureInputReview = in.Manifest.FailureInputReview.Clone()
+		manifestCopy.InputReviewInformation = clipRuntimeStateRawSliceCap(in.Manifest.InputReviewInformation)
+		manifestCopy.CoverageItems = clipRuntimeStateRawSliceCap(in.Manifest.CoverageItems)
+		manifestCopy.AllowedOwnerModuleIDs = clipRuntimeStateRawSliceCap(in.Manifest.AllowedOwnerModuleIDs)
+		manifestCopy.AllowedOperationKinds = clipRuntimeStateRawSliceCap(in.Manifest.AllowedOperationKinds)
+		manifestCopy.AllowedTargetPolicies = clipRuntimeStateRawSliceCap(in.Manifest.AllowedTargetPolicies)
+		manifestCopy.ProofObligations = clipRuntimeStateRawSliceCap(in.Manifest.ProofObligations)
+		manifestCopy.OwnerCatalogs = clipRuntimeStateRawSliceCap(in.Manifest.OwnerCatalogs)
+		manifestCopy.OwnerFactDependencyCatalogs = clipRuntimeStateRawSliceCap(in.Manifest.OwnerFactDependencyCatalogs)
+		out.Manifest = &manifestCopy
+	}
+	out.CorrectionDirective = cloneRuntimeStateRawPointer(in.CorrectionDirective, cloneRuntimeSemanticCorrectionDirectiveRaw)
+	out.CoverageOrderDocument = cloneRuntimeStateRawPointer(in.CoverageOrderDocument, cloneRuntimeSemanticPlanDocumentRaw)
+	out.Document = cloneRuntimeStateRawPointer(in.Document, cloneRuntimeSemanticPlanDocumentRaw)
+	out.Batches = cloneRuntimeStateRawSlice(in.Batches, cloneRuntimeSemanticPlanBatchRaw)
+	out.PendingCoverageIDs = cloneRuntimeStateRawSlice(in.PendingCoverageIDs, func(item common.CoverageWorkItemID) common.CoverageWorkItemID { return item })
+	out.CompletedBatchIDs = cloneRuntimeStateRawSlice(in.CompletedBatchIDs, func(item string) string { return item })
+	out.BatchFeasibilityResults = clipRuntimeStateRawSliceCap(in.BatchFeasibilityResults)
+	out.BatchDocuments = clipRuntimeStateRawSliceCap(in.BatchDocuments)
+	out.MergedDocument = cloneRuntimeStateRawPointer(in.MergedDocument, cloneRuntimeSemanticPlanDocumentRaw)
+	out.Feasibilities = clipRuntimeStateRawSliceCap(in.Feasibilities)
+	out.SealedLineageRefs = clipRuntimeStateRawSliceCap(in.SealedLineageRefs)
+	out.Rejections = clipRuntimeStateRawSliceCap(in.Rejections)
+	out.FeasibilityGaps = clipRuntimeStateRawSliceCap(in.FeasibilityGaps)
+	out.Failure = cloneRuntimeStateRawPointer(in.Failure, cloneRuntimeOriginalDiagnosticRaw)
+	out.History = clipRuntimeStateRawSliceCap(in.History)
+	if in.HistoryArchive != nil {
+		archiveCopy := *in.HistoryArchive
+		archiveCopy.Segments = cloneRuntimeStateRawSlice(in.HistoryArchive.Segments, func(segment []RuntimeSemanticPlanningGeneration) []RuntimeSemanticPlanningGeneration {
+			return clipRuntimeStateRawSliceCap(segment)
+		})
+		out.HistoryArchive = &archiveCopy
+	}
+	return out
+}
+
+func snapshotRuntimeResourceFactsFromStored(in RuntimeResourceFacts) RuntimeResourceFacts {
+	out := in
+	out.Manifest = cloneRuntimeStateRawPointer(in.Manifest, func(item WorkspaceManifest) WorkspaceManifest { return cloneWorkspaceManifestRaw(item) })
+	out.TargetSnapshots = clipRuntimeStateRawSliceCap(in.TargetSnapshots)
+	out.TargetSelection = cloneRuntimeStateRawPointer(in.TargetSelection, func(item RuntimeTargetSelection) RuntimeTargetSelection { return cloneRuntimeTargetSelectionRaw(item) })
+	out.FailureTarget = cloneRuntimeStateRawPointer(in.FailureTarget, func(item FailureTarget) FailureTarget { return cloneFailureTargetRaw(item) })
+	out.ValidationScratch = cloneRuntimeStateRawPointer(in.ValidationScratch, func(item ValidationScratch) ValidationScratch { return cloneValidationScratchRaw(item) })
+	out.ProviderCeiling = cloneRuntimeStateRawPointer(in.ProviderCeiling, func(item ProviderCeiling) ProviderCeiling { return cloneProviderCeilingRaw(item) })
+	out.CapabilityStates = clipRuntimeStateRawSliceCap(in.CapabilityStates)
+	out.OperationAdmissibilities = clipRuntimeStateRawSliceCap(in.OperationAdmissibilities)
+	out.PrerequisiteObservations = clipRuntimeStateRawSliceCap(in.PrerequisiteObservations)
+	out.RetiredPrerequisiteObservations = clipRuntimeStateRawSliceCap(in.RetiredPrerequisiteObservations)
+	return out
+}
+
+func snapshotRuntimeOperationAdmissibilityFromStored(in RuntimeOperationAdmissibility) RuntimeOperationAdmissibility {
+	out := in
+	out.TargetParameterBindings = clipRuntimeStateRawSliceCap(in.TargetParameterBindings)
+	out.OperationKinds = clipRuntimeStateRawSliceCap(in.OperationKinds)
+	out.OperationVariants = clipRuntimeStateRawSliceCap(in.OperationVariants)
+	out.TargetRefs = clipRuntimeStateRawSliceCap(in.TargetRefs)
+	out.SelectorRefs = clipRuntimeStateRawSliceCap(in.SelectorRefs)
+	out.ConstraintRefs = clipRuntimeStateRawSliceCap(in.ConstraintRefs)
+	out.ValidationRecipeRefs = clipRuntimeStateRawSliceCap(in.ValidationRecipeRefs)
+	out.ValidationSurfaces = clipRuntimeStateRawSliceCap(in.ValidationSurfaces)
+	out.OperationPolicies = clipRuntimeStateRawSliceCap(in.OperationPolicies)
+	out.MCPCapabilities = clipRuntimeStateRawSliceCap(in.MCPCapabilities)
+	out.ValidationRecipes = clipRuntimeStateRawSliceCap(in.ValidationRecipes)
+	return out
+}
+
+func snapshotRuntimeImplementationWorkScopeRequestFromStored(in RuntimeImplementationWorkScopeRequest) RuntimeImplementationWorkScopeRequest {
+	out := in
+	out.InputRevision = in.InputRevision.Clone()
+	out.Policy.AllowedOperations = clipRuntimeStateRawSliceCap(in.Policy.AllowedOperations)
+	out.Policy.AllowedTargetPolicies = clipRuntimeStateRawSliceCap(in.Policy.AllowedTargetPolicies)
+	out.Policy.TargetSelectorCandidateRefs = clipRuntimeStateRawSliceCap(in.Policy.TargetSelectorCandidateRefs)
+	out.Policy.ProspectiveTargetAllOfConstraintRefs = clipRuntimeStateRawSliceCap(in.Policy.ProspectiveTargetAllOfConstraintRefs)
+	out.ManifestBinding.Manifest.TargetRefs = clipRuntimeStateRawSliceCap(in.ManifestBinding.Manifest.TargetRefs)
+	out.ManifestBinding.Observation.Dependencies = clipRuntimeStateRawSliceCap(in.ManifestBinding.Observation.Dependencies)
+	return out
+}
+
+func snapshotRuntimeImplementationWorkScopeObservationFromStored(in RuntimeImplementationWorkScopeObservation) RuntimeImplementationWorkScopeObservation {
+	out := in
+	if in.Content != nil {
+		contentCopy := *in.Content
+		contentCopy.Snapshots = clipRuntimeStateRawSliceCap(in.Content.Snapshots)
+		out.Content = &contentCopy
+	}
+	out.Request = snapshotRuntimeImplementationWorkScopeRequestFromStored(in.Request)
+	out.Selection.SelectorCandidateRefs = clipRuntimeStateRawSliceCap(in.Selection.SelectorCandidateRefs)
+	out.Selection.ProspectiveTargetAllOfConstraintRefs = clipRuntimeStateRawSliceCap(in.Selection.ProspectiveTargetAllOfConstraintRefs)
+	out.Selection.TargetRefs = clipRuntimeStateRawSliceCap(in.Selection.TargetRefs)
+	out.Selection.CandidateTargetRefs = clipRuntimeStateRawSliceCap(in.Selection.CandidateTargetRefs)
+	out.Observation.Dependencies = clipRuntimeStateRawSliceCap(in.Observation.Dependencies)
+	return out
+}
+
+func snapshotRuntimeImplementationWorkingBindingFromStored(in RuntimeImplementationWorkingBinding) RuntimeImplementationWorkingBinding {
+	out := in
+	out.IntentBinding = in.IntentBinding.Clone()
+	out.InputRevision = in.InputRevision.Clone()
+	out.Proposals = clipRuntimeStateRawSliceCap(in.Proposals)
+	out.Feasibilities = clipRuntimeStateRawSliceCap(in.Feasibilities)
+	out.OwnerCatalog = snapshotRuntimeOperationAdmissibilityFromStored(in.OwnerCatalog)
+	out.CatalogObservation.Dependencies = clipRuntimeStateRawSliceCap(in.CatalogObservation.Dependencies)
+	out.MutationInputCatalogs = clipRuntimeStateRawSliceCap(in.MutationInputCatalogs)
+	out.ExcludedTargetRefs = clipRuntimeStateRawSliceCap(in.ExcludedTargetRefs)
+	return out
+}
+
+func snapshotRuntimeImplementationWorkRoundFromStored(in RuntimeImplementationWorkRound) RuntimeImplementationWorkRound {
+	out := in
+	out.GovernanceDispatchIDs = clipRuntimeStateRawSliceCap(in.GovernanceDispatchIDs)
+	out.ScopeRequest = snapshotRuntimeImplementationWorkScopeRequestFromStored(in.ScopeRequest)
+	out.ScopeObservation = cloneRuntimeStateRawPointer(in.ScopeObservation, snapshotRuntimeImplementationWorkScopeObservationFromStored)
+	out.WorkingBinding = cloneRuntimeStateRawPointer(in.WorkingBinding, snapshotRuntimeImplementationWorkingBindingFromStored)
+	return out
+}
+
+func snapshotRuntimeCandidateContractManifestFromStored(in RuntimeCandidateContractManifest) RuntimeCandidateContractManifest {
+	out := in
+	out.MutationInputCatalogs = clipRuntimeStateRawSliceCap(in.MutationInputCatalogs)
+	out.ImplementationWorkingBinding = cloneRuntimeStateRawPointer(in.ImplementationWorkingBinding, snapshotRuntimeImplementationWorkingBindingFromStored)
+	out.EffectPolicy.AllowedOperationEffects = clipRuntimeStateRawSliceCap(in.EffectPolicy.AllowedOperationEffects)
+	out.EffectPolicy.AllowedAcceptedReceiptEffects = clipRuntimeStateRawSliceCap(in.EffectPolicy.AllowedAcceptedReceiptEffects)
+	out.RequiredTopLevelFields = clipRuntimeStateRawSliceCap(in.RequiredTopLevelFields)
+	out.AllowedTopLevelFields = clipRuntimeStateRawSliceCap(in.AllowedTopLevelFields)
+	out.ForbiddenTopLevelFields = clipRuntimeStateRawSliceCap(in.ForbiddenTopLevelFields)
+	out.Bindings = clipRuntimeStateRawSliceCap(in.Bindings)
+	out.TargetRefs = clipRuntimeStateRawSliceCap(in.TargetRefs)
+	out.RequiredOperationSequence = clipRuntimeStateRawSliceCap(in.RequiredOperationSequence)
+	out.Operations = clipRuntimeStateRawSliceCap(in.Operations)
+	return out
+}
+
+func snapshotRuntimeActivationContextFromStored(in RuntimeActivationContext) RuntimeActivationContext {
+	out := in
+	out.ProviderSelection = cloneProviderInferenceSelectionRaw(in.ProviderSelection)
+	out.StageSoulBindings = clipRuntimeStateRawSliceCap(in.StageSoulBindings)
+	out.Skills = clipRuntimeStateRawSliceCap(in.Skills)
+	out.MCPServerIDs = clipRuntimeStateRawSliceCap(in.MCPServerIDs)
+	out.MCPCapabilities = clipRuntimeStateRawSliceCap(in.MCPCapabilities)
+	out.OperationPolicies = clipRuntimeStateRawSliceCap(in.OperationPolicies)
+	out.Memories = clipRuntimeStateRawSliceCap(in.Memories)
+	out.EvidencePolicies = clipRuntimeStateRawSliceCap(in.EvidencePolicies)
+	out.ExecutionContract = in.ExecutionContract
+	out.ExecutionContract.ExecutionLimits = cloneRuntimeStateRawPointer(in.ExecutionContract.ExecutionLimits, func(item RuntimeExecutionLimits) RuntimeExecutionLimits { return item })
+	out.ExecutionContract.CapabilityUsagePolicies = clipRuntimeStateRawSliceCap(in.ExecutionContract.CapabilityUsagePolicies)
+	out.ExecutionContract.ValidationPolicies = clipRuntimeStateRawSliceCap(in.ExecutionContract.ValidationPolicies)
+	out.ExecutionContract.ProfileContracts = clipRuntimeStateRawSliceCap(in.ExecutionContract.ProfileContracts)
+	out.Continuation = cloneRuntimeContinuationContextRaw(in.Continuation)
+	return out
+}
+
+func snapshotCoverageFocusFromStored(in CoverageFocus) CoverageFocus {
+	out := in
+	out.CoverageWorkItemIDs = clipRuntimeStateRawSliceCap(in.CoverageWorkItemIDs)
+	out.CoverageEvidenceBindings = clipRuntimeStateRawSliceCap(in.CoverageEvidenceBindings)
+	out.RequiredEvidenceKinds = clipRuntimeStateRawSliceCap(in.RequiredEvidenceKinds)
+	out.TargetRefs = clipRuntimeStateRawSliceCap(in.TargetRefs)
+	out.TargetDiscoverySources = clipRuntimeStateRawSliceCap(in.TargetDiscoverySources)
+	out.TargetSelectorCandidateRefs = clipRuntimeStateRawSliceCap(in.TargetSelectorCandidateRefs)
+	out.ProspectiveTargetAllOfConstraintRefs = clipRuntimeStateRawSliceCap(in.ProspectiveTargetAllOfConstraintRefs)
+	out.ProspectiveTargetRefs = clipRuntimeStateRawSliceCap(in.ProspectiveTargetRefs)
+	out.AcceptedStepKinds = clipRuntimeStateRawSliceCap(in.AcceptedStepKinds)
+	out.AcceptedOperationVariants = clipRuntimeStateRawSliceCap(in.AcceptedOperationVariants)
+	out.RejectedStepKinds = clipRuntimeStateRawSliceCap(in.RejectedStepKinds)
+	out.RequiredOwnerFacts = clipRuntimeStateRawSliceCap(in.RequiredOwnerFacts)
+	out.OwnerFactConvergences = clipRuntimeStateRawSliceCap(in.OwnerFactConvergences)
+	out.RequiredCheckRefs = clipRuntimeStateRawSliceCap(in.RequiredCheckRefs)
+	out.MetricConstraints = clipRuntimeStateRawSliceCap(in.MetricConstraints)
+	out.ArtifactRefs = clipRuntimeStateRawSliceCap(in.ArtifactRefs)
+	return out
+}
+
+func snapshotRuntimeCoverageItemFactFromStored(in RuntimeCoverageItemFact) RuntimeCoverageItemFact {
+	out := in
+	out.EvidenceRefs = clipRuntimeStateRawSliceCap(in.EvidenceRefs)
+	out.PrerequisiteCoverageWorkItemIDs = clipRuntimeStateRawSliceCap(in.PrerequisiteCoverageWorkItemIDs)
+	out.ReopenDependencies = clipRuntimeStateRawSliceCap(in.ReopenDependencies)
+	out.ReopenedByEvidenceRefs = clipRuntimeStateRawSliceCap(in.ReopenedByEvidenceRefs)
+	out.BindingLineage = clipRuntimeStateRawSliceCap(in.BindingLineage)
+	out.BindingRetirementLineage = clipRuntimeStateRawSliceCap(in.BindingRetirementLineage)
+	out.ReopenLineage = clipRuntimeStateRawSliceCap(in.ReopenLineage)
+	out.HistoricalAcceptanceProofs = clipRuntimeStateRawSliceCap(in.HistoricalAcceptanceProofs)
+	return out
+}
+
+func snapshotRuntimeOperationReceiptFromStored(in RuntimeOperationReceipt) RuntimeOperationReceipt {
+	out := in
+	out.TargetRefs = cloneRuntimeStateRawSlice(in.TargetRefs, func(item string) string { return item })
+	out.ResourceChanges = clipRuntimeStateRawSliceCap(in.ResourceChanges)
+	return out
+}
+
+func snapshotRuntimeCandidateRequestSessionFromStored(in RuntimeCandidateRequestSession) RuntimeCandidateRequestSession {
+	out := in
+	out.Transaction = cloneAuthorityTransactionRaw(in.Transaction)
+	return out
+}
+
+func snapshotRuntimeCandidateAttemptFromStored(in RuntimeCandidateAttemptRecord) RuntimeCandidateAttemptRecord {
+	out := in
+	out.Transaction = cloneAuthorityTransactionRaw(in.Transaction)
+	out.AdmissionTargetAuthorizations = cloneRuntimeStateRawSlice(in.AdmissionTargetAuthorizations, cloneRuntimeDispatchOperationTargetAuthorizationRaw)
+	out.AdmissionCoverageBindings = clipRuntimeStateRawSliceCap(in.AdmissionCoverageBindings)
+	out.AdmissionValidationRecipes = cloneRuntimeStateRawSlice(in.AdmissionValidationRecipes, cloneRuntimeValidationRecipeRaw)
+	out.Conformances = clipRuntimeStateRawSliceCap(in.Conformances)
+	out.Feasibilities = clipRuntimeStateRawSliceCap(in.Feasibilities)
+	out.FeasibilityCatalogs = clipRuntimeStateRawSliceCap(in.FeasibilityCatalogs)
+	return out
+}
+
+func snapshotRuntimeImplementationWorkLedgerFromStored(in RuntimeImplementationWorkLedger) RuntimeImplementationWorkLedger {
+	out := in
+	out.Rounds = slices.Clone(in.Rounds)
+	if len(out.Rounds) > 0 {
+		lastIdx := len(out.Rounds) - 1
+		if out.Rounds[lastIdx].CompletedReceiptSetHash != "" || out.Rounds[lastIdx].FailedReceiptHash != "" {
+			out.Rounds[lastIdx] = snapshotRuntimeImplementationWorkRoundFromStored(out.Rounds[lastIdx])
+		} else {
+			out.Rounds[lastIdx] = out.Rounds[lastIdx].Clone()
+		}
+	}
+	out.PurposeChoices = slices.Clone(in.PurposeChoices)
+	if in.ScopePreview != nil {
+		previewCopy := in.ScopePreview.Clone()
+		out.ScopePreview = &previewCopy
+	}
+	return out
+}
+
+func snapshotRuntimeExecutionBudgetLedgerFromStored(in RuntimeExecutionBudgetLedger) RuntimeExecutionBudgetLedger {
+	out := in
+	out.Policy = cloneRuntimeExecutionBudgetPolicyRaw(in.Policy)
+	out.Allocations = clipRuntimeStateRawSliceCap(in.Allocations)
+	out.Consumptions = clipRuntimeStateRawSliceCap(in.Consumptions)
+	out.Reconciliations = clipRuntimeStateRawSliceCap(in.Reconciliations)
+	return out
+}
+
+// SnapshotRuntimeStateRecordFromStored constructs a detached snapshot from a
+// read-only stored RuntimeStateRecord without mutating *in, making it safe for
+// concurrent readers holding only RLock. Append-only history slice headers on out
+// are capacity-clipped for copy-on-append isolation while ProcessedEventIDs and
+// mutable in-place collections are deep-cloned.
+func SnapshotRuntimeStateRecordFromStored(in *RuntimeStateRecord) RuntimeStateRecord {
+	if in == nil {
+		return RuntimeStateRecord{}
+	}
+	out := *in
+	// Definition and Facts.DefinitionSeed are immutable after activation.
+	out.Definition = in.Definition
+
+	out.Facts = in.Facts
+	out.Facts.DefinitionFocuses = clipRuntimeStateRawSliceCap(in.Facts.DefinitionFocuses)
+	out.Facts.Evidence.Accepted = clipRuntimeStateRawSliceCap(in.Facts.Evidence.Accepted)
+	out.Facts.Evidence.Rejected = clipRuntimeStateRawSliceCap(in.Facts.Evidence.Rejected)
+	out.Facts.EvidenceApplicabilityObservations = clipRuntimeStateRawSliceCap(in.Facts.EvidenceApplicabilityObservations)
+	out.Facts.Focus = cloneCoverageFocusRaw(in.Facts.Focus)
+	out.Facts.RemainingFocuses = cloneRuntimeStateRawSlice(in.Facts.RemainingFocuses, snapshotCoverageFocusFromStored)
+	out.Facts.CompletedFocuses = clipRuntimeStateRawSliceCap(in.Facts.CompletedFocuses)
+	out.Facts.CWISuspensions = CloneRuntimeCWISuspensions(in.Facts.CWISuspensions)
+	out.Facts.Assessments = clipRuntimeStateRawSliceCap(in.Facts.Assessments)
+	out.Facts.Failure = cloneRuntimeStateRawPointer(in.Facts.Failure, cloneFailureFactRaw)
+	out.Facts.Prerequisites = PrerequisiteState{
+		Pending:   clipRuntimeStateRawSliceCap(in.Facts.Prerequisites.Pending),
+		Satisfied: clipRuntimeStateRawSliceCap(in.Facts.Prerequisites.Satisfied),
+		Retired:   clipRuntimeStateRawSliceCap(in.Facts.Prerequisites.Retired),
+	}
+	out.Facts.Capabilities = RuntimeCapabilities{
+		StateChangeKinds:  clipRuntimeStateRawSliceCap(in.Facts.Capabilities.StateChangeKinds),
+		ValidationKinds:   clipRuntimeStateRawSliceCap(in.Facts.Capabilities.ValidationKinds),
+		GovernanceKinds:   clipRuntimeStateRawSliceCap(in.Facts.Capabilities.GovernanceKinds),
+		PrerequisiteFacts: clipRuntimeStateRawSliceCap(in.Facts.Capabilities.PrerequisiteFacts),
+	}
+	out.Facts.Resources = snapshotRuntimeResourceFactsFromStored(in.Facts.Resources)
+	out.Facts.Activation = snapshotRuntimeActivationContextFromStored(in.Facts.Activation)
+	out.Facts.ReconciliationContract = in.Facts.ReconciliationContract
+	out.Facts.ReconciliationContract.Bindings = clipRuntimeStateRawSliceCap(in.Facts.ReconciliationContract.Bindings)
+	out.Facts.StateChange = cloneRuntimeStateChangeLedgerRaw(in.Facts.StateChange)
+	out.Facts.ConvergencePolicy = cloneRuntimeConvergencePolicyRaw(in.Facts.ConvergencePolicy)
+	out.Facts.RecoveryPolicy = cloneRuntimeRecoveryPolicyRaw(in.Facts.RecoveryPolicy)
+	out.Facts.ExecutionBudgetPolicy = cloneRuntimeExecutionBudgetPolicyRaw(in.Facts.ExecutionBudgetPolicy)
+	out.Facts.Recovery = cloneRuntimeRecoveryLedgerRaw(in.Facts.Recovery)
+	out.Facts.Repair = cloneRuntimeRepairLedgerRaw(in.Facts.Repair)
+	out.Facts.RepairDirective = cloneRuntimeStateRawPointer(in.Facts.RepairDirective, cloneRuntimeRepairDirectiveRaw)
+	out.Facts.Coverage = cloneRuntimeStateRawSlice(in.Facts.Coverage, snapshotRuntimeCoverageItemFactFromStored)
+	out.Facts.Feasibility = cloneRuntimeStateRawPointer(in.Facts.Feasibility, cloneRuntimeFeasibilityFactRaw)
+	out.Facts.Slices = clipRuntimeStateRawSliceCap(in.Facts.Slices)
+
+	out.SemanticPlanning = SnapshotSemanticPlanningLedgerWithSharedHistory(in.SemanticPlanning)
+
+	out.ImplementationWork = snapshotRuntimeImplementationWorkLedgerFromStored(in.ImplementationWork)
+
+	recWithoutHistory := in.Reconciliation
+	recWithoutHistory.History = nil
+	out.Reconciliation = cloneRuntimeCWIReconciliationLedgerRaw(recWithoutHistory)
+	out.Reconciliation.History = clipRuntimeStateRawSliceCap(in.Reconciliation.History)
+
+	out.CoverageProofLineage = clipRuntimeStateRawSliceCap(in.CoverageProofLineage)
+	out.Decision = cloneRuntimeDecisionRaw(in.Decision)
+	out.ActiveDispatch = cloneRuntimeStateRawPointer(in.ActiveDispatch, cloneRuntimeDispatchRecordRaw)
+	out.CompletedDispatches = clipRuntimeStateRawSliceCap(in.CompletedDispatches)
+	out.ProcessedEventIDs = cloneRuntimeStateRawSlice(in.ProcessedEventIDs, func(item string) string { return item })
+	out.RepairSurfaceConfirmations = clipRuntimeStateRawSliceCap(in.RepairSurfaceConfirmations)
+	out.Diagnostics = clipRuntimeStateRawSliceCap(in.Diagnostics)
+	out.CandidateRequestSessions = cloneRuntimeStateRawSlice(in.CandidateRequestSessions, snapshotRuntimeCandidateRequestSessionFromStored)
+	out.CandidateAttempts = cloneRuntimeStateRawSlice(in.CandidateAttempts, snapshotRuntimeCandidateAttemptFromStored)
+	out.ExecutionBudget = snapshotRuntimeExecutionBudgetLedgerFromStored(in.ExecutionBudget)
+	out.RecoverableWaits = cloneRuntimeStateRawSlice(in.RecoverableWaits, cloneRuntimeRecoverableWaitRecordRaw)
+	out.OperationRecoveryAuthorizations = cloneRuntimeStateRawSlice(in.OperationRecoveryAuthorizations, func(item RuntimeOperationRecoveryAuthorization) RuntimeOperationRecoveryAuthorization {
+		return item
+	})
+	out.DefinitionClarification = cloneRuntimeStateRawPointer(in.DefinitionClarification, cloneRuntimeDefinitionClarificationStateRaw)
+	out.GovernanceRequests = clipRuntimeStateRawSliceCap(in.GovernanceRequests)
+	out.GovernanceResolutions = clipRuntimeStateRawSliceCap(in.GovernanceResolutions)
+	out.OperationGovernanceBindings = cloneRuntimeStateRawSlice(in.OperationGovernanceBindings, cloneRuntimeOperationGovernanceBindingRaw)
+	out.OperationReceipts = cloneRuntimeStateRawSlice(in.OperationReceipts, snapshotRuntimeOperationReceiptFromStored)
+	out.DeliveryAcknowledgements = clipRuntimeStateRawSliceCap(in.DeliveryAcknowledgements)
+	out.TerminalMaterialSeal = cloneRuntimeStateRawPointer(in.TerminalMaterialSeal, func(item RuntimeTerminalMaterialSeal) RuntimeTerminalMaterialSeal {
+		return item.CloneRaw()
+	})
+	out.PrerequisiteInvalidations = clipRuntimeStateRawSliceCap(in.PrerequisiteInvalidations)
+	out.DriveLease = cloneRuntimeStateRawPointer(in.DriveLease, cloneRuntimeDriveLeaseRaw)
+	out.Termination = cloneRuntimeStateRawPointer(in.Termination, cloneRuntimeTerminationRecordRaw)
+	return out
+}
+
+// SnapshotRuntimeStateRecordWithSharedReadOnlyHistory constructs a detached
+// transaction preimage while clipping slice capacities on append-only/read-only
+// history collections so the live record and preimage share backing arrays for
+// O(1) equality checks and copy-on-append isolation. Mutable in-place fields
+// (such as Focus queues, ActiveDispatch, CandidateRequestSessions,
+// CandidateAttempts, and OperationGovernanceBindings) are deep-cloned.
+func SnapshotRuntimeStateRecordWithSharedReadOnlyHistory(in *RuntimeStateRecord) RuntimeStateRecord {
+	if in == nil {
+		return RuntimeStateRecord{}
+	}
+	// Clip capacity on read-only/append-only live slices too so later appends to *in
+	// allocate a fresh backing array instead of overwriting the preimage.
+	in.Facts.DefinitionFocuses = clipRuntimeStateRawSliceCap(in.Facts.DefinitionFocuses)
+	in.Facts.CompletedFocuses = clipRuntimeStateRawSliceCap(in.Facts.CompletedFocuses)
+	in.Facts.Assessments = clipRuntimeStateRawSliceCap(in.Facts.Assessments)
+	in.Facts.Prerequisites.Pending = clipRuntimeStateRawSliceCap(in.Facts.Prerequisites.Pending)
+	in.Facts.Prerequisites.Satisfied = clipRuntimeStateRawSliceCap(in.Facts.Prerequisites.Satisfied)
+	in.Facts.Prerequisites.Retired = clipRuntimeStateRawSliceCap(in.Facts.Prerequisites.Retired)
+	in.Facts.Capabilities.StateChangeKinds = clipRuntimeStateRawSliceCap(in.Facts.Capabilities.StateChangeKinds)
+	in.Facts.Capabilities.ValidationKinds = clipRuntimeStateRawSliceCap(in.Facts.Capabilities.ValidationKinds)
+	in.Facts.Capabilities.GovernanceKinds = clipRuntimeStateRawSliceCap(in.Facts.Capabilities.GovernanceKinds)
+	in.Facts.Capabilities.PrerequisiteFacts = clipRuntimeStateRawSliceCap(in.Facts.Capabilities.PrerequisiteFacts)
+	in.Facts.ReconciliationContract.Bindings = clipRuntimeStateRawSliceCap(in.Facts.ReconciliationContract.Bindings)
+	in.Facts.Slices = clipRuntimeStateRawSliceCap(in.Facts.Slices)
+	in.Facts.Activation.StageSoulBindings = clipRuntimeStateRawSliceCap(in.Facts.Activation.StageSoulBindings)
+	in.Facts.Activation.Skills = clipRuntimeStateRawSliceCap(in.Facts.Activation.Skills)
+	in.Facts.Activation.MCPServerIDs = clipRuntimeStateRawSliceCap(in.Facts.Activation.MCPServerIDs)
+	in.Facts.Activation.MCPCapabilities = clipRuntimeStateRawSliceCap(in.Facts.Activation.MCPCapabilities)
+	in.Facts.Activation.OperationPolicies = clipRuntimeStateRawSliceCap(in.Facts.Activation.OperationPolicies)
+	in.Facts.Activation.Memories = clipRuntimeStateRawSliceCap(in.Facts.Activation.Memories)
+	in.Facts.Activation.EvidencePolicies = clipRuntimeStateRawSliceCap(in.Facts.Activation.EvidencePolicies)
+	in.Facts.Activation.ExecutionContract.CapabilityUsagePolicies = clipRuntimeStateRawSliceCap(in.Facts.Activation.ExecutionContract.CapabilityUsagePolicies)
+	in.Facts.Activation.ExecutionContract.ValidationPolicies = clipRuntimeStateRawSliceCap(in.Facts.Activation.ExecutionContract.ValidationPolicies)
+	in.Facts.Activation.ExecutionContract.ProfileContracts = clipRuntimeStateRawSliceCap(in.Facts.Activation.ExecutionContract.ProfileContracts)
+	in.Facts.Evidence.Accepted = clipRuntimeStateRawSliceCap(in.Facts.Evidence.Accepted)
+	in.Facts.Evidence.Rejected = clipRuntimeStateRawSliceCap(in.Facts.Evidence.Rejected)
+	in.Facts.EvidenceApplicabilityObservations = clipRuntimeStateRawSliceCap(in.Facts.EvidenceApplicabilityObservations)
+	in.Facts.Resources.TargetSnapshots = clipRuntimeStateRawSliceCap(in.Facts.Resources.TargetSnapshots)
+	in.Facts.Resources.CapabilityStates = clipRuntimeStateRawSliceCap(in.Facts.Resources.CapabilityStates)
+	in.Facts.Resources.OperationAdmissibilities = clipRuntimeStateRawSliceCap(in.Facts.Resources.OperationAdmissibilities)
+	in.Facts.Resources.PrerequisiteObservations = clipRuntimeStateRawSliceCap(in.Facts.Resources.PrerequisiteObservations)
+	in.Facts.Resources.RetiredPrerequisiteObservations = clipRuntimeStateRawSliceCap(in.Facts.Resources.RetiredPrerequisiteObservations)
+	in.SemanticPlanning.BatchFeasibilityResults = clipRuntimeStateRawSliceCap(in.SemanticPlanning.BatchFeasibilityResults)
+	in.SemanticPlanning.BatchDocuments = clipRuntimeStateRawSliceCap(in.SemanticPlanning.BatchDocuments)
+	in.SemanticPlanning.Feasibilities = clipRuntimeStateRawSliceCap(in.SemanticPlanning.Feasibilities)
+	in.SemanticPlanning.SealedLineageRefs = clipRuntimeStateRawSliceCap(in.SemanticPlanning.SealedLineageRefs)
+	in.SemanticPlanning.Rejections = clipRuntimeStateRawSliceCap(in.SemanticPlanning.Rejections)
+	in.SemanticPlanning.FeasibilityGaps = clipRuntimeStateRawSliceCap(in.SemanticPlanning.FeasibilityGaps)
+	in.SemanticPlanning.History = clipRuntimeStateRawSliceCap(in.SemanticPlanning.History)
+	if in.SemanticPlanning.HistoryArchive != nil {
+		in.SemanticPlanning.HistoryArchive.Segments = clipRuntimeStateRawSliceCap(in.SemanticPlanning.HistoryArchive.Segments)
+		for idx := range in.SemanticPlanning.HistoryArchive.Segments {
+			in.SemanticPlanning.HistoryArchive.Segments[idx] = clipRuntimeStateRawSliceCap(in.SemanticPlanning.HistoryArchive.Segments[idx])
+		}
+	}
+	in.Reconciliation.History = clipRuntimeStateRawSliceCap(in.Reconciliation.History)
+	in.CoverageProofLineage = clipRuntimeStateRawSliceCap(in.CoverageProofLineage)
+	in.CompletedDispatches = clipRuntimeStateRawSliceCap(in.CompletedDispatches)
+	in.RepairSurfaceConfirmations = clipRuntimeStateRawSliceCap(in.RepairSurfaceConfirmations)
+	in.Diagnostics = clipRuntimeStateRawSliceCap(in.Diagnostics)
+	in.ExecutionBudget.Allocations = clipRuntimeStateRawSliceCap(in.ExecutionBudget.Allocations)
+	in.ExecutionBudget.Consumptions = clipRuntimeStateRawSliceCap(in.ExecutionBudget.Consumptions)
+	in.ExecutionBudget.Reconciliations = clipRuntimeStateRawSliceCap(in.ExecutionBudget.Reconciliations)
+	in.GovernanceRequests = clipRuntimeStateRawSliceCap(in.GovernanceRequests)
+	in.GovernanceResolutions = clipRuntimeStateRawSliceCap(in.GovernanceResolutions)
+	in.OperationReceipts = clipRuntimeStateRawSliceCap(in.OperationReceipts)
+	in.DeliveryAcknowledgements = clipRuntimeStateRawSliceCap(in.DeliveryAcknowledgements)
+	in.PrerequisiteInvalidations = clipRuntimeStateRawSliceCap(in.PrerequisiteInvalidations)
+	return SnapshotRuntimeStateRecordFromStored(in)
 }

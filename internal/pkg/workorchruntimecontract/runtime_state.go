@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"reflect"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -301,71 +300,74 @@ func (r RuntimeCandidateAttemptRecord) Clone() RuntimeCandidateAttemptRecord {
 }
 
 // RuntimeStateRecord 是 Runtime 在 Run owner 中持久化的唯一正式状态。
+// Field order places immutable, sealed, and append-only ledgers first and
+// per-transition volatile state last so streaming SHA-256 prefix checkpoints
+// preserve unmodified multi-megabyte prefixes across incremental mutations.
 type RuntimeStateRecord struct {
-	ResultFeedbackVersion uint32 `json:",omitempty"`
-	StateRevision         uint64
-	EvidenceSequence      uint64
-	Definition            RuntimeDefinitionContext
-	Facts                 RuntimeFacts
-	// SemanticPlanning is the sole persisted semantic-plan request/proposal/
-	// feasibility/seal ledger. Run stores it opaquely with the aggregate.
-	SemanticPlanning RuntimeSemanticPlanningLedger
-	// ImplementationWork is the bounded Orchestrator-owned work transaction
-	// lineage. Run stores it opaquely with the one Runtime aggregate.
-	ImplementationWork RuntimeImplementationWorkLedger
-	// Reconciliation is the Orchestrator-owned SM-2 request/batch lineage. It
-	// is kept separate from Facts so owner observations never become coverage
-	// credit by deserialization alone.
-	Reconciliation RuntimeCWIReconciliationLedger
+	Definition RuntimeDefinitionContext
 	// CoverageProofLineage is the aggregate-local SM-2 receipt-to-reseal audit
 	// ledger. Run persists it opaquely; only Orchestrator may resolve an old
 	// accepted proof against a newly sealed binding.
 	CoverageProofLineage []RuntimeCoverageProofLineage
-	Decision             RuntimeDecision
-	ActiveDispatch       *RuntimeDispatchRecord
-	CompletedDispatches  []RuntimeDispatchRecord
-	ProcessedEventIDs    []string
+	// OperationReceipts are owner-authored terminal receipts persisted before
+	// capability owners return execution results (INV-03/INV-04).
+	OperationReceipts   []RuntimeOperationReceipt
+	ProcessedEventIDs   []string
+	CompletedDispatches []RuntimeDispatchRecord
+	// Reconciliation is the Orchestrator-owned SM-2 request/batch lineage. It
+	// is kept separate from Facts so owner observations never become coverage
+	// credit by deserialization alone.
+	Reconciliation RuntimeCWIReconciliationLedger
+	// CandidateRequestSessions record provider I/O before a complete candidate
+	// exists. They are not candidate attempts and cannot authorize a dispatch.
+	CandidateAttempts        []RuntimeCandidateAttemptRecord
+	CandidateRequestSessions []RuntimeCandidateRequestSession
+	// SemanticPlanning is the sole persisted semantic-plan request/proposal/
+	// feasibility/seal ledger. Run stores it opaquely with the aggregate.
+	SemanticPlanning RuntimeSemanticPlanningLedger
+	Facts            RuntimeFacts
+	// ExecutionBudget is persisted opaquely by Run; only Orchestrator reducers
+	// allocate, consume, reconcile or derive its read-only view.
+	ExecutionBudget RuntimeExecutionBudgetLedger
 	// RepairSurfaceConfirmations is the typed SM-2 replay ledger for owner
 	// confirmation facts; it is intentionally not folded into ProcessedEventIDs.
 	RepairSurfaceConfirmations []RuntimeRepairSurfaceConfirmationRecord
 	Diagnostics                []RuntimeDiagnosticRecord
-	// CandidateRequestSessions record provider I/O before a complete candidate
-	// exists. They are not candidate attempts and cannot authorize a dispatch.
-	CandidateRequestSessions []RuntimeCandidateRequestSession
-	CandidateAttempts        []RuntimeCandidateAttemptRecord
-	// ExecutionBudget is persisted opaquely by Run; only Orchestrator reducers
-	// allocate, consume, reconcile or derive its read-only view.
-	ExecutionBudget RuntimeExecutionBudgetLedger
-	// RecoverableWaits are Orchestrator-owned bounded wait records. Run stores
-	// them opaquely; only one record may be active for a Runtime aggregate.
-	RecoverableWaits []RuntimeRecoverableWaitRecord
+	// PrerequisiteInvalidations provide a persisted idempotency fence for
+	// freshness refreshes across duplicate events, CAS retries and restart.
+	PrerequisiteInvalidations   []RuntimePrerequisiteInvalidationRecord
+	GovernanceRequests          []RuntimeGovernanceRequestRecord
+	GovernanceResolutions       []RuntimeGovernanceResolutionRecord
+	OperationGovernanceBindings []RuntimeOperationGovernanceBinding
 	// OperationRecoveryAuthorizations are exact SM-4 replay permissions. Run
 	// persists them opaquely and never interprets an operation recovery counter
 	// as execution authority.
 	OperationRecoveryAuthorizations []RuntimeOperationRecoveryAuthorization
-	// DefinitionClarification is the dedicated persisted gap observation,
-	// sealed dispatch and Decision-owner request binding.
-	DefinitionClarification     *RuntimeDefinitionClarificationState
-	GovernanceRequests          []RuntimeGovernanceRequestRecord
-	GovernanceResolutions       []RuntimeGovernanceResolutionRecord
-	OperationGovernanceBindings []RuntimeOperationGovernanceBinding
-	// OperationReceipts are owner-authored terminal receipts persisted before
-	// capability owners return execution results (INV-03/INV-04).
-	OperationReceipts []RuntimeOperationReceipt
+	// RecoverableWaits are Orchestrator-owned bounded wait records. Run stores
+	// them opaquely; only one record may be active for a Runtime aggregate.
+	RecoverableWaits []RuntimeRecoverableWaitRecord
 	// DeliveryAcknowledgements are SM-4-only durable receipts for the terminal
 	// Result -> Workspace -> Run saga. They never alter the sealed SM-2 decision.
 	DeliveryAcknowledgements []RuntimeDeliveryAcknowledgement
+	// ImplementationWork is the bounded Orchestrator-owned work transaction
+	// lineage. Run stores it opaquely with the one Runtime aggregate.
+	ImplementationWork RuntimeImplementationWorkLedger
+	// DefinitionClarification is the dedicated persisted gap observation,
+	// sealed dispatch and Decision-owner request binding.
+	DefinitionClarification *RuntimeDefinitionClarificationState
 	// TerminalMaterialSeal 是 SM-4 首次交付材料的不可变前像，Run 仅 opaque 保存。
 	TerminalMaterialSeal *RuntimeTerminalMaterialSeal
-	// PrerequisiteInvalidations provide a persisted idempotency fence for
-	// freshness refreshes across duplicate events, CAS retries and restart.
-	PrerequisiteInvalidations []RuntimePrerequisiteInvalidationRecord
+	ActiveDispatch       *RuntimeDispatchRecord
+	Decision             RuntimeDecision
 	// DriveLease is the Orchestrator-owned SM-4 recovery permission. Run keeps
 	// it opaque together with the rest of the aggregate and never classifies it.
 	DriveLease *RuntimeDriveLease
 	// Termination is the SM-1 administrative cancel/supersede record.
 	// completed/failed do not use this field.
-	Termination *RuntimeTerminationRecord
+	Termination           *RuntimeTerminationRecord
+	ResultFeedbackVersion uint32 `json:",omitempty"`
+	StateRevision         uint64
+	EvidenceSequence      uint64
 }
 
 func (r RuntimeStateRecord) Validate() error {
@@ -378,44 +380,106 @@ func (r RuntimeStateRecord) Validate() error {
 
 func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSemanticValidationSession, historicalSession *runtimeHistoricalPreimageSession) error {
 	previous := semanticSession.committedPreimage
-	changedActiveDispatch := previous == nil || !reflect.DeepEqual(r.ActiveDispatch, previous.ActiveDispatch)
-	changedCandidateAttempts := previous == nil || !reflect.DeepEqual(r.CandidateAttempts, previous.CandidateAttempts)
-	changedCandidateRequestSessions := previous == nil || !reflect.DeepEqual(r.CandidateRequestSessions, previous.CandidateRequestSessions)
-	changedCompletedDispatches := previous == nil || !reflect.DeepEqual(r.CompletedDispatches, previous.CompletedDispatches)
-	changedCoverageProofLineage := previous == nil || !reflect.DeepEqual(r.CoverageProofLineage, previous.CoverageProofLineage)
-	changedDecision := previous == nil || !reflect.DeepEqual(r.Decision, previous.Decision)
-	changedDefinition := previous == nil || !reflect.DeepEqual(r.Definition, previous.Definition)
-	changedDefinitionClarification := previous == nil || !reflect.DeepEqual(r.DefinitionClarification, previous.DefinitionClarification)
-	changedDriveLease := previous == nil || !reflect.DeepEqual(r.DriveLease, previous.DriveLease)
-	changedEvidenceSequence := previous == nil || !reflect.DeepEqual(r.EvidenceSequence, previous.EvidenceSequence)
-	changedExecutionBudget := previous == nil || !reflect.DeepEqual(r.ExecutionBudget, previous.ExecutionBudget)
-	changedFacts := previous == nil || !reflect.DeepEqual(r.Facts, previous.Facts)
-	changedGovernanceRequests := previous == nil || !reflect.DeepEqual(r.GovernanceRequests, previous.GovernanceRequests)
-	changedGovernanceResolutions := previous == nil || !reflect.DeepEqual(r.GovernanceResolutions, previous.GovernanceResolutions)
-	changedImplementationWork := previous == nil || !reflect.DeepEqual(r.ImplementationWork, previous.ImplementationWork)
-	changedOperationGovernanceBindings := previous == nil || !reflect.DeepEqual(r.OperationGovernanceBindings, previous.OperationGovernanceBindings)
-	changedOperationReceipts := previous == nil || !reflect.DeepEqual(r.OperationReceipts, previous.OperationReceipts)
-	changedOperationRecoveryAuthorizations := previous == nil || !reflect.DeepEqual(r.OperationRecoveryAuthorizations, previous.OperationRecoveryAuthorizations)
-	changedPrerequisiteInvalidations := previous == nil || !reflect.DeepEqual(r.PrerequisiteInvalidations, previous.PrerequisiteInvalidations)
-	changedReconciliation := previous == nil || !reflect.DeepEqual(r.Reconciliation, previous.Reconciliation)
-	changedRepairSurfaceConfirmations := previous == nil || !reflect.DeepEqual(r.RepairSurfaceConfirmations, previous.RepairSurfaceConfirmations)
-	changedResultFeedbackVersion := previous == nil || !reflect.DeepEqual(r.ResultFeedbackVersion, previous.ResultFeedbackVersion)
-	changedSemanticPlanning := previous == nil || !reflect.DeepEqual(r.SemanticPlanning, previous.SemanticPlanning)
-	changedStateRevision := previous == nil || !reflect.DeepEqual(r.StateRevision, previous.StateRevision)
-	changedTerminalMaterialSeal := previous == nil || !reflect.DeepEqual(r.TerminalMaterialSeal, previous.TerminalMaterialSeal)
-	changedTermination := previous == nil || !reflect.DeepEqual(r.Termination, previous.Termination)
+	changedActiveDispatch := previous == nil || !runtimeRawEqual(r.ActiveDispatch, previous.ActiveDispatch)
+	changedCandidateAttempts := previous == nil || !runtimeRawEqual(r.CandidateAttempts, previous.CandidateAttempts)
+	changedCandidateRequestSessions := previous == nil || !runtimeRawEqual(r.CandidateRequestSessions, previous.CandidateRequestSessions)
+	changedCompletedDispatches := previous == nil || !runtimeRawEqual(r.CompletedDispatches, previous.CompletedDispatches)
+	changedCoverageProofLineage := previous == nil || !runtimeRawEqual(r.CoverageProofLineage, previous.CoverageProofLineage)
+	changedDecision := previous == nil || !runtimeRawEqual(r.Decision, previous.Decision)
+	changedDefinition := previous == nil || !runtimeRawEqual(r.Definition, previous.Definition)
+	changedDefinitionClarification := previous == nil || !runtimeRawEqual(r.DefinitionClarification, previous.DefinitionClarification)
+	changedDriveLease := previous == nil || !runtimeRawEqual(r.DriveLease, previous.DriveLease)
+	changedEvidenceSequence := previous == nil || !runtimeRawEqual(r.EvidenceSequence, previous.EvidenceSequence)
+	changedExecutionBudget := previous == nil || !runtimeRawEqual(r.ExecutionBudget, previous.ExecutionBudget)
+	changedGovernanceRequests := previous == nil || !runtimeRawEqual(r.GovernanceRequests, previous.GovernanceRequests)
+	changedGovernanceResolutions := previous == nil || !runtimeRawEqual(r.GovernanceResolutions, previous.GovernanceResolutions)
+	changedImplementationWork := previous == nil || !runtimeRawEqual(r.ImplementationWork, previous.ImplementationWork)
+	changedOperationGovernanceBindings := previous == nil || !runtimeRawEqual(r.OperationGovernanceBindings, previous.OperationGovernanceBindings)
+	changedOperationReceipts := previous == nil || !runtimeRawEqual(r.OperationReceipts, previous.OperationReceipts)
+	changedOperationRecoveryAuthorizations := previous == nil || !runtimeRawEqual(r.OperationRecoveryAuthorizations, previous.OperationRecoveryAuthorizations)
+	changedPrerequisiteInvalidations := previous == nil || !runtimeRawEqual(r.PrerequisiteInvalidations, previous.PrerequisiteInvalidations)
+	changedReconciliation := previous == nil || !runtimeRawEqual(r.Reconciliation, previous.Reconciliation)
+	changedRepairSurfaceConfirmations := previous == nil || !runtimeRawEqual(r.RepairSurfaceConfirmations, previous.RepairSurfaceConfirmations)
+	changedResultFeedbackVersion := previous == nil || !runtimeRawEqual(r.ResultFeedbackVersion, previous.ResultFeedbackVersion)
+	changedSemanticPlanning := previous == nil || !runtimeRawEqual(r.SemanticPlanning, previous.SemanticPlanning)
+	changedStateRevision := previous == nil || !runtimeRawEqual(r.StateRevision, previous.StateRevision)
+	changedTerminalMaterialSeal := previous == nil || !runtimeRawEqual(r.TerminalMaterialSeal, previous.TerminalMaterialSeal)
+	changedTermination := previous == nil || !runtimeRawEqual(r.Termination, previous.Termination)
+	changedFactsScope := previous == nil
+	changedFactsDefinitionRev := previous == nil
+	changedFactsCWILedgerSchema := previous == nil
+	changedFactsSeed := previous == nil
+	changedFactsDefFocuses := previous == nil
+	changedFactsCapabilities := previous == nil
+	changedFactsActivation := previous == nil
+	changedFactsPolicies := previous == nil
+	changedFactsSlices := previous == nil
+	changedFactsFocusQueues := previous == nil
+	changedFactsAssessments := previous == nil
+	changedFactsEvidence := previous == nil
+	changedFactsCoverage := previous == nil
+	changedFactsReconciliationContract := previous == nil
+	changedFactsSuspensions := previous == nil
+	changedFactsFeasibility := previous == nil
+	changedFactsFailure := previous == nil
+	changedFactsRepair := previous == nil
+	changedFactsRepairDirective := previous == nil
+	changedFactsRecovery := previous == nil
+	changedFactsStateChange := previous == nil
+	changedFactsPrerequisites := previous == nil
+	changedFactsResources := previous == nil
+	changedFactsEvidenceRev := previous == nil
+	changedFactsObs := previous == nil
+	if previous != nil {
+		changedFactsScope = r.Facts.WorkspaceID != previous.Facts.WorkspaceID || r.Facts.RunID != previous.Facts.RunID
+		changedFactsDefinitionRev = r.Facts.DefinitionRevision != previous.Facts.DefinitionRevision
+		changedFactsCWILedgerSchema = r.Facts.CWILedgerSchemaVersion != previous.Facts.CWILedgerSchemaVersion
+		changedFactsEvidenceRev = r.Facts.EvidenceRevision != previous.Facts.EvidenceRevision
+		changedFactsObs = !runtimeRawEqual(r.Facts.EvidenceApplicabilityObservations, previous.Facts.EvidenceApplicabilityObservations)
+		changedFactsSeed = !runtimeRawEqual(r.Facts.DefinitionSeed, previous.Facts.DefinitionSeed)
+		changedFactsDefFocuses = !runtimeRawEqual(r.Facts.DefinitionFocuses, previous.Facts.DefinitionFocuses)
+		changedFactsCapabilities = !runtimeRawEqual(r.Facts.Capabilities, previous.Facts.Capabilities)
+		changedFactsActivation = !runtimeRawEqual(r.Facts.Activation, previous.Facts.Activation)
+		changedFactsPolicies = !runtimeRawEqual(r.Facts.ConvergencePolicy, previous.Facts.ConvergencePolicy) ||
+			!runtimeRawEqual(r.Facts.RecoveryPolicy, previous.Facts.RecoveryPolicy) ||
+			!runtimeRawEqual(r.Facts.ExecutionBudgetPolicy, previous.Facts.ExecutionBudgetPolicy)
+		changedFactsSlices = !runtimeRawEqual(r.Facts.Slices, previous.Facts.Slices)
+		changedFactsFocusQueues = !runtimeRawEqual(r.Facts.Focus, previous.Facts.Focus) ||
+			!runtimeRawEqual(r.Facts.RemainingFocuses, previous.Facts.RemainingFocuses) ||
+			!runtimeRawEqual(r.Facts.CompletedFocuses, previous.Facts.CompletedFocuses)
+		changedFactsCoverage = !runtimeRawEqual(r.Facts.Coverage, previous.Facts.Coverage)
+		changedFactsReconciliationContract = !runtimeRawEqual(r.Facts.ReconciliationContract, previous.Facts.ReconciliationContract)
+		changedFactsEvidence = !runtimeRawEqual(r.Facts.Evidence, previous.Facts.Evidence)
+		changedFactsAssessments = !runtimeRawEqual(r.Facts.Assessments, previous.Facts.Assessments)
+		changedFactsSuspensions = !runtimeRawEqual(r.Facts.CWISuspensions, previous.Facts.CWISuspensions)
+		changedFactsFeasibility = !runtimeRawEqual(r.Facts.Feasibility, previous.Facts.Feasibility)
+		changedFactsFailure = !runtimeRawEqual(r.Facts.Failure, previous.Facts.Failure)
+		changedFactsRepair = !runtimeRawEqual(r.Facts.Repair, previous.Facts.Repair)
+		changedFactsRepairDirective = !runtimeRawEqual(r.Facts.RepairDirective, previous.Facts.RepairDirective)
+		changedFactsRecovery = !runtimeRawEqual(r.Facts.Recovery, previous.Facts.Recovery)
+		changedFactsStateChange = !runtimeRawEqual(r.Facts.StateChange, previous.Facts.StateChange)
+		changedFactsPrerequisites = !runtimeRawEqual(r.Facts.Prerequisites, previous.Facts.Prerequisites)
+		changedFactsResources = !runtimeRawEqual(r.Facts.Resources, previous.Facts.Resources)
+	}
+	changedFactsCore := previous == nil || changedFactsScope || changedFactsDefinitionRev || changedFactsCWILedgerSchema ||
+		changedFactsSeed || changedFactsDefFocuses || changedFactsCapabilities || changedFactsActivation || changedFactsPolicies ||
+		changedFactsFocusQueues || changedFactsAssessments || changedFactsEvidence || changedFactsCoverage ||
+		changedFactsReconciliationContract || changedFactsFeasibility || changedFactsFailure || changedFactsRepair ||
+		changedFactsRepairDirective || changedFactsRecovery || changedFactsStateChange || changedFactsPrerequisites ||
+		changedFactsResources || changedFactsEvidenceRev
+	_ = changedFactsSlices
 
 	if changedResultFeedbackVersion {
 		if err := ValidateRuntimeResultFeedbackVersion(r.ResultFeedbackVersion); err != nil {
 			return err
 		}
 	}
-	if changedFacts {
+	if changedFactsScope {
 		if r.Facts.WorkspaceID == "" || r.Facts.RunID == "" {
 			return fmt.Errorf("runtime state requires workspace and run scope")
 		}
 	}
-	if changedDecision || changedFacts || changedImplementationWork {
+	if changedDecision || changedFactsFocusQueues || changedFactsFailure || changedFactsRepairDirective || changedImplementationWork {
 		if r.Decision.RequiredOutput.ImplementationWorkBindingHash != "" {
 			matches := 0
 			for _, round := range r.ImplementationWork.Rounds {
@@ -428,38 +492,49 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 			}
 		}
 	}
-	if changedActiveDispatch || changedCompletedDispatches || changedDefinition || changedExecutionBudget || changedFacts || changedImplementationWork || changedOperationGovernanceBindings || changedOperationReceipts || changedSemanticPlanning {
+	if changedActiveDispatch || changedCompletedDispatches || changedDefinition || changedExecutionBudget ||
+		changedFactsScope || changedFactsSeed || changedFactsDefFocuses || changedFactsFocusQueues ||
+		changedFactsActivation || changedFactsResources || changedFactsEvidence || changedFactsFailure ||
+		changedImplementationWork || changedOperationGovernanceBindings || changedOperationReceipts || changedSemanticPlanning {
 		if err := validateRuntimeImplementationWorkStateInSession(r.Definition, r.Facts, r.ImplementationWork, r.SemanticPlanning, r.ActiveDispatch, r.CompletedDispatches, r.OperationReceipts, r.OperationGovernanceBindings, r.ExecutionBudget, semanticSession); err != nil {
 			return fmt.Errorf("runtime state implementation work: %w", err)
 		}
 	}
-	if changedActiveDispatch || changedCompletedDispatches || changedFacts {
+	if changedActiveDispatch || changedCompletedDispatches || changedFactsScope {
 		if err := validateRuntimeDispatchHistoryTransition(r.Facts.WorkspaceID, r.Facts.RunID, r.ActiveDispatch, r.CompletedDispatches, previous); err != nil {
 			return fmt.Errorf("runtime state dispatch history: %w", err)
 		}
 	}
-	if changedActiveDispatch || changedCompletedDispatches || changedEvidenceSequence || changedFacts || changedGovernanceResolutions {
-		if err := ValidateRuntimeEvidenceLedgerSequence(r.EvidenceSequence, r.Facts, r.ActiveDispatch, r.CompletedDispatches, r.GovernanceResolutions); err != nil {
+	if changedActiveDispatch || changedCompletedDispatches || changedEvidenceSequence || changedGovernanceResolutions ||
+		changedFactsDefinitionRev || changedFactsEvidence || changedFactsAssessments || changedFactsEvidenceRev {
+		if err := validateRuntimeEvidenceLedgerSequenceTransition(r, previous); err != nil {
 			return fmt.Errorf("runtime state evidence ledger: %w", err)
 		}
 	}
-	if changedFacts || changedOperationReceipts || changedReconciliation || changedStateRevision {
+	if changedFactsObs || changedFactsEvidence || changedFactsEvidenceRev || changedFactsScope || changedFactsDefinitionRev || changedOperationReceipts || changedReconciliation ||
+		(changedStateRevision && (previous == nil || r.StateRevision < previous.StateRevision || len(r.Facts.EvidenceApplicabilityObservations) != len(previous.Facts.EvidenceApplicabilityObservations))) {
 		if err := validateRuntimeEvidenceApplicabilityObservationTransition(r.Facts, r.OperationReceipts, r.StateRevision, r.Reconciliation, previous); err != nil {
 			return fmt.Errorf("runtime state evidence applicability: %w", err)
 		}
 	}
-	if changedCompletedDispatches || changedFacts || changedStateRevision || changedReconciliation {
+	if (len(r.Facts.CWISuspensions) > 0 || (previous != nil && len(previous.Facts.CWISuspensions) > 0)) &&
+		(changedCompletedDispatches || changedFactsSuspensions || changedFactsCoverage || changedFactsEvidence || changedFactsScope || changedFactsDefinitionRev || changedStateRevision || changedReconciliation) {
 		if err := ValidateRuntimeCWISuspensionSources(r.Facts, r.CompletedDispatches, r.StateRevision, r.Reconciliation); err != nil {
 			return err
 		}
 	}
-	if changedCandidateAttempts || changedCandidateRequestSessions || changedFacts {
+	if (len(r.Facts.EvidenceApplicabilityObservations) > 0 || (previous != nil && len(previous.Facts.EvidenceApplicabilityObservations) > 0)) &&
+		(changedCandidateAttempts || changedCandidateRequestSessions || changedFactsObs) {
 		if err := ValidateRuntimeApplicabilityCandidateInvalidations(r.Facts.EvidenceApplicabilityObservations, r.CandidateAttempts, r.CandidateRequestSessions); err != nil {
 			return err
 		}
 	}
-	if changedActiveDispatch || changedCompletedDispatches || changedFacts {
-		if err := ValidateRuntimeAssessmentAuthoritySources(r.Facts, r.ActiveDispatch, r.CompletedDispatches); err != nil {
+	obsPrefixUnchanged := previous != nil &&
+		len(r.Facts.EvidenceApplicabilityObservations) >= len(previous.Facts.EvidenceApplicabilityObservations) &&
+		(len(previous.Facts.EvidenceApplicabilityObservations) == 0 ||
+			runtimeRawEqual(r.Facts.EvidenceApplicabilityObservations[:len(previous.Facts.EvidenceApplicabilityObservations)], previous.Facts.EvidenceApplicabilityObservations))
+	if changedActiveDispatch || changedCompletedDispatches || changedFactsSeed || changedFactsDefFocuses || (changedFactsObs && !obsPrefixUnchanged) {
+		if err := validateRuntimeAssessmentAuthoritySourcesInSession(r.Facts, r.ActiveDispatch, r.CompletedDispatches, semanticSession); err != nil {
 			return fmt.Errorf("runtime state assessment authority: %w", err)
 		}
 	}
@@ -468,27 +543,28 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 			return fmt.Errorf("runtime state assessment applicability generation: %w", err)
 		}
 	}
-	if changedCompletedDispatches || changedFacts {
-		if err := ValidateRuntimeAssessmentAdjudications(r.Facts, r.CompletedDispatches); err != nil {
+	if changedCompletedDispatches || changedFactsScope || changedFactsDefinitionRev || changedFactsSeed || changedFactsDefFocuses || changedFactsEvidence || changedFactsAssessments {
+		if err := validateRuntimeAssessmentAdjudicationsInSession(r.Facts, r.CompletedDispatches, semanticSession); err != nil {
 			return fmt.Errorf("runtime state assessment adjudication: %w", err)
 		}
 	}
-	if changedFacts {
+	if changedFactsSeed || changedFactsDefFocuses {
 		if err := ValidateRuntimeDefinitionFocuses(r.Facts.DefinitionSeed, r.Facts.DefinitionFocuses); err != nil {
 			return fmt.Errorf("runtime state definition focuses: %w", err)
 		}
 	}
-	if changedFacts || changedReconciliation {
+	if changedReconciliation || changedFactsCWILedgerSchema || changedFactsDefinitionRev || changedFactsScope ||
+		changedFactsCoverage || changedFactsFocusQueues || changedFactsReconciliationContract {
 		if err := ValidateRuntimeStateCWILedger(r.Facts, r.Reconciliation); err != nil {
 			return err
 		}
 	}
-	if changedActiveDispatch || changedCompletedDispatches || changedFacts || changedOperationReceipts {
+	if changedActiveDispatch || changedCompletedDispatches || changedFactsCoverage || changedFactsFocusQueues || changedFactsEvidence || changedOperationReceipts {
 		if err := ValidateRuntimeCWIBindingRetirementsAgainstExecution(r.Facts, r.ActiveDispatch, r.CompletedDispatches, r.OperationReceipts); err != nil {
 			return err
 		}
 	}
-	if changedFacts {
+	if changedFactsCore {
 		if err := r.Facts.validateInSemanticSession(semanticSession); err != nil {
 			return err
 		}
@@ -498,17 +574,17 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 			return fmt.Errorf("runtime semantic planning ledger: %w", err)
 		}
 	}
-	if changedFacts || changedSemanticPlanning {
+	if changedFactsActivation || changedSemanticPlanning {
 		if err := ValidateRuntimeSemanticProofBatchLimits(r.SemanticPlanning, r.Facts.Activation.ExecutionContract.ExecutionLimits); err != nil {
 			return err
 		}
 	}
-	if changedFacts || changedSemanticPlanning {
+	if changedFactsScope || changedSemanticPlanning {
 		if err := ValidateRuntimeSemanticHistoryScope(r.SemanticPlanning, r.Facts.WorkspaceID, r.Facts.RunID); err != nil {
 			return err
 		}
 	}
-	if changedFacts || changedSemanticPlanning {
+	if changedFactsSeed || changedSemanticPlanning {
 		if r.SemanticPlanning.DefinitionSeed.Hash != r.Facts.DefinitionSeed.Hash {
 			return fmt.Errorf("runtime semantic planning seed does not match facts")
 		}
@@ -528,17 +604,15 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 			return err
 		}
 	}
-	if changedDefinition || changedFacts {
+	if changedDefinition || changedFactsDefinitionRev {
 		if strings.TrimSpace(r.Definition.Revision) != strings.TrimSpace(r.Facts.DefinitionRevision) {
 			return fmt.Errorf("runtime state definition revision mismatch")
 		}
 	}
-	if changedDefinition || changedFacts {
+	if changedDefinition || changedFactsSeed {
 		if !SameRuntimeSourceObligationInventory(r.Definition.SourceObligations, r.Facts.DefinitionSeed.SourceObligations) {
 			return fmt.Errorf("runtime state Definition and seed source obligations mismatch")
 		}
-	}
-	if changedDefinition || changedFacts {
 		if r.Facts.DefinitionSeed.SourceObligations != nil && r.Facts.DefinitionSeed.SourceObligations.StartupInputHash != r.Definition.StartupInputHash {
 			return fmt.Errorf("runtime state source obligations startup input mismatch")
 		}
@@ -548,19 +622,19 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 			return err
 		}
 	}
-	if changedDecision || changedFacts {
+	if changedDecision || changedFactsScope {
 		if r.Decision.AuthoritySnapshot.WorkspaceID != r.Facts.WorkspaceID || r.Decision.AuthoritySnapshot.RunID != r.Facts.RunID {
 			return fmt.Errorf("runtime state decision scope mismatch")
 		}
 	}
-	if changedActiveDispatch || changedDecision || changedFacts {
+	if changedActiveDispatch || changedDecision || changedFactsActivation {
 		if r.ActiveDispatch != nil {
 			if err := r.ActiveDispatch.ValidateWithActivation(r.Decision, RuntimeActivationForFacts(r.Facts)); err != nil {
 				return fmt.Errorf("runtime state active dispatch: %w", err)
 			}
 		}
 	}
-	if changedCandidateAttempts || changedFacts {
+	if changedCandidateAttempts || changedFactsScope {
 		if err := validateRuntimeCandidateAttemptSourcesInSession(r.Facts.WorkspaceID, r.Facts.RunID, r.CandidateAttempts, semanticSession); err != nil {
 			return err
 		}
@@ -571,7 +645,7 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 		}
 	}
 
-	if changedFacts || changedPrerequisiteInvalidations || changedSemanticPlanning {
+	if changedFactsResources || changedPrerequisiteInvalidations || changedSemanticPlanning {
 		if err := validateRuntimeInputRevisionObservationSourcesInSession(r.SemanticPlanning, r.Facts, r.PrerequisiteInvalidations, semanticSession); err != nil {
 			return err
 		}
@@ -582,16 +656,20 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 		}
 	}
 	if changedExecutionBudget {
-		if err := r.ExecutionBudget.Validate(); err != nil {
+		var prevBudget *RuntimeExecutionBudgetLedger
+		if previous != nil {
+			prevBudget = &previous.ExecutionBudget
+		}
+		if err := validateRuntimeExecutionBudgetLedgerTransition(r.ExecutionBudget, prevBudget); err != nil {
 			return fmt.Errorf("runtime execution budget: %w", err)
 		}
 	}
-	if changedExecutionBudget || changedFacts {
+	if changedExecutionBudget || changedFactsPolicies {
 		if !SameRuntimeExecutionBudgetPolicy(r.ExecutionBudget.Policy, r.Facts.ExecutionBudgetPolicy) {
 			return fmt.Errorf("runtime execution budget policy does not match activation facts")
 		}
 	}
-	if changedActiveDispatch || changedCandidateRequestSessions || changedDecision || changedDefinition || changedDefinitionClarification || changedFacts {
+	if changedActiveDispatch || changedCandidateRequestSessions || changedDecision || changedDefinition || changedDefinitionClarification || changedFactsScope {
 		if r.DefinitionClarification != nil {
 			if err := r.DefinitionClarification.Validate(); err != nil {
 				return fmt.Errorf("runtime Definition clarification: %w", err)
@@ -628,7 +706,7 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 			return fmt.Errorf("current runtime authority retains a failed candidate attempt 1 without reducer transition")
 		}
 	}
-	if changedCandidateAttempts || changedDecision || changedFacts {
+	if changedCandidateAttempts || changedDecision || changedFactsActivation || changedFactsPolicies {
 		for _, attempt := range r.CandidateAttempts {
 			// A pending proposal is the exact candidate that can be resumed into the
 			// feasibility gate. Validate it again at aggregate load so corrupted
@@ -665,13 +743,13 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 			return err
 		}
 	}
-	if changedActiveDispatch || changedCompletedDispatches || changedFacts || changedOperationGovernanceBindings {
+	if changedActiveDispatch || changedCompletedDispatches || changedFactsScope || changedOperationGovernanceBindings {
 		if err := ValidateRuntimeDispatchExecutionKeyLineage(r.Facts.WorkspaceID, r.Facts.RunID, r.ActiveDispatch, r.CompletedDispatches, r.OperationGovernanceBindings); err != nil {
 			return err
 		}
 	}
 	if changedActiveDispatch || changedCandidateAttempts || changedCompletedDispatches || changedOperationGovernanceBindings {
-		if err := ValidateRuntimeDispatchAdmissionLineage(r.ActiveDispatch, r.CompletedDispatches, r.CandidateAttempts, r.OperationGovernanceBindings); err != nil {
+		if err := validateRuntimeDispatchAdmissionLineageInSession(r.ActiveDispatch, r.CompletedDispatches, r.CandidateAttempts, r.OperationGovernanceBindings, previous); err != nil {
 			return err
 		}
 	}
@@ -680,7 +758,7 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 			return err
 		}
 	}
-	if changedActiveDispatch || changedCandidateAttempts || changedCompletedDispatches || changedFacts {
+	if changedActiveDispatch || changedCandidateAttempts || changedCompletedDispatches || changedFactsActivation {
 		if err := ValidateRuntimeDurableDispatchLimits(r.Facts.Activation.ExecutionContract.ExecutionLimits, r.ActiveDispatch, r.CompletedDispatches, r.CandidateAttempts); err != nil {
 			return err
 		}
@@ -700,7 +778,7 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 			return err
 		}
 	}
-	if changedCompletedDispatches || changedFacts {
+	if changedCompletedDispatches || changedFactsCoverage || changedFactsEvidence || changedFactsAssessments || changedFactsSeed || changedFactsDefFocuses || changedFactsScope || changedFactsDefinitionRev {
 		if err := ValidateRuntimeHistoricalBehaviorCompletions(r.Facts, r.CompletedDispatches); err != nil {
 			return err
 		}
@@ -717,101 +795,103 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 			return fmt.Errorf("runtime repair surface confirmations: %w", err)
 		}
 	}
-	if changedFacts || changedRepairSurfaceConfirmations {
+	if changedFactsScope || changedRepairSurfaceConfirmations {
 		for _, confirmation := range r.RepairSurfaceConfirmations {
 			if confirmation.Confirmation.Observation.WorkspaceID != r.Facts.WorkspaceID || confirmation.Confirmation.Observation.RunID != r.Facts.RunID {
 				return fmt.Errorf("runtime repair surface confirmation scope mismatch")
 			}
 		}
 	}
-	recovery := r.Facts.Recovery.Normalized()
-	if changedDriveLease || changedStateRevision || changedFacts {
-		if err := ValidateRuntimeNonTerminalRecoveryLinearization(recovery, r.StateRevision, r.DriveLease); err != nil {
-			return fmt.Errorf("runtime state recovery: %w", err)
+	if changedDriveLease || changedStateRevision || changedFactsRecovery || changedDecision || changedFactsScope || changedTermination {
+		recovery := r.Facts.Recovery.Normalized()
+		if changedDriveLease || changedStateRevision || changedFactsRecovery {
+			if err := ValidateRuntimeNonTerminalRecoveryLinearization(recovery, r.StateRevision, r.DriveLease); err != nil {
+				return fmt.Errorf("runtime state recovery: %w", err)
+			}
 		}
-	}
-	if changedDecision || changedDriveLease || changedFacts || changedTermination {
-		if r.DriveLease != nil {
-			if err := r.DriveLease.Validate(); err != nil {
-				return fmt.Errorf("runtime state drive lease: %w", err)
-			}
-			if r.DriveLease.WorkspaceID != r.Facts.WorkspaceID || r.DriveLease.RunID != r.Facts.RunID {
-				return fmt.Errorf("runtime state drive lease scope mismatch")
-			}
-			canonicalTerminalDelivery := r.DriveLease.Reason == RuntimeDriveLeaseReasonDeliveryRetry && r.DriveLease.FailureSignature == "terminal-delivery"
-			if canonicalTerminalDelivery {
-				authorization := r.Facts.Recovery.Normalized().TerminalDeliveryRequest
-				outcome, terminal, outcomeErr := DeriveRuntimeTerminalOutcome(r.Decision, r.Termination)
-				if outcomeErr != nil || !terminal {
-					return fmt.Errorf("runtime state terminal-delivery lease has no sealed terminal")
-				}
-				deliveryID := StableTerminalDeliveryID(r.Facts.WorkspaceID, r.Facts.RunID, r.Decision.AuthoritySnapshot.ID, outcome)
-				creatorGeneration := r.DriveLease.RecoveryGeneration - 1
-				creatorRequestID := StableRuntimeTerminalDeliveryRecoveryRequestID(deliveryID, creatorGeneration)
-				phaseMatches := authorization.Validate() == nil && authorization.TerminalDeliveryID == deliveryID &&
-					((authorization.FailedLeaseGeneration == creatorGeneration && authorization.RequestID == creatorRequestID) ||
-						(r.DriveLease.State == RuntimeDriveLeaseRunning && authorization.FailedLeaseGeneration == r.DriveLease.RecoveryGeneration &&
-							authorization.RequestID == StableRuntimeTerminalDeliveryRecoveryRequestID(deliveryID, r.DriveLease.RecoveryGeneration)))
-				if r.DriveLease.RecoveryRequestID != creatorRequestID || !phaseMatches {
-					return fmt.Errorf("runtime state terminal-delivery lease does not match persisted recovery request")
-				}
-			} else if RuntimeDriveLeaseBindsNonTerminalRecovery(*r.DriveLease) {
-				if err := ValidateRuntimeNonTerminalRecoveryLeaseBinding(r.Facts.Recovery, *r.DriveLease); err != nil {
+		if changedDecision || changedDriveLease || changedFactsScope || changedFactsRecovery || changedTermination {
+			if r.DriveLease != nil {
+				if err := r.DriveLease.Validate(); err != nil {
 					return fmt.Errorf("runtime state drive lease: %w", err)
 				}
-				// A newly sealed convergence terminal may retain only the exact
-				// request-bound running worker until SM-4 exit settlement. Scheduled
-				// authority and the administrative termination lane remain disjoint.
-				if r.Termination != nil || (isTerminalRuntimeDecision(r.Decision) && r.DriveLease.State != RuntimeDriveLeaseRunning) {
-					return fmt.Errorf("runtime state terminal cannot retain nonterminal recovery authority outside an exact running convergence handoff")
+				if r.DriveLease.WorkspaceID != r.Facts.WorkspaceID || r.DriveLease.RunID != r.Facts.RunID {
+					return fmt.Errorf("runtime state drive lease scope mismatch")
 				}
-			} else if r.DriveLease.RecoveryRequestID != "" {
-				return fmt.Errorf("runtime state non-terminal lease carries terminal recovery request")
+				canonicalTerminalDelivery := r.DriveLease.Reason == RuntimeDriveLeaseReasonDeliveryRetry && r.DriveLease.FailureSignature == "terminal-delivery"
+				if canonicalTerminalDelivery {
+					authorization := recovery.TerminalDeliveryRequest
+					outcome, terminal, outcomeErr := DeriveRuntimeTerminalOutcome(r.Decision, r.Termination)
+					if outcomeErr != nil || !terminal {
+						return fmt.Errorf("runtime state terminal-delivery lease has no sealed terminal")
+					}
+					deliveryID := StableTerminalDeliveryID(r.Facts.WorkspaceID, r.Facts.RunID, r.Decision.AuthoritySnapshot.ID, outcome)
+					creatorGeneration := r.DriveLease.RecoveryGeneration - 1
+					creatorRequestID := StableRuntimeTerminalDeliveryRecoveryRequestID(deliveryID, creatorGeneration)
+					phaseMatches := authorization.Validate() == nil && authorization.TerminalDeliveryID == deliveryID &&
+						((authorization.FailedLeaseGeneration == creatorGeneration && authorization.RequestID == creatorRequestID) ||
+							(r.DriveLease.State == RuntimeDriveLeaseRunning && authorization.FailedLeaseGeneration == r.DriveLease.RecoveryGeneration &&
+								authorization.RequestID == StableRuntimeTerminalDeliveryRecoveryRequestID(deliveryID, r.DriveLease.RecoveryGeneration)))
+					if r.DriveLease.RecoveryRequestID != creatorRequestID || !phaseMatches {
+						return fmt.Errorf("runtime state terminal-delivery lease does not match persisted recovery request")
+					}
+				} else if RuntimeDriveLeaseBindsNonTerminalRecovery(*r.DriveLease) {
+					if err := ValidateRuntimeNonTerminalRecoveryLeaseBinding(r.Facts.Recovery, *r.DriveLease); err != nil {
+						return fmt.Errorf("runtime state drive lease: %w", err)
+					}
+					// A newly sealed convergence terminal may retain only the exact
+					// request-bound running worker until SM-4 exit settlement. Scheduled
+					// authority and the administrative termination lane remain disjoint.
+					if r.Termination != nil || (isTerminalRuntimeDecision(r.Decision) && r.DriveLease.State != RuntimeDriveLeaseRunning) {
+						return fmt.Errorf("runtime state terminal cannot retain nonterminal recovery authority outside an exact running convergence handoff")
+					}
+				} else if r.DriveLease.RecoveryRequestID != "" {
+					return fmt.Errorf("runtime state non-terminal lease carries terminal recovery request")
+				}
 			}
 		}
-	}
-	if changedDriveLease || changedTermination {
-		if r.Termination != nil && r.DriveLease != nil &&
-			(r.DriveLease.Reason != RuntimeDriveLeaseReasonDeliveryRetry || r.DriveLease.FailureSignature != "terminal-delivery") {
-			return fmt.Errorf("administratively terminated runtime state can retain only the canonical terminal-delivery retry lease")
+		if changedDriveLease || changedTermination {
+			if r.Termination != nil && r.DriveLease != nil &&
+				(r.DriveLease.Reason != RuntimeDriveLeaseReasonDeliveryRetry || r.DriveLease.FailureSignature != "terminal-delivery") {
+				return fmt.Errorf("administratively terminated runtime state can retain only the canonical terminal-delivery retry lease")
+			}
 		}
-	}
 
-	if changedDriveLease || changedFacts {
-		if recovery.TerminalDeliveryIntervention.Validate() == nil && r.DriveLease != nil {
-			return fmt.Errorf("runtime state terminal delivery intervention cannot retain automatic drive authority")
+		if changedDriveLease || changedFactsRecovery {
+			if recovery.TerminalDeliveryIntervention.Validate() == nil && r.DriveLease != nil {
+				return fmt.Errorf("runtime state terminal delivery intervention cannot retain automatic drive authority")
+			}
 		}
-	}
-	retiredLease := recovery.RetiredTerminalDeliveryLease
-	retiredLeasePresent := RuntimeDriveLeasePresent(retiredLease)
-	if changedDecision || changedDriveLease || changedFacts || changedTermination {
-		if retiredLeasePresent {
-			requestBoundNonterminal := RuntimeDriveLeaseBindsNonTerminalRecovery(retiredLease) &&
-				ValidateRuntimeNonTerminalRecoveryLeaseBinding(recovery, retiredLease) == nil
-			if r.Termination == nil || retiredLease.Validate() != nil || retiredLease.State != RuntimeDriveLeaseRunning ||
-				retiredLease.WorkspaceID != r.Facts.WorkspaceID || retiredLease.RunID != r.Facts.RunID ||
-				retiredLease.AggregateRevision >= r.Termination.Revision || (retiredLease.RecoveryRequestID != "" && !requestBoundNonterminal) ||
-				(retiredLease.Reason == RuntimeDriveLeaseReasonDeliveryRetry && retiredLease.FailureSignature == "terminal-delivery") {
-				return fmt.Errorf("runtime state retired terminal-delivery lease does not match administrative termination")
-			}
-			if recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != "" {
-				outcome, terminal, err := DeriveRuntimeTerminalOutcome(r.Decision, r.Termination)
-				if err != nil || !terminal {
-					return fmt.Errorf("runtime state retired terminal-delivery lease has no terminal authority")
+		retiredLease := recovery.RetiredTerminalDeliveryLease
+		retiredLeasePresent := RuntimeDriveLeasePresent(retiredLease)
+		if changedDecision || changedDriveLease || changedFactsScope || changedFactsRecovery || changedTermination {
+			if retiredLeasePresent {
+				requestBoundNonterminal := RuntimeDriveLeaseBindsNonTerminalRecovery(retiredLease) &&
+					ValidateRuntimeNonTerminalRecoveryLeaseBinding(recovery, retiredLease) == nil
+				if r.Termination == nil || retiredLease.Validate() != nil || retiredLease.State != RuntimeDriveLeaseRunning ||
+					retiredLease.WorkspaceID != r.Facts.WorkspaceID || retiredLease.RunID != r.Facts.RunID ||
+					retiredLease.AggregateRevision >= r.Termination.Revision || (retiredLease.RecoveryRequestID != "" && !requestBoundNonterminal) ||
+					(retiredLease.Reason == RuntimeDriveLeaseReasonDeliveryRetry && retiredLease.FailureSignature == "terminal-delivery") {
+					return fmt.Errorf("runtime state retired terminal-delivery lease does not match administrative termination")
 				}
-				deliveryID := StableTerminalDeliveryID(r.Facts.WorkspaceID, r.Facts.RunID, r.Decision.AuthoritySnapshot.ID, outcome)
-				expectedRequestID := StableRuntimeTerminalDeliveryRecoveryRequestID(deliveryID, retiredLease.RecoveryGeneration)
-				if recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != expectedRequestID {
-					return fmt.Errorf("runtime state retired terminal-delivery lease handoff request mismatch")
+				if recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != "" {
+					outcome, terminal, err := DeriveRuntimeTerminalOutcome(r.Decision, r.Termination)
+					if err != nil || !terminal {
+						return fmt.Errorf("runtime state retired terminal-delivery lease has no terminal authority")
+					}
+					deliveryID := StableTerminalDeliveryID(r.Facts.WorkspaceID, r.Facts.RunID, r.Decision.AuthoritySnapshot.ID, outcome)
+					expectedRequestID := StableRuntimeTerminalDeliveryRecoveryRequestID(deliveryID, retiredLease.RecoveryGeneration)
+					if recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != expectedRequestID {
+						return fmt.Errorf("runtime state retired terminal-delivery lease handoff request mismatch")
+					}
 				}
+				if r.DriveLease != nil && r.DriveLease.Reason == RuntimeDriveLeaseReasonDeliveryRetry && r.DriveLease.FailureSignature == "terminal-delivery" &&
+					r.DriveLease.RecoveryGeneration == retiredLease.RecoveryGeneration+1 &&
+					recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != r.DriveLease.RecoveryRequestID {
+					return fmt.Errorf("runtime state retired terminal-delivery successor is not bound to its handoff request")
+				}
+			} else if recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != "" {
+				return fmt.Errorf("runtime state retired terminal-delivery handoff request has no exact lease")
 			}
-			if r.DriveLease != nil && r.DriveLease.Reason == RuntimeDriveLeaseReasonDeliveryRetry && r.DriveLease.FailureSignature == "terminal-delivery" &&
-				r.DriveLease.RecoveryGeneration == retiredLease.RecoveryGeneration+1 &&
-				recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != r.DriveLease.RecoveryRequestID {
-				return fmt.Errorf("runtime state retired terminal-delivery successor is not bound to its handoff request")
-			}
-		} else if recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != "" {
-			return fmt.Errorf("runtime state retired terminal-delivery handoff request has no exact lease")
 		}
 	}
 	if changedCompletedDispatches || changedGovernanceRequests || changedOperationGovernanceBindings || changedOperationReceipts {
@@ -876,31 +956,17 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 		}
 	}
 
-	if changedFacts || changedGovernanceResolutions || changedOperationGovernanceBindings {
+	if changedFactsEvidence || changedGovernanceResolutions || changedOperationGovernanceBindings {
 		if err := ValidateRuntimeOperationGovernanceGrantLineage(r.OperationGovernanceBindings, r.GovernanceResolutions, r.Facts.Evidence.Accepted, r.Facts.Evidence.Rejected); err != nil {
 			return err
 		}
 	}
 	if changedActiveDispatch || changedCandidateAttempts || changedCompletedDispatches {
-		for _, attempt := range r.CandidateAttempts {
-			if attempt.State != RuntimeCandidateAttemptStateAccepted {
-				continue
-			}
-			matched := r.ActiveDispatch != nil && RuntimeAcceptedCandidateAttemptMatchesDispatch(attempt, *r.ActiveDispatch)
-			if !matched {
-				for _, dispatch := range r.CompletedDispatches {
-					if RuntimeAcceptedCandidateAttemptMatchesDispatch(attempt, dispatch) {
-						matched = true
-						break
-					}
-				}
-			}
-			if !matched {
-				return fmt.Errorf("accepted runtime candidate attempt has no exact sealed dispatch target/validation-recipe authority projection")
-			}
+		if err := validateAcceptedCandidateAttemptsMatchDispatches(r.ActiveDispatch, r.CompletedDispatches, r.CandidateAttempts, previous); err != nil {
+			return err
 		}
 	}
-	if changedCompletedDispatches || changedFacts || changedGovernanceRequests || changedGovernanceResolutions {
+	if changedCompletedDispatches || changedFactsScope || changedGovernanceRequests || changedGovernanceResolutions {
 		for _, resolution := range r.GovernanceResolutions {
 			resolution = resolution.Normalized()
 			if resolution.WorkspaceID != r.Facts.WorkspaceID || resolution.RunID != r.Facts.RunID {
@@ -938,11 +1004,11 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 		}
 	}
 	if changedTerminalMaterialSeal {
-		if err := ValidateRuntimeTerminalMaterialSeal(r.TerminalMaterialSeal, r); err != nil {
+		if err := validateRuntimeTerminalMaterialSealInSession(r.TerminalMaterialSeal, r, historicalSession); err != nil {
 			return err
 		}
 	}
-	if changedActiveDispatch || changedCompletedDispatches || changedFacts || changedOperationReceipts || changedOperationRecoveryAuthorizations || changedStateRevision {
+	if changedActiveDispatch || changedCompletedDispatches || changedFactsScope || changedFactsRecovery || changedOperationReceipts || changedOperationRecoveryAuthorizations || changedStateRevision {
 		if err := ValidateRuntimeOperationRecoveryAuthorizations(r.Facts.WorkspaceID, r.Facts.RunID, r.ActiveDispatch, r.CompletedDispatches, r.OperationReceipts, r.OperationRecoveryAuthorizations, r.Facts.Recovery, r.StateRevision); err != nil {
 			return err
 		}
@@ -956,6 +1022,9 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 	}
 	if changedCompletedDispatches {
 		for idx, dispatch := range r.CompletedDispatches {
+			if previous != nil && idx < len(previous.CompletedDispatches) && runtimeRawEqual(dispatch, previous.CompletedDispatches[idx]) {
+				continue
+			}
 			if err := ValidateRuntimeOperationExecutionRecords(dispatch.OperationExecutions); err != nil {
 				return fmt.Errorf("runtime state completed dispatch[%d] executions: %w", idx, err)
 			}

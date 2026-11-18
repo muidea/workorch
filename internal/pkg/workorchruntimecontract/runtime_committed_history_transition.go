@@ -24,19 +24,24 @@ func ValidateRuntimeCommittedHistoryTransition(before, after RuntimeStateRecord)
 	if err := validateCommittedSemanticSources(before.SemanticPlanning, after.SemanticPlanning); err != nil {
 		return err
 	}
-	prior := make([]RuntimeSemanticPlanningGeneration, 0, before.SemanticPlanning.HistoryCount())
-	for _, generation := range before.SemanticPlanning.AllHistory() {
-		prior = append(prior, generation)
-	}
-	if after.SemanticPlanning.HistoryCount() < len(prior) {
-		return fmt.Errorf("runtime transition removes committed semantic history")
-	}
-	for i, generation := range after.SemanticPlanning.AllHistory() {
-		if i >= len(prior) {
-			break
+	historyUnchangedPrefix := runtimeRawEqual(before.SemanticPlanning.HistoryArchive, after.SemanticPlanning.HistoryArchive) &&
+		len(after.SemanticPlanning.History) >= len(before.SemanticPlanning.History) &&
+		(len(before.SemanticPlanning.History) == 0 || runtimeRawEqual(before.SemanticPlanning.History, after.SemanticPlanning.History[:len(before.SemanticPlanning.History)]))
+	if !historyUnchangedPrefix {
+		prior := make([]RuntimeSemanticPlanningGeneration, 0, before.SemanticPlanning.HistoryCount())
+		for _, generation := range before.SemanticPlanning.AllHistory() {
+			prior = append(prior, generation)
 		}
-		if !runtimeRawEqual(prior[i], generation) {
-			return fmt.Errorf("runtime transition rewrites committed semantic generation %d", i)
+		if after.SemanticPlanning.HistoryCount() < len(prior) {
+			return fmt.Errorf("runtime transition removes committed semantic history")
+		}
+		for i, generation := range after.SemanticPlanning.AllHistory() {
+			if i >= len(prior) {
+				break
+			}
+			if !runtimeRawEqual(prior[i], generation) {
+				return fmt.Errorf("runtime transition rewrites committed semantic generation %d", i)
+			}
 		}
 	}
 	if len(after.ImplementationWork.PurposeChoices) < len(before.ImplementationWork.PurposeChoices) {
@@ -58,6 +63,9 @@ func ValidateRuntimeCommittedHistoryTransition(before, after RuntimeStateRecord)
 		}
 	}
 	for _, pair := range [][2][]EvidenceFact{{before.Facts.Evidence.Accepted, after.Facts.Evidence.Accepted}, {before.Facts.Evidence.Rejected, after.Facts.Evidence.Rejected}} {
+		if len(pair[1]) >= len(pair[0]) && (len(pair[0]) == 0 || runtimeRawEqual(pair[0], pair[1][:len(pair[0])])) {
+			continue
+		}
 		// Evidence has canonical identity order, not append position.
 		for _, fact := range pair[0] {
 			matches := 0
@@ -73,62 +81,78 @@ func ValidateRuntimeCommittedHistoryTransition(before, after RuntimeStateRecord)
 	}
 	// Accepted request/attempt sources are original authority, not replaceable
 	// copies of the dispatch's current self hash. Pending requests still evolve.
-	for _, attempt := range before.CandidateAttempts {
-		if attempt.State != RuntimeCandidateAttemptStateAccepted {
-			continue
-		}
-		matches := 0
-		for _, next := range after.CandidateAttempts {
-			if runtimeRawEqual(attempt, next) {
-				matches++
-			}
-		}
-		if matches != 1 {
-			return fmt.Errorf("runtime transition rewrites accepted candidate source")
-		}
-		for _, session := range before.CandidateRequestSessions {
-			if session.LogicalRequestID != attempt.LogicalRequestID {
+	attemptsAndSessionsUnchangedPrefix := len(after.CandidateAttempts) >= len(before.CandidateAttempts) &&
+		(len(before.CandidateAttempts) == 0 || runtimeRawEqual(before.CandidateAttempts, after.CandidateAttempts[:len(before.CandidateAttempts)])) &&
+		len(after.CandidateRequestSessions) >= len(before.CandidateRequestSessions) &&
+		(len(before.CandidateRequestSessions) == 0 || runtimeRawEqual(before.CandidateRequestSessions, after.CandidateRequestSessions[:len(before.CandidateRequestSessions)]))
+	if !attemptsAndSessionsUnchangedPrefix {
+		for _, attempt := range before.CandidateAttempts {
+			if attempt.State != RuntimeCandidateAttemptStateAccepted {
 				continue
 			}
-			matches = 0
-			for _, next := range after.CandidateRequestSessions {
-				if runtimeRawEqual(session, next) {
+			matches := 0
+			for _, next := range after.CandidateAttempts {
+				if next.LogicalRequestID == attempt.LogicalRequestID && next.Attempt == attempt.Attempt && next.State == attempt.State && runtimeRawEqual(attempt, next) {
 					matches++
 				}
 			}
 			if matches != 1 {
-				return fmt.Errorf("runtime transition rewrites accepted request source")
+				return fmt.Errorf("runtime transition rewrites accepted candidate source")
+			}
+			for _, session := range before.CandidateRequestSessions {
+				if session.LogicalRequestID != attempt.LogicalRequestID {
+					continue
+				}
+				matches = 0
+				for _, next := range after.CandidateRequestSessions {
+					if next.LogicalRequestID == session.LogicalRequestID && runtimeRawEqual(session, next) {
+						matches++
+					}
+				}
+				if matches != 1 {
+					return fmt.Errorf("runtime transition rewrites accepted request source")
+				}
 			}
 		}
 	}
-	receipts := make(map[string]RuntimeOperationReceipt, len(after.OperationReceipts))
-	for _, receipt := range after.OperationReceipts {
-		receipts[fmt.Sprintf("%s/%d", receipt.ExecutionKey, receipt.Fence)] = receipt
+	type receiptIdentityKey struct {
+		executionKey string
+		fence        uint64
 	}
-	for _, receipt := range before.OperationReceipts {
-		if !runtimeRawEqual(receipt, receipts[fmt.Sprintf("%s/%d", receipt.ExecutionKey, receipt.Fence)]) {
-			return fmt.Errorf("runtime transition rewrites committed owner receipt")
+	if len(after.OperationReceipts) < len(before.OperationReceipts) ||
+		(len(before.OperationReceipts) > 0 && !runtimeRawEqual(before.OperationReceipts, after.OperationReceipts[:len(before.OperationReceipts)])) {
+		receipts := make(map[receiptIdentityKey]RuntimeOperationReceipt, len(after.OperationReceipts))
+		for _, receipt := range after.OperationReceipts {
+			receipts[receiptIdentityKey{executionKey: receipt.ExecutionKey, fence: receipt.Fence}] = receipt
 		}
-	}
-	dispatches := make(map[string]RuntimeDispatchRecord, len(after.CompletedDispatches))
-	for _, dispatch := range after.CompletedDispatches {
-		dispatches[dispatch.ID] = dispatch
-	}
-	for _, dispatch := range before.CompletedDispatches {
-		next, found := dispatches[dispatch.ID]
-		if !found {
-			return fmt.Errorf("runtime transition removes completed dispatch")
-		}
-		settled := dispatch.State == RuntimeDispatchStateCommitted
-		for _, execution := range dispatch.OperationExecutions {
-			settled = settled && execution.State == OperationExecutionEvidenceCommitted
-		}
-		if settled {
-			if !runtimeRawEqual(dispatch, next) {
-				return fmt.Errorf("runtime transition rewrites committed dispatch result")
+		for _, receipt := range before.OperationReceipts {
+			if !runtimeRawEqual(receipt, receipts[receiptIdentityKey{executionKey: receipt.ExecutionKey, fence: receipt.Fence}]) {
+				return fmt.Errorf("runtime transition rewrites committed owner receipt")
 			}
-		} else if dispatch.DispatchAuthorityHash != next.DispatchAuthorityHash || StableRuntimeDispatchAuthorityHash(dispatch) != StableRuntimeDispatchAuthorityHash(next) {
-			return fmt.Errorf("runtime transition rewrites invalidated dispatch authority")
+		}
+	}
+	if len(after.CompletedDispatches) < len(before.CompletedDispatches) ||
+		(len(before.CompletedDispatches) > 0 && !runtimeRawEqual(before.CompletedDispatches, after.CompletedDispatches[:len(before.CompletedDispatches)])) {
+		dispatches := make(map[string]RuntimeDispatchRecord, len(after.CompletedDispatches))
+		for _, dispatch := range after.CompletedDispatches {
+			dispatches[dispatch.ID] = dispatch
+		}
+		for _, dispatch := range before.CompletedDispatches {
+			next, found := dispatches[dispatch.ID]
+			if !found {
+				return fmt.Errorf("runtime transition removes completed dispatch")
+			}
+			settled := dispatch.State == RuntimeDispatchStateCommitted
+			for _, execution := range dispatch.OperationExecutions {
+				settled = settled && execution.State == OperationExecutionEvidenceCommitted
+			}
+			if settled {
+				if !runtimeRawEqual(dispatch, next) {
+					return fmt.Errorf("runtime transition rewrites committed dispatch result")
+				}
+			} else if dispatch.DispatchAuthorityHash != next.DispatchAuthorityHash || StableRuntimeDispatchAuthorityHash(dispatch) != StableRuntimeDispatchAuthorityHash(next) {
+				return fmt.Errorf("runtime transition rewrites invalidated dispatch authority")
+			}
 		}
 	}
 	return nil

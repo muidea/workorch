@@ -67,19 +67,17 @@ func (m *Biz) executeGoalCommand(ctx context.Context, ev magicevent.Event) (work
 		if err != nil {
 			return workspaceCommandResponse{}, err
 		}
-		hidden, err := m.workspaceDeletionReadHidden(scopedCtx, cmd.WorkspaceID)
-		if err != nil {
-			return workspaceCommandResponse{}, err
-		}
-		if hidden {
-			return workspaceCommandResponse{}, common.ErrNotFound
-		}
-		visible, err := m.authoringFormalDefinitionVisible(scopedCtx, cmd.WorkspaceID)
+		goals, _, visible, err := m.readVisibleWorkspaceFormalDefinitions(scopedCtx, cmd.WorkspaceID, false, false)
 		if err != nil {
 			return workspaceCommandResponse{}, err
 		}
 		if !visible {
 			return workspaceCommandResponse{}, common.ErrNotFound
+		}
+		for _, goal := range goals {
+			if goal != nil && goal.ID == cmd.GoalID {
+				return workspaceCommandResponse{Goal: workspacemodel.CloneGoal(goal)}, nil
+			}
 		}
 		item, err := m.goals.Get(scopedCtx, cmd.GoalID)
 		if err != nil {
@@ -95,23 +93,12 @@ func (m *Biz) executeGoalCommand(ctx context.Context, ev magicevent.Event) (work
 		if err != nil {
 			return workspaceCommandResponse{}, err
 		}
-		hidden, err := m.workspaceDeletionReadHidden(scopedCtx, cmd.WorkspaceID)
-		if err != nil {
-			return workspaceCommandResponse{}, err
-		}
-		if hidden {
-			return workspaceCommandResponse{Goals: []*workspacemodel.Goal{}}, nil
-		}
-		visible, err := m.authoringFormalDefinitionVisible(scopedCtx, cmd.WorkspaceID)
+		items, _, visible, err := m.readVisibleWorkspaceFormalDefinitions(scopedCtx, cmd.WorkspaceID, true, false)
 		if err != nil {
 			return workspaceCommandResponse{}, err
 		}
 		if !visible {
 			return workspaceCommandResponse{Goals: []*workspacemodel.Goal{}}, nil
-		}
-		items, err := m.goals.ListByWorkspaceID(scopedCtx, cmd.WorkspaceID)
-		if err != nil {
-			return workspaceCommandResponse{}, err
 		}
 		return workspaceCommandResponse{Goals: workspacemodel.CloneGoals(items)}, nil
 	default:

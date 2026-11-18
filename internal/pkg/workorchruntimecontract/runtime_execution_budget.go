@@ -541,9 +541,9 @@ func StableRuntimeBudgetReconciliationHash(record RuntimeBudgetReconciliationRec
 
 type RuntimeExecutionBudgetLedger struct {
 	Policy          RuntimeExecutionBudgetPolicy
-	Allocations     []RuntimeBudgetAllocation
 	Consumptions    []RuntimeBudgetConsumptionFact
 	Reconciliations []RuntimeBudgetReconciliationRecord
+	Allocations     []RuntimeBudgetAllocation
 }
 
 func NewRuntimeExecutionBudgetLedger(policy RuntimeExecutionBudgetPolicy) (RuntimeExecutionBudgetLedger, error) {
@@ -576,12 +576,147 @@ func (l RuntimeExecutionBudgetLedger) Clone() RuntimeExecutionBudgetLedger {
 	return l
 }
 
+func validateRuntimeExecutionBudgetLedgerTransition(l RuntimeExecutionBudgetLedger, previous *RuntimeExecutionBudgetLedger) error {
+	if previous == nil || !runtimeRawEqual(l.Policy, previous.Policy) {
+		return l.Validate()
+	}
+	allocations := make(map[string]RuntimeBudgetAllocation, len(l.Allocations))
+	var changedAllocIDs map[string]bool
+	prevAllocIdx := 0
+	for i := range l.Allocations {
+		raw := l.Allocations[i]
+		if strings.TrimSpace(raw.AllocationID) != raw.AllocationID || (i > 0 && raw.AllocationID < l.Allocations[i-1].AllocationID) {
+			return l.Validate()
+		}
+		for prevAllocIdx < len(previous.Allocations) && previous.Allocations[prevAllocIdx].AllocationID < raw.AllocationID {
+			prevAllocIdx++
+		}
+		var allocation RuntimeBudgetAllocation
+		if prevAllocIdx < len(previous.Allocations) && runtimeRawEqual(raw, previous.Allocations[prevAllocIdx]) {
+			allocation = raw
+		} else {
+			allocation = raw.Normalized()
+			if runtimeBudgetDimensionUsesSourceLedger(allocation.Dimension) {
+				return fmt.Errorf("runtime budget dimension %q must be derived from its authoritative source ledger", allocation.Dimension)
+			}
+			if err := allocation.Validate(l.Policy); err != nil {
+				return err
+			}
+			if changedAllocIDs == nil {
+				changedAllocIDs = make(map[string]bool, 4)
+			}
+			changedAllocIDs[allocation.AllocationID] = true
+		}
+		if _, duplicate := allocations[allocation.AllocationID]; duplicate {
+			return fmt.Errorf("runtime budget allocation %q is duplicated", allocation.AllocationID)
+		}
+		allocations[allocation.AllocationID] = allocation
+	}
+	consumptionsByAllocation := make(map[string]int, len(l.Consumptions))
+	consumptionByAllocation := make(map[string]RuntimeBudgetConsumptionFact, len(l.Consumptions))
+	physicalOwners := make(map[string]string, len(l.Consumptions))
+	seenConsumptions := make(map[string]struct{}, len(l.Consumptions))
+	prevConsIdx := 0
+	for i := range l.Consumptions {
+		raw := l.Consumptions[i]
+		if strings.TrimSpace(raw.ConsumptionID) != raw.ConsumptionID || (i > 0 && raw.ConsumptionID < l.Consumptions[i-1].ConsumptionID) {
+			return l.Validate()
+		}
+		allocation, found := allocations[strings.TrimSpace(raw.AllocationID)]
+		if !found {
+			return fmt.Errorf("runtime budget consumption has no allocation")
+		}
+		for prevConsIdx < len(previous.Consumptions) && previous.Consumptions[prevConsIdx].ConsumptionID < raw.ConsumptionID {
+			prevConsIdx++
+		}
+		var consumption RuntimeBudgetConsumptionFact
+		if prevConsIdx < len(previous.Consumptions) && runtimeRawEqual(raw, previous.Consumptions[prevConsIdx]) && !changedAllocIDs[allocation.AllocationID] {
+			consumption = raw
+		} else {
+			consumption = raw.Normalized()
+			if err := consumption.Validate(allocation); err != nil {
+				return err
+			}
+		}
+		if _, duplicate := seenConsumptions[consumption.ConsumptionID]; duplicate {
+			return fmt.Errorf("runtime budget consumption %q is duplicated", consumption.ConsumptionID)
+		}
+		seenConsumptions[consumption.ConsumptionID] = struct{}{}
+		consumptionsByAllocation[consumption.AllocationID]++
+		consumptionByAllocation[consumption.AllocationID] = consumption
+		physicalKey := consumption.Owner + "\x00" + consumption.PhysicalConsumptionID + "\x00" + string(allocation.Dimension)
+		if other, duplicate := physicalOwners[physicalKey]; duplicate && other != consumption.AllocationID {
+			return fmt.Errorf("runtime physical consumption belongs to multiple allocations")
+		}
+		physicalOwners[physicalKey] = consumption.AllocationID
+	}
+	if len(l.Reconciliations) > 0 && (len(changedAllocIDs) > 0 || !runtimeRawEqual(l.Reconciliations, previous.Reconciliations)) {
+		return l.Validate()
+	}
+	return validateRuntimeExecutionBudgetTotals(l.Policy, l.Allocations, allocations, consumptionsByAllocation, consumptionByAllocation)
+}
+
+func validateRuntimeExecutionBudgetTotals(
+	policy RuntimeExecutionBudgetPolicy,
+	rawAllocations []RuntimeBudgetAllocation,
+	normalizedAllocations map[string]RuntimeBudgetAllocation,
+	consumptionsByAllocation map[string]int,
+	consumptionByAllocation map[string]RuntimeBudgetConsumptionFact,
+) error {
+	reservedByDim := make(map[RuntimeBudgetDimension]int64, len(policy.Dimensions))
+	confirmedByDim := make(map[RuntimeBudgetDimension]int64, len(policy.Dimensions))
+	unknownByDim := make(map[RuntimeBudgetDimension]int64, len(policy.Dimensions))
+	for _, raw := range rawAllocations {
+		allocation := raw
+		if normalizedAllocations != nil {
+			allocation = normalizedAllocations[raw.AllocationID]
+		}
+		count := consumptionsByAllocation[allocation.AllocationID]
+		switch allocation.State {
+		case RuntimeBudgetAllocationReserved:
+			if count != 0 {
+				return fmt.Errorf("runtime budget allocation state %q cannot carry consumption", allocation.State)
+			}
+			reservedByDim[allocation.Dimension] += allocation.ReservedAmount
+		case RuntimeBudgetAllocationReleased:
+			if count != 0 {
+				return fmt.Errorf("runtime budget allocation state %q cannot carry consumption", allocation.State)
+			}
+		case RuntimeBudgetAllocationConfirmed:
+			if count != 1 {
+				return fmt.Errorf("confirmed runtime budget allocation requires one consumption")
+			}
+			fact := consumptionByAllocation[allocation.AllocationID]
+			if fact.UnknownAmount != 0 || allocation.OwnerFactRef != fact.OwnerResultRef {
+				return fmt.Errorf("confirmed runtime budget allocation carries unknown consumption")
+			}
+			confirmedByDim[allocation.Dimension] += fact.ConfirmedAmount
+		case RuntimeBudgetAllocationUnknown, RuntimeBudgetAllocationExhausted:
+			if count != 1 {
+				return fmt.Errorf("unknown or exhausted runtime budget allocation requires one consumption")
+			}
+			fact := consumptionByAllocation[allocation.AllocationID]
+			if fact.UnknownAmount <= 0 || fact.ConfirmedAmount != 0 || allocation.OwnerFactRef != fact.OwnerResultRef {
+				return fmt.Errorf("unknown or exhausted runtime budget allocation has invalid consumption")
+			}
+			unknownByDim[allocation.Dimension] += fact.UnknownAmount
+		}
+	}
+	for _, dimension := range policy.Dimensions {
+		used := confirmedByDim[dimension.Dimension] + reservedByDim[dimension.Dimension] + unknownByDim[dimension.Dimension]
+		if used < 0 || used > dimension.Limit {
+			return fmt.Errorf("runtime execution budget view exceeds dimension %q", dimension.Dimension)
+		}
+	}
+	return nil
+}
+
 func (l RuntimeExecutionBudgetLedger) Validate() error {
 	l = l.Clone()
 	if err := l.Policy.Validate(); err != nil {
 		return err
 	}
-	allocations := map[string]RuntimeBudgetAllocation{}
+	allocations := make(map[string]RuntimeBudgetAllocation, len(l.Allocations))
 	for _, allocation := range l.Allocations {
 		if runtimeBudgetDimensionUsesSourceLedger(allocation.Dimension) {
 			return fmt.Errorf("runtime budget dimension %q must be derived from its authoritative source ledger", allocation.Dimension)
@@ -594,10 +729,10 @@ func (l RuntimeExecutionBudgetLedger) Validate() error {
 		}
 		allocations[allocation.AllocationID] = allocation
 	}
-	consumptionsByAllocation := map[string]int{}
-	consumptionByAllocation := map[string]RuntimeBudgetConsumptionFact{}
-	physicalOwners := map[string]string{}
-	seenConsumptions := map[string]struct{}{}
+	consumptionsByAllocation := make(map[string]int, len(l.Consumptions))
+	consumptionByAllocation := make(map[string]RuntimeBudgetConsumptionFact, len(l.Consumptions))
+	physicalOwners := make(map[string]string, len(l.Consumptions))
+	seenConsumptions := make(map[string]struct{}, len(l.Consumptions))
 	for _, consumption := range l.Consumptions {
 		allocation, found := allocations[consumption.AllocationID]
 		if !found {
@@ -618,32 +753,7 @@ func (l RuntimeExecutionBudgetLedger) Validate() error {
 		}
 		physicalOwners[physicalKey] = consumption.AllocationID
 	}
-	for _, allocation := range l.Allocations {
-		count := consumptionsByAllocation[allocation.AllocationID]
-		switch allocation.State {
-		case RuntimeBudgetAllocationReserved, RuntimeBudgetAllocationReleased:
-			if count != 0 {
-				return fmt.Errorf("runtime budget allocation state %q cannot carry consumption", allocation.State)
-			}
-		case RuntimeBudgetAllocationConfirmed:
-			if count != 1 {
-				return fmt.Errorf("confirmed runtime budget allocation requires one consumption")
-			}
-			fact := consumptionByAllocation[allocation.AllocationID]
-			if fact.UnknownAmount != 0 || allocation.OwnerFactRef != fact.OwnerResultRef {
-				return fmt.Errorf("confirmed runtime budget allocation carries unknown consumption")
-			}
-		case RuntimeBudgetAllocationUnknown, RuntimeBudgetAllocationExhausted:
-			if count != 1 {
-				return fmt.Errorf("unknown or exhausted runtime budget allocation requires one consumption")
-			}
-			fact := consumptionByAllocation[allocation.AllocationID]
-			if fact.UnknownAmount <= 0 || fact.ConfirmedAmount != 0 || allocation.OwnerFactRef != fact.OwnerResultRef {
-				return fmt.Errorf("unknown or exhausted runtime budget allocation has invalid consumption")
-			}
-		}
-	}
-	seenReconciliations := map[string]struct{}{}
+	seenReconciliations := make(map[string]struct{}, len(l.Reconciliations))
 	for _, record := range l.Reconciliations {
 		if err := record.Validate(l.Allocations); err != nil {
 			return err
@@ -653,8 +763,7 @@ func (l RuntimeExecutionBudgetLedger) Validate() error {
 		}
 		seenReconciliations[record.ReconciliationID] = struct{}{}
 	}
-	_, err := BuildRuntimeExecutionBudgetView("workspace-validation", "run-validation", 1, l, "", "")
-	return err
+	return validateRuntimeExecutionBudgetTotals(l.Policy, l.Allocations, nil, consumptionsByAllocation, consumptionByAllocation)
 }
 
 func RuntimeBudgetAllocationForID(values []RuntimeBudgetAllocation, allocationID string) (RuntimeBudgetAllocation, bool) {
@@ -1289,10 +1398,11 @@ type RuntimeExecutionBudgetSourceUsage struct {
 }
 
 func RuntimeExecutionBudgetSourceUsageFromFacts(facts RuntimeFacts) RuntimeExecutionBudgetSourceUsage {
-	facts = facts.Normalized()
+	recovery := facts.Recovery.Normalized()
+	repair := facts.Repair.Normalized()
 	return RuntimeExecutionBudgetSourceUsage{
-		OperationRecoveryAttempts: int64(facts.Recovery.OperationRecoveryAttempts),
-		SameFocusRepairAttempts:   int64(facts.Repair.RepairAttempts),
+		OperationRecoveryAttempts: int64(recovery.OperationRecoveryAttempts),
+		SameFocusRepairAttempts:   int64(repair.RepairAttempts),
 	}
 }
 

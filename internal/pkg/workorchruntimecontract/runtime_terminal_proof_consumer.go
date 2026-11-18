@@ -80,6 +80,13 @@ func runtimeLineageSourcesFromRecord(source RuntimeStateRecord) RuntimeLineageAs
 // or trapped waiting for a success proof. No acceptance credit or terminal is rewritten.
 // The caller must independently validate/generate the immutable material and source.
 func ValidateRuntimeTerminalProofMaterial(source RuntimeStateRecord, material RuntimeTerminalResultMaterial) error {
+	return validateRuntimeTerminalProofMaterialInSession(source, material, &runtimeHistoricalPreimageSession{semantic: newRuntimeSemanticValidationSession()})
+}
+
+func validateRuntimeTerminalProofMaterialInSession(source RuntimeStateRecord, material RuntimeTerminalResultMaterial, session *runtimeHistoricalPreimageSession) error {
+	if session == nil {
+		session = &runtimeHistoricalPreimageSession{semantic: newRuntimeSemanticValidationSession()}
+	}
 	bindings, err := RuntimeDeliveryLineageBindingsFromState(source)
 	if err != nil {
 		return err
@@ -106,9 +113,11 @@ func ValidateRuntimeTerminalProofMaterial(source RuntimeStateRecord, material Ru
 	if material.RuntimeCloseout.TerminalOutcome.Kind != TerminalOutcomeKindCompleted {
 		return nil
 	}
+	var snapshotSources []RuntimeTerminalSnapshotSource
+	var snapshotSourcesLoaded bool
 	for _, binding := range bindings {
 		for _, assertion := range binding.Assertions {
-			if err := runtimeTerminalMaterialAssertion(source, material, assertion.Rule); err != nil {
+			if err := runtimeTerminalMaterialAssertionInSession(source, material, assertion.Rule, session, &snapshotSources, &snapshotSourcesLoaded); err != nil {
 				return fmt.Errorf("terminal proof %q CWI %q: %w", assertion.Rule.Ref, binding.CoverageWorkItemID, err)
 			}
 		}
@@ -117,6 +126,15 @@ func ValidateRuntimeTerminalProofMaterial(source RuntimeStateRecord, material Ru
 }
 
 func runtimeTerminalMaterialAssertion(source RuntimeStateRecord, material RuntimeTerminalResultMaterial, rule RuntimeLineageAssertionRule) error {
+	var snapshotSources []RuntimeTerminalSnapshotSource
+	var snapshotSourcesLoaded bool
+	return runtimeTerminalMaterialAssertionInSession(source, material, rule, &runtimeHistoricalPreimageSession{semantic: newRuntimeSemanticValidationSession()}, &snapshotSources, &snapshotSourcesLoaded)
+}
+
+func runtimeTerminalMaterialAssertionInSession(source RuntimeStateRecord, material RuntimeTerminalResultMaterial, rule RuntimeLineageAssertionRule, session *runtimeHistoricalPreimageSession, snapshotSources *[]RuntimeTerminalSnapshotSource, snapshotSourcesLoaded *bool) error {
+	if session == nil {
+		session = &runtimeHistoricalPreimageSession{semantic: newRuntimeSemanticValidationSession()}
+	}
 	switch rule.Kind {
 	case RuntimeLineageDeliveryAcknowledgements:
 		// ACK is consumed separately after actual ordered owner delivery.
@@ -124,9 +142,19 @@ func runtimeTerminalMaterialAssertion(source RuntimeStateRecord, material Runtim
 	case RuntimeLineageTerminalResultIndex:
 		return runtimeTerminalResultIndex(source, material)
 	case RuntimeLineageTerminalOwnerSnapshot:
-		expected, err := CompileRuntimeTerminalSnapshotSources(source)
-		if err != nil {
-			return err
+		var expected []RuntimeTerminalSnapshotSource
+		if snapshotSources != nil && snapshotSourcesLoaded != nil && *snapshotSourcesLoaded {
+			expected = *snapshotSources
+		} else {
+			var err error
+			expected, err = compileRuntimeTerminalSnapshotSourcesInSession(source, session)
+			if err != nil {
+				return err
+			}
+			if snapshotSources != nil && snapshotSourcesLoaded != nil {
+				*snapshotSources = expected
+				*snapshotSourcesLoaded = true
+			}
 		}
 		matchedSources := 0
 		for _, candidate := range expected {
@@ -167,7 +195,7 @@ func runtimeTerminalMaterialAssertion(source RuntimeStateRecord, material Runtim
 			return err
 		}
 		sources := runtimeLineageSourcesFromRecord(source)
-		if !runtimeCanonicalLineageCutoff(source.Facts.EvidenceRevision) || ValidateRuntimeEvidenceLedgerSequence(source.EvidenceSequence, source.Facts, source.ActiveDispatch, source.CompletedDispatches, source.GovernanceResolutions) != nil || runtimeValidateLineageOperations(sources) != nil {
+		if !runtimeCanonicalLineageCutoff(source.Facts.EvidenceRevision) || ValidateRuntimeEvidenceLedgerSequence(source.EvidenceSequence, source.Facts, source.ActiveDispatch, source.CompletedDispatches, source.GovernanceResolutions) != nil || runtimeValidateLineageOperationsInSession(sources, session) != nil {
 			return fmt.Errorf("terminal receipt requires original operation/evidence chronology")
 		}
 		for _, dispatch := range source.CompletedDispatches {

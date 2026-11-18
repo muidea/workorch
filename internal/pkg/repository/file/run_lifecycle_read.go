@@ -33,6 +33,24 @@ func (r *RunRepository) GetRuntimeStateWriteBase(_ context.Context, workspaceID 
 	return run.RuntimeStateWriteBaseFromRun(item)
 }
 
+// GetRuntimeStateCASPrecondition reads only the scalar precondition fields under the
+// repository read lock for CAS pre-checks without cloning full Run slices.
+func (r *RunRepository) GetRuntimeStateCASPrecondition(_ context.Context, workspaceID common.WorkspaceID, id common.RunID) (uint64, common.RunState, error) {
+	if workspaceID == "" || id == "" {
+		return 0, "", common.ErrInvalidArgument
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, err := loadRunOriginalByID(r.path, workspaceID, id)
+	if err != nil {
+		return 0, "", err
+	}
+	if item == nil || item.WorkspaceID == "" || item.ID == "" {
+		return 0, "", common.ErrNotFound
+	}
+	return item.Revision, item.State, nil
+}
+
 func (r *RunRepository) ListInventory(_ context.Context, workspaceID common.WorkspaceID) ([]run.RunInventoryItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

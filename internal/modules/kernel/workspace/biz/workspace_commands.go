@@ -52,12 +52,23 @@ func (m *Biz) createWorkspace(ctx context.Context, ev magicevent.Event) (workspa
 	return workspaceCommandResponse{Workspace: workspaceeventmapping.WorkspaceDTO(item)}, nil
 }
 
+type workspaceReadOnlyGetter interface {
+	GetReadOnly(context.Context, common.WorkspaceID) (*workspacemodel.Workspace, error)
+}
+
+func (m *Biz) getWorkspaceReadOnly(ctx context.Context, id common.WorkspaceID) (*workspacemodel.Workspace, error) {
+	if getter, ok := m.workspaces.(workspaceReadOnlyGetter); ok {
+		return getter.GetReadOnly(ctx, id)
+	}
+	return m.workspaces.Get(ctx, id)
+}
+
 func (m *Biz) getWorkspace(ctx context.Context, ev magicevent.Event) (workspaceCommandResponse, error) {
 	cmd, ok := ev.Data().(workspaceevents.GetWorkspaceCommand)
 	if !ok || cmd.WorkspaceID == "" || m.workspaces == nil {
 		return workspaceCommandResponse{}, common.ErrInvalidArgument
 	}
-	item, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
+	item, err := m.getWorkspaceReadOnly(ctx, cmd.WorkspaceID)
 	if err != nil {
 		return workspaceCommandResponse{}, err
 	}

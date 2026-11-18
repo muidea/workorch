@@ -67,19 +67,17 @@ func (m *Biz) executeDoDCommand(ctx context.Context, ev magicevent.Event) (works
 		if err != nil {
 			return workspaceCommandResponse{}, err
 		}
-		hidden, err := m.workspaceDeletionReadHidden(scopedCtx, cmd.WorkspaceID)
-		if err != nil {
-			return workspaceCommandResponse{}, err
-		}
-		if hidden {
-			return workspaceCommandResponse{}, common.ErrNotFound
-		}
-		visible, err := m.authoringFormalDefinitionVisible(scopedCtx, cmd.WorkspaceID)
+		_, dods, visible, err := m.readVisibleWorkspaceFormalDefinitions(scopedCtx, cmd.WorkspaceID, false, false)
 		if err != nil {
 			return workspaceCommandResponse{}, err
 		}
 		if !visible {
 			return workspaceCommandResponse{}, common.ErrNotFound
+		}
+		for _, dod := range dods {
+			if dod != nil && dod.ID == cmd.DoDID {
+				return workspaceCommandResponse{DoD: workspacemodel.CloneDoD(dod)}, nil
+			}
 		}
 		item, err := m.dods.Get(scopedCtx, cmd.DoDID)
 		if err != nil {
@@ -95,23 +93,12 @@ func (m *Biz) executeDoDCommand(ctx context.Context, ev magicevent.Event) (works
 		if err != nil {
 			return workspaceCommandResponse{}, err
 		}
-		hidden, err := m.workspaceDeletionReadHidden(scopedCtx, cmd.WorkspaceID)
-		if err != nil {
-			return workspaceCommandResponse{}, err
-		}
-		if hidden {
-			return workspaceCommandResponse{DoDs: []*workspacemodel.DoD{}}, nil
-		}
-		visible, err := m.authoringFormalDefinitionVisible(scopedCtx, cmd.WorkspaceID)
+		_, items, visible, err := m.readVisibleWorkspaceFormalDefinitions(scopedCtx, cmd.WorkspaceID, false, true)
 		if err != nil {
 			return workspaceCommandResponse{}, err
 		}
 		if !visible {
 			return workspaceCommandResponse{DoDs: []*workspacemodel.DoD{}}, nil
-		}
-		items, err := m.dods.ListByWorkspaceID(scopedCtx, cmd.WorkspaceID)
-		if err != nil {
-			return workspaceCommandResponse{}, err
 		}
 		return workspaceCommandResponse{DoDs: workspacemodel.CloneDoDs(items)}, nil
 	default:

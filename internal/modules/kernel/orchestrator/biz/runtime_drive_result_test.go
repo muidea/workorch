@@ -36,7 +36,7 @@ func TestRuntimeTerminalDeliveryWaitsForCurrentSemanticAuthority(t *testing.T) {
 	if runtimeTerminalDeliveryReady(aggregate) {
 		t.Fatal("binding-free reducer terminal escaped before semantic re-seal")
 	}
-	if outcome, err := finishRuntimeConvergenceTransition(aggregate, 1, "before-catalog-retirement"); err != nil || outcome.result != nil {
+	if outcome, err := finishRuntimeConvergenceTransition(aggregate, 1, runtime.RuntimeAggregate{}); err != nil || outcome.result != nil {
 		t.Fatalf("provisional terminal produced an SM-4 result: outcome=%+v err=%v", outcome, err)
 	}
 
@@ -50,7 +50,7 @@ func TestRuntimeTerminalDeliveryWaitsForCurrentSemanticAuthority(t *testing.T) {
 	if !runtimeTerminalDeliveryReady(aggregate) {
 		t.Fatal("sealed semantic terminal was not delivery-ready")
 	}
-	if outcome, err := finishRuntimeConvergenceTransition(aggregate, 1, "before-semantic-seal"); err != nil || outcome.result == nil || outcome.result.Terminal == nil {
+	if outcome, err := finishRuntimeConvergenceTransition(aggregate, 1, runtime.RuntimeAggregate{}); err != nil || outcome.result == nil || outcome.result.Terminal == nil {
 		t.Fatalf("sealed terminal did not produce its SM-4 result: outcome=%+v err=%v", outcome, err)
 	}
 

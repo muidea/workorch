@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"fmt"
-	"reflect"
 	"slices"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -29,7 +28,7 @@ func recordHistoricalBehaviorCompletion(aggregate *RuntimeAggregate, dispatch ru
 			if row.ID != binding.CoverageWorkItemID {
 				continue
 			}
-			if row.HistoricalBehavior != nil && !reflect.DeepEqual(row.HistoricalBehavior, completion) {
+			if row.HistoricalBehavior != nil && !runtimecontract.RuntimeRawEqual(row.HistoricalBehavior, completion) {
 				return fmt.Errorf("%w: historical behavior already completed under another dispatch", common.ErrConflict)
 			}
 			row.HistoricalBehavior = completion
@@ -119,7 +118,7 @@ func validateHistoricalBehaviorTransition(previous, next RuntimeAggregate) error
 		}
 		seen[row.ID] = true
 		if len(row.HistoricalAcceptanceProofs) < len(before.HistoricalAcceptanceProofs) ||
-			(len(before.HistoricalAcceptanceProofs) != 0 && !reflect.DeepEqual(row.HistoricalAcceptanceProofs[:len(before.HistoricalAcceptanceProofs)], before.HistoricalAcceptanceProofs)) {
+			(len(before.HistoricalAcceptanceProofs) != 0 && !runtimecontract.RuntimeRawEqual(row.HistoricalAcceptanceProofs[:len(before.HistoricalAcceptanceProofs)], before.HistoricalAcceptanceProofs)) {
 			return fmt.Errorf("%w: historical acceptance proof history is append-only", common.ErrConflict)
 		}
 		if len(row.HistoricalAcceptanceProofs) > len(before.HistoricalAcceptanceProofs) {
@@ -132,11 +131,11 @@ func validateHistoricalBehaviorTransition(previous, next RuntimeAggregate) error
 			}
 		}
 		if before.HistoricalBehavior != nil {
-			if !reflect.DeepEqual(before.HistoricalBehavior, row.HistoricalBehavior) {
+			if !runtimecontract.RuntimeRawEqual(before.HistoricalBehavior, row.HistoricalBehavior) {
 				return fmt.Errorf("%w: historical behavior completion is immutable", common.ErrConflict)
 			}
 			for i, dispatch := range previous.CompletedDispatches {
-				if dispatch.ID == before.HistoricalBehavior.DispatchID && (i >= len(next.CompletedDispatches) || !reflect.DeepEqual(dispatch, next.CompletedDispatches[i])) {
+				if dispatch.ID == before.HistoricalBehavior.DispatchID && (i >= len(next.CompletedDispatches) || !runtimecontract.RuntimeRawEqual(dispatch, next.CompletedDispatches[i])) {
 					return fmt.Errorf("%w: historical behavior source dispatch is immutable", common.ErrConflict)
 				}
 			}
@@ -160,7 +159,7 @@ func validateHistoricalBehaviorTransition(previous, next RuntimeAggregate) error
 func validateHistoricalResultDispatchClosure(previous, next RuntimeAggregate, id string) error {
 	if previous.ActiveDispatch == nil || previous.ActiveDispatch.ID != id || next.ActiveDispatch != nil ||
 		len(next.CompletedDispatches) != len(previous.CompletedDispatches)+1 ||
-		len(previous.CompletedDispatches) > 0 && !reflect.DeepEqual(previous.CompletedDispatches, next.CompletedDispatches[:len(previous.CompletedDispatches)]) {
+		len(previous.CompletedDispatches) > 0 && !runtimecontract.RuntimeRawEqual(previous.CompletedDispatches, next.CompletedDispatches[:len(previous.CompletedDispatches)]) {
 		return fmt.Errorf("%w: historical result requires its original dispatch closure", common.ErrConflict)
 	}
 	closed := cloneSealedDispatchRaw(next.CompletedDispatches[len(previous.CompletedDispatches)])
@@ -172,7 +171,7 @@ func validateHistoricalResultDispatchClosure(previous, next RuntimeAggregate, id
 	closed.CompletedOperationIDs = previous.ActiveDispatch.CompletedOperationIDs
 	closed.AssessmentAdjudication = previous.ActiveDispatch.AssessmentAdjudication
 	closed.AssessmentAdjudicationHash = previous.ActiveDispatch.AssessmentAdjudicationHash
-	if !reflect.DeepEqual(closed, *previous.ActiveDispatch) {
+	if !runtimecontract.RuntimeRawEqual(closed, *previous.ActiveDispatch) {
 		return fmt.Errorf("%w: historical result changed original sealed dispatch input", common.ErrConflict)
 	}
 	return nil

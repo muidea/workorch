@@ -291,11 +291,9 @@ func ValidateRuntimeCWIBindingRetirementsAgainstExecution(facts RuntimeFacts, ac
 	}
 	dispatches := make([]RuntimeDispatchRecord, 0, len(completed)+1)
 	if active != nil {
-		dispatches = append(dispatches, active.Clone())
+		dispatches = append(dispatches, *active)
 	}
-	for _, dispatch := range completed {
-		dispatches = append(dispatches, dispatch.Clone())
-	}
+	dispatches = append(dispatches, completed...)
 	for _, dispatch := range dispatches {
 		operations := make([]RuntimeOperation, 0)
 		if dispatch.Candidate.StateChange != nil {
@@ -805,23 +803,25 @@ func ValidateRuntimeCWIReconciliationLedger(facts RuntimeFacts, ledger RuntimeCW
 	if err := ledger.Validate(); err != nil {
 		return err
 	}
-	facts = facts.Normalized()
+	workspaceID := common.WorkspaceID(strings.TrimSpace(string(facts.WorkspaceID)))
+	runID := common.RunID(strings.TrimSpace(string(facts.RunID)))
+	reconciliationContract := facts.ReconciliationContract.Normalized()
 	for _, historical := range ledger.History {
 		historical = historical.Normalized()
-		if historical.Request.WorkspaceID != facts.WorkspaceID || historical.Request.RunID != facts.RunID {
+		if historical.Request.WorkspaceID != workspaceID || historical.Request.RunID != runID {
 			return fmt.Errorf("runtime CWI reconciliation history scope does not match runtime facts")
 		}
 	}
 	if ledger.Request == nil {
 		return nil
 	}
-	if ledger.Request.WorkspaceID != facts.WorkspaceID || ledger.Request.RunID != facts.RunID {
+	if ledger.Request.WorkspaceID != workspaceID || ledger.Request.RunID != runID {
 		return fmt.Errorf("runtime CWI reconciliation active request scope does not match runtime facts")
 	}
-	if facts.ReconciliationContract.SchemaVersion == "" {
+	if reconciliationContract.SchemaVersion == "" {
 		return fmt.Errorf("runtime CWI reconciliation has an active request without a current contract")
 	}
-	if err := ledger.Request.ValidateAgainstContract(facts.ReconciliationContract); err != nil {
+	if err := ledger.Request.ValidateAgainstContract(reconciliationContract); err != nil {
 		return fmt.Errorf("runtime CWI reconciliation active request: %w", err)
 	}
 	return nil

@@ -1,6 +1,7 @@
 package file
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -31,6 +32,10 @@ func (a *RuntimeAdapter) AcquireRuntimeOperationAdmissibility(workspaceDirectory
 	}
 	if maxItems < 1 || maxItems > runtimemodel.RuntimeOwnerInventoryItemsMaxCount {
 		return runtimemodel.RuntimeOperationAdmissibility{}, common.ErrInvalidArgument
+	}
+	budget := runtimemodel.RuntimeOwnerInventoryBudget{MaxItems: maxItems}
+	if err := runtimemodel.ValidateRuntimeRequiredTargetsWithinInventoryBudget(budget, runtimemodel.RuntimeModuleFile, prerequisiteID, requiredTargetRefs); err != nil {
+		return runtimemodel.RuntimeOperationAdmissibility{}, err
 	}
 	manifest := observation.manifest
 	inventory := runtimemodel.RuntimeOperationAdmissibility{
@@ -63,6 +68,12 @@ func (a *RuntimeAdapter) AcquireRuntimeOperationAdmissibility(workspaceDirectory
 			}
 			inventory.TargetParameterBindings = append(inventory.TargetParameterBindings, binding)
 		}
+	}
+	// TargetRefs are the bounded owner inventory. SelectorRefs and
+	// ConstraintRefs are interpretation vocabulary and must not consume the
+	// target inventory budget; manifest compilation uses this same pure rule.
+	if err := runtimemodel.ValidateRuntimeOwnerInventoryAdmissibilityBudget(budget, inventory); err != nil {
+		return runtimemodel.RuntimeOperationAdmissibility{}, fmt.Errorf("file owner target inventory exceeds budget: %w", err)
 	}
 	inventory.SnapshotID = runtimemodel.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	if err := inventory.Validate(); err != nil {

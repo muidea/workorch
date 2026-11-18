@@ -11,6 +11,7 @@ import (
 // Real owner receipts/material/ACK; scripted reviewer/private startup. This
 // is not a final Git snapshot producer or public implementation-work admission.
 func TestDriveRuntimeTerminalMaterialProofOwnerMainlineAndRestart(t *testing.T) {
+	t.Parallel()
 	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectConjunction, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, SourceObligations: true, TerminalMaterialGuards: true}
 	baseline := runValidationInputReviewMainline(t, "consistent", "", options)
 	for _, cut := range []string{"after_review_document", "after_review_binding", "after_project_receipt", "before_material_seal", "after_material_seal", "after_result_persistence", "after_workspace_persistence", "after_run_persistence"} {

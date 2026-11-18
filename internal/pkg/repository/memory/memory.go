@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -28,6 +29,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorcheventrecordcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type WorkspaceRepository struct {
@@ -2265,9 +2267,17 @@ func (r *DoDRepository) Delete(ctx context.Context, id common.DoDID) error {
 	return nil
 }
 
+type memoryRunStatePreimage struct {
+	state     *runtimecontract.RuntimeStateRecord
+	raw       []byte
+	spans     *runtimecontract.RuntimeStateJSONSpans
+	prevAlloc []byte
+}
+
 type RunRepository struct {
 	mu                     sync.RWMutex
 	items                  map[string]*run.Run
+	statePreimages         map[string]memoryRunStatePreimage
 	workspaceGenerations   map[common.WorkspaceID]uint64
 	workspaceRetirements   map[common.WorkspaceID]run.WorkspaceRetirementFence
 	workspacePurgeReceipts map[common.WorkspaceID]repository.RunWorkspaceResourcePurgeReceipt
@@ -2277,10 +2287,73 @@ type RunRepository struct {
 func NewRunRepository() *RunRepository {
 	return &RunRepository{
 		items:                  map[string]*run.Run{},
+		statePreimages:         map[string]memoryRunStatePreimage{},
 		workspaceGenerations:   map[common.WorkspaceID]uint64{},
 		workspaceRetirements:   map[common.WorkspaceID]run.WorkspaceRetirementFence{},
 		workspacePurgeReceipts: map[common.WorkspaceID]repository.RunWorkspaceResourcePurgeReceipt{},
 		ownerBinding:           repository.NewRunOwnerRepositoryBinding(),
+	}
+}
+
+func (r *RunRepository) encodeRuntimeStateWrite(key string, item *run.Run) (string, []byte, []byte, *runtimecontract.RuntimeStateJSONSpans, error) {
+	if item == nil || item.RuntimeState == nil {
+		digest, err := run.RuntimeStateWriteHash(item)
+		return digest, nil, nil, nil, err
+	}
+	var prevState *runtimecontract.RuntimeStateRecord
+	var prevRaw []byte
+	var prevSpans *runtimecontract.RuntimeStateJSONSpans
+	var buf bytes.Buffer
+	s := item.RuntimeState
+	estimatedSize := len(s.CompletedDispatches)*420_000 +
+		s.SemanticPlanning.HistoryCount()*1_100_000 +
+		len(s.CandidateRequestSessions)*45_000 +
+		len(s.Facts.EvidenceApplicabilityObservations)*6_000 +
+		2_097_152
+	if key != "" && r.statePreimages != nil {
+		if prev, ok := r.statePreimages[key]; ok {
+			if len(prev.raw)+1572864 > estimatedSize {
+				estimatedSize = len(prev.raw) + 1572864
+			}
+			if cap(prev.prevAlloc) >= estimatedSize {
+				buf = *bytes.NewBuffer(prev.prevAlloc[:0])
+			}
+			if prev.state != nil && len(prev.raw) > 0 && prev.spans != nil {
+				prevState, prevRaw, prevSpans = prev.state, prev.raw, prev.spans
+			}
+		}
+	}
+	if buf.Cap() < estimatedSize {
+		targetCap := estimatedSize + 4*1024*1024
+		if cap(prevRaw) > targetCap {
+			targetCap = cap(prevRaw)
+		}
+		buf = *bytes.NewBuffer(make([]byte, 0, targetCap))
+	}
+	digest, spans, err := run.AppendRuntimeStateWriteWithPreimage(&buf, item, prevState, prevRaw, prevSpans)
+	if err != nil {
+		return "", nil, nil, nil, err
+	}
+	return digest, prevRaw, buf.Bytes(), spans, nil
+}
+
+func (r *RunRepository) commitRuntimeStatePreimage(key string, stored *run.Run, prevRaw, raw []byte, spans *runtimecontract.RuntimeStateJSONSpans) {
+	if stored == nil || stored.RuntimeState == nil || spans == nil || len(raw) == 0 {
+		delete(r.statePreimages, key)
+		return
+	}
+	if r.statePreimages == nil {
+		r.statePreimages = map[string]memoryRunStatePreimage{}
+	}
+	var nextPrevAlloc []byte
+	if cap(prevRaw) > 0 && &prevRaw[:1][0] != &raw[:1][0] {
+		nextPrevAlloc = prevRaw[:0]
+	}
+	r.statePreimages[key] = memoryRunStatePreimage{
+		state:     stored.RuntimeState,
+		raw:       raw,
+		spans:     spans,
+		prevAlloc: nextPrevAlloc,
 	}
 }
 
@@ -2308,7 +2381,7 @@ func (r *RunRepository) create(item *run.Run, allocateID bool) error {
 	if err := run.ValidateRunRuntimeBootstrapsRaw(item); err != nil {
 		return err
 	}
-	digest, err := run.RuntimeStateWriteHash(item)
+	digest, prevRaw, raw, spans, err := r.encodeRuntimeStateWrite("", item)
 	if err != nil {
 		return err
 	}
@@ -2356,7 +2429,9 @@ func (r *RunRepository) create(item *run.Run, allocateID bool) error {
 		item.Revision = 1
 	}
 	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
-	r.items[key] = cloneRun(item)
+	stored := cloneRun(item)
+	r.items[key] = stored
+	r.commitRuntimeStatePreimage(key, stored, prevRaw, raw, spans)
 	r.workspaceGenerations[item.WorkspaceID] = item.WorkspaceRunGeneration
 	return nil
 }
@@ -2422,6 +2497,24 @@ func (r *RunRepository) GetByWorkspaceID(_ context.Context, workspaceID common.W
 		return nil, common.ErrNotFound
 	}
 	return cloneRun(item), nil
+}
+
+// GetRuntimeStateSnapshot returns a detached Run whose append-only Runtime
+// history slices are capacity-clipped and shared without mutating the stored Run.
+func (r *RunRepository) GetRuntimeStateSnapshot(_ context.Context, workspaceID common.WorkspaceID, id common.RunID) (*run.Run, error) {
+	if workspaceID == "" || id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if err := validateMemoryRunInventory(r.items); err != nil {
+		return nil, err
+	}
+	item, ok := r.items[workspaceScopedKey(workspaceID, string(id))]
+	if !ok {
+		return nil, common.ErrNotFound
+	}
+	return run.CloneRunWithSharedRuntimeHistory(item), nil
 }
 
 func (r *RunRepository) List(_ context.Context) ([]*run.Run, error) {
@@ -2602,13 +2695,15 @@ func (r *RunRepository) CompareAndSwapRuntimeState(ctx context.Context, item *ru
 	if err := run.ValidateOpaqueRuntimeStateCAS(current, item, expectedRuntimeStateRevision); err != nil {
 		return err
 	}
-	digest, err := run.RuntimeStateWriteHash(item)
+	digest, prevRaw, raw, spans, err := r.encodeRuntimeStateWrite(key, item)
 	if err != nil {
 		return err
 	}
 	item.RuntimeStateHash = digest
 	item.Revision = expectedRevision + 1
-	r.items[key] = cloneRun(item)
+	stored := run.CloneRunWithSharedRuntimeHistory(item)
+	r.items[key] = stored
+	r.commitRuntimeStatePreimage(key, stored, prevRaw, raw, spans)
 	return nil
 }
 
@@ -2627,6 +2722,7 @@ func (r *RunRepository) Delete(ctx context.Context, id common.RunID) error {
 			return common.ErrConflict
 		}
 		delete(r.items, key)
+		delete(r.statePreimages, key)
 		return nil
 	}
 	var found string
@@ -2646,6 +2742,7 @@ func (r *RunRepository) Delete(ctx context.Context, id common.RunID) error {
 		return common.ErrConflict
 	}
 	delete(r.items, found)
+	delete(r.statePreimages, found)
 	return nil
 }
 

@@ -58,24 +58,32 @@ type RuntimeValidationFailureRepairRoute struct {
 
 func (c RuntimeValidationFailureRepairConvergence) Normalized() RuntimeValidationFailureRepairConvergence {
 	c.ID = strings.TrimSpace(c.ID)
+	if len(c.Routes) == 0 {
+		c.Routes = nil
+		return c
+	}
 	routes := make([]RuntimeValidationFailureRepairRoute, len(c.Routes))
+	sorted := true
 	for index, raw := range c.Routes {
 		routes[index] = raw.Normalized()
+		if index > 0 && routes[index].ID < routes[index-1].ID {
+			sorted = false
+		}
 	}
 	// Routes are an authority declaration, so normalization must never erase an
 	// empty item or collapse duplicate identities before Validate can reject the
 	// original pre-seal shape. Valid routes have unique IDs, which makes this
 	// ordering deterministic; invalid equal-ID entries retain their source order
 	// only until the mandatory validation fence rejects them.
-	sort.SliceStable(routes, func(i, j int) bool { return routes[i].ID < routes[j].ID })
-	c.Routes = nilIfEmpty(routes)
+	if !sorted {
+		sort.SliceStable(routes, func(i, j int) bool { return routes[i].ID < routes[j].ID })
+	}
+	c.Routes = routes
 	return c
 }
 
 func (c RuntimeValidationFailureRepairConvergence) Clone() RuntimeValidationFailureRepairConvergence {
-	c = c.Normalized()
-	c.Routes = cloneRuntimeValidationFailureRepairRoutes(c.Routes)
-	return c
+	return c.Normalized()
 }
 
 func (c RuntimeValidationFailureRepairConvergence) Validate() error {
@@ -132,10 +140,7 @@ func (r RuntimeValidationFailureRepairRoute) Normalized() RuntimeValidationFailu
 }
 
 func (r RuntimeValidationFailureRepairRoute) Clone() RuntimeValidationFailureRepairRoute {
-	r = r.Normalized()
-	r.RepairOperationKinds = append([]string(nil), r.RepairOperationKinds...)
-	r.RepairDeclarationTargetSelectorCandidateRefs = append([]string(nil), r.RepairDeclarationTargetSelectorCandidateRefs...)
-	return r
+	return r.Normalized()
 }
 
 func (r RuntimeValidationFailureRepairRoute) Validate() error {
@@ -310,17 +315,6 @@ func cloneRuntimeValidationFailureRepairConvergence(value *RuntimeValidationFail
 	}
 	clone := value.Clone()
 	return &clone
-}
-
-func cloneRuntimeValidationFailureRepairRoutes(values []RuntimeValidationFailureRepairRoute) []RuntimeValidationFailureRepairRoute {
-	if len(values) == 0 {
-		return nil
-	}
-	ret := make([]RuntimeValidationFailureRepairRoute, len(values))
-	for index, value := range values {
-		ret[index] = value.Clone()
-	}
-	return ret
 }
 
 func runtimeValidationDiagnosticClassKnown(value string) bool {

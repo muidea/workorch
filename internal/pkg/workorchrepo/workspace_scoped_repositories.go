@@ -123,13 +123,13 @@ func workspacePersistenceLock(path string) *sync.Mutex {
 	return value.(*sync.Mutex)
 }
 
-func workspaceRunGenerationLock(path string) *sync.Mutex {
+func workspaceRunGenerationLock(path string) *sync.RWMutex {
 	key, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
 		key = filepath.Clean(path)
 	}
-	value, _ := workspaceRunGenerationLocks.LoadOrStore(key, &sync.Mutex{})
-	return value.(*sync.Mutex)
+	value, _ := workspaceRunGenerationLocks.LoadOrStore(key, &sync.RWMutex{})
+	return value.(*sync.RWMutex)
 }
 
 func workspaceIndexLock(path string) *sync.Mutex {
@@ -1517,6 +1517,29 @@ func (r *workspaceScopedWorkspaceRepository) Get(ctx context.Context, id common.
 	return r.completeCreationPersistence(ctx, path, item)
 }
 
+func (r *workspaceScopedWorkspaceRepository) GetReadOnly(ctx context.Context, id common.WorkspaceID) (*workspacemodel.Workspace, error) {
+	if id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	path := filepath.Join(r.store.workspaceRoot(id), workspaceScopedWorkspaceFile)
+	lock := workspacePersistenceLock(path)
+	lock.Lock()
+	defer lock.Unlock()
+	repo := r.store.workspaceRepo(path)
+	item, err := repo.GetReadOnly(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if item.DefinitionAuthoringCreation != nil && item.DefinitionAuthoringCreation.PendingPersistence != nil {
+		cloned, getErr := repo.Get(ctx, id)
+		if getErr != nil {
+			return nil, getErr
+		}
+		return r.completeCreationPersistence(ctx, path, cloned)
+	}
+	return r.store.attachWorkspaceSoulBindings(item)
+}
+
 func (r *workspaceScopedWorkspaceRepository) readWorkspaceIndex(ctx context.Context) ([]workspaceIndexEntry, error) {
 	entries, err := r.store.listWorkspaceIndexEntries()
 	if err != nil {
@@ -2316,6 +2339,13 @@ func (r *workspaceScopedRunRepository) GetByWorkspaceID(ctx context.Context, wor
 	return r.store.runRepo(r.store.runPath(r.store.runRoot(workspaceID, id), workspaceScopedRunFile)).GetByWorkspaceID(ctx, workspaceID, id)
 }
 
+func (r *workspaceScopedRunRepository) GetRuntimeStateSnapshot(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
+	if workspaceID == "" || id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	return r.store.runRepo(r.store.runPath(r.store.runRoot(workspaceID, id), workspaceScopedRunFile)).GetRuntimeStateSnapshot(ctx, workspaceID, id)
+}
+
 func (r *workspaceScopedRunRepository) ListInventory(ctx context.Context, workspaceID common.WorkspaceID) ([]runmodel.RunInventoryItem, error) {
 	ret := []runmodel.RunInventoryItem{}
 	roots := r.store.allRunRoots()
@@ -2455,23 +2485,23 @@ func (r *workspaceScopedRunRepository) CompareAndSwapRuntimeState(ctx context.Co
 		return common.ErrConflict
 	}
 	headLock := workspaceRunGenerationLock(r.store.workspaceRunGenerationPath(item.WorkspaceID))
-	headLock.Lock()
-	defer headLock.Unlock()
+	headLock.RLock()
+	defer headLock.RUnlock()
 	head, err := r.store.loadWorkspaceRunGenerationHead(item.WorkspaceID)
 	if err != nil {
 		return err
 	}
 	repo := r.store.runRepo(r.store.runPath(r.store.runRoot(item.WorkspaceID, item.ID), workspaceScopedRunFile))
-	base, err := repo.GetRuntimeStateWriteBase(ctx, item.WorkspaceID, item.ID)
+	revision, state, err := repo.GetRuntimeStateCASPrecondition(ctx, item.WorkspaceID, item.ID)
 	if err != nil {
 		return err
 	}
-	if base.Run.Revision != expectedRevision {
+	if revision != expectedRevision {
 		return common.ErrConflict
 	}
 	if head.Retirement != nil {
 		fence := head.Retirement.Normalized()
-		if fence.Validate() != nil || fence.IsRetired() || !workspaceScopedRunStateIsTerminal(base.Run.State) {
+		if fence.Validate() != nil || fence.IsRetired() || !workspaceScopedRunStateIsTerminal(state) {
 			return common.ErrConflict
 		}
 	}
@@ -2603,8 +2633,8 @@ func (r *workspaceScopedRunRepository) GetWorkspaceRetirement(ctx context.Contex
 		return nil, common.ErrConflict
 	}
 	headLock := workspaceRunGenerationLock(r.store.workspaceRunGenerationPath(workspaceID))
-	headLock.Lock()
-	defer headLock.Unlock()
+	headLock.RLock()
+	defer headLock.RUnlock()
 	head, err := r.store.loadWorkspaceRunGenerationHead(workspaceID)
 	if err != nil {
 		return nil, err
@@ -2629,9 +2659,9 @@ func (r *workspaceScopedRunRepository) ListWorkspaceRetirements(_ context.Contex
 			return nil, common.ErrConflict
 		}
 		headLock := workspaceRunGenerationLock(path)
-		headLock.Lock()
+		headLock.RLock()
 		head, loadErr := r.store.loadWorkspaceRunGenerationHead(workspaceID)
-		headLock.Unlock()
+		headLock.RUnlock()
 		if loadErr != nil {
 			return nil, loadErr
 		}

@@ -59,7 +59,10 @@ func NextRuntimeCWIBindingRetirementFact(aggregate RuntimeAggregate) (RuntimeCWI
 		if item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateBound || item.CurrentBindingRef == nil || item.CurrentBindingRef.SemanticManifestHash != manifestHash {
 			continue
 		}
-		probe := aggregate.Facts.Normalized()
+		probe := runtimecontract.RuntimeFacts{
+			Coverage: runtimecontract.NormalizeRuntimeCoverageFacts(aggregate.Facts.Coverage),
+			Evidence: aggregate.Facts.Evidence,
+		}
 		for index := range probe.Coverage {
 			if probe.Coverage[index].ID == item.ID {
 				probe.Coverage[index].BindingRetirementLineage = append(probe.Coverage[index].BindingRetirementLineage, runtimecontract.RuntimeCWIBindingRetirementLineage{
@@ -231,13 +234,12 @@ func runtimeCWIReopenRequiresSemanticRebinding(reason string) bool {
 // focus to be execution-authority-free; keeping lineage classification
 // independent makes delivery fail closed even for an invalid in-memory value.
 func RuntimeCWISemanticRebindingPending(facts runtimecontract.RuntimeFacts) bool {
-	facts = facts.Normalized()
 	focus := facts.Focus.Normalized()
 	if len(focus.CoverageWorkItemIDs) != 1 || focus.ID != "semantic-pending/"+string(focus.CoverageWorkItemIDs[0]) {
 		return false
 	}
 	coverageID := focus.CoverageWorkItemIDs[0]
-	for _, item := range facts.Coverage {
+	for _, item := range runtimecontract.NormalizeRuntimeCoverageFacts(facts.Coverage) {
 		if item.ID != coverageID || item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateReopened ||
 			item.CurrentBindingRef != nil || len(item.ReopenLineage) == 0 {
 			continue
@@ -1102,7 +1104,7 @@ func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, wo
 	var generationEligible []common.CoverageWorkItemID
 	semanticGenerationProjection := false
 	if manifestHash != "" {
-		ledger := aggregate.SemanticPlanning.CloneRaw()
+		ledger := runtimecontract.SnapshotSemanticPlanningLedgerWithSharedHistory(aggregate.SemanticPlanning)
 		if ledger.Manifest == nil || ledger.Manifest.Hash != manifestHash || ledger.CoverageOrderDocument == nil ||
 			!sameCoverageIDs(ledger.CoverageOrderDocument.CoverageOrder, acceptedOrder) {
 			return RuntimeAggregate{}, fmt.Errorf("%w: eligible focus projection semantic order is stale", common.ErrConflict)

@@ -190,8 +190,14 @@ func setRunMagicResult(result magicevent.Result, data any, err error) {
 	result.Set(cloned, nil)
 }
 
+type preClonedRunCommandResult struct {
+	value any
+}
+
 func cloneRunCommandResult(data any) (any, bool) {
 	switch value := data.(type) {
+	case preClonedRunCommandResult:
+		return value.value, true
 	case runevents.GetRunResult:
 		return value.Clone(), true
 	case runevents.ObserveWorkspacePreparationHistoryResult:

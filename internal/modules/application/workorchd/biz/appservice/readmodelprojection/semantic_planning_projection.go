@@ -9,7 +9,7 @@ import (
 )
 
 func runtimeSemanticPlanningProjection(state runtimecontract.RuntimeStateRecord) *projectioncontract.RuntimeSemanticPlanning {
-	ledger := state.SemanticPlanning.Clone()
+	ledger := state.SemanticPlanning.WithoutHistory().Clone()
 	if ledger.SchemaVersion == "" {
 		return nil
 	}

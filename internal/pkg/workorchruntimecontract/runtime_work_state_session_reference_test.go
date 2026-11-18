@@ -8,7 +8,7 @@ import (
 // Original complete state validator before compiler session reuse.
 func referenceWorkStateCompilerSession(definition RuntimeDefinitionContext, facts RuntimeFacts, ledger RuntimeImplementationWorkLedger, semantic RuntimeSemanticPlanningLedger, active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord, receipts []RuntimeOperationReceipt, governance []RuntimeOperationGovernanceBinding, budget RuntimeExecutionBudgetLedger) error {
 	if preview := ledger.ScopePreview; preview != nil {
-		previewSources := RuntimeImplementationWorkScopeSources{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: preview.Request.AuthoritySnapshotID, Seed: facts.DefinitionSeed, Focuses: facts.DefinitionFocuses, Profiles: facts.Activation.ExecutionContract.ProfileContracts, CoverageWorkItemID: preview.Request.CoverageWorkItemID, ManifestBinding: preview.Request.ManifestBinding}
+		previewSources := RuntimeImplementationWorkScopeSources{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: preview.Request.AuthoritySnapshotID, Seed: facts.DefinitionSeed, Focuses: facts.DefinitionFocuses, Profiles: facts.Activation.ExecutionContract.ProfileContracts, CoverageWorkItemID: preview.Request.CoverageWorkItemID, ManifestBinding: preview.Request.ManifestBinding, InputRevision: preview.Request.InputRevision}
 		if err := referenceWorkScopeAgainstSources(preview.Request, previewSources); err != nil {
 			return err
 		}
@@ -23,12 +23,12 @@ func referenceWorkStateCompilerSession(definition RuntimeDefinitionContext, fact
 	}
 	seenChoices := map[string]bool{}
 	for _, choice := range ledger.PurposeChoices {
-		if choice.Purpose != RuntimeImplementationWorkPurposeEffect && choice.Purpose != RuntimeImplementationWorkPurposeTerminal || seenChoices[choice.SemanticManifestHash] {
+		if choice.Purpose != RuntimeImplementationWorkPurposeEffect && choice.Purpose != RuntimeImplementationWorkPurposeTerminal && choice.Purpose != RuntimeImplementationWorkPurposeStalled && choice.Purpose != RuntimeImplementationWorkPurposeInconclusive || seenChoices[choice.SemanticManifestHash] {
 			return fmt.Errorf("implementation purpose choice is invalid or duplicated")
 		}
 		seenChoices[choice.SemanticManifestHash] = true
 		matches := 0
-		for _, history := range semantic.History {
+		for _, history := range semantic.AllHistory() {
 			snapshot := history.Snapshot
 			if history.Reason != RuntimeSemanticPlanningRetirementImplementationPurpose || snapshot.Manifest == nil || snapshot.CoverageOrderDocument == nil || snapshot.Manifest.Hash != choice.SemanticManifestHash || snapshot.LogicalRequestID != choice.LogicalRequestID || snapshot.DocumentHash != choice.DocumentHash || StableRuntimeSemanticPlanDocumentHash(*snapshot.CoverageOrderDocument) != choice.DocumentHash || snapshot.CoverageOrderDocument.ImplementationPurpose != choice.Purpose {
 				continue
@@ -56,9 +56,21 @@ func referenceWorkStateCompilerSession(definition RuntimeDefinitionContext, fact
 			if !work.PurposeChoiceOnly || work.Scope.Request.RequestID != choice.ScopeRequestID || work.Scope.Request.CoverageWorkItemID != choice.CoverageWorkItemID || choice.Purpose == RuntimeImplementationWorkPurposeEffect && !work.EffectAvailable {
 				return fmt.Errorf("implementation purpose choice differs from original vocabulary")
 			}
-			choiceScopeSources := RuntimeImplementationWorkScopeSources{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: work.Scope.Request.AuthoritySnapshotID, Seed: facts.DefinitionSeed, Focuses: facts.DefinitionFocuses, Profiles: facts.Activation.ExecutionContract.ProfileContracts, CoverageWorkItemID: work.Scope.Request.CoverageWorkItemID, ManifestBinding: work.Scope.Request.ManifestBinding}
+			choiceScopeSources := RuntimeImplementationWorkScopeSources{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: work.Scope.Request.AuthoritySnapshotID, Seed: facts.DefinitionSeed, Focuses: facts.DefinitionFocuses, Profiles: facts.Activation.ExecutionContract.ProfileContracts, CoverageWorkItemID: work.Scope.Request.CoverageWorkItemID, ManifestBinding: work.Scope.Request.ManifestBinding, InputRevision: work.Scope.Request.InputRevision}
 			if err := referenceWorkScopeAgainstSources(work.Scope.Request, choiceScopeSources); err != nil {
 				return err
+			}
+			validated, err := validateRuntimeSemanticPlanManifestInSession(*snapshot.Manifest, newRuntimeSemanticValidationSession())
+			if err != nil {
+				return err
+			}
+			if err := validateRuntimeSemanticPlanDocumentAgainstValidatedManifest(*snapshot.CoverageOrderDocument, validated); err != nil {
+				return err
+			}
+			if failure := RuntimeImplementationWorkObservationFailure(choice, snapshot.CoverageOrderDocument.ImplementationIntent); failure != nil {
+				if facts.Failure == nil || facts.Failure.Class != failure.Class || facts.Failure.Code != failure.Code || facts.Failure.Signature != failure.Signature || facts.Failure.Message != failure.Message || !runtimeRawEqual(facts.Failure.OriginalDiagnostic, failure.OriginalDiagnostic) {
+					return fmt.Errorf("implementation observation lacks its original failure authority")
+				}
 			}
 			matches++
 		}
@@ -99,6 +111,13 @@ func referenceWorkStateCompilerSession(definition RuntimeDefinitionContext, fact
 			outstanding++
 		}
 		if round.WorkingBinding != nil {
+			intent, err := ResolveRuntimeImplementationWorkIntent(round, semantic)
+			if err != nil {
+				return err
+			}
+			if !sameImplementationIntentBinding(intent, round.WorkingBinding.IntentBinding) {
+				return fmt.Errorf("working intent differs from unique accepted purpose source")
+			}
 			if err := ValidateRuntimeImplementationWorkingBindingSemanticSource(round, semantic); err != nil {
 				return err
 			}
@@ -166,6 +185,29 @@ func referenceWorkStateCompilerSession(definition RuntimeDefinitionContext, fact
 				return fmt.Errorf("implementation round differs from original pre-dispatch commitment")
 			}
 			joined[dispatch.ID] = true
+			{
+				for _, execution := range dispatch.OperationExecutions {
+					if execution.State != OperationExecutionEvidenceCommitted {
+						continue
+					}
+					for _, fact := range facts.Evidence.Accepted {
+						if fact.ID != execution.EvidenceFactID {
+							continue
+						}
+						receipt, found := RuntimeOperationReceiptForExecutionKeyFence(receipts, execution.ExecutionKey, execution.Fence)
+						if !found {
+							return fmt.Errorf("implementation work committed evidence lost its resource chain receipt")
+						}
+						disposition, err := RuntimeImplementationWorkDispositionForDispatchReceipt(round, dispatch, receipts, facts, governance, receipt)
+						if err != nil {
+							return err
+						}
+						if disposition != "" {
+							return fmt.Errorf("implementation work committed evidence has invalid resource chain")
+						}
+					}
+				}
+			}
 			if round.CompletedReceiptSetHash != "" {
 				if dispatch.State != RuntimeDispatchStateCommitted {
 					return fmt.Errorf("implementation completion requires committed original dispatch")
@@ -200,8 +242,14 @@ func referenceWorkStateCompilerSession(definition RuntimeDefinitionContext, fact
 					}
 					originalReceiptMatches := 0
 					for _, receipt := range receipts {
-						if receipt.ExecutionKey == execution.ExecutionKey && receipt.Fence == execution.Fence && receipt.OperationID == execution.OperationID && StableRuntimeOperationReceiptHash(receipt) == round.FailedReceiptHash && execution.OwnerReceiptRef == "runtime-receipt/"+receipt.ExecutionKey && RuntimeImplementationWorkDispositionForReceipt(*dispatch.ImplementationWorkCommitment, receipt) == round.ReceiptDisposition {
-							originalReceiptMatches++
+						if receipt.ExecutionKey == execution.ExecutionKey && receipt.Fence == execution.Fence && receipt.OperationID == execution.OperationID && StableRuntimeOperationReceiptHash(receipt) == round.FailedReceiptHash && execution.OwnerReceiptRef == "runtime-receipt/"+receipt.ExecutionKey {
+							disposition, err := RuntimeImplementationWorkDispositionForDispatchReceipt(round, dispatch, receipts, facts, governance, receipt)
+							if err != nil {
+								return err
+							}
+							if disposition == round.ReceiptDisposition {
+								originalReceiptMatches++
+							}
 						}
 					}
 					if originalReceiptMatches != 1 {

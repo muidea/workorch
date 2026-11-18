@@ -215,6 +215,9 @@ func candidateAdmissionInvalidSignature(candidate workorchruntimecontract.Runtim
 // persisted evidence, sealed dispatches, and failed feasibility records. This
 // is Orchestrator authority, not a shared contract-package helper.
 func ActiveRejectedOperationShapes(aggregate RuntimeAggregate) []workorchruntimecontract.RuntimeRejectedOperationShape {
+	if len(aggregate.Facts.Evidence.Rejected) == 0 {
+		return nil
+	}
 	facts := aggregate.Facts.Normalized()
 	dispatchByID := make(map[string]workorchruntimecontract.RuntimeDispatchRecord, len(aggregate.CompletedDispatches))
 	for _, dispatch := range aggregate.CompletedDispatches {
@@ -309,7 +312,13 @@ func rejectCandidateMissingValidationGap(aggregate RuntimeAggregate, candidate w
 }
 
 func candidateValidationGapFacts(aggregate RuntimeAggregate) candidateadmission.ValidationGapFacts {
-	facts := aggregate.Facts.Normalized()
+	trimmed := aggregate.Facts
+	trimmed.EvidenceApplicabilityObservations = nil
+	trimmed.DefinitionSeed = workorchruntimecontract.RuntimeDefinitionSeed{}
+	trimmed.DefinitionFocuses = nil
+	trimmed.Activation = workorchruntimecontract.RuntimeActivationContext{}
+	trimmed.Resources = workorchruntimecontract.RuntimeResourceFacts{}
+	facts := trimmed.Normalized()
 	missing := missingEvidenceKinds(facts, aggregate.CoverageProofLineage)
 	hasAcceptedStateChange := false
 	for _, evidence := range facts.Evidence.Accepted {

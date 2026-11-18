@@ -48,9 +48,9 @@ func consumeSemanticRepairFreshValidationReceipt(aggregate *RuntimeAggregate, di
 	// Reconstruct the still-outstanding handoff by removing only this admitted
 	// event from a detached view; all original repair lineage is independently
 	// reverse-proved by the existing compiler, never inferred from its ID.
-	previous := aggregate.CloneRaw()
-	previous.Facts.Evidence.Accepted = slices.DeleteFunc(previous.Facts.Evidence.Accepted, func(e runtimecontract.EvidenceFact) bool { return e.ID == fact.ID })
-	previous.Facts.Evidence.Rejected = slices.DeleteFunc(previous.Facts.Evidence.Rejected, func(e runtimecontract.EvidenceFact) bool { return e.ID == fact.ID })
+	previous := snapshotRuntimeAggregateWithSharedHistory(*aggregate)
+	previous.Facts.Evidence.Accepted = slices.DeleteFunc(slices.Clone(previous.Facts.Evidence.Accepted), func(e runtimecontract.EvidenceFact) bool { return e.ID == fact.ID })
+	previous.Facts.Evidence.Rejected = slices.DeleteFunc(slices.Clone(previous.Facts.Evidence.Rejected), func(e runtimecontract.EvidenceFact) bool { return e.ID == fact.ID })
 	barrier, err := semanticRepairFreshValidationEvidenceRevision(previous)
 	if err != nil || barrier != directive.SupersedesEvidenceRevision {
 		return fmt.Errorf("semantic repair receipt consumption lacks original handoff: %v", err)

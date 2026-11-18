@@ -84,7 +84,7 @@ func shellProcessBehaviorEnvironment(env []string, directory string, testArgs []
 	// Atomic retains real execution counts and is compatible with inherited
 	// nested go test -race. Count mode would make valid reviewed race commands
 	// fail solely because of owner instrumentation, not the delivery behavior.
-	return append(ret, "GOFLAGS=-cover -covermode=atomic "+coverage, "GOCOVERDIR="+directory, "WORKORCH_PROCESS_COVERDIR="+directory)
+	return append(ret, "GOFLAGS=-cover -covermode=atomic "+coverage+" -trimpath", "GOCOVERDIR="+directory, "WORKORCH_PROCESS_COVERDIR="+directory)
 }
 
 // This observation supplies execution grounding only. The native test must
@@ -136,7 +136,13 @@ func shellProcessBehaviorTargets(ctx context.Context, command, workspace, direct
 	convertCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	profile := filepath.Join(directory, "observed.cover")
-	cmd := exec.CommandContext(convertCtx, command, "tool", "covdata", "textfmt", "-i="+directory, "-o="+profile)
+	tools := resolvedGoToolPaths()
+	var cmd *exec.Cmd
+	if tools.covdata != "" && shellCanUseResolvedGoTool(command, env) {
+		cmd = exec.CommandContext(convertCtx, tools.covdata, "textfmt", "-i="+directory, "-o="+profile)
+	} else {
+		cmd = exec.CommandContext(convertCtx, command, "tool", "covdata", "textfmt", "-i="+directory, "-o="+profile)
+	}
 	cmd.Dir = workspace
 	cmd.Env = shellBehaviorEnvironment(env)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

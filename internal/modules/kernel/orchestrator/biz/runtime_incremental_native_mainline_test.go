@@ -14,6 +14,7 @@ import (
 // helper-only partial effects and new semantic conflicts across multiple files,
 // then the native/build/behavior failure sequence and final acceptance.
 func TestDriveRuntimeIncrementalNativeMaintenanceAndRecovery(t *testing.T) {
+	t.Parallel()
 	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, ValidationCount: 1, ProtocolRef: rc.RuntimeValidationInputReviewProtocol, DynamicProjectObservations: true, SequentialProjectFailures: true, NativeProjectSources: true, IncrementalNativeSources: true}
 	baseline := runValidationInputReviewMainline(t, "input_revision_after_failure", "", options)
 	for _, cut := range []string{"after_partial_native_helper", "after_result_persistence"} {

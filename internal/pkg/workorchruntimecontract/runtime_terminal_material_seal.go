@@ -51,6 +51,13 @@ func (s RuntimeTerminalMaterialSeal) ValidateRaw() error {
 // ValidateRuntimeTerminalMaterialSeal 不调用 aggregate 校验，供 fresh-load、回执与完成谓词共用。
 // 尚未首次 seal 的 terminal 可以等待交付，但不能拥有回执。
 func ValidateRuntimeTerminalMaterialSeal(seal *RuntimeTerminalMaterialSeal, source RuntimeStateRecord) error {
+	return validateRuntimeTerminalMaterialSealInSession(seal, source, &runtimeHistoricalPreimageSession{semantic: newRuntimeSemanticValidationSession()})
+}
+
+func validateRuntimeTerminalMaterialSealInSession(seal *RuntimeTerminalMaterialSeal, source RuntimeStateRecord, session *runtimeHistoricalPreimageSession) error {
+	if session == nil {
+		session = &runtimeHistoricalPreimageSession{semantic: newRuntimeSemanticValidationSession()}
+	}
 	revision, facts, decision, termination, acknowledgements := source.StateRevision, source.Facts, source.Decision, source.Termination, source.DeliveryAcknowledgements
 	if err := ValidateRuntimeStateTerminalDeliveryLedger(decision, termination, acknowledgements, facts.Recovery); err != nil {
 		return err
@@ -91,14 +98,14 @@ func ValidateRuntimeTerminalMaterialSeal(seal *RuntimeTerminalMaterialSeal, sour
 	if err != nil {
 		return err
 	}
-	material, err = ApplyRuntimeTerminalSnapshotProofs(preimage, material, seal.Material.RuntimeCloseout.TerminalSnapshotProofs)
+	material, err = applyRuntimeTerminalSnapshotProofsInSession(preimage, material, seal.Material.RuntimeCloseout.TerminalSnapshotProofs, session)
 	if err != nil {
 		return err
 	}
 	if !reflect.DeepEqual(material, seal.Material) {
 		return fmt.Errorf("terminal material seal does not match original authority material")
 	}
-	if err := ValidateRuntimeTerminalProofMaterial(preimage, seal.Material); err != nil {
+	if err := validateRuntimeTerminalProofMaterialInSession(preimage, seal.Material, session); err != nil {
 		return err
 	}
 	for _, acknowledgement := range acknowledgements {

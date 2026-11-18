@@ -2,6 +2,7 @@ package recordpayload
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 
@@ -68,5 +69,85 @@ func TestAuditCredentialPayloadIsExplicitlyOmittedWithoutRewritingInput(t *testi
 	encoded, _ := json.Marshal(got)
 	if strings.Contains(string(encoded), "fixture-value") || strings.Contains(string(encoded), "[redacted]") {
 		t.Fatal("audit disguised a credential payload as a rewritten original")
+	}
+}
+
+func TestIsSanitizedAuditPayloadFastPathMatchesSanitizer(t *testing.T) {
+	clean := workorcheventpayload.New(
+		workorcheventpayload.StringField("aKey", "alpha"),
+		workorcheventpayload.IntField("bCount", 42),
+		workorcheventpayload.ObjectField("cMeta", workorcheventpayload.New(
+			workorcheventpayload.StringField("credentialRef", "safe-ref"),
+		)),
+	)
+	if !IsSanitizedAuditPayload(clean) || !SanitizeAuditPayload(clean).Equal(clean) {
+		t.Fatal("expected clean sorted payload to pass")
+	}
+	if allocs := testing.AllocsPerRun(50, func() {
+		if !IsSanitizedAuditPayload(clean) {
+			t.Fatal("clean payload unexpectedly rejected")
+		}
+	}); allocs != 0 {
+		t.Fatalf("clean fast path allocated %.1f times, want 0", allocs)
+	}
+	if !IsSanitizedAuditPayload(workorcheventpayload.Payload{}) {
+		t.Fatal("expected empty payload to pass")
+	}
+
+	cases := []struct {
+		name  string
+		input workorcheventpayload.Payload
+		want  bool
+	}{
+		{
+			name:  "credential_uppercase_underscore",
+			input: workorcheventpayload.New(workorcheventpayload.StringField("Access_Token", "secret")),
+			want:  false,
+		},
+		{
+			name:  "credential_hyphen",
+			input: workorcheventpayload.New(workorcheventpayload.StringField("api-key", "secret")),
+			want:  false,
+		},
+		{
+			name:  "untrimmed_field_name",
+			input: workorcheventpayload.New(workorcheventpayload.StringField(" kind ", "ok")),
+			want:  false,
+		},
+		{
+			name:  "unsorted_clean_fields",
+			input: workorcheventpayload.New(workorcheventpayload.StringField("z", "1"), workorcheventpayload.StringField("a", "2")),
+			want:  true,
+		},
+		{
+			name:  "oversized_string",
+			input: workorcheventpayload.New(workorcheventpayload.StringField("a", strings.Repeat("x", maxAuditPayloadStringBytes+1))),
+			want:  false,
+		},
+		{
+			name:  "nan_float",
+			input: workorcheventpayload.New(workorcheventpayload.FloatField("a", math.NaN())),
+			want:  false,
+		},
+		{
+			name: "depth_4_object_truncated",
+			input: workorcheventpayload.New(workorcheventpayload.ObjectField("d0", workorcheventpayload.New(
+				workorcheventpayload.ObjectField("d1", workorcheventpayload.New(
+					workorcheventpayload.ObjectField("d2", workorcheventpayload.New(
+						workorcheventpayload.ObjectField("d3", workorcheventpayload.New(
+							workorcheventpayload.ObjectField("d4", workorcheventpayload.Payload{}),
+						)),
+					)),
+				)),
+			))),
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsSanitizedAuditPayload(tc.input); got != tc.want {
+				t.Fatalf("IsSanitizedAuditPayload=%v, want %v (Sanitize.Equal=%v)", got, tc.want, SanitizeAuditPayload(tc.input).Equal(tc.input))
+			}
+		})
 	}
 }

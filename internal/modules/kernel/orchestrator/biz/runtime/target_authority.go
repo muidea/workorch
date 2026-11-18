@@ -31,7 +31,6 @@ type runtimeTargetAuthorityPlan struct {
 // This is a pure SM-2 projection. It neither selects a target nor persists a
 // second focus/reducer state.
 func runtimeCurrentTargetGroundingFocus(facts runtimecontract.RuntimeFacts) (runtimecontract.CoverageFocus, bool) {
-	facts = facts.Normalized()
 	focus := facts.Focus.Normalized()
 	if focus.RequireTargetGrounding {
 		return focus, true
@@ -39,7 +38,7 @@ func runtimeCurrentTargetGroundingFocus(facts runtimecontract.RuntimeFacts) (run
 	if len(focus.CoverageWorkItemIDs) != 1 {
 		return runtimecontract.CoverageFocus{}, false
 	}
-	declaration, found, err := runtimeDefinitionFocusForCoverage(facts.DefinitionFocuses, focus.CoverageWorkItemIDs[0])
+	declaration, found, err := runtimeDefinitionFocusForCoverage(runtimecontract.NormalizeRuntimeDefinitionFocuses(facts.DefinitionFocuses), focus.CoverageWorkItemIDs[0])
 	if err != nil || !found || !declaration.RequireTargetGrounding {
 		return runtimecontract.CoverageFocus{}, false
 	}
@@ -58,6 +57,9 @@ func runtimeCurrentTargetGroundingFocus(facts runtimecontract.RuntimeFacts) (run
 // an unobserved/satisfied-only fixture, or a selection for another declaration
 // remains transient and cannot make target_grounding_unresolved deliverable.
 func CurrentFocusTargetSelectionConfirmsUnresolved(facts runtimecontract.RuntimeFacts) bool {
+	if facts.Resources.TargetSelection == nil {
+		return false
+	}
 	facts = facts.Normalized()
 	selection := grounding.CurrentFocusTargetSelection(facts)
 	declaration, declared := runtimeCurrentTargetGroundingFocus(facts)
@@ -141,7 +143,18 @@ func CurrentFocusTargetSelectionConfirmsUnresolved(facts runtimecontract.Runtime
 }
 
 func runtimeTargetAuthorityPlanForFacts(facts runtimecontract.RuntimeFacts) runtimeTargetAuthorityPlan {
-	facts = facts.Normalized()
+	facts.DefinitionFocuses = runtimecontract.NormalizeRuntimeDefinitionFocuses(facts.DefinitionFocuses)
+	facts.Resources = facts.Resources.Normalized()
+	facts.Prerequisites.Pending = runtimecontract.NormalizeRuntimePrerequisites(facts.Prerequisites.Pending)
+	facts.Prerequisites.Satisfied = runtimecontract.NormalizeRuntimePrerequisites(facts.Prerequisites.Satisfied)
+	if facts.RepairDirective != nil {
+		directive := facts.RepairDirective.Normalized()
+		facts.RepairDirective = &directive
+	}
+	return runtimeTargetAuthorityPlanForNormalizedFacts(facts)
+}
+
+func runtimeTargetAuthorityPlanForNormalizedFacts(facts runtimecontract.RuntimeFacts) runtimeTargetAuthorityPlan {
 	focus := facts.Focus.Normalized()
 	targetRefs := grounding.RepairTargets(facts)
 

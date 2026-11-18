@@ -62,10 +62,16 @@ func TestWorkspaceSnapshotReaderRejectsMismatchedOwnerIdentity(t *testing.T) {
 }
 
 func TestRunAndWorkspaceSnapshotReadersExposeOnlyRead(t *testing.T) {
-	for _, value := range []any{runSnapshotReader{}, workspaceSnapshotReader{}} {
-		typeOf := reflect.TypeOf(value)
-		if typeOf.NumMethod() != 1 || typeOf.Method(0).Name != "Read" {
-			t.Fatalf("%s methods = %v, want only Read", typeOf, exportedMethodNames(typeOf))
+	for _, item := range []struct {
+		value any
+		want  []string
+	}{
+		{value: runSnapshotReader{}, want: []string{"Read", "ReadLifecycle"}},
+		{value: workspaceSnapshotReader{}, want: []string{"Read"}},
+	} {
+		typeOf := reflect.TypeOf(item.value)
+		if got := exportedMethodNames(typeOf); !reflect.DeepEqual(got, item.want) {
+			t.Fatalf("%s methods = %v, want %v", typeOf, got, item.want)
 		}
 	}
 }

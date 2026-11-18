@@ -298,6 +298,19 @@ func WorkspaceRunID(generation uint64) common.RunID {
 }
 
 func CloneRun(item *Run) *Run {
+	return cloneRunWithStateCloner(item, func(state *runtimecontract.RuntimeStateRecord) runtimecontract.RuntimeStateRecord {
+		return state.Clone()
+	})
+}
+
+// CloneRunWithSharedRuntimeHistory detaches all Run metadata and mutable Runtime
+// state while sharing capacity-clipped read-only/append-only Runtime history
+// slices without mutating the source Run.
+func CloneRunWithSharedRuntimeHistory(item *Run) *Run {
+	return cloneRunWithStateCloner(item, runtimecontract.SnapshotRuntimeStateRecordFromStored)
+}
+
+func cloneRunWithStateCloner(item *Run, cloneState func(*runtimecontract.RuntimeStateRecord) runtimecontract.RuntimeStateRecord) *Run {
 	if item == nil {
 		return nil
 	}
@@ -308,7 +321,7 @@ func CloneRun(item *Run) *Run {
 		cloned.RuntimeBootstrap = &bootstrap
 	}
 	if item.RuntimeState != nil {
-		state := item.RuntimeState.Clone()
+		state := cloneState(item.RuntimeState)
 		cloned.RuntimeState = &state
 	}
 	if item.RuntimeLifecycleFence != nil {

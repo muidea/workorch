@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"runtime/trace"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -58,11 +57,23 @@ func (r ownerStateTransactionRepository) Load(ctx context.Context, workspaceID c
 
 	}
 	if !t.loaded && workspaceID == t.scope.WorkspaceID && runID == t.scope.RunID {
-		value := RuntimeStateRecordFromAggregate(aggregate)
+		var value runtimecontract.RuntimeStateRecord
+		if r.original == nil {
+			recordView := runtimecontract.RuntimeStateRecord(aggregate)
+			value = runtimecontract.SnapshotRuntimeStateRecordWithSharedReadOnlyHistory(&recordView)
+			aggregate = RuntimeAggregate(recordView)
+		} else {
+			value = RuntimeStateRecordFromAggregate(aggregate)
+		}
 		t.original = &value
 		t.loaded = true
 	}
 	return aggregate, nil
+}
+
+func snapshotRuntimeAggregateWithSharedHistory(in RuntimeAggregate) RuntimeAggregate {
+	record := runtimecontract.RuntimeStateRecord(in)
+	return RuntimeAggregate(runtimecontract.SnapshotRuntimeStateRecordWithSharedReadOnlyHistory(&record))
 }
 
 func ownerStateSourceImage(record *runtimecontract.RuntimeStateRecord, aggregate RuntimeAggregate) runtimecontract.RuntimeOwnerStateSourceImage {
@@ -104,7 +115,7 @@ func (c *RuntimeController) applyOwnerStateTransaction(ctx context.Context, even
 func (t *ownerStateTransaction) admit(record *runtimecontract.RuntimeStateRecord, aggregate RuntimeAggregate) error {
 	if t.original != nil {
 		converted := ownerStateRecord(aggregate)
-		if reflect.DeepEqual(*t.original, converted) && (record == nil || reflect.DeepEqual(*record, converted)) {
+		if runtimecontract.RuntimeRawEqual(*t.original, converted) && (record == nil || runtimecontract.RuntimeRawEqual(*record, converted)) {
 			return nil
 		}
 	}

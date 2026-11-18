@@ -22,6 +22,12 @@ type runInventoryPhysicalMap map[common.RunID]runInventoryPhysicalImage
 
 type runInventoryPhysicalImage struct {
 	raw               json.RawMessage
+	bootstrapRaw      json.RawMessage
+	stateRaw          json.RawMessage
+	stateSpans        *rc.RuntimeStateJSONSpans
+	alloc             []byte
+	prevAlloc         []byte
+	rawCanonical      bool
 	metadata          run.Run
 	stateRevision     uint64
 	hasState          bool
@@ -29,6 +35,47 @@ type runInventoryPhysicalImage struct {
 	memorySelection   *memorycontract.RecallSelectionEvidence
 	providerSelection *rc.ProviderInferenceSelection
 	aggregate         *run.Run
+}
+
+func canReuseValidatedRunBootstraps(cached *run.Run, item *run.Run) bool {
+	return cached != nil && item != nil &&
+		rc.RuntimeRawEqual(cached.RuntimeBootstrap, item.RuntimeBootstrap) &&
+		rc.RuntimeRawEqual(cached.ReplacementIntent, item.ReplacementIntent) &&
+		rc.RuntimeRawEqual(cached.RetiredReplacementIntents, item.RetiredReplacementIntents) &&
+		rc.RuntimeRawEqual(cached.ExecutionIntentReceipts, item.ExecutionIntentReceipts)
+}
+
+func hasCachedValidatedRunBootstraps(path string, item *run.Run) bool {
+	if item == nil || item.ID == "" {
+		return false
+	}
+	cache := mapCacheEntry(path)
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if !cache.loaded {
+		return false
+	}
+	items, ok := cache.items.(runInventoryPhysicalMap)
+	if !ok {
+		return false
+	}
+	image, found := items[item.ID]
+	if !found || image.aggregate == nil {
+		return false
+	}
+	return canReuseValidatedRunBootstraps(image.aggregate, item)
+}
+
+func cloneRunWithSharedRuntimeHistoryAndStoredBootstrap(item *run.Run, current *run.Run) *run.Run {
+	if item != nil && current != nil && current.RuntimeBootstrap != nil && item.RuntimeBootstrap != nil &&
+		rc.RuntimeRawEqual(*current.RuntimeBootstrap, *item.RuntimeBootstrap) {
+		shallow := *item
+		shallow.RuntimeBootstrap = nil
+		stored := run.CloneRunWithSharedRuntimeHistory(&shallow)
+		stored.RuntimeBootstrap = current.RuntimeBootstrap
+		return stored
+	}
+	return run.CloneRunWithSharedRuntimeHistory(item)
 }
 
 type runInventoryPersistenceAlias run.Run
@@ -201,16 +248,6 @@ func materializeRunInventoryImages(images runInventoryPhysicalMap) (map[common.R
 	return items, nil
 }
 
-// An exact aggregate read materializes only its selected original image. The
-// other historical images remain opaque in the same repository file cache.
-func loadRunByID(path string, workspaceID common.WorkspaceID, id common.RunID) (*run.Run, error) {
-	original, err := loadRunOriginalByID(path, workspaceID, id)
-	if err != nil {
-		return nil, err
-	}
-	return cloneRun(original), nil
-}
-
 // Borrow only while holding the owning repository lock. Metadata consumers
 // project their detached result before releasing that lock; no original escapes.
 func loadRunOriginalByID(path string, workspaceID common.WorkspaceID, id common.RunID) (*run.Run, error) {
@@ -232,20 +269,172 @@ func loadRunOriginalByID(path string, workspaceID common.WorkspaceID, id common.
 		if !found || workspaceID != "" && image.metadata.WorkspaceID != workspaceID {
 			return nil, common.ErrNotFound
 		}
-		if image.aggregate == nil {
-			var item run.Run
-			if err := decodeCurrentJSON(image.raw, &item); err != nil {
-				return nil, err
-			}
-			if err := validateRunMapIntegrity(map[common.RunID]run.Run{id: item}); err != nil {
-				return nil, err
-			}
-			image.aggregate = &item
-			image.raw = nil
-			items[id] = image
+		var err error
+		image, err = materializeRunPhysicalImage(id, image)
+		if err != nil {
+			return nil, err
 		}
+		items[id] = image
 		return image.aggregate, nil
 	default:
 		return nil, fmt.Errorf("file repository cache type mismatch for %s", path)
 	}
+}
+
+func saveRunMapWithPhysicalCache(path string, items map[common.RunID]run.Run, written *run.Run) error {
+	if written == nil || written.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	cache := mapCacheEntry(path)
+	cache.mu.Lock()
+	existingPhysical, hasPhysical := cache.items.(runInventoryPhysicalMap)
+	var physical runInventoryPhysicalMap
+	if hasPhysical {
+		physical = make(runInventoryPhysicalMap, len(items))
+		for id := range items {
+			if img, ok := existingPhysical[id]; ok {
+				if id == written.ID {
+					cached := img
+					cached.prevAlloc = nil
+					existingPhysical[id] = cached
+				}
+				physical[id] = img
+			}
+		}
+	}
+	cache.mu.Unlock()
+	if physical == nil {
+		physical = make(runInventoryPhysicalMap, len(items))
+	}
+	for id, item := range items {
+		if id == written.ID {
+			if prev, ok := physical[id]; ok {
+				physical[id] = prev
+			} else {
+				physical[id] = runInventoryPhysicalImage{
+					metadata:  *written,
+					aggregate: written,
+				}
+			}
+			continue
+		}
+		if _, ok := physical[id]; ok {
+			continue
+		}
+		otherCopy := item
+		raw, err := marshalRunPhysicalSingle(&otherCopy, false)
+		if err != nil {
+			return err
+		}
+		img, err := readRunInventoryPhysicalImage(raw)
+		if err != nil {
+			return err
+		}
+		img.rawCanonical = true
+		img.aggregate = cloneRun(&otherCopy)
+		physical[id] = img
+	}
+	body, err := marshalRunInventoryPhysicalWrite(physical, written)
+	if err != nil {
+		return err
+	}
+	return publishMapBytes(path, physical, body, 0o644, commitFileAtomically)
+}
+
+func materializeRunPhysicalImage(id common.RunID, image runInventoryPhysicalImage) (runInventoryPhysicalImage, error) {
+	if image.aggregate != nil {
+		return image, nil
+	}
+	var item run.Run
+	if err := decodeCurrentJSON(image.raw, &item); err != nil {
+		return runInventoryPhysicalImage{}, err
+	}
+	if err := validateRunMapIntegrity(map[common.RunID]run.Run{id: item}); err != nil {
+		return runInventoryPhysicalImage{}, err
+	}
+	image.aggregate = &item
+	return image, nil
+}
+
+func loadRunPhysicalImagesForCAS(path string, workspaceID common.WorkspaceID, id common.RunID, expectedRevision uint64) (runInventoryPhysicalMap, run.Run, error) {
+	if _, err := loadRunInventory(path); err != nil {
+		return nil, run.Run{}, err
+	}
+	cache := mapCacheEntry(path)
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	switch items := cache.items.(type) {
+	case runInventoryPhysicalMap:
+		image, found := items[id]
+		if !found {
+			return nil, run.Run{}, common.ErrNotFound
+		}
+		if image.metadata.WorkspaceID != workspaceID || image.metadata.Revision != expectedRevision {
+			return nil, run.Run{}, common.ErrConflict
+		}
+		var err error
+		image, err = materializeRunPhysicalImage(id, image)
+		if err != nil {
+			return nil, run.Run{}, err
+		}
+		cached := image
+		cached.prevAlloc = nil
+		items[id] = cached
+		ret := cloneStoredMap(items)
+		ret[id] = image
+		return ret, *image.aggregate, nil
+	case map[common.RunID]run.Run:
+		current, found := items[id]
+		if !found {
+			return nil, run.Run{}, common.ErrNotFound
+		}
+		if current.WorkspaceID != workspaceID || current.Revision != expectedRevision {
+			return nil, run.Run{}, common.ErrConflict
+		}
+		physical := make(runInventoryPhysicalMap, len(items))
+		for otherID, other := range items {
+			if otherID == id {
+				physical[otherID] = runInventoryPhysicalImage{
+					metadata:  current,
+					aggregate: cloneRun(&current),
+				}
+				continue
+			}
+			otherCopy := other
+			raw, err := marshalRunPhysicalSingle(&otherCopy, false)
+			if err != nil {
+				return nil, run.Run{}, err
+			}
+			img, err := readRunInventoryPhysicalImage(raw)
+			if err != nil {
+				return nil, run.Run{}, err
+			}
+			img.rawCanonical = true
+			img.aggregate = cloneRun(&otherCopy)
+			physical[otherID] = img
+		}
+		return physical, current, nil
+	default:
+		return nil, run.Run{}, fmt.Errorf("file repository cache type mismatch for %s", path)
+	}
+}
+
+func validatePersistedRunGenerationWatermarksPhysical(images runInventoryPhysicalMap, heads map[common.WorkspaceID]runWorkspacePersistenceHead) error {
+	seen := map[common.WorkspaceID]map[uint64]struct{}{}
+	for _, image := range images {
+		item := image.metadata
+		if item.ID == "" || item.WorkspaceID == "" || item.WorkspaceRunGeneration == 0 || heads[item.WorkspaceID].Generation < item.WorkspaceRunGeneration {
+			return fmt.Errorf("%w: Run workspace generation persistence is incomplete", common.ErrConflict)
+		}
+		workspaceSeen := seen[item.WorkspaceID]
+		if workspaceSeen == nil {
+			workspaceSeen = map[uint64]struct{}{}
+			seen[item.WorkspaceID] = workspaceSeen
+		}
+		if _, duplicate := workspaceSeen[item.WorkspaceRunGeneration]; duplicate {
+			return fmt.Errorf("%w: duplicate Run workspace generation", common.ErrConflict)
+		}
+		workspaceSeen[item.WorkspaceRunGeneration] = struct{}{}
+	}
+	return validateRunGenerationHeads(heads)
 }

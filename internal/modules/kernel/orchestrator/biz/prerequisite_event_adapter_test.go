@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -580,5 +581,68 @@ operations = ["responses"]
 	t.Cleanup(func() { _ = workorchconfig.Close() })
 	if _, err := workorchconfig.Current(); err != nil {
 		t.Fatalf("current config: %v", err)
+	}
+}
+
+func TestRuntimeOperationAdmissibilityTargetRefsScopedMerge(t *testing.T) {
+	aggregate := runtime.RuntimeAggregate{
+		Facts: runtimecontract.RuntimeFacts{
+			Focus: runtimecontract.CoverageFocus{
+				ID:         "focus-scoped",
+				TargetRefs: []string{"c.go"},
+				CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{
+					{ID: "existing-binding", TargetRefs: []string{"b.go", "not_in_manifest.go"}},
+					{ID: "prospective-binding", TargetRefs: []string{"a.go"}, ProspectiveTargetRefs: []string{"new.go"}},
+				},
+			},
+			Resources: runtimecontract.RuntimeResourceFacts{
+				Manifest: &runtimecontract.WorkspaceManifest{
+					Revision:   "rev-1",
+					TargetRefs: []string{"a.go", "b.go", "c.go"},
+				},
+			},
+		},
+	}
+
+	fileTargets := runtimeOperationAdmissibilityTargetRefs(aggregate, runtimecontract.RuntimeModuleFile)
+	if !slices.Equal(fileTargets, []string{"b.go", "c.go"}) {
+		t.Fatalf("File targets = %v, want [b.go c.go]", fileTargets)
+	}
+
+	maxItems := runtimecontract.DefaultRuntimeOwnerInventoryBudget().MaxItems
+	fullFileInventory := make([]string, 0, maxItems)
+	for i := 1; i <= maxItems; i++ {
+		fullFileInventory = append(fullFileInventory, fmt.Sprintf("file_%02d.txt", i))
+	}
+	shellAgg := runtime.RuntimeAggregate{
+		Facts: runtimecontract.RuntimeFacts{
+			Focus: runtimecontract.CoverageFocus{
+				ID:         "focus-shell-merge",
+				TargetRefs: []string{"file_01.txt", "z_active.go"},
+			},
+			Resources: runtimecontract.RuntimeResourceFacts{
+				OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{{
+					OwnerModuleID: runtimecontract.RuntimeModuleFile,
+					TargetRefs:    fullFileInventory,
+				}},
+			},
+		},
+	}
+	shellTargets := runtimeOperationAdmissibilityTargetRefs(shellAgg, runtimecontract.RuntimeModuleShell)
+	if len(shellTargets) != maxItems {
+		t.Fatalf("len(Shell targets) = %d, want %d", len(shellTargets), maxItems)
+	}
+	if !slices.Contains(shellTargets, "z_active.go") || !slices.Contains(shellTargets, "file_01.txt") {
+		t.Fatalf("Shell targets lost active focus targets: %v", shellTargets)
+	}
+
+	overActive := make([]string, 0, maxItems+1)
+	for i := 1; i <= maxItems+1; i++ {
+		overActive = append(overActive, fmt.Sprintf("active_%02d.go", i))
+	}
+	shellAgg.Facts.Focus.TargetRefs = overActive
+	overShellTargets := runtimeOperationAdmissibilityTargetRefs(shellAgg, runtimecontract.RuntimeModuleShell)
+	if len(overShellTargets) != maxItems+1 {
+		t.Fatalf("len(over-budget active Shell targets) = %d, want %d (must fail closed downstream, not truncate)", len(overShellTargets), maxItems+1)
 	}
 }

@@ -810,16 +810,16 @@ func (l RuntimeCWIReconciliationReopenedLineage) Validate() error {
 // per-CWI dispositions together, so duplicate delivery and process restart
 // never need to infer reconciliation state from coverage alone.
 type RuntimeCWIReconciliationLedger struct {
+	// History keeps every superseded request/batch generation.  A new resume
+	// must not overwrite the prior owner observations: SM-2 needs the exact
+	// lineage to explain which old credit was retained or reopened, and a
+	// duplicate request must remain idempotent after a process restart.
+	History     []RuntimeCWIReconciliationGeneration
 	Request     *RuntimeCWIReconciliationRequest
 	RequestHash string
 	Batch       *RuntimeCWIReconciliationBatch
 	Results     []RuntimeCWIReconciliationResult
 	Reopened    []RuntimeCWIReconciliationReopenedLineage
-	// History keeps every superseded request/batch generation.  A new resume
-	// must not overwrite the prior owner observations: SM-2 needs the exact
-	// lineage to explain which old credit was retained or reopened, and a
-	// duplicate request must remain idempotent after a process restart.
-	History []RuntimeCWIReconciliationGeneration
 }
 
 // RuntimeCWIReconciliationGeneration is an immutable historical snapshot of

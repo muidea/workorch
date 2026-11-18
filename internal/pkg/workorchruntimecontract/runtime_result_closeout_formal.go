@@ -5,9 +5,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -115,13 +115,100 @@ func (s RuntimeOwnerRevisionSet) Normalized() RuntimeOwnerRevisionSet {
 	return s
 }
 
-func (s RuntimeOwnerRevisionSet) WithHash() RuntimeOwnerRevisionSet {
-	s = s.Normalized()
-	s.SetHash = stableFormalValueHash("runtime-owner-revision-set", struct {
+func isRuntimeOwnerRevisionSetRawCanonical(s RuntimeOwnerRevisionSet) bool {
+	if s.DefinitionRevision != strings.TrimSpace(s.DefinitionRevision) ||
+		s.SetHash != strings.TrimSpace(s.SetHash) {
+		return false
+	}
+	if s.Entries != nil && len(s.Entries) == 0 {
+		return false
+	}
+	for idx, entry := range s.Entries {
+		if entry.OwnerKind != strings.TrimSpace(entry.OwnerKind) ||
+			entry.OwnerInstanceID != strings.TrimSpace(entry.OwnerInstanceID) ||
+			entry.ResourceKind != strings.TrimSpace(entry.ResourceKind) ||
+			entry.ResourceID != strings.TrimSpace(entry.ResourceID) ||
+			entry.SnapshotID != strings.TrimSpace(entry.SnapshotID) ||
+			entry.Revision != strings.TrimSpace(entry.Revision) ||
+			entry.DependencyHash != strings.TrimSpace(entry.DependencyHash) {
+			return false
+		}
+		if idx > 0 && ownerRevisionRefLess(entry, s.Entries[idx-1]) {
+			return false
+		}
+	}
+	return true
+}
+
+func computeNormalizedRuntimeOwnerRevisionSetHash(s RuntimeOwnerRevisionSet) string {
+	if payload, ok := appendRuntimeOwnerRevisionSetPayloadJSON(nil, s); ok {
+		sum := sha256.New()
+		_, _ = sum.Write([]byte("runtime-owner-revision-set\x00"))
+		_, _ = sum.Write(payload)
+		return "runtime-owner-revision-set-sha256:" + hex.EncodeToString(sum.Sum(nil))
+	}
+	return stableFormalValueHash("runtime-owner-revision-set", struct {
 		DefinitionRevision string
 		Entries            []RuntimeOwnerRevisionRef
 	}{s.DefinitionRevision, s.Entries})
+}
+
+func (s RuntimeOwnerRevisionSet) WithHash() RuntimeOwnerRevisionSet {
+	s = s.Normalized()
+	s.SetHash = computeNormalizedRuntimeOwnerRevisionSetHash(s)
 	return s
+}
+
+func appendSafeJSONStringField(buf []byte, prefix, value string) ([]byte, bool) {
+	buf = append(buf, prefix...)
+	return appendSafeJSONString(buf, value)
+}
+
+func appendRuntimeOwnerRevisionSetPayloadJSON(buf []byte, s RuntimeOwnerRevisionSet) ([]byte, bool) {
+	if cap(buf) == 0 {
+		buf = make([]byte, 0, 64+len(s.Entries)*192)
+	}
+	var ok bool
+	if buf, ok = appendSafeJSONStringField(buf, `{"DefinitionRevision":`, s.DefinitionRevision); !ok {
+		return nil, false
+	}
+	buf = append(buf, `,"Entries":`...)
+	if s.Entries == nil {
+		buf = append(buf, "null}"...)
+		return buf, true
+	}
+	buf = append(buf, '[')
+	for idx, entry := range s.Entries {
+		if idx > 0 {
+			buf = append(buf, ',')
+		}
+		if buf, ok = appendSafeJSONStringField(buf, `{"OwnerKind":`, entry.OwnerKind); !ok {
+			return nil, false
+		}
+		if buf, ok = appendSafeJSONStringField(buf, `,"OwnerInstanceID":`, entry.OwnerInstanceID); !ok {
+			return nil, false
+		}
+		if buf, ok = appendSafeJSONStringField(buf, `,"ResourceKind":`, entry.ResourceKind); !ok {
+			return nil, false
+		}
+		if buf, ok = appendSafeJSONStringField(buf, `,"ResourceID":`, entry.ResourceID); !ok {
+			return nil, false
+		}
+		if buf, ok = appendSafeJSONStringField(buf, `,"SnapshotID":`, entry.SnapshotID); !ok {
+			return nil, false
+		}
+		if buf, ok = appendSafeJSONStringField(buf, `,"Revision":`, entry.Revision); !ok {
+			return nil, false
+		}
+		buf = append(buf, `,"Fence":`...)
+		buf = strconv.AppendUint(buf, entry.Fence, 10)
+		if buf, ok = appendSafeJSONStringField(buf, `,"DependencyHash":`, entry.DependencyHash); !ok {
+			return nil, false
+		}
+		buf = append(buf, '}')
+	}
+	buf = append(buf, "]}"...)
+	return buf, true
 }
 
 // CompileRuntimeOwnerRevisionSetUnion 只合并调用方提供的实际依赖，不补造 owner fact。
@@ -132,7 +219,8 @@ func CompileRuntimeOwnerRevisionSetUnion(definitionRevision string, sets ...Runt
 	}
 	entries := make(map[[4]string]RuntimeOwnerRevisionRef)
 	for _, set := range sets {
-		if !reflect.DeepEqual(set, set.Normalized()) {
+		normalized := set.Normalized()
+		if !equalRuntimeOwnerRevisionSet(&set, &normalized) {
 			return RuntimeOwnerRevisionSet{}, fmt.Errorf("runtime owner revision union source is not raw canonical")
 		}
 		if err := set.Validate(); err != nil {
@@ -157,20 +245,20 @@ func CompileRuntimeOwnerRevisionSetUnion(definitionRevision string, sets ...Runt
 }
 
 func (s RuntimeOwnerRevisionSet) Validate() error {
-	s = s.Normalized()
-	if s.DefinitionRevision == "" || s.SetHash == "" || s.SetHash != s.WithHash().SetHash {
+	if !isRuntimeOwnerRevisionSetRawCanonical(s) {
+		s = s.Normalized()
+	}
+	if s.DefinitionRevision == "" || s.SetHash == "" || s.SetHash != computeNormalizedRuntimeOwnerRevisionSetHash(s) {
 		return fmt.Errorf("runtime owner revision set identity/hash is invalid")
 	}
-	seen := map[[4]string]struct{}{}
-	for _, entry := range s.Entries {
+	for idx, entry := range s.Entries {
 		key := ownerRevisionResourceKey(entry)
 		if entry.OwnerKind == "" || entry.OwnerInstanceID == "" || entry.ResourceKind == "" || entry.ResourceID == "" || entry.DependencyHash == "" || (entry.SnapshotID == "" && entry.Revision == "" && entry.Fence == 0) {
 			return fmt.Errorf("runtime owner revision entry is incomplete")
 		}
-		if _, duplicate := seen[key]; duplicate {
+		if idx > 0 && ownerRevisionResourceKey(s.Entries[idx-1]) == key {
 			return fmt.Errorf("runtime owner revision resource %q is duplicated", key)
 		}
-		seen[key] = struct{}{}
 	}
 	return nil
 }

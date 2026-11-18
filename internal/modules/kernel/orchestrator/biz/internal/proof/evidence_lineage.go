@@ -14,13 +14,16 @@ import (
 // Keep the original normalizers and all current-binding/applicability checks;
 // this projection is neither a validated aggregate nor a retained result.
 func normalizedEvidenceLineageFacts(facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
-	return (runtimecontract.RuntimeFacts{
+	normalized := (runtimecontract.RuntimeFacts{
 		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID,
 		EvidenceRevision:       facts.EvidenceRevision,
 		CWILedgerSchemaVersion: facts.CWILedgerSchemaVersion,
 		Coverage:               facts.Coverage, Focus: facts.Focus,
-		EvidenceApplicabilityObservations: facts.EvidenceApplicabilityObservations,
 	}).Normalized()
+	// Callers read EvidenceApplicabilityObservations without mutating them; keeping
+	// the caller's slice avoids cloning >1 MB of observations on every lineage check.
+	normalized.EvidenceApplicabilityObservations = facts.EvidenceApplicabilityObservations
+	return normalized
 }
 
 // CoverageBindingForCoverage returns the one activation-sealed proof binding
@@ -107,6 +110,25 @@ func evidenceHasCurrentProofApplicability(facts runtimecontract.RuntimeFacts, ev
 	return runtimecontract.RuntimeEvidenceIsHistoricalEffect(evidence) || !runtimecontract.RuntimeEvidenceHasStaleApplicability(evidence, facts.EvidenceApplicabilityObservations, facts.EvidenceRevision)
 }
 
+func focusMayMatchEvidence(focus runtimecontract.CoverageFocus, evidence runtimecontract.EvidenceFact) bool {
+	for _, rawFocusID := range focus.CoverageWorkItemIDs {
+		cid := common.CoverageWorkItemID(strings.TrimSpace(string(rawFocusID)))
+		if cid == "" {
+			continue
+		}
+		if CoverageWorkItemIncluded(evidence.CoverageWorkItemIDs, cid) {
+			return true
+		}
+		for _, binding := range focus.CoverageEvidenceBindings {
+			if common.CoverageWorkItemID(strings.TrimSpace(string(binding.CoverageWorkItemID))) == cid &&
+				EvidenceReferencesBinding(evidence, binding.ID) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func evidenceMatchesCurrentCoverageBinding(
 	facts runtimecontract.RuntimeFacts,
 	evidence runtimecontract.EvidenceFact,
@@ -145,7 +167,7 @@ func EvidenceAppliesToAnyFocusWithLineage(facts runtimecontract.RuntimeFacts, ev
 	var normalized *runtimecontract.RuntimeFacts
 	applicable := false
 	check := func(focus runtimecontract.CoverageFocus) bool {
-		if len(focus.CoverageWorkItemIDs) == 0 {
+		if len(focus.CoverageWorkItemIDs) == 0 || !focusMayMatchEvidence(focus, evidence) {
 			return false
 		}
 		if normalized == nil {

@@ -26,8 +26,15 @@ func (m *Biz) executeRunQueryCommand(ctx context.Context, ev magicevent.Event) (
 		}
 		var item *runmodel.Run
 		var err error
+		preCloned := false
 		if cmd.WorkspaceID != "" {
-			item, err = m.runs.GetByWorkspaceID(ctx, cmd.WorkspaceID, cmd.RunID)
+			if snapRepo, ok := m.runs.(runtimeStateSnapshotRepository); ok {
+				item, err = snapRepo.GetRuntimeStateSnapshot(ctx, cmd.WorkspaceID, cmd.RunID)
+				preCloned = true
+			}
+			if !preCloned {
+				item, err = m.runs.GetByWorkspaceID(ctx, cmd.WorkspaceID, cmd.RunID)
+			}
 		} else {
 			item, err = m.runs.Get(ctx, cmd.RunID)
 		}
@@ -39,7 +46,11 @@ func (m *Biz) executeRunQueryCommand(ctx context.Context, ev magicevent.Event) (
 		} else if retired {
 			return nil, common.ErrNotFound
 		}
-		return runevents.GetRunResult{Run: item}, nil
+		res := runevents.GetRunResult{Run: item}
+		if preCloned {
+			return preClonedRunCommandResult{value: res}, nil
+		}
+		return res, nil
 	case runevents.TopicRunCommandList:
 		cmd, ok := ev.Data().(runevents.ListRunsCommand)
 		if !ok {
@@ -101,14 +112,17 @@ func (m *Biz) listRunInventoryForQuery(ctx context.Context, workspaceID common.W
 	if err != nil {
 		return nil, err
 	}
-	retirements, err := m.runs.ListWorkspaceRetirements(ctx)
-	if err != nil {
-		return nil, err
-	}
-	retired := map[common.WorkspaceID]bool{}
-	for _, fence := range retirements {
-		if fence.IsRetired() {
-			retired[fence.WorkspaceID] = true
+	var retired map[common.WorkspaceID]bool
+	if workspaceID == "" {
+		retirements, err := m.runs.ListWorkspaceRetirements(ctx)
+		if err != nil {
+			return nil, err
+		}
+		retired = make(map[common.WorkspaceID]bool, len(retirements))
+		for _, fence := range retirements {
+			if fence.IsRetired() {
+				retired[fence.WorkspaceID] = true
+			}
 		}
 	}
 	filter := runStateFilter(states)

@@ -25,6 +25,9 @@ func matchRuntimeFailureInputReviewTrigger(a RuntimeAggregate, fact runtimecontr
 		return runtimeFailureInputReviewTrigger{coverageID: existing.coverageID, failure: existing.failure, convergence: existing.convergence}, matched, err
 	}
 	var empty runtimeFailureInputReviewTrigger
+	if fact.Kind != runtimecontract.EvidenceKindValidation || a.Facts.Failure == nil || a.Facts.Failure.ValidationDiagnostic == nil || a.Facts.Failure.OriginalDiagnostic == nil || len(a.Facts.Focus.CoverageWorkItemIDs) != 1 || a.Facts.Resources.FailureTarget != nil {
+		return empty, false, nil
+	}
 	f := a.Facts.Normalized()
 	if fact.Kind != runtimecontract.EvidenceKindValidation || f.Failure == nil || f.Failure.ValidationDiagnostic == nil || f.Failure.OriginalDiagnostic == nil || len(f.Focus.CoverageWorkItemIDs) != 1 || f.Resources.FailureTarget != nil {
 		return empty, false, nil
@@ -237,7 +240,7 @@ func settleRuntimeFailureInputReview(a RuntimeAggregate, l runtimecontract.Runti
 	}
 	// Work on detached state: unsupported maintenance must leave the original
 	// binding/failure untouched for the existing explicit conflict route.
-	a = a.CloneRaw()
+	a = snapshotRuntimeAggregateWithSharedHistory(a)
 	// A factual clarification may have replaced the mutable failure. Restore
 	// only the exact original rejected receipt's failure at this new SM-2 boundary.
 	originalFailure := failureFactFromOperationReceiptFeedback(receipt)

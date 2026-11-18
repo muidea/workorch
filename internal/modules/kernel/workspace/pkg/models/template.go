@@ -4,10 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"hash"
 	"reflect"
 	"sort"
-	"strings"
+	"strconv"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/runtimeprofiledecode"
@@ -42,30 +42,86 @@ func WorkspaceTemplateSnapshotHash(template *WorkspaceTemplate) string {
 		return ""
 	}
 	h := sha256.New()
-	values := []string{template.ID, template.Name, template.Description, template.GoalText, strings.Join(template.DoDItems, "\x00"), template.DefaultSoulID, template.ContextHints.CanonicalString()}
+	var scratch [256]byte
+	writeTemplateSnapshotHashValue(h, scratch[:], template.ID)
+	writeTemplateSnapshotHashValue(h, scratch[:], template.Name)
+	writeTemplateSnapshotHashValue(h, scratch[:], template.Description)
+	writeTemplateSnapshotHashValue(h, scratch[:], template.GoalText)
+	dodLen := 0
+	for i, item := range template.DoDItems {
+		if i > 0 {
+			dodLen++
+		}
+		dodLen += len(item)
+	}
+	writeTemplateSnapshotHashPrefix(h, scratch[:], dodLen)
+	for i, item := range template.DoDItems {
+		if i > 0 {
+			scratch[0] = 0
+			_, _ = h.Write(scratch[:1])
+		}
+		writeTemplateSnapshotHashRawString(h, scratch[:], item)
+	}
+	writeTemplateSnapshotHashValue(h, scratch[:], template.DefaultSoulID)
+	writeTemplateSnapshotHashValue(h, scratch[:], template.ContextHints.CanonicalString())
 	for _, policy := range template.EvidencePolicies {
-		values = append(values, policy.CanonicalString())
+		writeTemplateSnapshotHashValue(h, scratch[:], policy.CanonicalString())
 	}
-	stages := make([]string, 0, len(template.SoulBindings))
-	for stage := range template.SoulBindings {
-		stages = append(stages, stage)
-	}
-	sort.Strings(stages)
-	for _, stage := range stages {
-		values = append(values, stage, template.SoulBindings[stage])
+	if len(template.SoulBindings) == 1 {
+		for stage, soulID := range template.SoulBindings {
+			writeTemplateSnapshotHashValue(h, scratch[:], stage)
+			writeTemplateSnapshotHashValue(h, scratch[:], soulID)
+		}
+	} else if len(template.SoulBindings) > 1 {
+		stages := make([]string, 0, len(template.SoulBindings))
+		for stage := range template.SoulBindings {
+			stages = append(stages, stage)
+		}
+		sort.Strings(stages)
+		for _, stage := range stages {
+			writeTemplateSnapshotHashValue(h, scratch[:], stage)
+			writeTemplateSnapshotHashValue(h, scratch[:], template.SoulBindings[stage])
+		}
 	}
 	// Preserve the byte-for-byte historical hash for templates without parents.
 	// A derived snapshot binds both effective content and every raw ancestor.
 	for _, parentID := range template.ParentTemplateIDs {
-		values = append(values, "parent-template-id", parentID)
+		writeTemplateSnapshotHashValue(h, scratch[:], "parent-template-id")
+		writeTemplateSnapshotHashValue(h, scratch[:], parentID)
 	}
 	if len(template.EffectiveSources) > 1 {
-		values = append(values, "effective-template-sources", inheritedTemplateSourceHash(template.EffectiveSources))
-	}
-	for _, value := range values {
-		_, _ = fmt.Fprintf(h, "%08x%s", len(value), value)
+		writeTemplateSnapshotHashValue(h, scratch[:], "effective-template-sources")
+		writeTemplateSnapshotHashValue(h, scratch[:], inheritedTemplateSourceHash(template.EffectiveSources))
 	}
 	return "template-snapshot-sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+func writeTemplateSnapshotHashValue(h hash.Hash, scratch []byte, value string) {
+	writeTemplateSnapshotHashPrefix(h, scratch, len(value))
+	writeTemplateSnapshotHashRawString(h, scratch, value)
+}
+
+func writeTemplateSnapshotHashPrefix(h hash.Hash, scratch []byte, length int) {
+	const hexDigits = "0123456789abcdef"
+	u := uint64(length)
+	if u <= 0xffffffff {
+		for i := 7; i >= 0; i-- {
+			scratch[i] = hexDigits[u&0xf]
+			u >>= 4
+		}
+		_, _ = h.Write(scratch[:8])
+		return
+	}
+	encoded := strconv.AppendUint(scratch[:0], u, 16)
+	_, _ = h.Write(encoded)
+}
+
+func writeTemplateSnapshotHashRawString(h hash.Hash, scratch []byte, value string) {
+	for len(value) > 0 {
+		n := copy(scratch, value)
+		_, _ = h.Write(scratch[:n])
+		value = value[n:]
+	}
 }
 
 // WorkspaceForCurrentTemplate is a detached current-declaration view. A changed Template

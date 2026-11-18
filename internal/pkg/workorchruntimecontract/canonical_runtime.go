@@ -687,43 +687,43 @@ type RuntimeFacts struct {
 	// those queues are replaced with generation-specific semantic bindings by
 	// SM-2. Only fresh activation may populate this declaration queue.
 	DefinitionFocuses []RuntimeDefinitionFocus
-	EvidenceRevision  string
-	Focus             CoverageFocus
-	RemainingFocuses  []CoverageFocus
+	Activation        RuntimeActivationContext
+	ConvergencePolicy RuntimeConvergencePolicy
+	RecoveryPolicy    RuntimeRecoveryPolicy
+	// ExecutionBudgetPolicy is the fresh-activation-sealed policy. Consumption
+	// remains in the Orchestrator aggregate sub-ledger, never in owner facts.
+	ExecutionBudgetPolicy RuntimeExecutionBudgetPolicy
+	Slices                []RuntimeAcceptanceSlice
 	// CompletedFocuses retains the already-advanced SM-2 queue entries.  It is
 	// required to deterministically requeue a profile-declared dependent focus
 	// when later accepted source evidence invalidates its prior closure.
 	CompletedFocuses []CoverageFocus
-	CWISuspensions   []RuntimeCWISuspension `json:",omitempty"`
+	Assessments      []RuntimeAssessmentFact
 	Evidence         EvidenceLedger
 	// SM-2 owner-current observations retain original receipt/fact identities;
 	// they never rewrite either immutable dependency collection.
 	EvidenceApplicabilityObservations []RuntimeEvidenceApplicabilityObservation `json:",omitempty"`
-	Assessments                       []RuntimeAssessmentFact
-	Failure                           *FailureFact
-	Prerequisites                     PrerequisiteState
 	Capabilities                      RuntimeCapabilities
-	Resources                         RuntimeResourceFacts
-	Activation                        RuntimeActivationContext
 	// ReconciliationContract is the SM-2-sealed generation-specific CWI proof contract.
 	// It is persisted as part of the Orchestrator aggregate facts so a resume
 	// never reconstructs reconciliation authority from mutable profile text.
 	ReconciliationContract RuntimeCWIReconciliationContract
-	StateChange            RuntimeStateChangeLedger
-	ConvergencePolicy      RuntimeConvergencePolicy
-	RecoveryPolicy         RuntimeRecoveryPolicy
-	// ExecutionBudgetPolicy is the fresh-activation-sealed policy. Consumption
-	// remains in the Orchestrator aggregate sub-ledger, never in owner facts.
-	ExecutionBudgetPolicy RuntimeExecutionBudgetPolicy
-	Recovery              RuntimeRecoveryLedger
-	Repair                RuntimeRepairLedger
+	RemainingFocuses       []CoverageFocus
+	Coverage               []RuntimeCoverageItemFact
+	CWISuspensions         []RuntimeCWISuspension `json:",omitempty"`
+	Resources              RuntimeResourceFacts
+	Prerequisites          PrerequisiteState
+	EvidenceRevision       string
+	Focus                  CoverageFocus
+	Feasibility            *RuntimeFeasibilityFact
+	Failure                *FailureFact
+	Repair                 RuntimeRepairLedger
 	// RepairDirective is the single persisted next-action authority for the current
 	// focus. When set it overrides raw MissingRequiredEvidenceKinds for candidate
 	// action selection (INV-05).
 	RepairDirective *RuntimeRepairDirective
-	Coverage        []RuntimeCoverageItemFact
-	Feasibility     *RuntimeFeasibilityFact
-	Slices          []RuntimeAcceptanceSlice
+	Recovery        RuntimeRecoveryLedger
+	StateChange     RuntimeStateChangeLedger
 }
 
 // RuntimeFeasibilityFact is the persisted result of the pre-candidate
@@ -1796,38 +1796,73 @@ type AuthorityTransaction struct {
 	Attempt                   int
 }
 
+func pickNormalizedSlice[T any](orig, norm []T, preserveEqual bool) []T {
+	if preserveEqual && runtimeRawEqual(orig, norm) {
+		return clipRuntimeStateRawSliceCap(orig)
+	}
+	return norm
+}
+
+func pickNormalizedValue[T any](orig, norm T, preserveEqual bool) T {
+	if preserveEqual && runtimeRawEqual(orig, norm) {
+		return orig
+	}
+	return norm
+}
+
 func (f RuntimeFacts) Normalized() RuntimeFacts {
+	return f.normalize(false)
+}
+
+// NormalizedPreservingEqual canonicalizes RuntimeFacts like Normalized while
+// preserving original capacity-clipped backing arrays for subfields that are
+// already in canonical form. Used by the reducer so untouched multi-megabyte
+// ledgers keep pointer identity across aggregate transitions.
+func (f RuntimeFacts) NormalizedPreservingEqual() RuntimeFacts {
+	return f.normalize(true)
+}
+
+func (f RuntimeFacts) normalize(preserveEqual bool) RuntimeFacts {
 	f.DefinitionRevision = strings.TrimSpace(f.DefinitionRevision)
 	f.CWILedgerSchemaVersion = strings.TrimSpace(f.CWILedgerSchemaVersion)
-	f.DefinitionSeed = f.DefinitionSeed.Clone()
-	f.DefinitionFocuses = NormalizeRuntimeDefinitionFocuses(f.DefinitionFocuses)
+	f.DefinitionSeed = pickNormalizedValue(f.DefinitionSeed, f.DefinitionSeed.Clone(), preserveEqual)
+	f.DefinitionFocuses = pickNormalizedSlice(f.DefinitionFocuses, NormalizeRuntimeDefinitionFocuses(f.DefinitionFocuses), preserveEqual)
 	f.EvidenceRevision = strings.TrimSpace(f.EvidenceRevision)
 	f.Focus = f.Focus.Normalized()
-	f.RemainingFocuses = normalizeCoverageFocusQueue(f.RemainingFocuses)
-	f.CompletedFocuses = normalizeCoverageFocusQueue(f.CompletedFocuses)
-	f.CWISuspensions = CloneRuntimeCWISuspensions(f.CWISuspensions)
-	f.Evidence.Accepted = normalizeEvidenceFacts(f.Evidence.Accepted)
-	f.Evidence.Rejected = normalizeEvidenceFacts(f.Evidence.Rejected)
-	f.EvidenceApplicabilityObservations = CloneRuntimeEvidenceApplicabilityObservations(f.EvidenceApplicabilityObservations)
-	f.Assessments = normalizeRuntimeAssessmentFacts(f.Assessments)
-	f.Prerequisites.Pending = normalizeRuntimePrerequisites(f.Prerequisites.Pending)
-	f.Prerequisites.Satisfied = normalizeRuntimePrerequisites(f.Prerequisites.Satisfied)
-	f.Prerequisites.Retired = normalizeRuntimePrerequisites(f.Prerequisites.Retired)
+	f.RemainingFocuses = pickNormalizedSlice(f.RemainingFocuses, normalizeCoverageFocusQueue(f.RemainingFocuses), preserveEqual)
+	f.CompletedFocuses = pickNormalizedSlice(f.CompletedFocuses, normalizeCoverageFocusQueue(f.CompletedFocuses), preserveEqual)
+	f.CWISuspensions = pickNormalizedSlice(f.CWISuspensions, CloneRuntimeCWISuspensions(f.CWISuspensions), preserveEqual)
+	if preserveEqual {
+		f.Evidence.Accepted = NormalizeEvidenceFactsPreservingEqual(f.Evidence.Accepted)
+		f.Evidence.Rejected = NormalizeEvidenceFactsPreservingEqual(f.Evidence.Rejected)
+	} else {
+		f.Evidence.Accepted = normalizeEvidenceFacts(f.Evidence.Accepted)
+		f.Evidence.Rejected = normalizeEvidenceFacts(f.Evidence.Rejected)
+	}
+	if f.EvidenceApplicabilityObservations != nil && len(f.EvidenceApplicabilityObservations) == 0 {
+		f.EvidenceApplicabilityObservations = []RuntimeEvidenceApplicabilityObservation{}
+	} else {
+		f.EvidenceApplicabilityObservations = clipRuntimeStateRawSliceCap(f.EvidenceApplicabilityObservations)
+	}
+	f.Assessments = pickNormalizedSlice(f.Assessments, normalizeRuntimeAssessmentFacts(f.Assessments), preserveEqual)
+	f.Prerequisites.Pending = pickNormalizedSlice(f.Prerequisites.Pending, NormalizeRuntimePrerequisites(f.Prerequisites.Pending), preserveEqual)
+	f.Prerequisites.Satisfied = pickNormalizedSlice(f.Prerequisites.Satisfied, NormalizeRuntimePrerequisites(f.Prerequisites.Satisfied), preserveEqual)
+	f.Prerequisites.Retired = pickNormalizedSlice(f.Prerequisites.Retired, NormalizeRuntimePrerequisites(f.Prerequisites.Retired), preserveEqual)
 	f.Capabilities.StateChangeKinds = normalizeStrings(f.Capabilities.StateChangeKinds)
 	f.Capabilities.ValidationKinds = normalizeStrings(f.Capabilities.ValidationKinds)
 	f.Capabilities.GovernanceKinds = normalizeStrings(f.Capabilities.GovernanceKinds)
-	f.Capabilities.PrerequisiteFacts = NormalizeRuntimeCapabilityPrerequisiteFacts(f.Capabilities.PrerequisiteFacts)
-	f.Resources = f.Resources.Normalized()
-	f.Activation = f.Activation.Normalized()
-	f.ReconciliationContract = f.ReconciliationContract.Normalized()
+	f.Capabilities.PrerequisiteFacts = pickNormalizedSlice(f.Capabilities.PrerequisiteFacts, NormalizeRuntimeCapabilityPrerequisiteFacts(f.Capabilities.PrerequisiteFacts), preserveEqual)
+	f.Resources = f.Resources.normalize(preserveEqual)
+	f.Activation = pickNormalizedValue(f.Activation, f.Activation.Normalized(), preserveEqual)
+	f.ReconciliationContract = pickNormalizedValue(f.ReconciliationContract, f.ReconciliationContract.Normalized(), preserveEqual)
 	f.StateChange = f.StateChange.Normalized()
 	f.ConvergencePolicy = f.ConvergencePolicy.Normalized()
 	f.RecoveryPolicy = f.RecoveryPolicy.Normalized()
 	f.ExecutionBudgetPolicy = f.ExecutionBudgetPolicy.Normalized()
 	f.Recovery = f.Recovery.Normalized()
 	f.Repair = f.Repair.Normalized()
-	f.Coverage = NormalizeRuntimeCoverageFacts(f.Coverage)
-	f.Slices = NormalizeRuntimeAcceptanceSlices(f.Slices)
+	f.Coverage = pickNormalizedSlice(f.Coverage, NormalizeRuntimeCoverageFacts(f.Coverage), preserveEqual)
+	f.Slices = pickNormalizedSlice(f.Slices, NormalizeRuntimeAcceptanceSlices(f.Slices), preserveEqual)
 	if f.Feasibility != nil {
 		value := *f.Feasibility
 		value.FocusID = strings.TrimSpace(value.FocusID)
@@ -1856,19 +1891,47 @@ func (f RuntimeFacts) Validate() error {
 
 func (f RuntimeFacts) validateInSemanticSession(session *runtimeSemanticValidationSession) error {
 	raw := f
+	var previous *RuntimeStateRecord
+	if session != nil {
+		previous = session.committedPreimage
+	}
 	// Facts normalization must not repair a coordinated persisted rewrite of
 	// activation evidence authority. Check this nested raw collection before
 	// f.Normalized() can canonicalize nested authority fields.
-	if err := ValidateRuntimeFactsRaw(raw); err != nil {
-		return err
+	if previous == nil || !runtimeRawEqual(raw.Activation.EvidencePolicies, previous.Facts.Activation.EvidencePolicies) {
+		if err := ValidateRuntimeFactsRaw(raw); err != nil {
+			return err
+		}
 	}
 	rawFocuses := make([]CoverageFocus, 0, 1+len(raw.RemainingFocuses)+len(raw.CompletedFocuses))
 	rawFocuses = append(rawFocuses, raw.Focus)
 	rawFocuses = append(rawFocuses, raw.RemainingFocuses...)
 	rawFocuses = append(rawFocuses, raw.CompletedFocuses...)
-	for _, focus := range rawFocuses {
+	sameDefRev := previous != nil && raw.DefinitionRevision == previous.Facts.DefinitionRevision
+	var prevFocusByID map[string]*CoverageFocus
+	for i, focus := range rawFocuses {
 		if len(focus.CoverageEvidenceBindings) == 0 {
 			continue
+		}
+		if sameDefRev {
+			if i == 0 && runtimeRawEqual(focus, previous.Facts.Focus) {
+				continue
+			}
+			if prevFocusByID == nil {
+				prevFocusByID = make(map[string]*CoverageFocus, 1+len(previous.Facts.RemainingFocuses)+len(previous.Facts.CompletedFocuses))
+				prevFocusByID[previous.Facts.Focus.ID] = &previous.Facts.Focus
+				for j := range previous.Facts.RemainingFocuses {
+					pf := &previous.Facts.RemainingFocuses[j]
+					prevFocusByID[pf.ID] = pf
+				}
+				for j := range previous.Facts.CompletedFocuses {
+					pf := &previous.Facts.CompletedFocuses[j]
+					prevFocusByID[pf.ID] = pf
+				}
+			}
+			if pf, ok := prevFocusByID[focus.ID]; ok && runtimeRawEqual(focus, *pf) {
+				continue
+			}
 		}
 		if err := ValidateCoverageEvidenceBindingsForFocus(focus, raw.DefinitionRevision); err != nil {
 			return fmt.Errorf("runtime facts focus %s: %w", strings.TrimSpace(focus.ID), err)
@@ -1883,26 +1946,96 @@ func (f RuntimeFacts) validateInSemanticSession(session *runtimeSemanticValidati
 	if err != nil {
 		return fmt.Errorf("runtime operation admissibility: %w", err)
 	}
-	for _, fact := range append(append([]EvidenceFact(nil), raw.Evidence.Accepted...), raw.Evidence.Rejected...) {
-		if fact.Validation != nil {
-			if err := fact.Validation.ValidateFailureDetails(); err != nil {
-				return fmt.Errorf("runtime evidence validation observation %q: %w", fact.ID, err)
+	if previous == nil || !runtimeRawEqual(raw.Evidence, previous.Facts.Evidence) {
+		for _, fact := range raw.Evidence.Accepted {
+			if fact.Validation != nil {
+				if err := fact.Validation.ValidateFailureDetails(); err != nil {
+					return fmt.Errorf("runtime evidence validation observation %q: %w", fact.ID, err)
+				}
+			}
+		}
+		for _, fact := range raw.Evidence.Rejected {
+			if fact.Validation != nil {
+				if err := fact.Validation.ValidateFailureDetails(); err != nil {
+					return fmt.Errorf("runtime evidence validation observation %q: %w", fact.ID, err)
+				}
 			}
 		}
 	}
+	sameDefinitionAndActivation := previous != nil &&
+		strings.TrimSpace(raw.DefinitionRevision) == previous.Facts.DefinitionRevision &&
+		runtimeRawEqual(raw.DefinitionSeed, previous.Facts.DefinitionSeed) &&
+		runtimeRawEqual(raw.DefinitionFocuses, previous.Facts.DefinitionFocuses) &&
+		runtimeRawEqual(raw.Activation, previous.Facts.Activation)
+	sameCWIComponents := previous != nil &&
+		raw.CWILedgerSchemaVersion == previous.Facts.CWILedgerSchemaVersion &&
+		raw.DefinitionRevision == previous.Facts.DefinitionRevision &&
+		raw.WorkspaceID == previous.Facts.WorkspaceID &&
+		raw.RunID == previous.Facts.RunID &&
+		runtimeRawEqual(raw.Coverage, previous.Facts.Coverage) &&
+		runtimeRawEqual(raw.Focus, previous.Facts.Focus) &&
+		runtimeRawEqual(raw.RemainingFocuses, previous.Facts.RemainingFocuses) &&
+		runtimeRawEqual(raw.CompletedFocuses, previous.Facts.CompletedFocuses) &&
+		runtimeRawEqual(raw.ReconciliationContract, previous.Facts.ReconciliationContract)
+	sameCapabilities := previous != nil && runtimeRawEqual(raw.Capabilities, previous.Facts.Capabilities)
+	sameAssessments := previous != nil && runtimeRawEqual(raw.Assessments, previous.Facts.Assessments)
+	sameRetiredPrerequisites := previous != nil &&
+		runtimeRawEqual(raw.Prerequisites.Retired, previous.Facts.Prerequisites.Retired) &&
+		runtimeRawEqual(raw.Resources.RetiredPrerequisiteObservations, previous.Facts.Resources.RetiredPrerequisiteObservations)
 	// The complete raw catalog gate above already produced the exact normal
 	// form. Borrow it read-only within this validator instead of normalizing
-	// all input files and proof graphs again. No such borrow leaves this call.
+	// all input files and proof graphs again. Also omit heavy non-inspected
+	// ledgers (and immutable definition/activation/CWI copies when unchanged vs the
+	// formal preimage) before normalizing. No such borrow leaves this call.
 	f.Resources.OperationAdmissibilities = nil
+	f.Resources.Manifest = nil
+	f.Resources.TargetSnapshots = nil
+	f.Resources.ProviderCeiling = nil
+	f.Resources.ValidationScratch = nil
+	f.EvidenceApplicabilityObservations = nil
+	f.Evidence = EvidenceLedger{}
+	f.CWISuspensions = nil
+	f.Slices = nil
+	var executionLimits *RuntimeExecutionLimits
+	if sameDefinitionAndActivation {
+		if f.Activation.ExecutionContract.ExecutionLimits != nil {
+			copied := *f.Activation.ExecutionContract.ExecutionLimits
+			executionLimits = &copied
+		}
+		f.DefinitionSeed = RuntimeDefinitionSeed{}
+		f.DefinitionFocuses = nil
+		f.Activation = RuntimeActivationContext{}
+	}
+	if sameCWIComponents {
+		focusID := strings.TrimSpace(raw.Focus.ID)
+		f.Coverage = nil
+		f.Focus = CoverageFocus{ID: focusID}
+		f.RemainingFocuses = nil
+		f.CompletedFocuses = nil
+		f.ReconciliationContract = RuntimeCWIReconciliationContract{}
+	}
+	if sameCapabilities {
+		f.Capabilities = RuntimeCapabilities{}
+	}
+	if sameAssessments {
+		f.Assessments = nil
+	}
+	if sameRetiredPrerequisites {
+		f.Prerequisites.Retired = nil
+		f.Resources.RetiredPrerequisiteObservations = nil
+	}
 	f = f.Normalized()
 	f.Resources.OperationAdmissibilities = catalogs
+	if sameDefinitionAndActivation {
+		f.Activation.ExecutionContract.ExecutionLimits = executionLimits
+	}
 	if f.WorkspaceID == "" || f.RunID == "" {
 		return fmt.Errorf("runtime facts require workspace and run scope")
 	}
 	if f.DefinitionRevision == "" || f.EvidenceRevision == "" {
 		return fmt.Errorf("runtime facts require definition and evidence revisions")
 	}
-	if raw.CWILedgerSchemaVersion != "" {
+	if raw.CWILedgerSchemaVersion != "" && !sameCWIComponents {
 		if err := ValidateRuntimeCWILedger(raw); err != nil {
 			return err
 		}
@@ -1910,75 +2043,90 @@ func (f RuntimeFacts) validateInSemanticSession(session *runtimeSemanticValidati
 			return err
 		}
 	}
-	if f.DefinitionSeed.SchemaVersion != "" {
-		if err := validateRuntimeSemanticSeedInSession(f.DefinitionSeed, session); err != nil {
-			return fmt.Errorf("runtime facts definition seed: %w", err)
-		}
-		if err := ValidateRuntimeSourceObligationApplicability(f.DefinitionSeed.SourceObligations, f.Activation.ExecutionContract.ProfileContracts); err != nil {
-			return fmt.Errorf("runtime facts source applicability: %w", err)
-		}
-		if err := ValidateRuntimeGoalExecutionAssertionSeed(f.DefinitionSeed, f.Activation.ExecutionContract.ProfileContracts); err != nil {
-			return err
-		}
-		if f.DefinitionSeed.DefinitionRevision != f.DefinitionRevision {
-			return fmt.Errorf("runtime facts definition seed revision mismatch")
-		}
-		if len(f.DefinitionFocuses) != 0 {
-			if err := ValidateRuntimeDefinitionFocuses(f.DefinitionSeed, f.DefinitionFocuses); err != nil {
-				return fmt.Errorf("runtime facts definition focuses: %w", err)
+	if !sameDefinitionAndActivation {
+		if f.DefinitionSeed.SchemaVersion != "" {
+			if err := validateRuntimeSemanticSeedInSession(f.DefinitionSeed, session); err != nil {
+				return fmt.Errorf("runtime facts definition seed: %w", err)
 			}
-			if err := ValidateRuntimeDefinitionImplementationWorkPolicies(f.DefinitionFocuses, f.Activation.ExecutionContract.ProfileContracts); err != nil {
-				return fmt.Errorf("runtime facts definition work policies: %w", err)
+			if err := ValidateRuntimeSourceObligationApplicability(f.DefinitionSeed.SourceObligations, f.Activation.ExecutionContract.ProfileContracts); err != nil {
+				return fmt.Errorf("runtime facts source applicability: %w", err)
 			}
-			if err := ValidateRuntimeDefinitionLineageAssertions(f.DefinitionFocuses, f.Activation.ExecutionContract.ProfileContracts); err != nil {
+			if err := ValidateRuntimeGoalExecutionAssertionSeed(f.DefinitionSeed, f.Activation.ExecutionContract.ProfileContracts); err != nil {
 				return err
 			}
-			if err := ValidateRuntimeDefinitionVerificationPolicies(f.DefinitionFocuses, f.Activation.ExecutionContract.ProfileContracts); err != nil {
-				return fmt.Errorf("runtime facts definition verification policies: %w", err)
+			if f.DefinitionSeed.DefinitionRevision != f.DefinitionRevision {
+				return fmt.Errorf("runtime facts definition seed revision mismatch")
+			}
+			if len(f.DefinitionFocuses) != 0 {
+				if err := ValidateRuntimeDefinitionFocuses(f.DefinitionSeed, f.DefinitionFocuses); err != nil {
+					return fmt.Errorf("runtime facts definition focuses: %w", err)
+				}
+				if err := ValidateRuntimeDefinitionImplementationWorkPolicies(f.DefinitionFocuses, f.Activation.ExecutionContract.ProfileContracts); err != nil {
+					return fmt.Errorf("runtime facts definition work policies: %w", err)
+				}
+				if err := ValidateRuntimeDefinitionLineageAssertions(f.DefinitionFocuses, f.Activation.ExecutionContract.ProfileContracts); err != nil {
+					return err
+				}
+				if err := ValidateRuntimeDefinitionVerificationPolicies(f.DefinitionFocuses, f.Activation.ExecutionContract.ProfileContracts); err != nil {
+					return fmt.Errorf("runtime facts definition verification policies: %w", err)
+				}
 			}
 		}
-	}
-	if err := ValidateRuntimeTerminalProofDeclarationSources(f.DefinitionSeed.CoverageItems, f.Activation.ExecutionContract.ProfileContracts); err != nil {
-		return err
+		if err := ValidateRuntimeTerminalProofDeclarationSources(f.DefinitionSeed.CoverageItems, f.Activation.ExecutionContract.ProfileContracts); err != nil {
+			return err
+		}
 	}
 	if f.Focus.ID == "" {
 		return fmt.Errorf("runtime facts require a coverage focus")
 	}
-	if err := ValidateRuntimeCapabilityPrerequisiteFacts(raw.Capabilities.PrerequisiteFacts); err != nil {
-		return fmt.Errorf("runtime capability prerequisite facts: %w", err)
-	}
-	for _, focus := range append(append([]CoverageFocus{f.Focus}, f.RemainingFocuses...), f.CompletedFocuses...) {
-		if err := ValidateRuntimeProspectiveTargetAllOfConstraintRefs(focus.ProspectiveTargetAllOfConstraintRefs); err != nil {
-			return fmt.Errorf("runtime focus %q prospective target all-of declaration: %w", focus.ID, err)
-		}
-		if len(focus.ProspectiveTargetAllOfConstraintRefs) != 0 &&
-			(!focus.RequireTargetGrounding || focus.TargetSelectorRef == "" || focus.TargetSelectorOwnerRef == "" || focus.TargetSelectorSubjectRef == "") {
-			return fmt.Errorf("runtime focus %q prospective target all-of declaration requires grounding and a complete selector", focus.ID)
-		}
-		if err := ValidateRuntimeOwnerFactRequirements(focus.RequiredOwnerFacts); err != nil {
-			return fmt.Errorf("runtime focus %q owner facts: %w", focus.ID, err)
-		}
-		if err := ValidateRuntimeOwnerFactConvergences(focus.RequiredOwnerFacts, focus.OwnerFactConvergences); err != nil {
-			return fmt.Errorf("runtime focus %q owner-fact convergence: %w", focus.ID, err)
+	if !sameCapabilities {
+		if err := ValidateRuntimeCapabilityPrerequisiteFacts(raw.Capabilities.PrerequisiteFacts); err != nil {
+			return fmt.Errorf("runtime capability prerequisite facts: %w", err)
 		}
 	}
-	if err := f.Activation.Validate(); err != nil {
-		return err
+	if !sameCWIComponents {
+		for _, focus := range append(append([]CoverageFocus{f.Focus}, f.RemainingFocuses...), f.CompletedFocuses...) {
+			if err := ValidateRuntimeProspectiveTargetAllOfConstraintRefs(focus.ProspectiveTargetAllOfConstraintRefs); err != nil {
+				return fmt.Errorf("runtime focus %q prospective target all-of declaration: %w", focus.ID, err)
+			}
+			if len(focus.ProspectiveTargetAllOfConstraintRefs) != 0 &&
+				(!focus.RequireTargetGrounding || focus.TargetSelectorRef == "" || focus.TargetSelectorOwnerRef == "" || focus.TargetSelectorSubjectRef == "") {
+				return fmt.Errorf("runtime focus %q prospective target all-of declaration requires grounding and a complete selector", focus.ID)
+			}
+			if err := ValidateRuntimeOwnerFactRequirements(focus.RequiredOwnerFacts); err != nil {
+				return fmt.Errorf("runtime focus %q owner facts: %w", focus.ID, err)
+			}
+			if err := ValidateRuntimeOwnerFactConvergences(focus.RequiredOwnerFacts, focus.OwnerFactConvergences); err != nil {
+				return fmt.Errorf("runtime focus %q owner-fact convergence: %w", focus.ID, err)
+			}
+		}
 	}
-	if err := f.ConvergencePolicy.Validate(); err != nil {
-		return fmt.Errorf("runtime facts convergence policy: %w", err)
+	if !sameDefinitionAndActivation {
+		if err := f.Activation.Validate(); err != nil {
+			return err
+		}
 	}
-	if err := f.RecoveryPolicy.Validate(); err != nil {
-		return fmt.Errorf("runtime facts recovery policy: %w", err)
-	}
-	if err := f.ExecutionBudgetPolicy.Validate(); err != nil {
-		return fmt.Errorf("runtime facts execution budget policy: %w", err)
-	}
-	if err := ValidateRuntimeExecutionBudgetPolicySources(f.ExecutionBudgetPolicy, f.ConvergencePolicy, f.RecoveryPolicy); err != nil {
-		return fmt.Errorf("runtime facts execution budget policy: %w", err)
-	}
-	if err := ValidateRuntimeExecutionLimitsBinding(f.ExecutionBudgetPolicy, f.Activation.ExecutionContract.ExecutionLimits); err != nil {
-		return fmt.Errorf("runtime facts execution budget limits: %w", err)
+	samePolicies := previous != nil &&
+		runtimeRawEqual(raw.ConvergencePolicy, previous.Facts.ConvergencePolicy) &&
+		runtimeRawEqual(raw.RecoveryPolicy, previous.Facts.RecoveryPolicy) &&
+		runtimeRawEqual(raw.ExecutionBudgetPolicy, previous.Facts.ExecutionBudgetPolicy) &&
+		runtimeRawEqual(raw.Activation.ExecutionContract.ExecutionLimits, previous.Facts.Activation.ExecutionContract.ExecutionLimits)
+	if !samePolicies {
+		if err := f.ConvergencePolicy.Validate(); err != nil {
+			return fmt.Errorf("runtime facts convergence policy: %w", err)
+		}
+		if err := f.RecoveryPolicy.Validate(); err != nil {
+			return fmt.Errorf("runtime facts recovery policy: %w", err)
+		}
+		if err := f.ExecutionBudgetPolicy.Validate(); err != nil {
+			return fmt.Errorf("runtime facts execution budget policy: %w", err)
+		}
+		if err := ValidateRuntimeExecutionBudgetPolicySources(f.ExecutionBudgetPolicy, f.ConvergencePolicy, f.RecoveryPolicy); err != nil {
+			return fmt.Errorf("runtime facts execution budget policy: %w", err)
+		}
+		if err := ValidateRuntimeExecutionLimitsBinding(f.ExecutionBudgetPolicy, f.Activation.ExecutionContract.ExecutionLimits); err != nil {
+			return fmt.Errorf("runtime facts execution budget limits: %w", err)
+		}
 	}
 	if err := f.Recovery.Validate(f.RecoveryPolicy); err != nil {
 		return fmt.Errorf("runtime facts recovery ledger: %w", err)
@@ -2077,72 +2225,88 @@ func (f RuntimeFacts) validateInSemanticSession(session *runtimeSemanticValidati
 		}
 		activeIDs[prerequisite.ID] = struct{}{}
 	}
-	retiredIDs := make(map[string]RuntimePrerequisite, len(f.Prerequisites.Retired))
-	for _, prerequisite := range f.Prerequisites.Retired {
-		if !RuntimePrerequisiteKindSupported(prerequisite.Kind) {
-			return fmt.Errorf("runtime retired prerequisite %q has unsupported kind %q", prerequisite.ID, prerequisite.Kind)
-		}
-		if err := validateRuntimePrerequisiteProspectiveTargetAllOfDeclaration(prerequisite); err != nil {
-			return err
-		}
-		if _, active := activeIDs[prerequisite.ID]; active {
-			return fmt.Errorf("runtime prerequisite %q cannot be both active and retired", prerequisite.ID)
-		}
-		if prerequisite.Scope != RuntimePrerequisiteScopeFocus || prerequisite.FocusID == "" {
-			return fmt.Errorf("runtime retired prerequisite %q must be focus-scoped", prerequisite.ID)
-		}
-		retiredIDs[prerequisite.ID] = prerequisite
-	}
-	for _, observation := range f.Resources.RetiredPrerequisiteObservations {
-		if err := observation.Validate(); err != nil {
-			return fmt.Errorf("runtime retired prerequisite observation: %w", err)
-		}
-		prerequisite, found := retiredIDs[observation.PrerequisiteID]
-		if !found || prerequisite.Kind != observation.Kind || prerequisite.OwnerModuleID != observation.OwnerModuleID {
-			return fmt.Errorf("runtime retired prerequisite observation %q has no matching retired prerequisite", observation.PrerequisiteID)
-		}
-	}
-	seenFocus := map[string]struct{}{f.Focus.ID: {}}
-	for _, focus := range append(append([]CoverageFocus(nil), f.RemainingFocuses...), f.CompletedFocuses...) {
-		if focus.ID == "" {
-			return fmt.Errorf("runtime facts queued focus requires identity")
-		}
-		if _, ok := seenFocus[focus.ID]; ok {
-			return fmt.Errorf("runtime facts coverage focus %s is duplicated", focus.ID)
-		}
-		seenFocus[focus.ID] = struct{}{}
-	}
-	coverage := map[common.CoverageWorkItemID]struct{}{}
-	for _, item := range f.Coverage {
-		coverage[item.ID] = struct{}{}
-	}
-	for _, focus := range append(append([]CoverageFocus{f.Focus}, f.RemainingFocuses...), f.CompletedFocuses...) {
-		for _, id := range focus.CoverageWorkItemIDs {
-			if _, ok := coverage[id]; !ok {
-				return fmt.Errorf("runtime facts focus coverage item %s has no coverage ledger entry", id)
+	if sameRetiredPrerequisites {
+		for _, prerequisite := range raw.Prerequisites.Retired {
+			id := strings.TrimSpace(prerequisite.ID)
+			if id == "" {
+				continue
+			}
+			if _, active := activeIDs[id]; active {
+				return fmt.Errorf("runtime prerequisite %q cannot be both active and retired", id)
 			}
 		}
-		if len(focus.CoverageEvidenceBindings) != 0 {
-			if err := ValidateCoverageEvidenceBindingsForFocus(focus, f.DefinitionRevision); err != nil {
-				return fmt.Errorf("runtime facts focus %s: %w", focus.ID, err)
+	} else {
+		retiredIDs := make(map[string]RuntimePrerequisite, len(f.Prerequisites.Retired))
+		for _, prerequisite := range f.Prerequisites.Retired {
+			if !RuntimePrerequisiteKindSupported(prerequisite.Kind) {
+				return fmt.Errorf("runtime retired prerequisite %q has unsupported kind %q", prerequisite.ID, prerequisite.Kind)
+			}
+			if err := validateRuntimePrerequisiteProspectiveTargetAllOfDeclaration(prerequisite); err != nil {
+				return err
+			}
+			if _, active := activeIDs[prerequisite.ID]; active {
+				return fmt.Errorf("runtime prerequisite %q cannot be both active and retired", prerequisite.ID)
+			}
+			if prerequisite.Scope != RuntimePrerequisiteScopeFocus || prerequisite.FocusID == "" {
+				return fmt.Errorf("runtime retired prerequisite %q must be focus-scoped", prerequisite.ID)
+			}
+			retiredIDs[prerequisite.ID] = prerequisite
+		}
+		for _, observation := range f.Resources.RetiredPrerequisiteObservations {
+			if err := observation.Validate(); err != nil {
+				return fmt.Errorf("runtime retired prerequisite observation: %w", err)
+			}
+			prerequisite, found := retiredIDs[observation.PrerequisiteID]
+			if !found || prerequisite.Kind != observation.Kind || prerequisite.OwnerModuleID != observation.OwnerModuleID {
+				return fmt.Errorf("runtime retired prerequisite observation %q has no matching retired prerequisite", observation.PrerequisiteID)
 			}
 		}
 	}
-	if f.ReconciliationContract.SchemaVersion != "" {
-		if err := f.ReconciliationContract.Validate(); err != nil {
-			return fmt.Errorf("runtime facts reconciliation contract: %w", err)
+	if !sameCWIComponents {
+		seenFocus := map[string]struct{}{f.Focus.ID: {}}
+		for _, focus := range append(append([]CoverageFocus(nil), f.RemainingFocuses...), f.CompletedFocuses...) {
+			if focus.ID == "" {
+				return fmt.Errorf("runtime facts queued focus requires identity")
+			}
+			if _, ok := seenFocus[focus.ID]; ok {
+				return fmt.Errorf("runtime facts coverage focus %s is duplicated", focus.ID)
+			}
+			seenFocus[focus.ID] = struct{}{}
 		}
-	}
-	coverageItems := make([]RuntimeCoverageItem, 0, len(f.Coverage))
-	for _, item := range f.Coverage {
-		coverageItems = append(coverageItems, RuntimeCoverageItem{
-			ID: item.ID, SliceID: item.SliceID, SourceScope: item.SourceScope, SourceID: item.SourceID,
-			TargetText: item.TargetText, PrerequisiteCoverageWorkItemIDs: item.PrerequisiteCoverageWorkItemIDs,
-			ReopenDependencies: item.ReopenDependencies,
-		})
-	}
-	if err := ValidateRuntimeCoverageItemDependencies(coverageItems); err != nil {
-		return fmt.Errorf("runtime facts coverage dependencies: %w", err)
+		coverage := map[common.CoverageWorkItemID]struct{}{}
+		for _, item := range f.Coverage {
+			coverage[item.ID] = struct{}{}
+		}
+		for _, focus := range append(append([]CoverageFocus{f.Focus}, f.RemainingFocuses...), f.CompletedFocuses...) {
+			for _, id := range focus.CoverageWorkItemIDs {
+				if _, ok := coverage[id]; !ok {
+					return fmt.Errorf("runtime facts focus coverage item %s has no coverage ledger entry", id)
+				}
+			}
+			if len(focus.CoverageEvidenceBindings) != 0 && f.DefinitionRevision != strings.TrimSpace(raw.DefinitionRevision) {
+				if err := ValidateCoverageEvidenceBindingsForFocus(focus, f.DefinitionRevision); err != nil {
+					return fmt.Errorf("runtime facts focus %s: %w", focus.ID, err)
+				}
+			}
+		}
+		if f.ReconciliationContract.SchemaVersion != "" {
+			if err := f.ReconciliationContract.Validate(); err != nil {
+				return fmt.Errorf("runtime facts reconciliation contract: %w", err)
+			}
+		}
+		if previous == nil || !runtimeRawEqual(raw.Coverage, previous.Facts.Coverage) {
+			coverageItems := make([]RuntimeCoverageItem, 0, len(f.Coverage))
+			for _, item := range f.Coverage {
+				coverageItems = append(coverageItems, RuntimeCoverageItem{
+					ID: item.ID, SliceID: item.SliceID, SourceScope: item.SourceScope, SourceID: item.SourceID,
+					TargetText: item.TargetText, PrerequisiteCoverageWorkItemIDs: item.PrerequisiteCoverageWorkItemIDs,
+					ReopenDependencies: item.ReopenDependencies,
+				})
+			}
+			if err := ValidateRuntimeCoverageItemDependencies(coverageItems); err != nil {
+				return fmt.Errorf("runtime facts coverage dependencies: %w", err)
+			}
+		}
 	}
 	if f.RepairDirective != nil {
 		if err := f.RepairDirective.Validate(); err != nil {
@@ -2152,16 +2316,18 @@ func (f RuntimeFacts) validateInSemanticSession(session *runtimeSemanticValidati
 			return fmt.Errorf("runtime facts repair directive focus %s does not match current focus %s", f.RepairDirective.FocusID, f.Focus.ID)
 		}
 	}
-	for _, assessment := range f.Assessments {
-		if assessment.ID == "" || assessment.Revision == "" || assessment.FocusID == "" {
-			return fmt.Errorf("runtime assessment fact requires identity, revision and focus")
-		}
-		if err := assessment.Disposition.Validate(); err != nil {
-			return fmt.Errorf("runtime assessment fact %s canonical disposition: %w", assessment.ID, err)
-		}
-		if assessment.ClaimedDisposition != "" {
-			if err := assessment.ClaimedDisposition.Validate(); err != nil {
-				return fmt.Errorf("runtime assessment fact %s claimed disposition: %w", assessment.ID, err)
+	if !sameAssessments {
+		for _, assessment := range f.Assessments {
+			if assessment.ID == "" || assessment.Revision == "" || assessment.FocusID == "" {
+				return fmt.Errorf("runtime assessment fact requires identity, revision and focus")
+			}
+			if err := assessment.Disposition.Validate(); err != nil {
+				return fmt.Errorf("runtime assessment fact %s canonical disposition: %w", assessment.ID, err)
+			}
+			if assessment.ClaimedDisposition != "" {
+				if err := assessment.ClaimedDisposition.Validate(); err != nil {
+					return fmt.Errorf("runtime assessment fact %s claimed disposition: %w", assessment.ID, err)
+				}
 			}
 		}
 	}
@@ -2183,7 +2349,8 @@ func ValidateRuntimeFactsRaw(f RuntimeFacts) error {
 // assessment may cite for the current focus. Rendering and commit validation
 // must use this same helper to avoid two evidence namespaces.
 func AcceptedEvidenceRefsForFocus(facts RuntimeFacts) []string {
-	facts = facts.Normalized()
+	facts.Focus = facts.Focus.Normalized()
+	facts.Evidence.Accepted = NormalizeEvidenceFactsPreservingEqual(facts.Evidence.Accepted)
 	ret := []string{}
 	for _, evidence := range facts.Evidence.Accepted {
 		credited := false
@@ -2273,13 +2440,21 @@ func ValidateRuntimeTargetGrounding(required bool, role string, targetRefs, disc
 }
 
 func (r RuntimeResourceFacts) Normalized() RuntimeResourceFacts {
+	return r.normalize(false)
+}
+
+func (r RuntimeResourceFacts) normalize(preserveEqual bool) RuntimeResourceFacts {
 	if r.Manifest != nil {
 		manifest := *r.Manifest
 		manifest.Revision = strings.TrimSpace(manifest.Revision)
 		manifest.TargetRefs = normalizeStrings(manifest.TargetRefs)
 		r.Manifest = &manifest
 	}
-	r.TargetSnapshots = normalizeTargetSnapshots(r.TargetSnapshots)
+	if preserveEqual && isCanonicalTargetSnapshots(r.TargetSnapshots) {
+		r.TargetSnapshots = clipRuntimeStateRawSliceCap(r.TargetSnapshots)
+	} else {
+		r.TargetSnapshots = pickNormalizedSlice(r.TargetSnapshots, normalizeTargetSnapshots(r.TargetSnapshots), preserveEqual)
+	}
 	if r.TargetSelection != nil {
 		selection := r.TargetSelection.Normalized()
 		r.TargetSelection = &selection
@@ -2304,10 +2479,18 @@ func (r RuntimeResourceFacts) Normalized() RuntimeResourceFacts {
 		ceiling := r.ProviderCeiling.Normalized()
 		r.ProviderCeiling = &ceiling
 	}
-	r.CapabilityStates = NormalizeRuntimeCapabilityStateSnapshots(r.CapabilityStates)
-	r.OperationAdmissibilities = NormalizeRuntimeOperationAdmissibilities(r.OperationAdmissibilities)
-	r.PrerequisiteObservations = NormalizeRuntimePrerequisiteObservations(r.PrerequisiteObservations)
-	r.RetiredPrerequisiteObservations = NormalizeRuntimePrerequisiteObservations(r.RetiredPrerequisiteObservations)
+	r.CapabilityStates = pickNormalizedSlice(r.CapabilityStates, NormalizeRuntimeCapabilityStateSnapshots(r.CapabilityStates), preserveEqual)
+	r.OperationAdmissibilities = pickNormalizedSlice(r.OperationAdmissibilities, NormalizeRuntimeOperationAdmissibilities(r.OperationAdmissibilities), preserveEqual)
+	if preserveEqual && isCanonicalRuntimePrerequisiteObservations(r.PrerequisiteObservations) {
+		r.PrerequisiteObservations = clipRuntimeStateRawSliceCap(r.PrerequisiteObservations)
+	} else {
+		r.PrerequisiteObservations = pickNormalizedSlice(r.PrerequisiteObservations, NormalizeRuntimePrerequisiteObservations(r.PrerequisiteObservations), preserveEqual)
+	}
+	if preserveEqual && isCanonicalRuntimePrerequisiteObservations(r.RetiredPrerequisiteObservations) {
+		r.RetiredPrerequisiteObservations = clipRuntimeStateRawSliceCap(r.RetiredPrerequisiteObservations)
+	} else {
+		r.RetiredPrerequisiteObservations = pickNormalizedSlice(r.RetiredPrerequisiteObservations, NormalizeRuntimePrerequisiteObservations(r.RetiredPrerequisiteObservations), preserveEqual)
+	}
 	return r
 }
 
@@ -2645,7 +2828,7 @@ func CompileRuntimeDecisionSeal(facts RuntimeFacts, decision RuntimeDecision, at
 	}
 	decision.Focus = decision.Focus.Normalized()
 	decision.RequiredOutput = decision.RequiredOutput.Normalized()
-	decision.Prerequisites = normalizeRuntimePrerequisites(decision.Prerequisites)
+	decision.Prerequisites = NormalizeRuntimePrerequisites(decision.Prerequisites)
 	if decision.Terminal != nil {
 		terminal := *decision.Terminal
 		terminal.Code = strings.TrimSpace(terminal.Code)
@@ -2795,20 +2978,20 @@ func StableAuthoritySnapshotIDForTransaction(workspaceID common.WorkspaceID, run
 }
 
 func runtimeEquivalentAuthorityInput(facts RuntimeFacts) RuntimeEquivalentAuthorityInputIdentity {
-	facts = facts.Normalized()
+	observations := NormalizeRuntimePrerequisiteObservations(facts.Resources.PrerequisiteObservations)
 	observationHash := newRuntimeHashWriter()
-	for _, observation := range facts.Resources.PrerequisiteObservations {
+	for _, observation := range observations {
 		writeHashString(observationHash, observation.ObservationID)
 		writeHashString(observationHash, observation.ContentHash)
 	}
 	return RuntimeEquivalentAuthorityInputIdentity{
-		DefinitionRevision:           facts.DefinitionRevision,
+		DefinitionRevision:           strings.TrimSpace(facts.DefinitionRevision),
 		FocusHash:                    StableRuntimeAuthorityFocusHash(facts.Focus),
-		BindingSetHash:               facts.ReconciliationContract.BindingSetHash,
-		EvidenceRevision:             facts.EvidenceRevision,
+		BindingSetHash:               strings.TrimSpace(facts.ReconciliationContract.BindingSetHash),
+		EvidenceRevision:             strings.TrimSpace(facts.EvidenceRevision),
 		CapabilityStateHash:          StableRuntimeCapabilityStateHash(facts.Resources.CapabilityStates),
 		CatalogRevisionHash:          StableRuntimeOperationAdmissibilityCatalogRevisionHash(facts.Resources.OperationAdmissibilities),
-		PrerequisiteFreshnessHash:    StableRuntimePrerequisiteFreshnessHash(facts.Resources.PrerequisiteObservations),
+		PrerequisiteFreshnessHash:    StableRuntimePrerequisiteFreshnessHash(observations),
 		OwnerObservationHash:         "owner-observation-" + hex.EncodeToString(observationHash.Sum(nil))[:20],
 		ApplicabilityObservationHash: StableRuntimeEvidenceApplicabilitySemanticHash(facts.EvidenceApplicabilityObservations),
 	}.Normalized()
@@ -2995,7 +3178,7 @@ func normalizeCoverageFocusQueue(values []CoverageFocus) []CoverageFocus {
 	return ret
 }
 
-func normalizeRuntimePrerequisites(values []RuntimePrerequisite) []RuntimePrerequisite {
+func NormalizeRuntimePrerequisites(values []RuntimePrerequisite) []RuntimePrerequisite {
 	ret := make([]RuntimePrerequisite, 0, len(values))
 	seen := map[string]struct{}{}
 	for _, value := range values {
@@ -3038,7 +3221,7 @@ func normalizeRuntimePrerequisites(values []RuntimePrerequisite) []RuntimePrereq
 }
 
 func validateRuntimePrerequisiteProspectiveTargetAllOfDeclaration(prerequisite RuntimePrerequisite) error {
-	prerequisite = normalizeRuntimePrerequisites([]RuntimePrerequisite{prerequisite})[0]
+	prerequisite = NormalizeRuntimePrerequisites([]RuntimePrerequisite{prerequisite})[0]
 	if err := ValidateRuntimeProspectiveTargetAllOfConstraintRefs(prerequisite.ProspectiveTargetAllOfConstraintRefs); err != nil {
 		return fmt.Errorf("runtime prerequisite %q prospective target all-of declaration: %w", prerequisite.ID, err)
 	}
@@ -3074,6 +3257,127 @@ func normalizeTargetSnapshots(values []TargetSnapshot) []TargetSnapshot {
 		return nil
 	}
 	return ret
+}
+
+func isCanonicalStrings(values []string) bool {
+	if len(values) == 0 {
+		return values == nil
+	}
+	for i, s := range values {
+		if s == "" || s != strings.TrimSpace(s) || (i > 0 && values[i-1] >= s) {
+			return false
+		}
+	}
+	return true
+}
+
+func isCanonicalCoverageWorkItemIDs(values []common.CoverageWorkItemID) bool {
+	if len(values) == 0 {
+		return values == nil
+	}
+	for i, s := range values {
+		if s == "" || string(s) != strings.TrimSpace(string(s)) || (i > 0 && values[i-1] >= s) {
+			return false
+		}
+	}
+	return true
+}
+
+func isCanonicalTargetSnapshots(values []TargetSnapshot) bool {
+	if len(values) == 0 {
+		return values == nil
+	}
+	for i := range values {
+		v := &values[i]
+		if v.TargetRef == "" ||
+			v.TargetRef != strings.TrimSpace(v.TargetRef) ||
+			v.ContentHash != strings.TrimSpace(v.ContentHash) ||
+			v.ObservedAt != strings.TrimSpace(v.ObservedAt) {
+			return false
+		}
+		if i > 0 && values[i-1].TargetRef >= v.TargetRef {
+			return false
+		}
+	}
+	return true
+}
+
+func isCanonicalRuntimeValidationObservation(v RuntimeValidationObservation) bool {
+	if v.RecipeID != strings.TrimSpace(v.RecipeID) ||
+		v.ProofClass != RuntimeValidationProofClass(strings.TrimSpace(string(v.ProofClass))) ||
+		v.ObservationProtocolRef != strings.TrimSpace(v.ObservationProtocolRef) ||
+		v.OutputPreview != strings.TrimSpace(v.OutputPreview) {
+		return false
+	}
+	if !isCanonicalStrings(v.ExecutedChecks) ||
+		!isCanonicalStrings(v.PassedChecks) ||
+		!isCanonicalStrings(v.FailedChecks) ||
+		!isCanonicalStrings(v.SkippedChecks) ||
+		!isCanonicalStrings(v.IncompleteChecks) {
+		return false
+	}
+	if len(v.CheckFailures) == 0 {
+		return v.CheckFailures == nil
+	}
+	return runtimeRawEqual(v.CheckFailures, normalizeRuntimeValidationCheckFailures(v.CheckFailures))
+}
+
+func isCanonicalEvidenceFacts(values []EvidenceFact) bool {
+	if len(values) == 0 {
+		return values == nil
+	}
+	for i := range values {
+		v := &values[i]
+		if v.ID == "" ||
+			v.Kind != strings.TrimSpace(v.Kind) ||
+			v.FocusID != strings.TrimSpace(v.FocusID) ||
+			v.SubjectRef != strings.TrimSpace(v.SubjectRef) ||
+			v.SourceRef != strings.TrimSpace(v.SourceRef) ||
+			v.AuthoritySnapshotID != strings.TrimSpace(v.AuthoritySnapshotID) ||
+			v.DispatchID != strings.TrimSpace(v.DispatchID) ||
+			v.OperationID != strings.TrimSpace(v.OperationID) ||
+			v.Revision != strings.TrimSpace(v.Revision) ||
+			v.FailureClass != FailureClass(strings.TrimSpace(string(v.FailureClass))) ||
+			v.FailureCode != strings.TrimSpace(v.FailureCode) ||
+			v.FailureSignature != strings.TrimSpace(v.FailureSignature) ||
+			v.FailureMessage != strings.TrimSpace(v.FailureMessage) ||
+			v.Summary != strings.TrimSpace(v.Summary) ||
+			v.ContentHash != strings.TrimSpace(v.ContentHash) ||
+			v.Quality != common.EvidenceQuality(strings.TrimSpace(string(v.Quality))) ||
+			v.EvidenceReason != strings.TrimSpace(v.EvidenceReason) {
+			return false
+		}
+		if !isCanonicalStrings(v.EvidenceRefs) ||
+			!isCanonicalStrings(v.TargetRefs) ||
+			!isCanonicalStrings(v.BindingRefs) ||
+			!isCanonicalCoverageWorkItemIDs(v.CoverageWorkItemIDs) ||
+			!isCanonicalStrings(v.EvidenceTags) {
+			return false
+		}
+		if v.ContentAddress != nil && *v.ContentAddress != v.ContentAddress.Normalized() {
+			return false
+		}
+		if v.Validation != nil && !isCanonicalRuntimeValidationObservation(*v.Validation) {
+			return false
+		}
+		if i > 0 && values[i-1].ID >= v.ID {
+			return false
+		}
+	}
+	return true
+}
+
+func NormalizeEvidenceFactsPreservingEqual(values []EvidenceFact) []EvidenceFact {
+	if isCanonicalEvidenceFacts(values) {
+		return clipRuntimeStateRawSliceCap(values)
+	}
+	return pickNormalizedSlice(values, normalizeEvidenceFacts(values), true)
+}
+
+// NormalizeEvidenceFacts canonicalizes, deduplicates, and sorts a slice of
+// evidence facts by record ID.
+func NormalizeEvidenceFacts(values []EvidenceFact) []EvidenceFact {
+	return normalizeEvidenceFacts(values)
 }
 
 func normalizeEvidenceFacts(values []EvidenceFact) []EvidenceFact {

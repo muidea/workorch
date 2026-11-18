@@ -80,6 +80,40 @@ func TestRuntimeStateRecordClonePreservesRawShapeAndDetachesAllReferences(t *tes
 	assertRuntimeStateRawCloneDetached(t, reflect.ValueOf(original), reflect.ValueOf(cloned), "RuntimeStateRecord")
 }
 
+func TestSnapshotRuntimeStateRecordWithSharedReadOnlyHistoryIsolatesAppendsAndMutableWrites(t *testing.T) {
+	t.Parallel()
+
+	var live RuntimeStateRecord
+	sequence := 0
+	populateRuntimeStateRawCloneFixture(reflect.ValueOf(&live).Elem(), map[reflect.Type]int{}, &sequence)
+	live.CompletedDispatches = make([]RuntimeDispatchRecord, 1, 4)
+	populateRuntimeStateRawCloneFixture(reflect.ValueOf(&live.CompletedDispatches[0]).Elem(), map[reflect.Type]int{}, &sequence)
+	live.Facts.EvidenceApplicabilityObservations = make([]RuntimeEvidenceApplicabilityObservation, 1, 4)
+	populateRuntimeStateRawCloneFixture(reflect.ValueOf(&live.Facts.EvidenceApplicabilityObservations[0]).Elem(), map[reflect.Type]int{}, &sequence)
+	live.SemanticPlanning.History = make([]RuntimeSemanticPlanningGeneration, 1, 4)
+	populateRuntimeStateRawCloneFixture(reflect.ValueOf(&live.SemanticPlanning.History[0]).Elem(), map[reflect.Type]int{}, &sequence)
+	live.OperationReceipts = make([]RuntimeOperationReceipt, 1, 4)
+	populateRuntimeStateRawCloneFixture(reflect.ValueOf(&live.OperationReceipts[0]).Elem(), map[reflect.Type]int{}, &sequence)
+
+	snapshot := SnapshotRuntimeStateRecordWithSharedReadOnlyHistory(&live)
+	baseline := snapshot.Clone()
+
+	// Appending to capacity-clipped shared slices on live must never mutate snapshot.
+	live.CompletedDispatches = append(live.CompletedDispatches, live.CompletedDispatches[0])
+	live.Facts.EvidenceApplicabilityObservations = append(live.Facts.EvidenceApplicabilityObservations, live.Facts.EvidenceApplicabilityObservations[0])
+	live.SemanticPlanning.History = append(live.SemanticPlanning.History, live.SemanticPlanning.History[0])
+	live.OperationReceipts = append(live.OperationReceipts, live.OperationReceipts[0])
+	// Mutating mutable in-place collections on live must never mutate snapshot.
+	live.CandidateRequestSessions[0].LogicalRequestID = "mutated-session"
+	live.CandidateAttempts[0].LogicalRequestID = "mutated-attempt"
+	live.OperationGovernanceBindings[0].TicketID = "mutated-ticket"
+	live.Facts.Focus.ID = "mutated-focus"
+	live.Facts.Coverage[0].TargetText = "mutated-coverage"
+	if !reflect.DeepEqual(snapshot, baseline) {
+		t.Fatalf("snapshot drifted after live appends and mutable writes")
+	}
+}
+
 func populateRuntimeStateRawCloneFixture(value reflect.Value, active map[reflect.Type]int, sequence *int) {
 	if !value.IsValid() || !value.CanSet() {
 		return

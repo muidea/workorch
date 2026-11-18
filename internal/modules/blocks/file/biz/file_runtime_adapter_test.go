@@ -2598,3 +2598,70 @@ func TestRuntimeAdapterRuntimeFeasibilityRejectsStaleUnifiedDiff(t *testing.T) {
 		t.Fatalf("read-only feasibility changed file content=%q err=%v", string(content), err)
 	}
 }
+
+func TestRuntimeAdapterOperationAdmissibilityPreservesAllRequiredTargetsWithinBoundedInventory(t *testing.T) {
+	workspace := t.TempDir()
+	allFiles := make([]string, 0, 35)
+	for i := 1; i <= 35; i++ {
+		name := fmt.Sprintf("file_%02d.txt", i)
+		allFiles = append(allFiles, name)
+		if err := os.WriteFile(filepath.Join(workspace, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+
+	adapter := NewRuntimeAdapter()
+	requiredTail := []string{"file_33.txt", "file_34.txt", "file_35.txt"}
+	inventory, err := adapter.AcquireRuntimeOperationAdmissibility(
+		workspace,
+		"admissibility-file",
+		[]string{runtimecontract.StepKindFileRead, runtimecontract.StepKindFileEdit},
+		requiredTail,
+		runtimecontract.RuntimeOwnerInventoryItemsMaxCount,
+	)
+	if err != nil {
+		t.Fatalf("AcquireRuntimeOperationAdmissibility failed: %v", err)
+	}
+	if len(inventory.TargetRefs) != runtimecontract.RuntimeOwnerInventoryItemsMaxCount {
+		t.Fatalf("len(TargetRefs) = %d, want %d", len(inventory.TargetRefs), runtimecontract.RuntimeOwnerInventoryItemsMaxCount)
+	}
+	for _, required := range requiredTail {
+		if !slices.Contains(inventory.TargetRefs, required) {
+			t.Fatalf("TargetRefs missing tail-sorted required target %q: %v", required, inventory.TargetRefs)
+		}
+	}
+	if len(inventory.SelectorRefs) == 0 || len(inventory.ConstraintRefs) == 0 {
+		t.Fatalf("expected non-empty selectors and constraints alongside full target budget")
+	}
+	var editBaseHashes []runtimecontract.RuntimeTargetParameterValue
+	for _, binding := range inventory.TargetParameterBindings {
+		if binding.Kind == runtimecontract.StepKindFileEdit && binding.Name == "baseHash" {
+			editBaseHashes = binding.Values
+			break
+		}
+	}
+	for _, required := range requiredTail {
+		found := false
+		for _, val := range editBaseHashes {
+			if val.TargetRef == required && val.Value != "" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("missing FileEdit baseHash binding for required target %q", required)
+		}
+	}
+
+	_, overErr := adapter.AcquireRuntimeOperationAdmissibility(
+		workspace,
+		"admissibility-file",
+		[]string{runtimecontract.StepKindFileRead},
+		allFiles[:33],
+		runtimecontract.RuntimeOwnerInventoryItemsMaxCount,
+	)
+	var budgetErr *runtimecontract.RuntimeOwnerInventoryBudgetExceededError
+	if !errors.As(overErr, &budgetErr) || budgetErr.ItemCount != 33 || budgetErr.MaxItems != runtimecontract.RuntimeOwnerInventoryItemsMaxCount {
+		t.Fatalf("over-budget required targets err = %v, want RuntimeOwnerInventoryBudgetExceededError(33/32)", overErr)
+	}
+}

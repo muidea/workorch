@@ -33,7 +33,7 @@ func (c *planningTransactionComponent) beginSemanticPlanningMutation(ctx context
 		return semanticPlanningMutationTransaction{}, fmt.Errorf("%w: runtime semantic planning scope mismatch", common.ErrConflict)
 	}
 	return semanticPlanningMutationTransaction{
-		aggregate: aggregate, ledger: aggregate.SemanticPlanning.CloneRaw(), expectedRevision: aggregate.StateRevision,
+		aggregate: aggregate, ledger: runtimecontract.SnapshotSemanticPlanningLedgerWithSharedHistory(aggregate.SemanticPlanning), expectedRevision: aggregate.StateRevision,
 	}, nil
 }
 

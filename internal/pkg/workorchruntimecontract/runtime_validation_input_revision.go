@@ -398,24 +398,29 @@ func validateRuntimeInputRevisionState(def RuntimeDefinitionContext, facts Runti
 	}
 
 	// A history product may only be consumed by a later semantic transaction.
-	for _, consumer := range s.AllHistory() {
-		if session.committedGeneration(consumer) {
-			continue
-		}
-		if consumer.Snapshot.Manifest == nil {
-			continue
-		}
-		for _, o := range consumer.Snapshot.Manifest.ProofObligations {
-			if o.ImplementationWork == nil || o.ImplementationWork.Scope.Request.InputRevision == nil {
+	historyUnchanged := session != nil && session.committedPreimage != nil &&
+		runtimeRawEqual(s.History, session.committedPreimage.SemanticPlanning.History) &&
+		runtimeRawEqual(s.HistoryArchive, session.committedPreimage.SemanticPlanning.HistoryArchive)
+	if !historyUnchanged {
+		for _, consumer := range s.AllHistory() {
+			if session.committedGeneration(consumer) {
 				continue
 			}
-			v := o.ImplementationWork.Scope.Request.InputRevision
-			if err := validateRuntimeInputRevisionSource(v, sources); err != nil {
-				return err
+			if consumer.Snapshot.Manifest == nil {
+				continue
 			}
-			for _, source := range s.AllHistory() {
-				if source.Reason == RuntimeSemanticPlanningRetirementInputRevision && ((v.OwnerObservation != nil && reflect.DeepEqual(source.OwnerInputRevision, v)) || (source.Snapshot.Manifest != nil && source.Snapshot.Manifest.Hash == v.SourceManifestHash)) && source.RetiredAtStateRevision >= consumer.RetiredAtStateRevision {
-					return fmt.Errorf("input revision borrowed a future conflict report")
+			for _, o := range consumer.Snapshot.Manifest.ProofObligations {
+				if o.ImplementationWork == nil || o.ImplementationWork.Scope.Request.InputRevision == nil {
+					continue
+				}
+				v := o.ImplementationWork.Scope.Request.InputRevision
+				if err := validateRuntimeInputRevisionSource(v, sources); err != nil {
+					return err
+				}
+				for _, source := range s.AllHistory() {
+					if source.Reason == RuntimeSemanticPlanningRetirementInputRevision && ((v.OwnerObservation != nil && reflect.DeepEqual(source.OwnerInputRevision, v)) || (source.Snapshot.Manifest != nil && source.Snapshot.Manifest.Hash == v.SourceManifestHash)) && source.RetiredAtStateRevision >= consumer.RetiredAtStateRevision {
+						return fmt.Errorf("input revision borrowed a future conflict report")
+					}
 				}
 			}
 		}

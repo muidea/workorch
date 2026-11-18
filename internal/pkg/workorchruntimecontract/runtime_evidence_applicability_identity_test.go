@@ -1,7 +1,11 @@
 package workorchruntimecontract
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"reflect"
+	"sort"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -102,5 +106,88 @@ func TestAssessmentApplicabilityHistoricalPrefixExcludesFutureSameEvidenceRevisi
 				t.Fatalf("%s bypassed original sealed authority", name)
 			}
 		}
+	}
+}
+
+func TestStableRuntimeEvidenceApplicabilitySemanticHashMatchesJSONMarshal(t *testing.T) {
+	oracle := func(values []RuntimeEvidenceApplicabilityObservation) string {
+		if len(values) == 0 {
+			return ""
+		}
+		type result struct {
+			EvidenceID          common.EvidenceRecordID
+			EvidenceHash        string
+			ReceiptHash         string
+			Missing             bool
+			CurrentDependencies *RuntimeOwnerRevisionSet
+		}
+		unique := make(map[string]struct{}, len(values))
+		for _, observation := range values {
+			if observation.Request.PurposeRef == RuntimeHistoricalEffectProofV1 {
+				continue
+			}
+			body, _ := json.Marshal(result{observation.Request.SourceEvidenceID, observation.Request.SourceEvidenceHash, observation.Request.SourceReceiptHash, observation.Missing, observation.CurrentDependencies})
+			unique[string(body)] = struct{}{}
+		}
+		if len(unique) == 0 {
+			return ""
+		}
+		keys := make([]string, 0, len(unique))
+		for key := range unique {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		h := sha256.New()
+		writeHashString(h, "evidence-applicability-semantic/v1")
+		for _, key := range keys {
+			writeHashString(h, key)
+		}
+		return hex.EncodeToString(h.Sum(nil))
+	}
+
+	nilEntriesObs := RuntimeEvidenceApplicabilityObservation{
+		Request: RuntimeEvidenceApplicabilityRequest{SourceEvidenceID: "e-nil", SourceEvidenceHash: "eh1", SourceReceiptHash: "rh1"},
+		CurrentDependencies: &RuntimeOwnerRevisionSet{
+			DefinitionRevision: "d1", Entries: nil, SetHash: "s1",
+		},
+	}
+	emptyEntriesObs := RuntimeEvidenceApplicabilityObservation{
+		Request: RuntimeEvidenceApplicabilityRequest{SourceEvidenceID: "e-empty", SourceEvidenceHash: "eh2", SourceReceiptHash: "rh2"},
+		CurrentDependencies: &RuntimeOwnerRevisionSet{
+			DefinitionRevision: "d2", Entries: []RuntimeOwnerRevisionRef{}, SetHash: "s2",
+		},
+	}
+	nilDepsObs := RuntimeEvidenceApplicabilityObservation{
+		Request: RuntimeEvidenceApplicabilityRequest{SourceEvidenceID: "e-nodeps", SourceEvidenceHash: "eh3", SourceReceiptHash: "rh3"},
+		Missing: true,
+	}
+	specialCharsObs := RuntimeEvidenceApplicabilityObservation{
+		Request: RuntimeEvidenceApplicabilityRequest{SourceEvidenceID: `e-"<>&\n中文`, SourceEvidenceHash: "eh4", SourceReceiptHash: "rh4"},
+		CurrentDependencies: &RuntimeOwnerRevisionSet{
+			DefinitionRevision: "d<4>",
+			Entries: []RuntimeOwnerRevisionRef{
+				{OwnerKind: "file", OwnerInstanceID: "ws\"1", ResourceKind: "k", ResourceID: "a&b.go", SnapshotID: "s", Revision: "1\n", Fence: 9, DependencyHash: "dh"},
+			},
+			SetHash: "s4",
+		},
+	}
+	historicalObs := RuntimeEvidenceApplicabilityObservation{
+		Request: RuntimeEvidenceApplicabilityRequest{SourceEvidenceID: "e-hist", PurposeRef: RuntimeHistoricalEffectProofV1},
+	}
+
+	cases := [][]RuntimeEvidenceApplicabilityObservation{
+		nil,
+		{},
+		{historicalObs},
+		{nilDepsObs},
+		{nilEntriesObs, emptyEntriesObs, nilDepsObs, specialCharsObs, historicalObs},
+	}
+	for i, tc := range cases {
+		if got, want := StableRuntimeEvidenceApplicabilitySemanticHash(tc), oracle(tc); got != want {
+			t.Fatalf("case %d semantic hash mismatch: got %q want %q", i, got, want)
+		}
+	}
+	if hNil, hEmpty := StableRuntimeEvidenceApplicabilitySemanticHash([]RuntimeEvidenceApplicabilityObservation{nilEntriesObs}), StableRuntimeEvidenceApplicabilitySemanticHash([]RuntimeEvidenceApplicabilityObservation{emptyEntriesObs}); hNil == hEmpty {
+		t.Fatal("nil vs empty Entries collapsed")
 	}
 }

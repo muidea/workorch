@@ -23,7 +23,10 @@ type PrerequisiteResult struct {
 }
 
 func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []runtimecontract.RuntimeRequirement) runtimecontract.RuntimeFacts {
-	facts = facts.Normalized()
+	return preflightRuntimeFactsNormalized(facts.Normalized(), requirements)
+}
+
+func preflightRuntimeFactsNormalized(facts runtimecontract.RuntimeFacts, requirements []runtimecontract.RuntimeRequirement) runtimecontract.RuntimeFacts {
 	normalizedRequirements := normalizeRuntimeRequirements(requirements)
 	normalizedRequirements = runtimeRequirementsWithCapabilityPrerequisiteFacts(facts, normalizedRequirements)
 	pending := make([]runtimecontract.RuntimePrerequisite, 0, len(normalizedRequirements))
@@ -78,9 +81,13 @@ func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []ru
 		}
 		facts.Resources.PrerequisiteObservations = observations
 		facts = reactivateReopenedPendingFocusPrerequisites(facts, reacquiring)
+		facts.Prerequisites.Pending = runtimecontract.NormalizeRuntimePrerequisites(pending)
+		facts.Prerequisites.Satisfied = runtimecontract.NormalizeRuntimePrerequisites(facts.Prerequisites.Satisfied)
+		facts.Prerequisites.Retired = runtimecontract.NormalizeRuntimePrerequisites(facts.Prerequisites.Retired)
+		return facts
 	}
-	facts.Prerequisites.Pending = pending
-	return facts.Normalized()
+	facts.Prerequisites.Pending = runtimecontract.NormalizeRuntimePrerequisites(pending)
+	return facts
 }
 
 // preflightRuntimeFactsPreservingPending is the only additive SM-2
@@ -93,9 +100,13 @@ func PreflightRuntimeFacts(facts runtimecontract.RuntimeFacts, requirements []ru
 // silently dropping unrelated manifest, capability, admissibility, or provider
 // debt without reopening settled acquisitions.
 func preflightRuntimeFactsPreservingPending(facts runtimecontract.RuntimeFacts, additions []runtimecontract.RuntimeRequirement) runtimecontract.RuntimeFacts {
+	return preflightRuntimeFactsPreservingPendingNormalized(facts.Normalized(), additions)
+}
+
+func preflightRuntimeFactsPreservingPendingNormalized(facts runtimecontract.RuntimeFacts, additions []runtimecontract.RuntimeRequirement) runtimecontract.RuntimeFacts {
 	requirements := runtimePrerequisiteRequirements(facts.Prerequisites.Pending)
 	requirements = append(requirements, additions...)
-	return PreflightRuntimeFacts(facts, requirements)
+	return preflightRuntimeFactsNormalized(facts, requirements)
 }
 
 // reactivateReopenedPendingFocusPrerequisites handles the one bounded case in
@@ -200,7 +211,13 @@ func runtimeRequirementsWithCapabilityPrerequisiteFacts(facts runtimecontract.Ru
 // read before creation. Discovery source IDs only assert the owner facts that
 // the profile declared as a bounded basis.
 func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) []runtimecontract.RuntimeRequirement {
-	facts = facts.Normalized()
+	if _, required := runtimeCurrentTargetGroundingFocus(facts); !required {
+		return nil
+	}
+	return runtimeTargetGroundingRequirementsNormalized(facts.Normalized(), proofLineages...)
+}
+
+func runtimeTargetGroundingRequirementsNormalized(facts runtimecontract.RuntimeFacts, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) []runtimecontract.RuntimeRequirement {
 	focus, required := runtimeCurrentTargetGroundingFocus(facts)
 	if !required {
 		return nil
@@ -213,7 +230,7 @@ func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts, proo
 	// Use the same owner-private target classification as SM-2 grounding and
 	// SM-3 candidate admission. Only targets classified as currently existing
 	// may produce a snapshot prerequisite.
-	targetAuthority := runtimeTargetAuthorityPlanForFacts(facts)
+	targetAuthority := runtimeTargetAuthorityPlanForNormalizedFacts(facts)
 	groundingOwner := runtimeTargetGroundingOwner(facts, focus)
 	snapshotRequirements := make([]runtimecontract.RuntimeRequirement, 0, len(targetAuthority.existingTargets()))
 	for _, target := range targetAuthority.existingTargets() {
@@ -518,7 +535,10 @@ func CommitPrerequisiteResult(facts runtimecontract.RuntimeFacts, result Prerequ
 	}
 	facts.Prerequisites.Pending = next
 	facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, *completed)
-	facts = facts.Normalized()
+	facts.Prerequisites.Pending = runtimecontract.NormalizeRuntimePrerequisites(facts.Prerequisites.Pending)
+	facts.Prerequisites.Satisfied = runtimecontract.NormalizeRuntimePrerequisites(facts.Prerequisites.Satisfied)
+	facts.Resources = facts.Resources.Normalized()
+	facts.Capabilities = (runtimecontract.RuntimeFacts{Capabilities: facts.Capabilities}).Normalized().Capabilities
 	if completed.Kind == runtimecontract.PrerequisiteKindCapability && result.Capabilities != nil && len(result.Capabilities.PrerequisiteFacts) != 0 {
 		// Capability owners may reveal typed resource dependencies only when
 		// their sealed catalog is acquired. Recompile the still-active

@@ -1164,12 +1164,13 @@ func runtimeTargetRefsWithin(values, allowed []string) bool {
 // prove only that a commitment is mandatory; the commitment remains the sole
 // reverse key for confirmation, closure and fresh-validation settlement.
 func validateConfirmedRepairMandatoryCommitments(aggregate RuntimeAggregate) error {
-	dispatches := make([]runtimecontract.RuntimeDispatchRecord, 0, len(aggregate.CompletedDispatches)+1)
-	dispatches = append(dispatches, aggregate.CompletedDispatches...)
+	dispatches := aggregate.CompletedDispatches
 	if aggregate.ActiveDispatch != nil {
-		dispatches = append(dispatches, *aggregate.ActiveDispatch)
+		dispatches = make([]runtimecontract.RuntimeDispatchRecord, len(aggregate.CompletedDispatches)+1)
+		copy(dispatches, aggregate.CompletedDispatches)
+		dispatches[len(aggregate.CompletedDispatches)] = *aggregate.ActiveDispatch
 	}
-	rejected := (runtimecontract.RuntimeFacts{Evidence: runtimecontract.EvidenceLedger{Rejected: aggregate.Facts.Evidence.Rejected}}).Normalized().Evidence.Rejected
+	rejected := runtimecontract.NormalizeEvidenceFacts(aggregate.Facts.Evidence.Rejected)
 	for _, dispatch := range dispatches {
 		required, err := confirmedRepairCommitmentRequiredFromRejectedEvidence(aggregate, dispatch, rejected)
 		if err != nil {
@@ -1183,7 +1184,7 @@ func validateConfirmedRepairMandatoryCommitments(aggregate RuntimeAggregate) err
 }
 
 func confirmedRepairCommitmentRequiredByRejectedObservation(aggregate RuntimeAggregate, dispatch runtimecontract.RuntimeDispatchRecord) (bool, error) {
-	rejected := (runtimecontract.RuntimeFacts{Evidence: runtimecontract.EvidenceLedger{Rejected: aggregate.Facts.Evidence.Rejected}}).Normalized().Evidence.Rejected
+	rejected := runtimecontract.NormalizeEvidenceFacts(aggregate.Facts.Evidence.Rejected)
 	return confirmedRepairCommitmentRequiredFromRejectedEvidence(aggregate, dispatch, rejected)
 }
 
@@ -1460,6 +1461,9 @@ func (t confirmedRepairTransaction) freshValidationDirective(facts runtimecontra
 // generic directive synchronization from copying audit-only closure targets
 // back into action authority while prerequisites are reacquired.
 func runtimeConfirmedRepairOwnsFreshValidationDirective(facts runtimecontract.RuntimeFacts) bool {
+	if facts.RepairDirective == nil || facts.RepairDirective.Closure == nil {
+		return false
+	}
 	facts = facts.Normalized()
 	if facts.RepairDirective == nil || facts.RepairDirective.Closure == nil || len(facts.Focus.CoverageWorkItemIDs) == 0 {
 		return false
@@ -1496,6 +1500,19 @@ func validateConfirmedRepairFreshValidationContinuation(aggregate RuntimeAggrega
 	transactions, err := completedConfirmedRepairTransactions(aggregate)
 	if err != nil {
 		return err
+	}
+	if aggregate.Facts.RepairDirective == nil {
+		focusIDs := normalizeCoverageIDs(aggregate.Facts.Focus.CoverageWorkItemIDs)
+		hasApplicable := false
+		for _, completed := range transactions {
+			if sameCoverageIDs(completed.transaction.closure.CoverageWorkItemIDs, focusIDs) {
+				hasApplicable = true
+				break
+			}
+		}
+		if !hasApplicable {
+			return nil
+		}
 	}
 	facts := aggregate.Facts.Normalized()
 	terminalFailureClosed := aggregate.Decision.State == runtimecontract.ConvergenceStateFailed &&

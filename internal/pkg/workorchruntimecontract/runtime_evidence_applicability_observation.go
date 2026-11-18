@@ -5,15 +5,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 const RuntimeEvidenceApplicabilityObservationV1 = "evidence-applicability-observation/v1"
-const RuntimeEvidenceApplicabilityObservationLimit = 512
+const RuntimeEvidenceApplicabilityObservationLimit = 4096
 
 // Decision-only projection of an existing SM-2 current-read obligation. It is
 // not an ordinary acquisition requirement and cannot enter Pending/Satisfied
@@ -35,11 +35,28 @@ func StableRuntimeEvidenceApplicabilitySemanticHash(values []RuntimeEvidenceAppl
 		CurrentDependencies *RuntimeOwnerRevisionSet
 	}
 	unique := make(map[string]struct{}, len(values))
-	for _, observation := range values {
+	lastBySource := make(map[common.EvidenceRecordID]int, 32)
+	buf := make([]byte, 0, 512)
+	for i, observation := range values {
 		if observation.Request.PurposeRef == RuntimeHistoricalEffectProofV1 {
 			// Source validation independently checks this against the original
 			// receipt. An audit of an old effect postimage is not current
 			// resource authority and cannot invalidate an ordinary candidate.
+			continue
+		}
+		if prevIdx, ok := lastBySource[observation.Request.SourceEvidenceID]; ok {
+			prev := &values[prevIdx]
+			if prev.Request.SourceEvidenceHash == observation.Request.SourceEvidenceHash &&
+				prev.Request.SourceReceiptHash == observation.Request.SourceReceiptHash &&
+				prev.Missing == observation.Missing &&
+				equalRuntimeOwnerRevisionSetPtr(prev.CurrentDependencies, observation.CurrentDependencies) {
+				continue
+			}
+		}
+		lastBySource[observation.Request.SourceEvidenceID] = i
+		if encoded, ok := appendEvidenceApplicabilitySemanticResultJSON(buf[:0], observation); ok {
+			buf = encoded[:0]
+			unique[string(encoded)] = struct{}{}
 			continue
 		}
 		body, _ := json.Marshal(result{observation.Request.SourceEvidenceID, observation.Request.SourceEvidenceHash, observation.Request.SourceReceiptHash, observation.Missing, observation.CurrentDependencies})
@@ -59,6 +76,104 @@ func StableRuntimeEvidenceApplicabilitySemanticHash(values []RuntimeEvidenceAppl
 		writeHashString(h, key)
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func isSafeJSONASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < 0x20 || c >= 0x7f || c == '"' || c == '\\' || c == '<' || c == '>' || c == '&' {
+			return false
+		}
+	}
+	return true
+}
+
+func appendSafeJSONString(buf []byte, s string) ([]byte, bool) {
+	if !isSafeJSONASCII(s) {
+		return nil, false
+	}
+	buf = append(buf, '"')
+	buf = append(buf, s...)
+	buf = append(buf, '"')
+	return buf, true
+}
+
+func appendEvidenceApplicabilitySemanticResultJSON(buf []byte, observation RuntimeEvidenceApplicabilityObservation) ([]byte, bool) {
+	var ok bool
+	buf = append(buf, `{"EvidenceID":`...)
+	if buf, ok = appendSafeJSONString(buf, string(observation.Request.SourceEvidenceID)); !ok {
+		return nil, false
+	}
+	buf = append(buf, `,"EvidenceHash":`...)
+	if buf, ok = appendSafeJSONString(buf, observation.Request.SourceEvidenceHash); !ok {
+		return nil, false
+	}
+	buf = append(buf, `,"ReceiptHash":`...)
+	if buf, ok = appendSafeJSONString(buf, observation.Request.SourceReceiptHash); !ok {
+		return nil, false
+	}
+	buf = append(buf, `,"Missing":`...)
+	buf = strconv.AppendBool(buf, observation.Missing)
+	buf = append(buf, `,"CurrentDependencies":`...)
+	deps := observation.CurrentDependencies
+	if deps == nil {
+		buf = append(buf, `null}`...)
+		return buf, true
+	}
+	buf = append(buf, `{"DefinitionRevision":`...)
+	if buf, ok = appendSafeJSONString(buf, deps.DefinitionRevision); !ok {
+		return nil, false
+	}
+	buf = append(buf, `,"Entries":`...)
+	if deps.Entries == nil {
+		buf = append(buf, `null`...)
+	} else {
+		buf = append(buf, '[')
+		for i := range deps.Entries {
+			if i > 0 {
+				buf = append(buf, ',')
+			}
+			entry := &deps.Entries[i]
+			buf = append(buf, `{"OwnerKind":`...)
+			if buf, ok = appendSafeJSONString(buf, entry.OwnerKind); !ok {
+				return nil, false
+			}
+			buf = append(buf, `,"OwnerInstanceID":`...)
+			if buf, ok = appendSafeJSONString(buf, entry.OwnerInstanceID); !ok {
+				return nil, false
+			}
+			buf = append(buf, `,"ResourceKind":`...)
+			if buf, ok = appendSafeJSONString(buf, entry.ResourceKind); !ok {
+				return nil, false
+			}
+			buf = append(buf, `,"ResourceID":`...)
+			if buf, ok = appendSafeJSONString(buf, entry.ResourceID); !ok {
+				return nil, false
+			}
+			buf = append(buf, `,"SnapshotID":`...)
+			if buf, ok = appendSafeJSONString(buf, entry.SnapshotID); !ok {
+				return nil, false
+			}
+			buf = append(buf, `,"Revision":`...)
+			if buf, ok = appendSafeJSONString(buf, entry.Revision); !ok {
+				return nil, false
+			}
+			buf = append(buf, `,"Fence":`...)
+			buf = strconv.AppendUint(buf, entry.Fence, 10)
+			buf = append(buf, `,"DependencyHash":`...)
+			if buf, ok = appendSafeJSONString(buf, entry.DependencyHash); !ok {
+				return nil, false
+			}
+			buf = append(buf, '}')
+		}
+		buf = append(buf, ']')
+	}
+	buf = append(buf, `,"SetHash":`...)
+	if buf, ok = appendSafeJSONString(buf, deps.SetHash); !ok {
+		return nil, false
+	}
+	buf = append(buf, `}}`...)
+	return buf, true
 }
 
 // A read-only owner observation request is independently compiled from the
@@ -178,10 +293,11 @@ func ValidateRuntimeEvidenceApplicabilityObservationSource(o RuntimeEvidenceAppl
 	}
 	matches = 0
 	for _, receipt := range receipts {
-		if receipt.OperationID == fact.OperationID && StableRuntimeOperationReceiptHash(receipt) == o.Request.SourceReceiptHash &&
+		if receipt.OperationID == fact.OperationID &&
 			fact.SourceRef == "runtime-receipt/"+receipt.ExecutionKey && fact.ID == common.EvidenceRecordID("runtime-receipt|"+o.Request.SourceReceiptHash) &&
 			(receipt.Outcome == RuntimeOperationOutcomeAccepted || receipt.Outcome == RuntimeOperationOutcomeNoOp) &&
-			reflect.DeepEqual(receipt.Evidence.OwnerRevisionSet, fact.OwnerRevisionSet) && reflect.DeepEqual(receipt.Evidence.ApplicabilityDependencies, fact.ApplicabilityDependencies) {
+			RuntimeRawEqual(receipt.Evidence.OwnerRevisionSet, fact.OwnerRevisionSet) && RuntimeRawEqual(receipt.Evidence.ApplicabilityDependencies, fact.ApplicabilityDependencies) &&
+			StableRuntimeOperationReceiptHash(receipt) == o.Request.SourceReceiptHash {
 			matches++
 		}
 	}
@@ -213,6 +329,7 @@ type runtimeEvidenceApplicability struct {
 func queryRuntimeEvidenceApplicability(fact EvidenceFact, observations []RuntimeEvidenceApplicabilityObservation, cutoff, reconciliationRequestHash string) runtimeEvidenceApplicability {
 	var result runtimeEvidenceApplicability
 	var factHash string
+	dependenciesValidated := false
 	for _, observation := range observations {
 		if observation.Request.SourceEvidenceID != fact.ID || (cutoff != "" && observation.Request.EvidenceRevision > cutoff) {
 			continue
@@ -229,7 +346,16 @@ func queryRuntimeEvidenceApplicability(fact EvidenceFact, observations []Runtime
 			result.stale = true
 			return result
 		}
-		matches, err := RuntimeOwnerRevisionSetMatchesCurrent(fact.ApplicabilityDependencies.OwnerRevisionSet, *observation.CurrentDependencies)
+		var matches bool
+		var err error
+		if dependenciesValidated && equalRuntimeOwnerRevisionSet(&fact.ApplicabilityDependencies.OwnerRevisionSet, observation.CurrentDependencies) {
+			matches = true
+		} else {
+			matches, err = RuntimeOwnerRevisionSetMatchesCurrent(fact.ApplicabilityDependencies.OwnerRevisionSet, *observation.CurrentDependencies)
+			if err == nil {
+				dependenciesValidated = true
+			}
+		}
 		if err != nil || !matches {
 			result.stale = true
 			return result
@@ -275,6 +401,18 @@ func RuntimeEvidenceHasFreshApplicability(fact EvidenceFact, observations []Runt
 		return true
 	}
 	if evidenceRevision == "" {
+		return false
+	}
+	required := false
+	for _, observation := range observations {
+		if observation.Request.SourceEvidenceID == fact.ID &&
+			observation.Request.EvidenceRevision == evidenceRevision &&
+			observation.Request.ReconciliationRequestHash == reconciliationRequestHash {
+			required = true
+			break
+		}
+	}
+	if !required {
 		return false
 	}
 	result := queryRuntimeEvidenceApplicability(fact, observations, evidenceRevision, reconciliationRequestHash)
@@ -326,7 +464,7 @@ func validateRuntimeEvidenceApplicabilityObservationTransition(facts RuntimeFact
 			return fmt.Errorf("evidence applicability observation ledger has stale/duplicate/reordered fence")
 		}
 		committed := previous != nil && index < len(previous.Facts.EvidenceApplicabilityObservations) &&
-			reflect.DeepEqual(observation, previous.Facts.EvidenceApplicabilityObservations[index])
+			equalRuntimeEvidenceApplicabilityObservation(&observation, &previous.Facts.EvidenceApplicabilityObservations[index])
 		if !committed {
 			if err := ValidateRuntimeEvidenceApplicabilityObservationSource(observation, facts, receipts); err != nil {
 				return err
