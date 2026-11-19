@@ -87,8 +87,9 @@ func buildRuntimeSemanticPrompt(request llmmodels.RuntimeCandidateRequest, prepa
 	if authority.WorkContext != nil {
 		workContent = authority.WorkContext.Content
 	}
-	tail.ChangeReviewValueRefs = compactChangeReviewValues(tail.ChangeReview)
-	tail.ChangeReviewFileRefs = compactChangeReviewFiles(tail.ChangeReview, changeReviewBodySources(workContent, "C3.workContext.content", authority.Manifest.ValidationGenerationContexts, "C3.manifest.validationGenerationContexts"))
+	reviewSources := changeReviewBodySources(workContent, "C3.workContext.content", authority.Manifest.ValidationGenerationContexts, "C3.manifest.validationGenerationContexts")
+	tail.ChangeReviewBaselineRefs, tail.ChangeReviewValueRefs = compactChangeReviewBaselinesAndValues(tail.ChangeReview, reviewSources)
+	tail.ChangeReviewFileRefs = compactChangeReviewFiles(tail.ChangeReview, reviewSources)
 	tailJSON, err := json.Marshal(tail)
 	if err != nil {
 		return runtimeSemanticPrompt{}, err

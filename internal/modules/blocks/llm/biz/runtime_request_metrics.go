@@ -167,7 +167,7 @@ func runtimeProviderContextSectionMetrics(s models.PromptSection, prompt *models
 		var p runtimeSemanticTailProjection
 		if json.Unmarshal([]byte(s.Content), &p) == nil {
 			add("executionHistory", "owner.semantic.executionHistory", "work_and_proof_causal_receipts_ordering_excluded", p.ExecutionHistory.Hash != "", p.ExecutionHistory)
-			m.LocalReferences = len(p.ChangeReviewFileRefs) + len(p.ChangeReviewValueRefs)
+			m.LocalReferences = len(p.ChangeReviewFileRefs) + len(p.ChangeReviewBaselineRefs) + len(p.ChangeReviewValueRefs)
 			var authority runtimeSemanticAuthorityProjection
 			for _, section := range prompt.Sections {
 				if section.ID != "C3.semantic-authority" {
@@ -180,7 +180,9 @@ func runtimeProviderContextSectionMetrics(s models.PromptSection, prompt *models
 				if authority.WorkContext != nil {
 					content = authority.WorkContext.Content
 				}
-				if expandChangeReviewFiles(p.ChangeReview, p.ChangeReviewFileRefs, changeReviewBodySources(content, "C3.workContext.content", authority.Manifest.ValidationGenerationContexts, "C3.manifest.validationGenerationContexts")) == nil && expandChangeReviewValues(p.ChangeReview, p.ChangeReviewValueRefs) == nil {
+				reviewSources := changeReviewBodySources(content, "C3.workContext.content", authority.Manifest.ValidationGenerationContexts, "C3.manifest.validationGenerationContexts")
+				if expandChangeReviewFiles(p.ChangeReview, p.ChangeReviewFileRefs, reviewSources) == nil && expandChangeReviewBaselinesAndValues(p.ChangeReview, p.ChangeReviewBaselineRefs, p.ChangeReviewValueRefs, reviewSources) == nil {
+					p.ChangeReviewBaselineRefs = nil
 					p.ChangeReviewValueRefs = nil
 					p.ChangeReviewFileRefs = nil
 					raw, _ := json.Marshal(p)
@@ -192,8 +194,9 @@ func runtimeProviderContextSectionMetrics(s models.PromptSection, prompt *models
 	case "C4.execution-tail":
 		var tail runtimeCandidateExecutionTailProjection
 		if json.Unmarshal([]byte(s.Content), &tail) == nil {
-			m.LocalReferences = len(tail.WorkFileRefs) + len(tail.ChangeReviewFileRefs) + len(tail.ChangeReviewValueRefs)
+			m.LocalReferences = len(tail.WorkFileRefs) + len(tail.ChangeReviewFileRefs) + len(tail.ChangeReviewBaselineRefs) + len(tail.ChangeReviewValueRefs)
 			if expandRuntimeCandidateFiles(&tail, prompt) == nil {
+				tail.ChangeReviewBaselineRefs = nil
 				tail.ChangeReviewValueRefs = nil
 				tail.ChangeReviewFileRefs = nil
 				tail.WorkFileRefs, tail.ReferenceRule = nil, ""

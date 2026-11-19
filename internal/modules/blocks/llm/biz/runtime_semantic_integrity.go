@@ -73,7 +73,8 @@ func validateRuntimeSemanticRenderedIntegrity(schema string, context runtimecont
 	if authority.WorkContext != nil {
 		workContent = authority.WorkContext.Content
 	}
-	if expandChangeReviewFiles(tail.ChangeReview, tail.ChangeReviewFileRefs, changeReviewBodySources(workContent, "C3.workContext.content", authority.Manifest.ValidationGenerationContexts, "C3.manifest.validationGenerationContexts")) != nil || expandChangeReviewValues(tail.ChangeReview, tail.ChangeReviewValueRefs) != nil {
+	reviewSources := changeReviewBodySources(workContent, "C3.workContext.content", authority.Manifest.ValidationGenerationContexts, "C3.manifest.validationGenerationContexts")
+	if expandChangeReviewFiles(tail.ChangeReview, tail.ChangeReviewFileRefs, reviewSources) != nil || expandChangeReviewBaselinesAndValues(tail.ChangeReview, tail.ChangeReviewBaselineRefs, tail.ChangeReviewValueRefs, reviewSources) != nil {
 		missing = append(missing, "P4.change_review_reference")
 	}
 	for _, field := range []struct {

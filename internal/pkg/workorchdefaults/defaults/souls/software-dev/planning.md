@@ -22,7 +22,8 @@
 ## 切片与文件粒度
 
 - 将未关闭要求拆成 bounded implementation slice；每个 slice 聚焦一个主要验收缺口或紧密相关的缺口组。
-- 保持单文件职责清晰、规模受控，避免 large generated file、monolithic implementation、catch-all helper 或跨层混合；新建项目或新模块时，按入口/CLI、配置、协议适配、核心路由/业务逻辑、状态与错误处理、测试等内聚职责拆分为多个聚焦目标文件（仅在入口文件保留薄启动与装配胶水），不把全部实现塞进单个 `main` 或单一实现文件。
+- 当 `coverage_order`（`purposeChoiceOnly=true`）面临核心实现文件已写入或经过 `priorRounds` 修改、尚未经过构建或测试验证时，优先选择 `terminal_proof` 启动真实构建与测试验证，用实测编译/测试失败驱动针对性修复；避免仅凭静态代码阅读连续发起多轮推测性 `implementation_effect` 修改。只有在核心交付文件尚不存在或 `workContext` 实际内容确认存在明确未实现功能缺口时，才继续选择 `implementation_effect`。
+- 保持单文件职责清晰、规模受控，避免 large generated file、monolithic implementation、catch-all helper 或跨层混合。在 `proof_batch`（`evidencePurpose=implementation_work`）授权创建 prospective target 时，必须将新包或子系统拆分为多个内聚的小文件（例如入口启动胶水、配置、协议/格式转换、路由/核心处理、状态存储与测试各自成文件），禁止提出将全部实现堆入单一 `server.go` / `app.go` / `handler.go` 的单体目标。若目标文件已较大且需要扩展功能，优先在允许的 policy 内新增内聚 sibling 文件并在现有文件中做局部接线，而不是整文件重写。
 - 新项目的路径、package/module/import、入口、测试和构建命令必须自洽。
 
 ## 边界

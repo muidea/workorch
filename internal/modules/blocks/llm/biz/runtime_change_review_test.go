@@ -73,17 +73,19 @@ func TestChangeReviewRenderedIntegrityAndFrozenRecovery(t *testing.T) {
 	if err := json.Unmarshal([]byte(p.PromptContext.Sections[4].Content), &expanded); err != nil {
 		t.Fatal(err)
 	}
-	if err := expandChangeReviewFiles(expanded.ChangeReview, expanded.ChangeReviewFileRefs, changeReviewBodySources(r.SemanticContext.WorkContext.Content, "C3.workContext.content", nil, "")); err != nil {
+	reviewSources := changeReviewBodySources(r.SemanticContext.WorkContext.Content, "C3.workContext.content", nil, "")
+	if err := expandChangeReviewFiles(expanded.ChangeReview, expanded.ChangeReviewFileRefs, reviewSources); err != nil {
 		t.Fatal(err)
 	}
-	if err := expandChangeReviewValues(expanded.ChangeReview, expanded.ChangeReviewValueRefs); err != nil {
+	if err := expandChangeReviewBaselinesAndValues(expanded.ChangeReview, expanded.ChangeReviewBaselineRefs, expanded.ChangeReviewValueRefs, reviewSources); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(expanded.ChangeReview, c) {
 		t.Fatal("rendered projection lost original auxiliary preimage or operation")
 	}
-	refCount := len(expanded.ChangeReviewFileRefs) + len(expanded.ChangeReviewValueRefs)
+	refCount := len(expanded.ChangeReviewFileRefs) + len(expanded.ChangeReviewBaselineRefs) + len(expanded.ChangeReviewValueRefs)
 	expanded.ChangeReviewFileRefs = nil
+	expanded.ChangeReviewBaselineRefs = nil
 	expanded.ChangeReviewValueRefs = nil
 	expandedJSON, _ := json.Marshal(expanded)
 	if metrics.LocalReferences != refCount || metrics.BodyBytes != len(p.PromptContext.Sections[4].Content) || metrics.ExpandedBytes != len(expandedJSON) {

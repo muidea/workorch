@@ -14,7 +14,7 @@ type runtimeCandidateWorkFileRef struct {
 	Source   string `json:"source"`
 }
 
-const runtimeCandidateFileReferenceRule = "workFileRefs replace only empty C4.implementationWorkContent.snapshots[snapshot].Content with the exact source path in this request's C3 generation corpus or operationContracts inputRevision input files. Target, hash and complete bytes must match. Expand workFileRefs first, then changeReviewFileRefs (which may reference the expanded C4 work snapshots), then changeReviewValueRefs. No external lookup or cycles are allowed. Restore all original inputs and operations before proposing changes; references grant no execution or validation credit."
+const runtimeCandidateFileReferenceRule = "workFileRefs replace only empty C4.implementationWorkContent.snapshots[snapshot].Content with the exact source path in this request's C3 generation corpus or operationContracts inputRevision input files. Target, hash and complete bytes must match. Expand workFileRefs first, then changeReviewFileRefs (which may reference the expanded C4 work snapshots), then changeReviewBaselineRefs and changeReviewValueRefs. No external lookup or cycles are allowed. Restore all original inputs and operations before proposing changes; references grant no execution or validation credit."
 
 const runtimeCandidateTargetSnapshotReferenceRule = "targetSnapshotRefs replace only empty C3.context.resources.targetSnapshots[snapshot].Content with the exact source path in this request's C3 generation corpus or operationContracts inputRevision input files. Target, contentHash and complete bytes must match."
 
@@ -126,7 +126,7 @@ func compactRuntimeCandidateFiles(tail *runtimeCandidateExecutionTailProjection,
 	// Capture the complete work sources before replacing their bodies. The
 	// decoder restores work before using it as a review source.
 	reviewSources := append(changeReviewBodySources(candidateReviewWorkSource(tail), "C4.implementationWorkContent", nil, ""), sources...)
-	tail.ChangeReviewValueRefs = compactChangeReviewValues(tail.ChangeReview)
+	tail.ChangeReviewBaselineRefs, tail.ChangeReviewValueRefs = compactChangeReviewBaselinesAndValues(tail.ChangeReview, reviewSources)
 	tail.ChangeReviewFileRefs = compactChangeReviewFiles(tail.ChangeReview, reviewSources)
 	compactRuntimeCandidateWorkFiles(tail, sources)
 }
@@ -218,7 +218,7 @@ func runtimeCandidatePromptBodySources(prompt *models.PromptContext) ([]runtimeC
 // the same encoding, in the same order, without rebuilding owner authority.
 func expandRuntimeCandidateFiles(tail *runtimeCandidateExecutionTailProjection, prompt *models.PromptContext) error {
 	var sources []runtimeChangeReviewBodySource
-	if len(tail.WorkFileRefs)+len(tail.ChangeReviewFileRefs) != 0 {
+	if len(tail.WorkFileRefs)+len(tail.ChangeReviewFileRefs)+len(tail.ChangeReviewBaselineRefs)+len(tail.ChangeReviewValueRefs) != 0 {
 		var err error
 		sources, err = runtimeCandidatePromptBodySources(prompt)
 		if err != nil {
@@ -232,5 +232,5 @@ func expandRuntimeCandidateFiles(tail *runtimeCandidateExecutionTailProjection, 
 	if err := expandChangeReviewFiles(tail.ChangeReview, tail.ChangeReviewFileRefs, sources); err != nil {
 		return err
 	}
-	return expandChangeReviewValues(tail.ChangeReview, tail.ChangeReviewValueRefs)
+	return expandChangeReviewBaselinesAndValues(tail.ChangeReview, tail.ChangeReviewBaselineRefs, tail.ChangeReviewValueRefs, sources)
 }

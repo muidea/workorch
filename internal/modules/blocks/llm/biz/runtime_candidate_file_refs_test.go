@@ -100,8 +100,8 @@ func TestCandidateRequestLocalBodiesRoundtripAndAccounting(t *testing.T) {
 					t.Fatal("historical operation or preimage changed")
 				}
 			}
-			count := len(tail.WorkFileRefs) + len(tail.ChangeReviewFileRefs) + len(tail.ChangeReviewValueRefs)
-			tail.WorkFileRefs, tail.ChangeReviewFileRefs, tail.ChangeReviewValueRefs, tail.ReferenceRule = nil, nil, nil, ""
+			count := len(tail.WorkFileRefs) + len(tail.ChangeReviewFileRefs) + len(tail.ChangeReviewBaselineRefs) + len(tail.ChangeReviewValueRefs)
+			tail.WorkFileRefs, tail.ChangeReviewFileRefs, tail.ChangeReviewBaselineRefs, tail.ChangeReviewValueRefs, tail.ReferenceRule = nil, nil, nil, nil, ""
 			if !reflect.DeepEqual(tail, original) {
 				t.Fatal("local reuse changed full original values")
 			}
@@ -405,5 +405,51 @@ func TestRuntimeCandidateTargetSnapshotRefsDeduplicateAndPreserveFailureLocation
 	p.PromptContext.Sections[3].Content = string(tampered)
 	if err := validateRuntimeCandidateContextIntegrity(r.DefinitionContext, r.CandidateContext, r.CandidateManifest, r.CandidateAttempt, r.CandidateCorrectionObservation, p.ContextBudget, p.PromptContext); err == nil {
 		t.Fatal("expected self-referential TargetSnapshotRefs source to fail integrity check")
+	}
+}
+
+func TestCandidateChangeReviewBaselinesCompactLosslesslyAcrossDispatches(t *testing.T) {
+	r, p, _ := candidateBodyReferenceFixture(t, false)
+	v1 := strings.Repeat("initial large implementation\r\n", 150)
+	v2 := strings.Repeat("revised large implementation\r\n", 150)
+	v1Hash := rc.RuntimeValidationInputContentHash(v1)
+	v2Hash := rc.RuntimeValidationInputContentHash(v2)
+	target := r.CandidateContext.ChangeReview.Current[1].TargetRef
+	currentBody := r.CandidateContext.ChangeReview.Current[1].Content
+	currentHash := r.CandidateContext.ChangeReview.Current[1].ContentHash
+	op0 := rc.RuntimeOperation{ID: "op-0", Kind: rc.StepKindFileWrite, TargetRefs: []string{target}, Parameters: []rc.OperationParameter{{Name: "content", String: &v1}}}
+	op1 := rc.RuntimeOperation{ID: "op-1", Kind: rc.StepKindFileEdit, TargetRefs: []string{target}, Parameters: []rc.OperationParameter{{Name: "oldText", String: &v1}, {Name: "newText", String: &v2}}}
+	op2 := rc.RuntimeOperation{ID: "op-2", Kind: rc.StepKindFileEdit, TargetRefs: []string{target}, Parameters: []rc.OperationParameter{{Name: "oldText", String: &v2}, {Name: "newText", String: &currentBody}}}
+	r.CandidateContext.ChangeReview.Changes = []rc.RuntimeChangeReviewOperation{
+		{TargetRef: target, OperationID: op0.ID, Operation: op0, OperationHash: rc.StableRuntimeOperationHash(op0), AfterHash: v1Hash},
+		{TargetRef: target, OperationID: op1.ID, Operation: op1, OperationHash: rc.StableRuntimeOperationHash(op1), BeforeHash: v1Hash, AfterHash: v2Hash, Baseline: &rc.RuntimeValidationInputReviewFile{TargetRef: target, Content: v1, ContentHash: v1Hash}},
+		{TargetRef: target, OperationID: op2.ID, Operation: op2, OperationHash: rc.StableRuntimeOperationHash(op2), BeforeHash: v2Hash, AfterHash: currentHash, Baseline: &rc.RuntimeValidationInputReviewFile{TargetRef: target, Content: v2, ContentHash: v2Hash}},
+	}
+	originalTail := buildRuntimeCandidateExecutionTailProjection(r.CandidateContext, 0, nil, r.CandidateManifest, nil)
+	compactTail := buildRuntimeCandidateExecutionTailProjection(r.CandidateContext, 0, nil, r.CandidateManifest, nil)
+	output := runtimeCandidateOutputContractProjection{OperationContracts: []runtimeCandidateOperationContractProjection{{Kind: rc.StepKindFileEdit, InputRevision: inputRevisionForProvider(r.CandidateManifest.Operations[0].InputRevision)}}}
+	compactRuntimeCandidateFiles(&compactTail, runtimeCandidateAuthorityBodySources(output, runtimeCandidateApplicableGenerationContexts(r.CandidateContext, r.CandidateManifest)))
+	if len(compactTail.ChangeReviewBaselineRefs) != 2 ||
+		compactTail.ChangeReviewBaselineRefs[0].Change != 1 || compactTail.ChangeReviewBaselineRefs[0].SourceKind != "parameter" || compactTail.ChangeReviewBaselineRefs[0].SourceIndex != 0 || compactTail.ChangeReviewBaselineRefs[0].SourceParameter != 0 ||
+		compactTail.ChangeReviewBaselineRefs[1].Change != 2 || compactTail.ChangeReviewBaselineRefs[1].SourceKind != "parameter" || compactTail.ChangeReviewBaselineRefs[1].SourceIndex != 1 || compactTail.ChangeReviewBaselineRefs[1].SourceParameter != 1 {
+		t.Fatalf("expected baselines 1 and 2 to reference prior operation parameters, got %+v", compactTail.ChangeReviewBaselineRefs)
+	}
+	rawTail, _ := json.Marshal(compactTail)
+	p.PromptContext.Sections[4].Content = string(rawTail)
+	if err := validateRuntimeCandidateContextIntegrity(r.DefinitionContext, r.CandidateContext, r.CandidateManifest, 0, nil, p.ContextBudget, p.PromptContext); err != nil {
+		t.Fatalf("valid baseline ref tail failed integrity check: %v", err)
+	}
+	expanded, err := runtimeCandidateExecutionTailForIntegrity(r.CandidateContext, r.CandidateManifest, p.PromptContext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(expanded.ChangeReview, originalTail.ChangeReview) {
+		t.Fatal("expanded candidate changeReview differs from original")
+	}
+	compactTail.ChangeReviewBaselineRefs[0].SourceIndex = compactTail.ChangeReviewBaselineRefs[0].Change
+	tamperedRaw, _ := json.Marshal(compactTail)
+	p.PromptContext.Sections[4].Content = string(tamperedRaw)
+	if err := validateRuntimeCandidateContextIntegrity(r.DefinitionContext, r.CandidateContext, r.CandidateManifest, 0, nil, p.ContextBudget, p.PromptContext); err == nil {
+		t.Fatal("expected cyclic baseline ref to fail integrity check")
 	}
 }

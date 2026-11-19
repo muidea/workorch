@@ -78,6 +78,7 @@ type runtimeCandidateAuthorityProjection struct {
 // evidence and retry context. It never changes C0-C2 and never carries raw
 // provider payloads.
 type runtimeCandidateExecutionTailProjection struct {
+	ChangeReviewBaselineRefs   []runtimeChangeReviewBaselineRef                       `json:"changeReviewBaselineRefs,omitempty"`
 	ChangeReviewValueRefs      []runtimeChangeReviewValueRef                          `json:"changeReviewValueRefs,omitempty"`
 	ChangeReviewFileRefs       []runtimeChangeReviewFileRef                           `json:"changeReviewFileRefs,omitempty"`
 	ChangeReviewResponsibility string                                                 `json:"changeReviewResponsibility,omitempty"`

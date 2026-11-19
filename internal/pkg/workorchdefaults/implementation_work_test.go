@@ -1,6 +1,7 @@
 package workorchdefaults
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/runtimeprofiledecode"
@@ -40,5 +41,18 @@ func TestDefaultImplementationWorkIsProfileScopedAndDoesNotRequireArtificialRoun
 	}
 	if declarations != 1 {
 		t.Fatalf("expected one bounded default work declaration, got %d", declarations)
+	}
+}
+
+func TestSoftwareDevPlanningSoulGuidesValidationAndModularTargets(t *testing.T) {
+	raw, err := embeddedDefaults.ReadFile("defaults/souls/software-dev/planning.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(raw)
+	for _, want := range []string{"terminal_proof", "priorRounds", "proof_batch", "prospective target", "server.go"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("software-dev planning soul missing %q guidance", want)
+		}
 	}
 }
