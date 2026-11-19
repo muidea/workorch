@@ -56,7 +56,8 @@ func matchRuntimeFailureInputReviewTrigger(a RuntimeAggregate, fact runtimecontr
 // target acquisition. This is a new review of affected inputs, not a replay of
 // the prior report or a reclassification of the failed execution.
 func openRuntimeFailureInputReview(a *RuntimeAggregate, fact runtimecontract.EvidenceFact, op runtimecontract.RuntimeOperation) (bool, error) {
-	if a == nil || fact.Kind != runtimecontract.EvidenceKindValidation || a.Facts.Failure == nil || a.ActiveDispatch != nil || (a.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed && !runtimeFailureInputReviewedCurrentBinding(*a)) {
+	if a == nil || fact.Kind != runtimecontract.EvidenceKindValidation || a.Facts.Failure == nil || a.ActiveDispatch != nil ||
+		(a.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed && !runtimeFailureInputReviewedCurrentBinding(*a) && !runtimeFailureInputResourceRetiredCurrentBinding(*a)) {
 		return false, nil
 	}
 	trigger, matched, err := matchRuntimeFailureInputReviewTrigger(*a, fact, op)
@@ -223,6 +224,30 @@ func runtimeFailureInputReviewedCurrentBinding(a RuntimeAggregate) bool {
 			continue
 		}
 		if runtimecontract.SameRuntimeCWIBindingRef(*row.CurrentBindingRef, s.BindingRef) {
+			return true
+		}
+	}
+	return false
+}
+
+// A prior state-change repair invalidates SemanticPlanning resources while
+// retaining the current CWI binding so fresh validation can run. If that fresh
+// validation reports an unavailable failure diagnostic (e.g. behavior_unobserved),
+// FailureInputReview must still open against the retired sealed manifest in History.
+func runtimeFailureInputResourceRetiredCurrentBinding(a RuntimeAggregate) bool {
+	if a.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || a.SemanticPlanning.FailureInputReview != nil || len(a.Facts.Focus.CoverageWorkItemIDs) != 1 {
+		return false
+	}
+	coverageID := a.Facts.Focus.CoverageWorkItemIDs[0]
+	row, bound := currentRuntimeCWIBindingForFocus(a.Facts, coverageID)
+	if !bound || row.CurrentBindingRef == nil || row.CurrentBindingRef.FocusID != a.Facts.Focus.ID {
+		return false
+	}
+	for _, g := range a.SemanticPlanning.AllHistory() {
+		if (g.Reason == runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated || g.Reason == runtimecontract.RuntimeSemanticPlanningRetirementCatalogRefresh) &&
+			g.Snapshot.Phase == runtimecontract.RuntimeSemanticPlanningSealed &&
+			g.Snapshot.Manifest != nil &&
+			g.Snapshot.Manifest.Hash == row.CurrentBindingRef.SemanticManifestHash {
 			return true
 		}
 	}

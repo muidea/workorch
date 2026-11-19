@@ -689,3 +689,44 @@ func TestFailureInputReviewWholeEnvelopeCapacityFromCommittedReceipt(t *testing.
 		})
 	}
 }
+
+func TestFailureInputReviewOpensAfterResourceInvalidatedRepairFreshValidation(t *testing.T) {
+	repository, coordinator, e, _ := runtimeFailureInputReviewFixture(t, false)
+	savedDispatch := repository.aggregate.ActiveDispatch
+	repository.aggregate.ActiveDispatch = nil
+	if err := retireSemanticPlanningGeneration(
+		&repository.aggregate,
+		rc.RuntimeSemanticPlanningRetirementResourceInvalidated,
+		[]RuntimeSemanticCatalogFreshnessGap{{PrerequisiteID: repository.aggregate.SemanticPlanning.Manifest.OwnerCatalogs[0].PrerequisiteID}},
+	); err != nil {
+		t.Fatalf("retireSemanticPlanningGeneration failed: %v", err)
+	}
+	repository.aggregate.ActiveDispatch = savedDispatch
+	if !runtimeFailureInputResourceRetiredCurrentBinding(repository.aggregate) {
+		t.Fatal("expected retired sealed manifest for resource_invalidated to qualify current binding")
+	}
+
+	wrongReason := repository.aggregate.CloneRaw()
+	wrongReason.SemanticPlanning.History[len(wrongReason.SemanticPlanning.History)-1].Reason = rc.RuntimeSemanticPlanningRetirementCWIReopened
+	if runtimeFailureInputResourceRetiredCurrentBinding(wrongReason) {
+		t.Fatal("cwi_reopened history qualified for current binding input review")
+	}
+
+	wrongManifest := repository.aggregate.CloneRaw()
+	wrongManifest.SemanticPlanning.History[len(wrongManifest.SemanticPlanning.History)-1].Snapshot.Manifest.Hash = "other-manifest"
+	if runtimeFailureInputResourceRetiredCurrentBinding(wrongManifest) {
+		t.Fatal("mismatched manifest hash qualified for current binding input review")
+	}
+
+	got, err := coordinator.commitEvidence(context.Background(), e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := got.Aggregate
+	if a.SemanticPlanning.Phase != rc.RuntimeSemanticPlanningRequired || a.SemanticPlanning.FailureInputReview == nil {
+		t.Fatalf("expected FailureInputReview to open after resource_invalidated fresh validation, got phase=%s review=%v failure=%+v", a.SemanticPlanning.Phase, a.SemanticPlanning.FailureInputReview != nil, a.Facts.Failure)
+	}
+	if a.Facts.Failure != nil && a.Facts.Failure.Code == runtimeValidationFailureDiagnosticUnavailable {
+		t.Fatalf("prematurely fell through to diagnostic unavailable: %+v", a.Facts.Failure)
+	}
+}
