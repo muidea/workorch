@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	DefaultMaxProviderTransportAttempts = 3
+	DefaultMaxProviderTransportAttempts = 10
 	DefaultMaxOperationRecoveryAttempts = 3
 	DefaultMaxCASReloadAttempts         = 5
 	DefaultMaxTerminalDeliveryAttempts  = 5

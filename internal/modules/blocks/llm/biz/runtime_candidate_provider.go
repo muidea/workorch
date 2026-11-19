@@ -278,6 +278,11 @@ func runtimeCandidateProviderFailureClass(err error, submitted bool) runtimecont
 	}
 	var protocolErr *ProviderProtocolError
 	if errors.As(err, &protocolErr) {
+		// Premature SSE EOF before response.completed is an upstream stream drop,
+		// not a permanent malformed-document violation; allow transport retry.
+		if protocolErr != nil && protocolErr.Code == "stream_ended_before_completion" {
+			return runtimecontract.RuntimeCandidateFailureClassProviderTransient
+		}
 		return runtimecontract.RuntimeCandidateFailureClassProviderProtocol
 	}
 	var outputLimitErr *ProviderOutputLimitError

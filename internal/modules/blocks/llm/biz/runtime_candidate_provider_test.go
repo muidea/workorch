@@ -334,6 +334,12 @@ func TestRuntimeCandidateProviderClassifiesAuthenticationConfigurationAndTransie
 	if got := runtimeCandidateProviderFailureClass(&ProviderProtocolError{Code: "invalid_response_json", ResponseBytes: 17}, true); got != runtimecontract.RuntimeCandidateFailureClassProviderProtocol {
 		t.Fatalf("protocol class = %s, want provider protocol", got)
 	}
+	if got := runtimeCandidateProviderFailureClass(&ProviderProtocolError{Code: "stream_done_before_terminal", ResponseBytes: 17}, true); got != runtimecontract.RuntimeCandidateFailureClassProviderProtocol {
+		t.Fatalf("stream done before terminal class = %s, want provider protocol", got)
+	}
+	if got := runtimeCandidateProviderFailureClass(&ProviderProtocolError{Code: "stream_ended_before_completion", ResponseBytes: 17}, true); got != runtimecontract.RuntimeCandidateFailureClassProviderTransient {
+		t.Fatalf("premature stream EOF class = %s, want provider transient for automatic retry", got)
+	}
 	if got := runtimeCandidateProviderFailureClass(llmmodels.ProviderModelFailure{Code: llmmodels.ProviderModelFailureModelNotFound, Message: "typed catalog fact"}, false); got != runtimecontract.RuntimeCandidateFailureClassProviderConfiguration {
 		t.Fatalf("typed model failure class = %s, want provider configuration", got)
 	}
