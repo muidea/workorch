@@ -24,6 +24,7 @@ type RuntimeAssessmentAuthorityInput struct {
 	SourceID                 string
 	SourceText               string
 	Focus                    CoverageFocus
+	CatalogIdentities        []RuntimeOperationAdmissibilityCatalogIdentity `json:",omitempty"`
 	OperationAdmissibilities []RuntimeOperationAdmissibility
 	// Immutable SM-2 observation prefix at admission. Later
 	// observations cannot change a historical assessment's classification.
@@ -31,6 +32,31 @@ type RuntimeAssessmentAuthorityInput struct {
 	// Original generation at assessment admission; later Resume cannot upgrade
 	// old observations, while historical classification retains this fence.
 	ApplicabilityReconciliationRequestHash string `json:",omitempty"`
+}
+
+// RuntimeAssessmentRequiredOperationAdmissibilities returns clones of only
+// the owner catalogs referenced by required owner-fact requirements.
+func RuntimeAssessmentRequiredOperationAdmissibilities(all []RuntimeOperationAdmissibility, required []RuntimeOwnerFactRequirement) []RuntimeOperationAdmissibility {
+	if len(required) == 0 {
+		return nil
+	}
+	requiredOwners := make(map[string]struct{}, len(required))
+	for _, requirement := range required {
+		owner := strings.TrimSpace(requirement.OwnerModuleID)
+		if owner != "" {
+			requiredOwners[owner] = struct{}{}
+		}
+	}
+	if len(requiredOwners) == 0 {
+		return nil
+	}
+	filtered := make([]RuntimeOperationAdmissibility, 0, len(requiredOwners))
+	for _, catalog := range all {
+		if _, needed := requiredOwners[strings.TrimSpace(catalog.OwnerModuleID)]; needed {
+			filtered = append(filtered, catalog)
+		}
+	}
+	return CloneRuntimeOperationAdmissibilities(filtered)
 }
 
 type RuntimeAssessmentPurpose string
@@ -62,6 +88,7 @@ func (a RuntimeAssessmentAuthorityInput) Normalized() RuntimeAssessmentAuthority
 	a.SourceID = strings.TrimSpace(a.SourceID)
 	a.SourceText = strings.TrimSpace(a.SourceText)
 	a.Focus = a.Focus.Normalized()
+	a.CatalogIdentities = NormalizeRuntimeOperationAdmissibilityCatalogIdentities(a.CatalogIdentities)
 	a.OperationAdmissibilities = NormalizeRuntimeOperationAdmissibilities(a.OperationAdmissibilities)
 	a.ApplicabilityObservations = CloneRuntimeEvidenceApplicabilityObservations(a.ApplicabilityObservations)
 	a.ApplicabilityReconciliationRequestHash = strings.TrimSpace(a.ApplicabilityReconciliationRequestHash)
@@ -98,8 +125,11 @@ func validateAndNormalizeRuntimeAssessmentAuthorityInput(a RuntimeAssessmentAuth
 		return RuntimeAssessmentAuthorityInput{}, fmt.Errorf("runtime assessment authority input identity mismatch")
 	}
 	if StableRuntimeAuthorityFocusHash(a.Focus) != a.AuthorityInput.FocusHash ||
-		StableRuntimeOperationAdmissibilityCatalogRevisionHash(a.OperationAdmissibilities) != a.AuthorityInput.CatalogRevisionHash {
+		StableRuntimeOperationAdmissibilityCatalogIdentityHash(a.CatalogIdentities) != a.AuthorityInput.CatalogRevisionHash {
 		return RuntimeAssessmentAuthorityInput{}, fmt.Errorf("runtime assessment authority input preimage mismatch")
+	}
+	if err := validateRuntimeAssessmentCatalogScoping(a.Focus, a.CatalogIdentities, a.OperationAdmissibilities); err != nil {
+		return RuntimeAssessmentAuthorityInput{}, err
 	}
 	if !RuntimeCoverageEvidenceBindingProjectionsEqual(a.Focus.CoverageEvidenceBindings, bindings) {
 		return RuntimeAssessmentAuthorityInput{}, fmt.Errorf("runtime assessment authority input binding preimage mismatch")
@@ -116,6 +146,41 @@ func validateAndNormalizeRuntimeAssessmentAuthorityInput(a RuntimeAssessmentAuth
 		return RuntimeAssessmentAuthorityInput{}, fmt.Errorf("assessment applicability observations do not match sealed authority identity")
 	}
 	return a, nil
+}
+
+func validateRuntimeAssessmentCatalogScoping(
+	focus CoverageFocus,
+	identities []RuntimeOperationAdmissibilityCatalogIdentity,
+	catalogs []RuntimeOperationAdmissibility,
+) error {
+	identityCounts := make(map[RuntimeOperationAdmissibilityCatalogIdentity]int, len(identities))
+	for _, identity := range identities {
+		if err := identity.Validate(); err != nil {
+			return err
+		}
+		identityCounts[identity]++
+	}
+	requiredOwners := make(map[string]struct{}, len(focus.RequiredOwnerFacts))
+	for _, requirement := range focus.RequiredOwnerFacts {
+		requiredOwners[requirement.OwnerModuleID] = struct{}{}
+	}
+	presentCounts := make(map[RuntimeOperationAdmissibilityCatalogIdentity]int, len(catalogs))
+	for _, catalog := range catalogs {
+		if _, required := requiredOwners[catalog.OwnerModuleID]; !required {
+			return fmt.Errorf("runtime assessment authority input includes unrequired owner catalog %q", catalog.OwnerModuleID)
+		}
+		identity := RuntimeOperationAdmissibilityCatalogIdentityFrom(catalog)
+		if identityCounts[identity] == 0 {
+			return fmt.Errorf("runtime assessment authority input catalog %q is missing sealed catalog identity", catalog.OwnerModuleID)
+		}
+		presentCounts[identity]++
+	}
+	for identity, expected := range identityCounts {
+		if _, required := requiredOwners[identity.OwnerModuleID]; required && presentCounts[identity] != expected {
+			return fmt.Errorf("runtime assessment authority input is missing required owner catalog %q", identity.OwnerModuleID)
+		}
+	}
+	return nil
 }
 
 func StableRuntimeAssessmentAuthorityInputHash(value RuntimeAssessmentAuthorityInput) string {

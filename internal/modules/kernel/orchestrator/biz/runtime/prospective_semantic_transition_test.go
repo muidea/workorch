@@ -32,7 +32,7 @@ func TestRuntimeProspectiveCompositePersistsOneBatchAndReplaysIdempotently(t *te
 	fixture.apply(t, RuntimeInternalEvent{
 		Kind: RuntimeInternalEventSemanticFeasibilityObserved,
 		Authority: &RuntimeInternalAuthorityPayload{
-			SemanticBatchID: batchID, SemanticFeasibility: &composite,
+			SemanticBatchID: batchID, SemanticFeasibilities: []runtimecontract.RuntimeSemanticProofFeasibility{composite},
 		},
 	})
 	if fixture.repository.saves != beforeSaves+1 || len(fixture.aggregate.SemanticPlanning.Feasibilities) != 1 {
@@ -58,7 +58,7 @@ func TestRuntimeProspectiveCompositePersistsOneBatchAndReplaysIdempotently(t *te
 		Kind:  RuntimeInternalEventSemanticFeasibilityObserved,
 		Scope: RuntimeInternalEventScope{WorkspaceID: fixture.aggregate.Facts.WorkspaceID, RunID: fixture.aggregate.Facts.RunID},
 		Authority: &RuntimeInternalAuthorityPayload{
-			SemanticBatchID: batchID, SemanticFeasibility: &composite,
+			SemanticBatchID: batchID, SemanticFeasibilities: []runtimecontract.RuntimeSemanticProofFeasibility{composite},
 		},
 	})
 	if err != nil {
@@ -98,7 +98,7 @@ func TestRuntimeProspectiveNestedStalePersistsBeforeBoundedRefreshAndRestartRepl
 	fixture.apply(t, RuntimeInternalEvent{
 		Kind: RuntimeInternalEventSemanticFeasibilityObserved,
 		Authority: &RuntimeInternalAuthorityPayload{
-			SemanticBatchID: batchID, SemanticFeasibility: &staleComposite,
+			SemanticBatchID: batchID, SemanticFeasibilities: []runtimecontract.RuntimeSemanticProofFeasibility{staleComposite},
 		},
 	})
 	if len(fixture.aggregate.SemanticPlanning.Feasibilities) != 1 ||
@@ -153,7 +153,7 @@ func TestRuntimeProspectiveNestedStalePersistsBeforeBoundedRefreshAndRestartRepl
 		Kind:  RuntimeInternalEventSemanticFeasibilityObserved,
 		Scope: RuntimeInternalEventScope{WorkspaceID: fixture.aggregate.Facts.WorkspaceID, RunID: fixture.aggregate.Facts.RunID},
 		Authority: &RuntimeInternalAuthorityPayload{
-			SemanticBatchID: batchID, SemanticFeasibility: &staleComposite,
+			SemanticBatchID: batchID, SemanticFeasibilities: []runtimecontract.RuntimeSemanticProofFeasibility{staleComposite},
 		},
 	}); err == nil {
 		t.Fatal("delayed stale feasibility event unexpectedly entered the fresh semantic generation")
@@ -205,7 +205,7 @@ func TestRuntimeProspectiveCompositeRetiresGenerationWhenDependencyCatalogDrifts
 	fixture.apply(t, RuntimeInternalEvent{
 		Kind: RuntimeInternalEventSemanticFeasibilityObserved,
 		Authority: &RuntimeInternalAuthorityPayload{
-			SemanticBatchID: batchID, SemanticFeasibility: &composite,
+			SemanticBatchID: batchID, SemanticFeasibilities: []runtimecontract.RuntimeSemanticProofFeasibility{composite},
 		},
 	})
 	if fixture.aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired ||
@@ -224,7 +224,7 @@ func TestRuntimeProspectiveCompositeRefusesSealWhenDependencyObservationDriftsAf
 	fixture.apply(t, RuntimeInternalEvent{
 		Kind: RuntimeInternalEventSemanticFeasibilityObserved,
 		Authority: &RuntimeInternalAuthorityPayload{
-			SemanticBatchID: batchID, SemanticFeasibility: &composite,
+			SemanticBatchID: batchID, SemanticFeasibilities: []runtimecontract.RuntimeSemanticProofFeasibility{composite},
 		},
 	})
 	oldManifestHash := fixture.manifest.Hash
@@ -374,6 +374,9 @@ func newProspectiveSemanticTransitionFixture(t *testing.T) *prospectiveSemanticT
 	if len(manifest.ProofObligations) != 1 || manifest.ProofObligations[0].OwnerFactAcquisition == nil ||
 		len(manifest.OwnerFactDependencyCatalogs) != 1 {
 		t.Fatalf("prospective semantic manifest fixture is incomplete: %+v", manifest)
+	}
+	if dep, ok := manifest.OwnerFactDependencyCatalogForOwner(runtimecontract.RuntimeModuleShell); !ok || dep.OwnerModuleID != runtimecontract.RuntimeModuleShell {
+		t.Fatalf("prospective semantic manifest failed to resolve dependency catalog: %+v", manifest)
 	}
 	acquisition := manifest.ProofObligations[0].OwnerFactAcquisition.Clone()
 	proposal := runtimecontract.RuntimeSemanticProofProposal{

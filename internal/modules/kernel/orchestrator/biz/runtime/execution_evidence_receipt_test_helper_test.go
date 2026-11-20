@@ -1205,14 +1205,8 @@ func runtimeTestBuildSealedSemanticPlanning(aggregate RuntimeAggregate) (runtime
 				if deltaErr != nil {
 					return runtimecontract.RuntimeSemanticPlanningLedger{}, fmt.Errorf("build test prospective workspace delta: %w: proposal=%+v catalog=%+v", deltaErr, proposal, catalog)
 				}
-				var dependencyCatalog runtimecontract.RuntimeOperationAdmissibility
-				for _, candidate := range manifest.OwnerFactDependencyCatalogs {
-					if candidate.OwnerModuleID == acquisition.Requirement.OwnerModuleID {
-						dependencyCatalog = candidate
-						break
-					}
-				}
-				if dependencyCatalog.SnapshotID == "" {
+				dependencyCatalog, depFound := manifest.OwnerFactDependencyCatalogForOwner(acquisition.Requirement.OwnerModuleID)
+				if !depFound || dependencyCatalog.SnapshotID == "" {
 					return runtimecontract.RuntimeSemanticPlanningLedger{}, fmt.Errorf("build test prospective satisfaction: missing dependency catalog %q", acquisition.Requirement.OwnerModuleID)
 				}
 				recipeRefs := runtimeTestProspectiveSatisfactionRecipeRefs(dependencyCatalog, acquisition.Requirement, acquisition.ProspectiveSatisfactionContractRef)

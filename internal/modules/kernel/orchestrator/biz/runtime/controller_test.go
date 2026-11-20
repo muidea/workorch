@@ -1233,10 +1233,10 @@ func TestRuntimeControllerRejectsExecutableSealWithoutPersistedOwnerFeasibility(
 		t.Fatal(err)
 	}
 	operationID := runtimeTestCandidateOperationID(t, *repository.aggregate.CandidateAttempts[len(repository.aggregate.CandidateAttempts)-1].Proposal, 0)
-	if _, err := controller.recordCandidateFeasibility(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+	if _, err := controller.recordCandidateFeasibilities(context.Background(), "ws-v2", "run-v2", 0, []runtimecontract.RuntimeCandidateFeasibilityRecord{{
 		OperationID: operationID, AdmissibilitySnapshotID: inventory.SnapshotID,
 		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, "ws-v2", "run-v2", 0), Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
-	}); err != nil {
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	if sealed, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, candidate); err != nil || sealed.ActiveDispatch == nil {
@@ -1503,30 +1503,24 @@ func TestRuntimeControllerCandidateRetryIsPersistedAndLimitedToTwoAttempts(t *te
 	if _, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	firstPending, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix")
+	firstFailed, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix", runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassSchema))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
-		t.Fatalf("pending attempt replay should be idempotent: %v", err)
+	savesAfterAttempt0 := repository.saves
+	if _, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix", runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassSchema)); err != nil {
+		t.Fatalf("rejected attempt replay should be idempotent: %v", err)
 	}
-	if repository.saves != 6 {
-		t.Fatalf("pending replay performed another save: %d", repository.saves)
+	if repository.saves != savesAfterAttempt0 {
+		t.Fatalf("attempt replay performed another save: %d != %d", repository.saves, savesAfterAttempt0)
 	}
-	firstFailed, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassSchema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if firstFailed.Decision.AuthoritySnapshot.ID != firstPending.Decision.AuthoritySnapshot.ID || firstFailed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
+	if firstFailed.Decision.AuthoritySnapshot.ID == "" || firstFailed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("attempt 0 failure changed contract: %+v", firstFailed.Decision)
 	}
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "different-prefix"); !errors.Is(err, common.ErrConflict) {
+	if _, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), "ws-v2", "run-v2", 1, "different-prefix", runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProvider, Reason: "provider unavailable"}); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("different-prefix retry err = %v, want conflict", err)
 	}
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
-		t.Fatal(err)
-	}
-	exhausted, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, runtimecontract.RuntimeCandidateFailure{
+	exhausted, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix", runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassProvider, Reason: "provider unavailable",
 	})
 	if err != nil {
@@ -1535,7 +1529,7 @@ func TestRuntimeControllerCandidateRetryIsPersistedAndLimitedToTwoAttempts(t *te
 	if exhausted.Decision.State != runtimecontract.ConvergenceStateFailed || exhausted.Decision.Terminal == nil || exhausted.Decision.Terminal.Code != "candidate_retry_exhausted" {
 		t.Fatalf("exhausted decision = %+v", exhausted.Decision)
 	}
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); !errors.Is(err, common.ErrConflict) {
+	if _, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix", runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProvider, Reason: "provider unavailable"}); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("third request err = %v, want conflict", err)
 	}
 }
@@ -1549,18 +1543,19 @@ func TestRuntimeControllerCandidateRetryExhaustionClosesAtomically(t *testing.T)
 	if _, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassSchema)); err != nil {
+	if _, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix", runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassSchema)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
+	_, manifest, logicalRequestID, stablePrefixHash, err := candidateAttemptTestBindingWithPrefix(context.Background(), controller, "ws-v2", "run-v2", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	savesBeforeFailure := repository.saves
 
-	terminal, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, runtimecontract.RuntimeCandidateFailure{
+	terminal, err := controller.rejectCompletedCandidateDocument(context.Background(), "ws-v2", "run-v2", 1, stablePrefixHash, manifest, logicalRequestID, nil, runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid", Reason: "unexpected EOF",
 	})
 	if err != nil {
@@ -1589,6 +1584,10 @@ func TestRuntimeControllerTerminalDriveFailureClosesPendingCandidate(t *testing.
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
+	}
+	admitted, err := controller.AdmitCandidateProposalForTest(context.Background(), "ws-v2", "run-v2", 0, runtimeTestBindCandidateToCurrentFocus(t, *repository.aggregate, controllerFileWriteCandidate()))
+	if err != nil || !admitted.Admission.Accepted() {
+		t.Fatalf("admit candidate proposal = %+v err=%v", admitted.Admission, err)
 	}
 	savesBeforeFailure := repository.saves
 
@@ -1640,23 +1639,29 @@ func TestRuntimeControllerReopensInvalidatedAttemptZeroWithoutCandidateDebt(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
+	candidate := runtimeTestBindCandidateToCurrentFocus(t, aggregate, stateChangeCandidate())
+	candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
 	logicalRequestID := aggregate.CandidateAttempts[0].LogicalRequestID
-	if _, err := controller.beginCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "drifted-prefix", manifest, logicalRequestID); !errors.Is(err, common.ErrConflict) {
+	if _, err := controller.admitCandidateProposal(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "drifted-prefix", manifest, logicalRequestID, candidate); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("stable-prefix drift err=%v, want conflict", err)
 	}
 	if repository.saves != 0 || repository.aggregate.StateRevision != beforeRevision {
 		t.Fatalf("stable-prefix drift mutated aggregate: revision=%d saves=%d", repository.aggregate.StateRevision, repository.saves)
 	}
-	reopened, err := controller.beginCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix", manifest, logicalRequestID)
+	reopenedResult, err := controller.admitCandidateProposal(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix", manifest, logicalRequestID, candidate)
 	if err != nil {
 		t.Fatal(err)
 	}
+	reopened := reopenedResult.Aggregate
 	if reopened.StateRevision != beforeRevision+1 || len(reopened.CandidateAttempts) != 1 {
 		t.Fatalf("invalidated attempt was not atomically reopened: %+v", reopened)
 	}
 	record := reopened.CandidateAttempts[0]
 	if record.Attempt != 0 || record.State != runtimecontract.RuntimeCandidateAttemptStatePending || record.StablePrefixHash != "stable-prefix" ||
-		record.Transaction != reopened.Decision.AuthorityTransaction() || record.Proposal != nil || len(record.Feasibilities) != 0 || record.Failure != nil || record.Stale != nil {
+		record.Transaction != reopened.Decision.AuthorityTransaction() || record.Proposal == nil || len(record.Feasibilities) != 0 || record.Failure != nil || record.Stale != nil {
 		t.Fatalf("reopened attempt = %+v", record)
 	}
 	if len(reopened.PrerequisiteInvalidations) != 1 || reopened.PrerequisiteInvalidations[0].Signature != signature {
@@ -1665,10 +1670,11 @@ func TestRuntimeControllerReopensInvalidatedAttemptZeroWithoutCandidateDebt(t *t
 	if repository.saves != 1 {
 		t.Fatalf("reopen saves=%d, want 1", repository.saves)
 	}
-	duplicate, err := controller.beginCandidateAttempt(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix", manifest, logicalRequestID)
+	duplicateResult, err := controller.admitCandidateProposal(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix", manifest, logicalRequestID, candidate)
 	if err != nil {
 		t.Fatal(err)
 	}
+	duplicate := duplicateResult.Aggregate
 	if duplicate.StateRevision != reopened.StateRevision || repository.saves != 1 || len(duplicate.CandidateAttempts) != 1 {
 		t.Fatalf("duplicate reopen was not idempotent: aggregate=%+v saves=%d", duplicate, repository.saves)
 	}
@@ -1687,24 +1693,24 @@ func TestRuntimeControllerCandidateFailureDoesNotResealPreExistingExecutionFailu
 	// exact semantic generation before candidate handling. The failure remains
 	// SM-2 state; it is not a license to start with handwritten bindings.
 	initialized := runtimeTestInitializeAndSealSemanticContract(t, context.Background(), controller, facts, controllerDefinition(), nil)
-	pending, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix")
+	failed, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix", runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract))
 	if err != nil {
 		t.Fatal(err)
 	}
-	failed, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if failed.Decision.AuthoritySnapshot != pending.Decision.AuthoritySnapshot || failed.Decision.AuthoritySnapshot != initialized.Decision.AuthoritySnapshot {
-		t.Fatalf("attempt 0 failure re-sealed authority: initialized=%+v pending=%+v failed=%+v", initialized.Decision.AuthoritySnapshot, pending.Decision.AuthoritySnapshot, failed.Decision.AuthoritySnapshot)
+	if failed.Decision.AuthoritySnapshot != initialized.Decision.AuthoritySnapshot {
+		t.Fatalf("attempt 0 failure re-sealed authority: initialized=%+v failed=%+v", initialized.Decision.AuthoritySnapshot, failed.Decision.AuthoritySnapshot)
 	}
 	if failed.Facts.Failure == nil || failed.Facts.Failure.Signature != "patch-base-hash" {
 		t.Fatalf("attempt 0 failure replaced execution failure: %+v", failed.Facts.Failure)
 	}
-	retried, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix")
-	if err != nil {
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
+	retriedResult, err := controller.AdmitCandidateProposalForTest(context.Background(), "ws-v2", "run-v2", 1, runtimeTestBindCandidateToCurrentFocus(t, initialized, controllerFileWriteCandidate()))
+	if err != nil || !retriedResult.Admission.Accepted() {
+		t.Fatalf("admit retry proposal = %+v err=%v", retriedResult.Admission, err)
+	}
+	retried := retriedResult.Aggregate
 	if len(retried.CandidateAttempts) != 2 || retried.CandidateAttempts[0].AuthorityContractID == "" || retried.CandidateAttempts[0].AuthorityContractID != retried.CandidateAttempts[1].AuthorityContractID {
 		t.Fatalf("candidate retry did not preserve authority contract identity: %+v", retried.CandidateAttempts)
 	}
@@ -1716,10 +1722,7 @@ func TestRuntimeControllerRejectsRetryWhenPersistedContractIDIsMissing(t *testin
 	if _, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
-		t.Fatal(err)
-	}
-	failed, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract))
+	failed, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix", runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1731,7 +1734,7 @@ func TestRuntimeControllerRejectsRetryWhenPersistedContractIDIsMissing(t *testin
 	failed.Decision = resealed
 	failed.StateRevision++
 	repository.aggregate = &failed
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err == nil {
+	if _, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix", runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract)); err == nil {
 		t.Fatal("candidate retry accepted persisted attempt without authority contract id")
 	}
 }
@@ -1744,15 +1747,12 @@ func TestRuntimeControllerCandidateExhaustionWithGovernanceCapabilityIsTerminal(
 	if _, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
-		t.Fatal(err)
-	}
 	// N6: provider-class complete rejection is rejected_final. Attempt 0 must
 	// seal terminal in the same CAS; governance capability must not open a
 	// correction attempt or governance ticket for it. Reducer maps the
 	// misalignment FailureFact class to terminal code runtime_contract_defect
 	// while preserving the sealed provider code on the attempt/fact.
-	terminal, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProvider, Reason: "provider unavailable"})
+	terminal, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix", runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProvider, Reason: "provider unavailable"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1763,7 +1763,7 @@ func TestRuntimeControllerCandidateExhaustionWithGovernanceCapabilityIsTerminal(
 		len(terminal.GovernanceRequests) != 0 || terminal.ActiveDispatch != nil {
 		t.Fatalf("rejected_final provider failure = action=%s terminal=%+v fact=%+v attempt=%+v gov=%d", terminal.Decision.State, terminal.Decision.Terminal, terminal.Facts.Failure, terminal.CandidateAttempts, len(terminal.GovernanceRequests))
 	}
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); !errors.Is(err, common.ErrConflict) {
+	if _, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix", runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassProvider, Reason: "provider unavailable"}); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("attempt 1 after rejected_final err=%v, want conflict", err)
 	}
 }
@@ -1774,16 +1774,10 @@ func TestRuntimeControllerCandidateExhaustionWithoutGovernanceIsTerminal(t *test
 	if _, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
+	if _, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix", runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
-		t.Fatal(err)
-	}
-	terminal, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 1, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: "invalid operation again"})
+	terminal, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix", runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassContract, Reason: "invalid operation again"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1798,10 +1792,7 @@ func TestRuntimeControllerInternalCandidateFailureIsImmediatelyTerminal(t *testi
 	if _, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
-		t.Fatal(err)
-	}
-	terminal, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: "transaction mismatch"})
+	terminal, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix", runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassInternal, Reason: "transaction mismatch"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1830,10 +1821,7 @@ func TestFailInfeasibleValidationCandidateDoesNotFabricateStateChangeRepair(t *t
 	if initialized.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
 		t.Fatalf("initial decision = %+v, want validation", initialized.Decision)
 	}
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
-		t.Fatal(err)
-	}
-	continued, err := controller.failCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract))
+	continued, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix", runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1869,10 +1857,7 @@ func TestFailInfeasibleValidationCandidateDoesNotConsumeRepairBudget(t *testing.
 	definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	initialized := runtimeTestInitializeAndSealSemanticContract(t, context.Background(), controller, facts, definition, nil)
 	facts = initialized.Facts
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
-		t.Fatal(err)
-	}
-	continued, err := controller.failCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract))
+	continued, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix", runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1901,10 +1886,7 @@ func TestFailInfeasibleValidationCandidateKeepsValidationWhenPolicyAllowsAlterna
 	if initialized.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
 		t.Fatalf("initial decision = %+v, want validation", initialized.Decision)
 	}
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
-		t.Fatal(err)
-	}
-	continued, err := controller.failCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract))
+	continued, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix", runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1930,15 +1912,12 @@ func TestFailInfeasibleValidationCommandDiagnosticKeepsSameContractRetry(t *test
 	definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	initialized := runtimeTestInitializeAndSealSemanticContract(t, context.Background(), controller, facts, definition, nil)
 	facts = initialized.Facts
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
-		t.Fatal(err)
-	}
 	failure := runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract)
 	failure.ValidationDiagnostic = &runtimecontract.ValidationFailureDiagnostic{
 		SchemaVersion: runtimecontract.ValidationFailureDiagnosticSchemaVersion,
 		Class:         runtimecontract.ValidationDiagnosticCommandInvalid, RecommendedEvidenceTargetType: runtimecontract.ValidationEvidenceTargetCommandContract,
 	}
-	continued, err := controller.failCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, failure)
+	continued, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix", failure)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1967,15 +1946,12 @@ func TestFailInfeasibleValidationCommandDiagnosticDoesNotCreateImplementationRep
 	definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	initialized := runtimeTestInitializeAndSealSemanticContract(t, context.Background(), controller, facts, definition, nil)
 	facts = initialized.Facts
-	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix"); err != nil {
-		t.Fatal(err)
-	}
 	failure := runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassContract)
 	failure.ValidationDiagnostic = &runtimecontract.ValidationFailureDiagnostic{
 		SchemaVersion: runtimecontract.ValidationFailureDiagnosticSchemaVersion,
 		Class:         runtimecontract.ValidationDiagnosticCommandInvalid, RecommendedEvidenceTargetType: runtimecontract.ValidationEvidenceTargetCommandContract,
 	}
-	continued, err := controller.failCandidateAttempt(context.Background(), facts.WorkspaceID, facts.RunID, 0, failure)
+	continued, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), facts.WorkspaceID, facts.RunID, 0, "validation-prefix", failure)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2020,6 +1996,21 @@ func controllerFacts() runtimecontract.RuntimeFacts {
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	return facts
+}
+
+func controllerFileWriteCandidate() runtimecontract.RuntimeCandidate {
+	return runtimecontract.RuntimeCandidate{
+		StateChange: &runtimecontract.StateChangeCandidate{
+			Operations: []runtimecontract.StateChangingOperation{{
+				Operation: runtimecontract.RuntimeOperation{
+					Kind:                runtimecontract.StepKindFileWrite,
+					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+					TargetRefs:          []string{"target.txt"},
+					Parameters:          runtimeFileWriteParameters("updated"),
+				},
+			}},
+		},
+	}
 }
 
 func runtimeManagedValidationEvidencePolicy() runtimecontract.RuntimeEvidencePolicy {

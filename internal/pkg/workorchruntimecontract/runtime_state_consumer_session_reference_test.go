@@ -69,8 +69,8 @@ func referenceRuntimeStateConsumerSession(r RuntimeStateRecord) error {
 	if err := ValidateRuntimeSemanticProofBatchLimits(r.SemanticPlanning, r.Facts.Activation.ExecutionContract.ExecutionLimits); err != nil {
 		return err
 	}
-	if r.SemanticPlanning.DefinitionSeed.Hash != r.Facts.DefinitionSeed.Hash {
-		return fmt.Errorf("runtime semantic planning seed does not match facts")
+	if err := ValidateRuntimeSemanticHistoryCoverage(r.SemanticPlanning, r.Facts.DefinitionSeed); err != nil {
+		return err
 	}
 	if err := r.Reconciliation.Validate(); err != nil {
 		return fmt.Errorf("runtime reconciliation ledger: %w", err)

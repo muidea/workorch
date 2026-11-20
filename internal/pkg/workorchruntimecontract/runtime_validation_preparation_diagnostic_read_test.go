@@ -20,9 +20,9 @@ func referenceRuntimeValidationProofPreparationValidate(p RuntimeValidationProof
 	if strings.Contains(p.DeclarationRef, "*") {
 		return fmt.Errorf("runtime validation proof preparation declaration %q is not CWI-specific", p.DeclarationRef)
 	}
-	if (p.ContentContractRef == "") != (p.ContentRequirements == "") || len(p.ContentContractRef) > 512 || len(p.ContentRequirements) > 4096 || !utf8.ValidString(p.ContentContractRef+p.ContentRequirements) ||
-		strings.IndexFunc(p.ContentContractRef+p.ContentRequirements, func(r rune) bool { return r < 32 || r == 127 }) >= 0 {
-		return fmt.Errorf("runtime validation proof preparation requires bounded owner content contract and requirements together")
+	if len(p.ContentContractRef) > 512 || !utf8.ValidString(p.ContentContractRef) ||
+		strings.IndexFunc(p.ContentContractRef, func(r rune) bool { return r < 32 || r == 127 }) >= 0 {
+		return fmt.Errorf("runtime validation proof preparation requires bounded owner content contract ref")
 	}
 	required := make([]string, 0, len(p.CheckAttestations))
 	for _, attestation := range p.CheckAttestations {
@@ -133,7 +133,7 @@ func TestProofPreparationDiagnosticReadKeepsCompleteGateAndRawOwnerBinding(t *te
 				value.CheckAttestations[0].NativeCheckRef = ""
 				value.OriginalDiagnostic = &RuntimeOriginalDiagnostic{}
 			case "content-before-diagnostic":
-				value.ContentContractRef = "contract"
+				value.ContentContractRef = "invalid\x00contract"
 				value.OriginalDiagnostic = &RuntimeOriginalDiagnostic{}
 			}
 			if scenario == "valid" || scenario == "nil" {
@@ -187,7 +187,7 @@ func FuzzProofPreparationDiagnosticReadReference(f *testing.F) {
 			value.OriginalDiagnostic.FieldViolations[0].Actual = first
 			value.OriginalDiagnostic.FieldViolations[0].Path = second
 		case 3:
-			value.ContentContractRef, value.ContentRequirements = first, second
+			value.ContentContractRef = first
 			value.OriginalDiagnostic.Signature = second
 		}
 		assertProofPreparationDiagnosticReadReference(t, value)

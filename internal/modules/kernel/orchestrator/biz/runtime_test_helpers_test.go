@@ -59,15 +59,13 @@ func (o *Biz) BeginRuntimeCandidateAttemptForTest(ctx context.Context, workspace
 		if _, err := o.MarkRuntimeCandidateRequestSubmitted(ctx, workspaceID, runID, session.LogicalRequestID, session.NextSequence, physicalCallID); err != nil {
 			return runtime.RuntimeAggregate{}, err
 		}
-		if _, err := o.CompleteRuntimeCandidateRequestDocument(ctx, workspaceID, runID, session.LogicalRequestID, physicalCallID); err != nil {
-			return runtime.RuntimeAggregate{}, err
-		}
+		return o.CompleteRuntimeCandidateRequestDocument(ctx, workspaceID, runID, session.LogicalRequestID, physicalCallID)
 	}
-	return o.BeginRuntimeCandidateAttempt(ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, session.LogicalRequestID)
+	return o.loadRuntime(ctx, workspaceID, runID)
 }
 
 func (o *Biz) AdmitRuntimeCandidateProposalForTest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtime.CandidateAdmissionCommitResult, error) {
-	manifest, logicalRequestID, err := runtimeCandidateAttemptTestBinding(ctx, o, workspaceID, runID, attempt)
+	manifest, logicalRequestID, stablePrefixHash, err := runtimeCandidateAttemptTestBindingWithPrefix(ctx, o, workspaceID, runID, attempt)
 	if err != nil {
 		return runtime.CandidateAdmissionCommitResult{}, err
 	}
@@ -76,12 +74,12 @@ func (o *Biz) AdmitRuntimeCandidateProposalForTest(ctx context.Context, workspac
 	if err != nil {
 		return runtime.CandidateAdmissionCommitResult{}, err
 	}
-	return o.AdmitRuntimeCandidateProposal(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
+	return o.AdmitRuntimeCandidateProposal(ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, logicalRequestID, candidate)
 }
 
 func (o *Biz) AdmitAndSealRuntimeCandidateAttemptForTest(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtime.CandidateAdmissionCommitResult, error) {
 	rawCandidate := candidate
-	manifest, logicalRequestID, err := runtimeCandidateAttemptTestBinding(ctx, o, workspaceID, runID, attempt)
+	manifest, logicalRequestID, stablePrefixHash, err := runtimeCandidateAttemptTestBindingWithPrefix(ctx, o, workspaceID, runID, attempt)
 	if err != nil {
 		return runtime.CandidateAdmissionCommitResult{}, err
 	}
@@ -95,13 +93,16 @@ func (o *Biz) AdmitAndSealRuntimeCandidateAttemptForTest(ctx context.Context, wo
 		return runtime.CandidateAdmissionCommitResult{}, err
 	}
 	contractID := runtimemodel.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
-	_, record, pending := pendingRuntimeCandidateAttemptForTest(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
-	if pending && record.Proposal == nil {
-		proposal, proposalErr := o.AdmitRuntimeCandidateProposal(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
+	existing, found := runtimeCandidateAttemptRecordForTest(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
+	needsProposal := !found || (existing.State != runtimemodel.RuntimeCandidateAttemptStateAccepted &&
+		existing.State != runtimemodel.RuntimeCandidateAttemptStateFailed &&
+		(existing.State != runtimemodel.RuntimeCandidateAttemptStatePending || existing.Proposal == nil))
+	if needsProposal {
+		proposal, proposalErr := o.AdmitRuntimeCandidateProposal(ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, logicalRequestID, candidate)
 		if proposalErr != nil || !proposal.Admission.Accepted() {
 			return proposal, proposalErr
 		}
-		manifest, logicalRequestID, err = runtimeCandidateAttemptTestBinding(ctx, o, workspaceID, runID, attempt)
+		manifest, logicalRequestID, _, err = runtimeCandidateAttemptTestBindingWithPrefix(ctx, o, workspaceID, runID, attempt)
 		if err != nil {
 			return runtime.CandidateAdmissionCommitResult{}, err
 		}
@@ -110,10 +111,19 @@ func (o *Biz) AdmitAndSealRuntimeCandidateAttemptForTest(ctx context.Context, wo
 		if err != nil {
 			return runtime.CandidateAdmissionCommitResult{}, err
 		}
-	} else if pending && record.Proposal != nil {
-		candidate = *record.Proposal
+	} else if existing.State == runtimemodel.RuntimeCandidateAttemptStatePending && existing.Proposal != nil {
+		candidate = *existing.Proposal
 	}
 	return o.AdmitAndSealRuntimeCandidateAttempt(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
+}
+
+func runtimeCandidateAttemptRecordForTest(records []runtimemodel.RuntimeCandidateAttemptRecord, workspaceID common.WorkspaceID, runID common.RunID, contractID string, attempt int) (runtimemodel.RuntimeCandidateAttemptRecord, bool) {
+	for _, record := range records {
+		if runtimemodel.CandidateAttemptAuthorityContractID(workspaceID, runID, record) == contractID && record.Attempt == attempt {
+			return record, true
+		}
+	}
+	return runtimemodel.RuntimeCandidateAttemptRecord{}, false
 }
 
 func pendingRuntimeCandidateAttemptForTest(records []runtimemodel.RuntimeCandidateAttemptRecord, workspaceID common.WorkspaceID, runID common.RunID, contractID string, attempt int) (int, runtimemodel.RuntimeCandidateAttemptRecord, bool) {
@@ -126,29 +136,64 @@ func pendingRuntimeCandidateAttemptForTest(records []runtimemodel.RuntimeCandida
 }
 
 func runtimeCandidateAttemptTestBinding(ctx context.Context, o *Biz, workspaceID common.WorkspaceID, runID common.RunID, attempt int) (runtimemodel.RuntimeCandidateContractManifest, string, error) {
+	manifest, logicalRequestID, _, err := runtimeCandidateAttemptTestBindingWithPrefix(ctx, o, workspaceID, runID, attempt)
+	return manifest, logicalRequestID, err
+}
+
+func runtimeCandidateAttemptTestBindingWithPrefix(ctx context.Context, o *Biz, workspaceID common.WorkspaceID, runID common.RunID, attempt int) (runtimemodel.RuntimeCandidateContractManifest, string, string, error) {
 	aggregate, err := o.loadRuntime(ctx, workspaceID, runID)
 	if err != nil {
-		return runtimemodel.RuntimeCandidateContractManifest{}, "", err
+		return runtimemodel.RuntimeCandidateContractManifest{}, "", "", err
+	}
+	return resolveRuntimeCandidateAttemptTestBinding(aggregate, attempt)
+}
+
+func resolveRuntimeCandidateAttemptTestBinding(aggregate runtime.RuntimeAggregate, attempt int) (runtimemodel.RuntimeCandidateContractManifest, string, string, error) {
+	transaction := aggregate.Decision.AuthorityTransaction()
+	for _, record := range aggregate.CandidateAttempts {
+		if record.Attempt != attempt || record.Transaction != transaction || record.State != runtimemodel.RuntimeCandidateAttemptStatePending {
+			continue
+		}
+		manifest, manifestErr := runtime.BuildRuntimeCandidateContractManifestForAggregate(aggregate)
+		if manifestErr != nil {
+			return runtimemodel.RuntimeCandidateContractManifest{Hash: record.ManifestHash}, record.LogicalRequestID, record.StablePrefixHash, nil
+		}
+		return manifest, record.LogicalRequestID, record.StablePrefixHash, nil
+	}
+	for i := len(aggregate.CandidateRequestSessions) - 1; i >= 0; i-- {
+		session := aggregate.CandidateRequestSessions[i]
+		if session.DocumentKind != runtimemodel.RuntimeProviderDocumentOperations ||
+			session.Transaction != transaction ||
+			session.State != runtimemodel.RuntimeCandidateRequestSessionDocumentComplete ||
+			session.ExpectedDocument == nil ||
+			session.ExpectedDocument.CorrectionAttempt != attempt {
+			continue
+		}
+		manifest, manifestErr := runtime.BuildRuntimeCandidateContractManifestForAggregate(aggregate)
+		if manifestErr != nil {
+			return runtimemodel.RuntimeCandidateContractManifest{Hash: session.ManifestHash}, session.LogicalRequestID, session.StablePrefixHash, nil
+		}
+		return manifest, session.LogicalRequestID, session.StablePrefixHash, nil
 	}
 	var fallback *runtimemodel.RuntimeCandidateAttemptRecord
 	for _, record := range aggregate.CandidateAttempts {
 		if record.Attempt != attempt {
 			continue
 		}
-		if record.Transaction == aggregate.Decision.AuthorityTransaction() {
+		if record.Transaction == transaction {
 			manifest, manifestErr := runtime.BuildRuntimeCandidateContractManifestForAggregate(aggregate)
 			if manifestErr != nil {
-				return runtimemodel.RuntimeCandidateContractManifest{Hash: record.ManifestHash}, record.LogicalRequestID, nil
+				return runtimemodel.RuntimeCandidateContractManifest{Hash: record.ManifestHash}, record.LogicalRequestID, record.StablePrefixHash, nil
 			}
-			return manifest, record.LogicalRequestID, nil
+			return manifest, record.LogicalRequestID, record.StablePrefixHash, nil
 		}
 		copyRecord := record
 		fallback = &copyRecord
 	}
 	if fallback != nil {
-		return runtimemodel.RuntimeCandidateContractManifest{Hash: fallback.ManifestHash}, fallback.LogicalRequestID, nil
+		return runtimemodel.RuntimeCandidateContractManifest{Hash: fallback.ManifestHash}, fallback.LogicalRequestID, fallback.StablePrefixHash, nil
 	}
-	return runtimemodel.RuntimeCandidateContractManifest{}, "", fmt.Errorf("%w: candidate attempt %d has no test binding", common.ErrConflict, attempt)
+	return runtimemodel.RuntimeCandidateContractManifest{}, "", "", fmt.Errorf("%w: candidate attempt %d has no test binding", common.ErrConflict, attempt)
 }
 
 func candidateTargetSelection(aggregate runtime.RuntimeAggregate) *runtimemodel.RuntimeTargetSelection {
@@ -181,15 +226,13 @@ func beginRuntimeCandidateAttemptForTest(ctx context.Context, controller *runtim
 		if _, err := runtimeTestControllerMarkCandidateRequestSubmitted(controller, ctx, workspaceID, runID, session.LogicalRequestID, session.NextSequence, physicalCallID); err != nil {
 			return runtime.RuntimeAggregate{}, err
 		}
-		if _, err := runtimeTestControllerCompleteCandidateDocument(controller, ctx, workspaceID, runID, session.LogicalRequestID, physicalCallID); err != nil {
-			return runtime.RuntimeAggregate{}, err
-		}
+		return runtimeTestControllerCompleteCandidateDocument(controller, ctx, workspaceID, runID, session.LogicalRequestID, physicalCallID)
 	}
-	return runtimeTestControllerBeginCandidateAttempt(controller, ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, session.LogicalRequestID)
+	return controller.Load(ctx, workspaceID, runID)
 }
 
 func admitRuntimeCandidateProposalForTest(ctx context.Context, controller *runtime.RuntimeController, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtime.CandidateAdmissionCommitResult, error) {
-	manifest, logicalRequestID, err := directRuntimeCandidateAttemptTestBinding(ctx, controller, workspaceID, runID, attempt)
+	manifest, logicalRequestID, stablePrefixHash, err := directRuntimeCandidateAttemptTestBindingWithPrefix(ctx, controller, workspaceID, runID, attempt)
 	if err != nil {
 		return runtime.CandidateAdmissionCommitResult{}, err
 	}
@@ -198,12 +241,12 @@ func admitRuntimeCandidateProposalForTest(ctx context.Context, controller *runti
 	if err != nil {
 		return runtime.CandidateAdmissionCommitResult{}, err
 	}
-	return runtimeTestControllerAdmitCandidateProposal(controller, ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
+	return runtimeTestControllerAdmitCandidateProposal(controller, ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, logicalRequestID, candidate)
 }
 
 func admitAndSealRuntimeCandidateAttemptForTest(ctx context.Context, controller *runtime.RuntimeController, workspaceID common.WorkspaceID, runID common.RunID, attempt int, candidate runtimemodel.RuntimeCandidate) (runtime.CandidateAdmissionCommitResult, error) {
 	rawCandidate := candidate
-	manifest, logicalRequestID, err := directRuntimeCandidateAttemptTestBinding(ctx, controller, workspaceID, runID, attempt)
+	manifest, logicalRequestID, stablePrefixHash, err := directRuntimeCandidateAttemptTestBindingWithPrefix(ctx, controller, workspaceID, runID, attempt)
 	if err != nil {
 		return runtime.CandidateAdmissionCommitResult{}, err
 	}
@@ -217,13 +260,16 @@ func admitAndSealRuntimeCandidateAttemptForTest(ctx context.Context, controller 
 		return runtime.CandidateAdmissionCommitResult{}, err
 	}
 	contractID := runtimemodel.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
-	_, record, pending := pendingRuntimeCandidateAttemptForTest(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
-	if pending && record.Proposal == nil {
-		proposal, proposalErr := runtimeTestControllerAdmitCandidateProposal(controller, ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
+	existing, found := runtimeCandidateAttemptRecordForTest(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
+	needsProposal := !found || (existing.State != runtimemodel.RuntimeCandidateAttemptStateAccepted &&
+		existing.State != runtimemodel.RuntimeCandidateAttemptStateFailed &&
+		(existing.State != runtimemodel.RuntimeCandidateAttemptStatePending || existing.Proposal == nil))
+	if needsProposal {
+		proposal, proposalErr := runtimeTestControllerAdmitCandidateProposal(controller, ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, logicalRequestID, candidate)
 		if proposalErr != nil || !proposal.Admission.Accepted() {
 			return proposal, proposalErr
 		}
-		manifest, logicalRequestID, err = directRuntimeCandidateAttemptTestBinding(ctx, controller, workspaceID, runID, attempt)
+		manifest, logicalRequestID, _, err = directRuntimeCandidateAttemptTestBindingWithPrefix(ctx, controller, workspaceID, runID, attempt)
 		if err != nil {
 			return runtime.CandidateAdmissionCommitResult{}, err
 		}
@@ -232,36 +278,23 @@ func admitAndSealRuntimeCandidateAttemptForTest(ctx context.Context, controller 
 		if err != nil {
 			return runtime.CandidateAdmissionCommitResult{}, err
 		}
-	} else if pending && record.Proposal != nil {
-		candidate = *record.Proposal
+	} else if existing.State == runtimemodel.RuntimeCandidateAttemptStatePending && existing.Proposal != nil {
+		candidate = *existing.Proposal
 	}
 	return runtimeTestControllerAdmitAndSealCandidate(controller, ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
 }
 
 func directRuntimeCandidateAttemptTestBinding(ctx context.Context, controller *runtime.RuntimeController, workspaceID common.WorkspaceID, runID common.RunID, attempt int) (runtimemodel.RuntimeCandidateContractManifest, string, error) {
+	manifest, logicalRequestID, _, err := directRuntimeCandidateAttemptTestBindingWithPrefix(ctx, controller, workspaceID, runID, attempt)
+	return manifest, logicalRequestID, err
+}
+
+func directRuntimeCandidateAttemptTestBindingWithPrefix(ctx context.Context, controller *runtime.RuntimeController, workspaceID common.WorkspaceID, runID common.RunID, attempt int) (runtimemodel.RuntimeCandidateContractManifest, string, string, error) {
 	aggregate, err := controller.Load(ctx, workspaceID, runID)
 	if err != nil {
-		return runtimemodel.RuntimeCandidateContractManifest{}, "", err
+		return runtimemodel.RuntimeCandidateContractManifest{}, "", "", err
 	}
-	var fallback *runtimemodel.RuntimeCandidateAttemptRecord
-	for _, record := range aggregate.CandidateAttempts {
-		if record.Attempt != attempt {
-			continue
-		}
-		if record.Transaction == aggregate.Decision.AuthorityTransaction() {
-			manifest, manifestErr := runtime.BuildRuntimeCandidateContractManifestForAggregate(aggregate)
-			if manifestErr != nil {
-				return runtimemodel.RuntimeCandidateContractManifest{Hash: record.ManifestHash}, record.LogicalRequestID, nil
-			}
-			return manifest, record.LogicalRequestID, nil
-		}
-		copyRecord := record
-		fallback = &copyRecord
-	}
-	if fallback != nil {
-		return runtimemodel.RuntimeCandidateContractManifest{Hash: fallback.ManifestHash}, fallback.LogicalRequestID, nil
-	}
-	return runtimemodel.RuntimeCandidateContractManifest{}, "", fmt.Errorf("%w: candidate attempt %d has no test binding", common.ErrConflict, attempt)
+	return resolveRuntimeCandidateAttemptTestBinding(aggregate, attempt)
 }
 
 func evaluateRuntimeCandidateAdmissionForTest(aggregate runtime.RuntimeAggregate, candidate runtimemodel.RuntimeCandidate) runtime.CandidateAdmissionResult {

@@ -243,7 +243,7 @@ func (m *Biz) driveRuntimeRecoverableWait(ctx context.Context, aggregate runtime
 	committed, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 		Kind:      runtime.RuntimeInternalEventPrerequisiteObserved,
 		Scope:     runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
-		Authority: &runtime.RuntimeInternalAuthorityPayload{PrerequisiteResult: &result, RecoverableWaitProbeObservation: &probeObservation},
+		Authority: &runtime.RuntimeInternalAuthorityPayload{PrerequisiteResults: []runtime.PrerequisiteResult{result}, RecoverableWaitProbeObservation: &probeObservation},
 	})
 	if err != nil {
 		return runtimeDriveTransitionOutcome{}, err

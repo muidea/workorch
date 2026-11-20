@@ -347,7 +347,7 @@ func prepareSemanticValidationRepairOwnerInfeasibility(t *testing.T) (RuntimeAgg
 		Kind:  RuntimeInternalEventCandidateFeasibilityObserved,
 		Scope: RuntimeInternalEventScope{WorkspaceID: proposed.Facts.WorkspaceID, RunID: proposed.Facts.RunID},
 		Transaction: &RuntimeInternalTransactionPayload{
-			Attempt: 0, CandidateFeasibility: &feasibility,
+			Attempt: 0, CandidateFeasibilities: []runtimecontract.RuntimeCandidateFeasibilityRecord{feasibility},
 		},
 	}
 }
@@ -401,7 +401,7 @@ func prepareConfirmedRepairOwnerInfeasibility(t *testing.T) (RuntimeAggregate, R
 		Kind:  RuntimeInternalEventCandidateFeasibilityObserved,
 		Scope: RuntimeInternalEventScope{WorkspaceID: proposed.Facts.WorkspaceID, RunID: proposed.Facts.RunID},
 		Transaction: &RuntimeInternalTransactionPayload{
-			Attempt: 0, CandidateFeasibility: &feasibility,
+			Attempt: 0, CandidateFeasibilities: []runtimecontract.RuntimeCandidateFeasibilityRecord{feasibility},
 		},
 	}
 }

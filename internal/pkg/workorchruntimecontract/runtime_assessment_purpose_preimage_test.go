@@ -112,6 +112,11 @@ func TestAssessmentPurposeIndexExcludesImplementationWorkBatch(t *testing.T) {
 // It is not a transition fixture; the Orchestrator mainline tests exercise the
 // owner-private events and opaque CAS that produce these records in production.
 func assessmentPurposeGenerationForTest(t testing.TB, coverageID common.CoverageWorkItemID, requestID string, repair bool, sourceScopeOverride ...string) (RuntimeSemanticPlanningLedger, []CoverageEvidenceBinding) {
+	ledger, bindings, _ := assessmentPurposeGenerationWithSeedForTest(t, coverageID, requestID, repair, sourceScopeOverride...)
+	return ledger, bindings
+}
+
+func assessmentPurposeGenerationWithSeedForTest(t testing.TB, coverageID common.CoverageWorkItemID, requestID string, repair bool, sourceScopeOverride ...string) (RuntimeSemanticPlanningLedger, []CoverageEvidenceBinding, RuntimeDefinitionSeed) {
 	t.Helper()
 	definition := RuntimeDefinitionContext{
 		StartupInputHash: "startup-purpose", Revision: "definition-purpose", GoalID: "goal-purpose", GoalDefinition: "deliver behavior",
@@ -174,7 +179,7 @@ func assessmentPurposeGenerationForTest(t testing.TB, coverageID common.Coverage
 		t.Fatal(err)
 	}
 	ledger := RuntimeSemanticPlanningLedger{
-		SchemaVersion: RuntimeSemanticPlanningLedgerSchemaCurrent, Phase: RuntimeSemanticPlanningSealed, DefinitionSeed: seed,
+		SchemaVersion: RuntimeSemanticPlanningLedgerSchemaCurrent, Phase: RuntimeSemanticPlanningSealed, DefinitionSeedHash: seed.Hash,
 		Manifest: &manifest, StablePrefixHash: "stable-purpose-prefix", LogicalRequestID: requestID,
 		CoverageOrderDocument: &order, Document: &document, DocumentHash: batch.DocumentHash,
 		Batches: []RuntimeSemanticPlanBatch{batch}, NextBatchSequence: 1, CompletedBatchIDs: []string{batch.BatchID}, BatchDocuments: []RuntimeSemanticPlanDocument{document},
@@ -185,5 +190,5 @@ func assessmentPurposeGenerationForTest(t testing.TB, coverageID common.Coverage
 	if err := ledger.Validate(); err != nil {
 		t.Fatalf("semantic purpose fixture: %v", err)
 	}
-	return ledger, compiled[0].CoverageEvidenceBindings
+	return ledger, compiled[0].CoverageEvidenceBindings, seed
 }

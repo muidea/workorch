@@ -85,8 +85,7 @@ func mutateSemanticDefinitionSession(r *RuntimeStateRecord, arm uint8, raw strin
 
 func semanticDefinitionSessionFixture(t testing.TB) RuntimeStateRecord {
 	t.Helper()
-	ledger := semanticBindingIndexedMultiBatchFixture(t, 3)
-	seed := ledger.DefinitionSeed.Clone()
+	ledger, seed := semanticBindingIndexedMultiBatchAndSeedFixture(t, 3)
 	focuses := semanticDefinitionFocuses(seed.CoverageItems)
 	for range 3 {
 		ledger.History = append(ledger.History, RuntimeSemanticPlanningGeneration{Snapshot: RuntimeSemanticPlanningLedger{Manifest: ledger.Manifest}})

@@ -36,7 +36,7 @@ func TestOwnerHistoricalCompilerRetiredGenerationAndPurposeOracle(t *testing.T) 
 			case "history duplicate":
 				changed.History = append(changed.History, changed.History[0])
 			case "source seed":
-				changed.DefinitionSeed.PolicyHash = "same hash different raw"
+				changed.DefinitionSeedHash = "same hash different raw"
 			}
 			for range 2 {
 				got := validateRuntimeSemanticPlanningLedgerInSession(changed, s)

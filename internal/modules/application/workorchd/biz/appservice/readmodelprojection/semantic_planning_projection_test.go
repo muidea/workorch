@@ -169,14 +169,17 @@ func TestRuntimeSemanticPlanningProjectionPreservesFailureAndSealedBinding(t *te
 }
 
 func semanticPlanningProjectionState(workspaceID, runID string, revision uint64) runtimecontract.RuntimeStateRecord {
+	seed := runtimecontract.RuntimeDefinitionSeed{CoverageItems: []runtimecontract.RuntimeCoverageItem{{ID: "cwi-a"}, {ID: "cwi-b"}}}
+	seed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(seed)
 	return runtimecontract.RuntimeStateRecord{
 		StateRevision: revision,
 		Facts: runtimecontract.RuntimeFacts{
 			WorkspaceID: common.WorkspaceID(workspaceID), RunID: common.RunID(runID), DefinitionRevision: "definition-semantic",
+			DefinitionSeed: seed,
 		},
 		SemanticPlanning: runtimecontract.RuntimeSemanticPlanningLedger{
-			SchemaVersion:  runtimecontract.RuntimeSemanticPlanningLedgerSchemaCurrent,
-			DefinitionSeed: runtimecontract.RuntimeDefinitionSeed{CoverageItems: []runtimecontract.RuntimeCoverageItem{{ID: "cwi-a"}, {ID: "cwi-b"}}},
+			SchemaVersion:      runtimecontract.RuntimeSemanticPlanningLedgerSchemaCurrent,
+			DefinitionSeedHash: seed.Hash,
 		},
 	}
 }

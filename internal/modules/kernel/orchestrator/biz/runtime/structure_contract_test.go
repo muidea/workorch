@@ -222,9 +222,9 @@ func TestRuntimePrivateComponentsShareOneMutationKernel(t *testing.T) {
 		}
 	}
 	for receiver, required := range map[string][]string{
-		"authorityComponent":           {"reconcileAuthorityBeforeCandidate", "recordFeasibilityFact", "commitPrerequisite", "commitAssessment", "commitGovernanceResolution", "commitReconciliationBatch", "invalidatePrerequisitesForReadOnlyStale"},
+		"authorityComponent":           {"reconcileAuthorityBeforeCandidate", "recordFeasibilityFact", "commitPrerequisites", "commitAssessment", "commitGovernanceResolution", "commitReconciliationBatch", "invalidatePrerequisitesForReadOnlyStale"},
 		"planningTransactionComponent": {"beginSemanticPlanningMutation", "commitSemanticPlanningMutation", "requireSemanticContract", "ensureCandidateRequestSessionWithExpected", "markCandidateRequestSubmitted", "coordinateProviderRequestRecovery", "invalidateCandidateRequestSessionForPrerequisiteStale"},
-		"candidateDispatchComponent":   {"commitEvidence", "commitOperationReceipt", "admitCandidateProposal", "admitAndSealCandidateAttempt", "beginCandidateAttempt", "claimOperationExecution", "invalidateActiveDispatchForPrerequisiteStale"},
+		"candidateDispatchComponent":   {"commitEvidence", "commitOperationReceipt", "admitCandidateProposal", "admitAndSealCandidateAttempt", "claimOperationExecution", "invalidateActiveDispatchForPrerequisiteStale"},
 		"driveDeliveryComponent":       {"scheduleDriveLease", "claimDriveLease", "consumeRecoveryBudget", "recordDeliveryAcknowledgement", "ensureReconciliationRequest", "requestTermination"},
 	} {
 		for _, method := range required {
@@ -632,8 +632,8 @@ func TestO7SemanticPlanningTransactionHasNoMutationCallback(t *testing.T) {
 	if legacyDeclarations != 0 {
 		t.Fatalf("legacy callback transaction declarations = %d, want 0", legacyDeclarations)
 	}
-	if beginCalls != 12 || commitCalls != 12 {
-		t.Fatalf("explicit semantic planning transaction calls begin=%d commit=%d, want 12/12", beginCalls, commitCalls)
+	if beginCalls != 10 || commitCalls != 10 {
+		t.Fatalf("explicit semantic planning transaction calls begin=%d commit=%d, want 10/10", beginCalls, commitCalls)
 	}
 }
 
@@ -790,7 +790,7 @@ func TestO7RuntimeFilesKeepOneFacetPerTransitionFile(t *testing.T) {
 			"authorityComponent.recordFailureFact":                 true,
 			"authorityComponent.recordDriveFailureFact":            true,
 			"authorityComponent.commitFailureFact":                 true,
-			"authorityComponent.commitPrerequisite":                true,
+			"authorityComponent.commitPrerequisites":               true,
 		},
 		"authority_assessment_transition.go": {"authorityComponent.commitAssessment": true},
 		"drive_delivery_transition.go":       {"driveDeliveryComponent.requestTermination": true},

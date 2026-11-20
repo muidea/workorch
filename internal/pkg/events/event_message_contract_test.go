@@ -122,7 +122,8 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// Neither executes operations nor grants evidence or transition authority.
 	// Run adds an opaque-state-free lifecycle read for the Runtime drive. It
 	// reports SM-1 metadata and cannot select actions or rebuild authority.
-	const expectedProductionTopicCount = 333
+	// LLM adds /llm/command/reload-configuration (ReloadConfigurationCommand -> GetActiveConfigurationResult), already adjudicated in blocks/llm/readme.md.
+	const expectedProductionTopicCount = 334
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the owning component contracts and README", len(contracts), expectedProductionTopicCount)
 	}

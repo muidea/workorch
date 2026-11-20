@@ -3,11 +3,13 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -132,7 +134,7 @@ func TestRuntimeSemanticOrderAcceptedRetirementHandsRequiredPhaseBackToOuterDriv
 	batchFeasibility.Hash = runtimecontract.StableRuntimeSemanticPlanBatchFeasibilityResultHash(batchFeasibility)
 	orderLedger := runtimecontract.RuntimeSemanticPlanningLedger{
 		SchemaVersion: sealedLedger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningOrderAccepted,
-		DefinitionSeed: sealedLedger.DefinitionSeed.Clone(), Manifest: &manifest,
+		DefinitionSeedHash: sealedLedger.DefinitionSeedHash, Manifest: &manifest,
 		StablePrefixHash: sealedLedger.StablePrefixHash, LogicalRequestID: "stale-order-request",
 		CoverageOrderDocument: &order, Document: &order,
 		DocumentHash:            runtimecontract.StableRuntimeSemanticPlanDocumentHash(order),
@@ -769,42 +771,28 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionAndExcludesRetiredGenera
 	if err != nil {
 		t.Fatal(err)
 	}
-	if corrected.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted || corrected.SemanticPlanning.Attempt != 1 || len(corrected.SemanticPlanning.Rejections) != 1 || requestCount != 2 || len(corrected.CandidateAttempts) != 0 || corrected.ActiveDispatch != nil {
-		t.Fatalf("corrected proof lost bounded lineage or crossed into operation authority: ledger=%+v requests=%d", corrected.SemanticPlanning, requestCount)
+	if corrected.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFeasibilityRequired || corrected.SemanticPlanning.Attempt != 1 || len(corrected.SemanticPlanning.Rejections) != 1 || requestCount != 2 || len(corrected.CandidateAttempts) != 0 || corrected.ActiveDispatch != nil || ownerProbeCalls != 0 {
+		t.Fatalf("corrected proof lost bounded lineage or crossed into operation/probe authority: ledger=%+v requests=%d probes=%d", corrected.SemanticPlanning, requestCount, ownerProbeCalls)
 	}
 	acceptedBatchRequestID := corrected.SemanticPlanning.Batches[0].RequestLogicalID
 	correctionRequestID := corrected.SemanticPlanning.LogicalRequestID
 	if acceptedBatchRequestID == "" || correctionRequestID == "" || acceptedBatchRequestID == correctionRequestID {
 		t.Fatalf("semantic correction collapsed batch generation and request-session identities: batch=%q correction=%q", acceptedBatchRequestID, correctionRequestID)
 	}
-	feasibilityRequired, err := module.driveRuntimeSemanticPlanning(ctx, corrected)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if feasibilityRequired.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFeasibilityRequired || ownerProbeCalls != 0 {
-		t.Fatalf("semantic feasibility was not persisted before owner I/O: phase=%q probes=%d", feasibilityRequired.SemanticPlanning.Phase, ownerProbeCalls)
-	}
-	feasibilityComplete, err := module.driveRuntimeSemanticPlanning(ctx, feasibilityRequired)
+	feasibilityComplete, err := module.driveRuntimeSemanticPlanning(ctx, corrected)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if feasibilityComplete.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchFeasibilityComplete || ownerProbeCalls != 1 {
 		t.Fatalf("corrected semantic proof did not persist one owner fact: phase=%q probes=%d", feasibilityComplete.SemanticPlanning.Phase, ownerProbeCalls)
 	}
-	archived, err := module.driveRuntimeSemanticPlanning(ctx, feasibilityComplete)
+	sealed, err := module.driveRuntimeSemanticPlanning(ctx, feasibilityComplete)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if archived.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchFeasibilityComplete || len(archived.SemanticPlanning.BatchFeasibilityResults) != 1 {
-		t.Fatalf("corrected semantic owner facts were not archived before seal: %+v", archived.SemanticPlanning)
-	}
-	sealed, err := module.driveRuntimeSemanticPlanning(ctx, archived)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sealed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed || len(sealed.Facts.Focus.CoverageEvidenceBindings) != 1 ||
+	if sealed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed || len(sealed.SemanticPlanning.BatchFeasibilityResults) != 1 || len(sealed.Facts.Focus.CoverageEvidenceBindings) != 1 ||
 		requestCount != 2 || ownerProbeCalls != 1 || len(sealed.CandidateAttempts) != 0 || sealed.ActiveDispatch != nil {
-		t.Fatalf("corrected semantic drive did not seal without operation authority: ledger=%+v requests=%d probes=%d", sealed.SemanticPlanning, requestCount, ownerProbeCalls)
+		t.Fatalf("corrected semantic drive did not seal atomically without operation authority: ledger=%+v requests=%d probes=%d", sealed.SemanticPlanning, requestCount, ownerProbeCalls)
 	}
 	acceptedBatch := sealed.SemanticPlanning.Batches[0]
 	acceptedDocument := sealed.SemanticPlanning.BatchDocuments[0]
@@ -1510,7 +1498,7 @@ func TestRuntimeSemanticDriveFailsOnlyAfterPersistedCatalogRefreshBudgetIsExhaus
 		Status: runtimecontract.RuntimeSemanticFeasibilityStale, ObservedRevision: "file-revision-2", OriginalDiagnostic: &diagnostic,
 	}
 	result, err = controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventSemanticFeasibilityObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibility},
+		Kind: runtime.RuntimeInternalEventSemanticFeasibilityObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibilities: []runtimecontract.RuntimeSemanticProofFeasibility{feasibility}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1541,4 +1529,457 @@ func runtimeSemanticProviderOrderBootstrap() runtimecontract.RuntimeBootstrap {
 	focus.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-v3"}
 	b.DefinitionFocuses = append(b.DefinitionFocuses, focus)
 	return runtimeTestBootstrapWithReboundBindings(b)
+}
+
+func TestRuntimeSemanticDriveCompilesSingletonProofBatchWithoutProviderAndSealsWithOwnerProbe(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	bootstrap := runtimeBootstrap()
+	bootstrap.Definition.CapabilityContract = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	bootstrap.Slices[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	bootstrap.CoverageItems = []runtimecontract.RuntimeCoverageItem{{
+		ID: "cwi-singleton-val", SliceID: bootstrap.Slices[0].ID, SourceScope: "dodItem", SourceID: "dod/singleton-val", Order: 1,
+	}}
+	bootstrap.Slices[0].CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-singleton-val"}
+	bootstrap.DefinitionFocuses = []runtimecontract.RuntimeDefinitionFocus{{
+		ID: "focus-singleton-val", SliceID: bootstrap.Slices[0].ID,
+		CoverageWorkItemIDs:    []common.CoverageWorkItemID{"cwi-singleton-val"},
+		RequiredEvidenceKinds:  []string{runtimecontract.EvidenceKindValidation},
+		AcceptedStepKinds:      []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		ValidationRecipeID:     "recipe/singleton-validation",
+		RequiredCheckRefs:      []string{"check/singleton-validation"},
+		AssessmentScope:        "dodItem",
+		AssessmentID:           "dod/singleton-val",
+		AssessmentText:         "singleton validation passes",
+		EvidenceDeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod/singleton-val"),
+		RequireAssessment:      true,
+	}}
+	bootstrap.Requirements = nil
+	bootstrap = runtimeTestBootstrapWithReboundBindings(bootstrap)
+
+	facts, err := bootstrap.InitialFacts("ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts.Focus.CoverageEvidenceBindings = nil
+	facts.Capabilities = runtimecontract.RuntimeCapabilities{
+		ValidationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}
+	shellCatalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID:       "semantic-shell-singleton",
+		OwnerModuleID:        runtimecontract.RuntimeModuleShell,
+		OperationKinds:       []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		SelectorRefs:         []string{"workspace-validation-target"},
+		ValidationRecipeRefs: []string{"recipe/singleton-validation"},
+		ValidationRecipes:    []runtimecontract.RuntimeValidationRecipe{{ID: "recipe/singleton-validation", Command: "true"}},
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
+			ID: "recipe/singleton-validation", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			Readiness:     runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "singleton-schema-v1", InputBindingRef: "singleton-input-v1",
+			CheckRefs: []string{"check/singleton-validation"}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+			EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+		}},
+		OperationPolicies: []runtimecontract.RuntimeOperationPolicyFact{{
+			ID: "singleton-managed-val-policy", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			EffectScope:   runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+		}},
+		ObservedRevision: "shell-catalog-singleton-v1",
+	}
+	shellCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(shellCatalog)
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{shellCatalog}
+	facts, err = runtimeTestBindExactManagedValidationProofFacts(facts)
+	if err != nil {
+		t.Fatalf("bind singleton validation proof facts: %v", err)
+	}
+	shellCatalog = facts.Resources.OperationAdmissibilities[0]
+	prereq := runtimecontract.RuntimePrerequisite{
+		ID: shellCatalog.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}
+	obs := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prereq.ID, Kind: prereq.Kind, OwnerModuleID: prereq.OwnerModuleID, ContentHash: shellCatalog.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			SubjectRef: "shell_policy", Revision: shellCatalog.ObservedRevision,
+		}},
+	}
+	obs.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(obs)
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{obs}
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{prereq}
+	facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
+		Selection:           runtimecontract.ProviderInferenceSelection{Target: facts.Activation.ProviderSelection.Target},
+		ContextWindowTokens: 8192, ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048,
+		MaxInputTokens: 4096, MaxBytes: 65536, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1",
+	}
+
+	repository := &runtimeDriveRepository{}
+	controller, err := runtime.NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err := runtimeTestControllerInitialize(controller, ctx, facts, bootstrap.Definition, bootstrap.Requirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository.aggregate = aggregate
+	module := newRuntimeGroundedTargetSequenceModule(t, hub, repository)
+
+	requestCount := 0
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, result magicevent.Result) {
+		requestCount++
+		t.Errorf("unexpected LLM provider call during deterministic singleton proof-batch drive")
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
+
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
+			ID: aggregate.Facts.WorkspaceID, DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir(),
+		}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+
+	ownerProbeCalls := 0
+	shellObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleShell, hub)
+	shellObserver.Subscribe(shellevents.TopicProbeRuntimeSemanticProofFeasibility, func(event magicevent.Event, result magicevent.Result) {
+		ownerProbeCalls++
+		command := event.Data().(shellevents.ProbeRuntimeSemanticProofFeasibilityCommand)
+		var checks []string
+		for _, surface := range command.OwnerCatalog.ValidationSurfaces {
+			if surface.ID == command.Proposal.ValidationRecipeID && len(surface.ProofRequirementBindings) > 0 {
+				checks = append([]string(nil), surface.ProofRequirementBindings[0].RequiredCheckRefs...)
+				break
+			}
+		}
+		obsResult, obsErr := shellevents.NewRuntimeSemanticProofFeasibilityResult(
+			command, runtimecontract.RuntimeSemanticFeasibilityFeasible, command.OwnerCatalog.ObservedRevision,
+			nil, nil,
+		)
+		if obsErr != nil {
+			t.Errorf("shell semantic feasibility result: %v", obsErr)
+			return
+		}
+		obsResult.Observation.ValidationRecipeID = command.Proposal.ValidationRecipeID
+		obsResult.Observation.RequiredCheckRefs = checks
+		result.Set(obsResult, nil)
+	})
+	t.Cleanup(func() { shellObserver.Unsubscribe(shellevents.TopicProbeRuntimeSemanticProofFeasibility) })
+
+	initialBudget := aggregate.ExecutionBudget
+	current := aggregate
+	for step := 0; step < 8 && current.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed; step++ {
+		next, stepErr := module.driveRuntimeSemanticPlanning(ctx, current)
+		if stepErr != nil {
+			t.Fatalf("semantic drive step %d from phase %q failed: %v", step, current.SemanticPlanning.Phase, stepErr)
+		}
+		current = next
+	}
+	if current.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed ||
+		requestCount != 0 ||
+		ownerProbeCalls != 1 ||
+		len(current.CandidateRequestSessions) != 0 ||
+		current.SemanticPlanning.CompiledOrder == nil ||
+		len(current.SemanticPlanning.CompiledProofBatches) != 1 ||
+		current.SemanticPlanning.CompiledProofBatches[0].Rule != runtimecontract.RuntimeSemanticCompiledProofBatchRuleSingletonUniqueDirectValidationSurface ||
+		!reflect.DeepEqual(current.ExecutionBudget, initialBudget) ||
+		len(current.Facts.Focus.CoverageEvidenceBindings) != 1 {
+		t.Fatalf("singleton proof batch drive did not seal with 0 LLM calls and 1 owner probe: phase=%q requests=%d probes=%d compiled=%+v bindings=%+v",
+			current.SemanticPlanning.Phase, requestCount, ownerProbeCalls, current.SemanticPlanning.CompiledProofBatches, current.Facts.Focus.CoverageEvidenceBindings)
+	}
+}
+
+func TestRuntimeSemanticDriveBatchesMultiProposalFeasibilityInOneCASAndStopsEarlyOnFailure(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+
+	bootstrap := runtimeBootstrap()
+	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindManagedValidationSession}
+	bootstrap.Slices[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+	bootstrap.DefinitionFocuses[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+	bootstrap.DefinitionFocuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindManagedValidationSession}
+	bootstrap.DefinitionFocuses[0].ValidationRecipeID = "recipe/wave-drive-val"
+	bootstrap.DefinitionFocuses[0].RequiredCheckRefs = []string{"check/wave-drive-val"}
+	bootstrap.DefinitionFocuses[0].AssessmentScope = "dodItem"
+	bootstrap.DefinitionFocuses[0].AssessmentID = "dod/wave-drive-val"
+	bootstrap.DefinitionFocuses[0].AssessmentText = "wave drive validation passes"
+	bootstrap.DefinitionFocuses[0].EvidenceDeclarationRef = runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod/wave-drive-val")
+	bootstrap.Requirements = nil
+	bootstrap = runtimeTestBootstrapWithReboundBindings(bootstrap)
+
+	facts, err := bootstrap.InitialFacts("ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts.Focus.CoverageEvidenceBindings = nil
+	facts.Focus.TargetRefs = []string{"target.txt"}
+	facts.Capabilities = runtimecontract.RuntimeCapabilities{
+		StateChangeKinds: []string{runtimecontract.StepKindFileEdit},
+		ValidationKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}
+	fileCatalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "semantic-file-wave", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"target.txt"},
+		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind: runtimecontract.StepKindFileEdit,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+				runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+			},
+		}},
+		ObservedRevision: "file-rev-wave-drive-1",
+	}
+	fileCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(fileCatalog)
+	shellCatalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID:       "semantic-shell-wave",
+		OwnerModuleID:        runtimecontract.RuntimeModuleShell,
+		OperationKinds:       []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		TargetRefs:           []string{"target.txt"},
+		ValidationRecipeRefs: []string{"recipe/wave-drive-val"},
+		ValidationRecipes:    []runtimecontract.RuntimeValidationRecipe{{ID: "recipe/wave-drive-val", Command: "true"}},
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
+			ID: "recipe/wave-drive-val", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			Readiness:     runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "wave-drive-schema-v1", InputBindingRef: "wave-drive-input-v1",
+			CheckRefs: []string{"check/wave-drive-val"}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+			EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+		}},
+		OperationPolicies: []runtimecontract.RuntimeOperationPolicyFact{{
+			ID: "wave-drive-managed-val-policy", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			EffectScope:   runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+		}},
+		ObservedRevision: "shell-rev-wave-drive-1",
+	}
+	shellCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(shellCatalog)
+	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{fileCatalog, shellCatalog}
+	facts, err = runtimeTestBindExactManagedValidationProofFacts(facts)
+	if err != nil {
+		t.Fatalf("bind wave drive proof facts: %v", err)
+	}
+	var reboundFile, reboundShell runtimecontract.RuntimeOperationAdmissibility
+	for _, cat := range facts.Resources.OperationAdmissibilities {
+		if cat.OwnerModuleID == runtimecontract.RuntimeModuleFile {
+			reboundFile = cat
+		} else if cat.OwnerModuleID == runtimecontract.RuntimeModuleShell {
+			reboundShell = cat
+		}
+	}
+	filePrereq := runtimeOperationAdmissibilityPrerequisite(reboundFile)
+	fileObs := runtimeFileAdmissibilityObservation(reboundFile)
+	shellPrereq := runtimecontract.RuntimePrerequisite{
+		ID: reboundShell.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}
+	shellObs := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: shellPrereq.ID, Kind: shellPrereq.Kind, OwnerModuleID: shellPrereq.OwnerModuleID, ContentHash: reboundShell.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			SubjectRef: "shell_policy", Revision: reboundShell.ObservedRevision,
+		}},
+	}
+	shellObs.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(shellObs)
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{fileObs, shellObs}
+	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{filePrereq, shellPrereq}
+	facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{{
+		TargetRef: "target.txt", ContentHash: "wave-drive-target-v1", ContentState: runtimecontract.SnapshotContentStateComplete,
+	}}
+	facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
+		Selection:           runtimecontract.ProviderInferenceSelection{Target: facts.Activation.ProviderSelection.Target},
+		ContextWindowTokens: 8192, ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048,
+		MaxInputTokens: 4096, MaxBytes: 65536, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1",
+	}
+
+	setupRepo := &runtimeDriveRepository{}
+	controller, err := runtime.NewRuntimeController(setupRepo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err := runtimeTestControllerInitialize(controller, ctx, facts, bootstrap.Definition, bootstrap.Requirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setupRepo.aggregate = aggregate
+
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(llmevents.TopicPreflightRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(llmevents.PreflightRuntimeCandidateCommand)
+		result.Set(withRuntimePreflightSnapshotForTest(command, llmevents.PreflightRuntimeCandidateResult{
+			Transaction: command.Transaction, DocumentKind: command.DocumentKind,
+			Feedback: runtimePreflightFeedbackForTest(t, command, ""),
+		}), nil)
+	})
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		item := command.SemanticManifest.CoverageItems[0]
+		document := runtimecontract.RuntimeSemanticPlanDocument{
+			SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
+			ManifestHash:  command.SemanticManifest.Hash, DefinitionSeedHash: command.SemanticManifest.DefinitionSeedHash,
+			PlanStep: command.SemanticContext.PlanStep,
+		}
+		if command.SemanticContext.PlanStep == runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
+			document.CoverageOrder = []common.CoverageWorkItemID{item.ID}
+		} else {
+			declRef := runtimecontract.RuntimeSemanticCurrentDeclarationRef(command.SemanticManifest.ProofObligations[0])
+			document.BatchID = command.SemanticContext.BatchID
+			document.BatchSequence = command.SemanticContext.BatchSequence
+			document.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), command.SemanticContext.BatchCoverageWorkItemIDs...)
+			document.Proposals = []runtimecontract.RuntimeSemanticProofProposal{
+				{
+					CoverageWorkItemID: item.ID, OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileEdit,
+					Target: runtimecontract.RuntimeOperationTargetAuthorization{
+						Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"target.txt"},
+					},
+					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+					RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+					DeclarationRef:        declRef,
+				},
+				{
+					CoverageWorkItemID: item.ID, OwnerModuleID: runtimecontract.RuntimeModuleShell, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+					Target: runtimecontract.RuntimeOperationTargetAuthorization{
+						Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"target.txt"},
+					},
+					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+					RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectEphemeralSession},
+					ValidationRecipeID:    "recipe/wave-drive-val",
+					DeclarationRef:        declRef,
+				},
+			}
+		}
+		payload, encodeErr := runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(command.SemanticManifest, document)
+		if encodeErr != nil {
+			t.Errorf("encode semantic wave document: %v", encodeErr)
+			return
+		}
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
+			DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
+			DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload),
+		}), nil)
+	})
+	t.Cleanup(func() {
+		llmObserver.Unsubscribe(llmevents.TopicPreflightRuntimeCandidate)
+		llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate)
+	})
+
+	workspaceGets := 0
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		workspaceGets++
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
+			ID: aggregate.Facts.WorkspaceID, DeliverableDirectory: t.TempDir(), InternalDirectory: t.TempDir(),
+		}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+
+	setupModule := newRuntimeGroundedTargetSequenceModule(t, hub, setupRepo)
+	preWave := aggregate
+	for step := 0; step < 8 && preWave.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFeasibilityRequired; step++ {
+		next, stepErr := setupModule.driveRuntimeSemanticPlanning(ctx, preWave)
+		if stepErr != nil {
+			t.Fatalf("drive setup step %d from phase %q: %v", step, preWave.SemanticPlanning.Phase, stepErr)
+		}
+		preWave = next
+	}
+	if preWave.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFeasibilityRequired {
+		t.Fatalf("did not reach FeasibilityRequired: phase=%q", preWave.SemanticPlanning.Phase)
+	}
+
+	returnInfeasibleOwner := ""
+	fileProbeCalls, shellProbeCalls := 0, 0
+	fileObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
+	fileObserver.Subscribe(fileevents.TopicProbeRuntimeSemanticProofFeasibility, func(event magicevent.Event, result magicevent.Result) {
+		fileProbeCalls++
+		command := event.Data().(fileevents.ProbeRuntimeSemanticProofFeasibilityCommand)
+		status := runtimecontract.RuntimeSemanticFeasibilityFeasible
+		var diag *runtimecontract.RuntimeOriginalDiagnostic
+		targets := append([]string(nil), command.Proposal.Target.ExactTargetRefs...)
+		if returnInfeasibleOwner == runtimecontract.RuntimeModuleFile {
+			status = runtimecontract.RuntimeSemanticFeasibilityInfeasible
+			targets = nil
+			diag = &runtimecontract.RuntimeOriginalDiagnostic{
+				SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+				OriginalClass: "feasibility", OriginalCode: "target_missing", OriginalMessage: "target missing in wave", Signature: "file/target-missing",
+			}
+		}
+		obsResult, obsErr := fileevents.NewRuntimeSemanticProofFeasibilityResult(command, status, command.OwnerCatalog.ObservedRevision, targets, diag)
+		if obsErr != nil {
+			t.Errorf("file semantic feasibility result: %v", obsErr)
+			return
+		}
+		result.Set(obsResult, nil)
+	})
+	t.Cleanup(func() { fileObserver.Unsubscribe(fileevents.TopicProbeRuntimeSemanticProofFeasibility) })
+
+	shellObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleShell, hub)
+	shellObserver.Subscribe(shellevents.TopicProbeRuntimeSemanticProofFeasibility, func(event magicevent.Event, result magicevent.Result) {
+		shellProbeCalls++
+		command := event.Data().(shellevents.ProbeRuntimeSemanticProofFeasibilityCommand)
+		var checks []string
+		for _, surface := range command.OwnerCatalog.ValidationSurfaces {
+			if surface.ID == command.Proposal.ValidationRecipeID && len(surface.ProofRequirementBindings) > 0 {
+				checks = append([]string(nil), surface.ProofRequirementBindings[0].RequiredCheckRefs...)
+				break
+			}
+		}
+		status := runtimecontract.RuntimeSemanticFeasibilityFeasible
+		var diag *runtimecontract.RuntimeOriginalDiagnostic
+		targets := append([]string(nil), command.Proposal.Target.ExactTargetRefs...)
+		if returnInfeasibleOwner == runtimecontract.RuntimeModuleShell {
+			status = runtimecontract.RuntimeSemanticFeasibilityInfeasible
+			targets = nil
+			checks = nil
+			diag = &runtimecontract.RuntimeOriginalDiagnostic{
+				SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+				OriginalClass: "feasibility", OriginalCode: "validation_surface_unavailable", OriginalMessage: "validation surface unavailable in wave", Signature: "shell/validation-surface-unavailable",
+			}
+		}
+		obsResult, obsErr := shellevents.NewRuntimeSemanticProofFeasibilityResult(command, status, command.OwnerCatalog.ObservedRevision, targets, diag)
+		if obsErr != nil {
+			t.Errorf("shell semantic feasibility result: %v", obsErr)
+			return
+		}
+		obsResult.Observation.ValidationRecipeID = command.Proposal.ValidationRecipeID
+		obsResult.Observation.RequiredCheckRefs = checks
+		result.Set(obsResult, nil)
+	})
+	t.Cleanup(func() { shellObserver.Unsubscribe(shellevents.TopicProbeRuntimeSemanticProofFeasibility) })
+
+	t.Run("both_feasible_wave_one_cas_one_workspace_read", func(t *testing.T) {
+		workspaceGets, fileProbeCalls, shellProbeCalls = 0, 0, 0
+		returnInfeasibleOwner = ""
+		countingRepo := &countingRuntimeSemanticDriveRepository{delegate: &runtimeDriveRepository{aggregate: preWave.CloneRaw()}}
+		driveModule := newRuntimeGroundedTargetSequenceModule(t, hub, countingRepo)
+		afterWave, waveErr := driveModule.driveRuntimeSemanticFeasibility(ctx, preWave.CloneRaw())
+		if waveErr != nil {
+			t.Fatal(waveErr)
+		}
+		if workspaceGets != 1 || fileProbeCalls != 1 || shellProbeCalls != 1 || countingRepo.saves != 1 ||
+			len(afterWave.SemanticPlanning.Feasibilities) != 2 ||
+			afterWave.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchFeasibilityComplete {
+			t.Fatalf("semantic wave drive ws=%d file=%d shell=%d saves=%d phase=%q feas=%d",
+				workspaceGets, fileProbeCalls, shellProbeCalls, countingRepo.saves, afterWave.SemanticPlanning.Phase, len(afterWave.SemanticPlanning.Feasibilities))
+		}
+	})
+
+	t.Run("first_infeasible_stops_early_and_persists_one_cas", func(t *testing.T) {
+		workspaceGets, fileProbeCalls, shellProbeCalls = 0, 0, 0
+		returnInfeasibleOwner = preWave.SemanticPlanning.BatchDocuments[0].Proposals[0].OwnerModuleID
+		countingRepo := &countingRuntimeSemanticDriveRepository{delegate: &runtimeDriveRepository{aggregate: preWave.CloneRaw()}}
+		driveModule := newRuntimeGroundedTargetSequenceModule(t, hub, countingRepo)
+		afterEarly, earlyErr := driveModule.driveRuntimeSemanticFeasibility(ctx, preWave.CloneRaw())
+		if earlyErr != nil {
+			t.Fatal(earlyErr)
+		}
+		totalProbes := fileProbeCalls + shellProbeCalls
+		if workspaceGets != 1 || totalProbes != 1 || countingRepo.saves != 1 ||
+			len(afterEarly.SemanticPlanning.Feasibilities) != 1 ||
+			afterEarly.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFeasibilityRequired ||
+			afterEarly.SemanticPlanning.Feasibilities[0].OwnerModuleID != returnInfeasibleOwner {
+			t.Fatalf("semantic early-stop drive ws=%d totalProbes=%d (file=%d shell=%d) saves=%d phase=%q feas=%+v",
+				workspaceGets, totalProbes, fileProbeCalls, shellProbeCalls, countingRepo.saves, afterEarly.SemanticPlanning.Phase, afterEarly.SemanticPlanning.Feasibilities)
+		}
+	})
 }

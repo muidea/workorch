@@ -28,7 +28,7 @@ func mutateHistoricalSession(s *RuntimeLineageAssertionSources, arm uint8, value
 	case 1:
 		s.Semantic.Manifest.OwnerCatalogs[0].SnapshotID = value
 	case 2:
-		s.Semantic.DefinitionSeed.CoverageItems[0].TargetText = value
+		s.Semantic.DefinitionSeedHash = value
 	case 3:
 		s.Semantic.BatchDocuments[0].ManifestHash = value
 	case 4:

@@ -1137,7 +1137,15 @@ func %s(t *testing.T) {
 			case "after_failure_input_review_open":
 				return a.SemanticPlanning.FailureInputReview != nil && a.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningRequired
 			case "after_failure_input_review_document":
-				return a.SemanticPlanning.FailureInputReview != nil && a.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted
+				if a.SemanticPlanning.FailureInputReview != nil && a.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted {
+					return true
+				}
+				for _, g := range a.SemanticPlanning.AllHistory() {
+					if (g.Reason == runtimecontract.RuntimeSemanticPlanningRetirementFailureInputReviewed || g.Reason == runtimecontract.RuntimeSemanticPlanningRetirementInputRevision) && g.Snapshot.FailureInputReview != nil {
+						return true
+					}
+				}
+				return false
 			case "after_input_revision_retirement":
 				for _, g := range a.SemanticPlanning.History {
 					if g.Reason == runtimecontract.RuntimeSemanticPlanningRetirementInputRevision {
@@ -1179,7 +1187,19 @@ func %s(t *testing.T) {
 				}
 				return false
 			case "after_review_document":
-				return a.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted && len(a.SemanticPlanning.BatchDocuments) != 0 && a.SemanticPlanning.BatchDocuments[0].Proposals[0].ValidationInputReview != nil
+				if (a.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted ||
+					a.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningFeasibilityRequired ||
+					a.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningFailed) &&
+					len(a.SemanticPlanning.BatchDocuments) != 0 && a.SemanticPlanning.BatchDocuments[0].Proposals[0].ValidationInputReview != nil {
+					return true
+				}
+				for _, g := range a.SemanticPlanning.AllHistory() {
+					if g.Reason == runtimecontract.RuntimeSemanticPlanningRetirementInputRevision &&
+						len(g.Snapshot.BatchDocuments) != 0 && g.Snapshot.BatchDocuments[0].Proposals[0].ValidationInputReview != nil {
+						return true
+					}
+				}
+				return false
 			case "after_review_scope_rejection":
 				return a.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningCorrectionRequired && a.SemanticPlanning.CorrectionDirective != nil
 			case "after_review_classification":

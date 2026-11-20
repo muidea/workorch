@@ -44,9 +44,19 @@ func (c *RuntimeTransitionCoordinator) Commit(ctx context.Context, aggregate Run
 	if expectedRevision == ^uint64(0) || aggregate.StateRevision != expectedRevision+1 {
 		return fmt.Errorf("%w: runtime transition revision %d does not follow expected revision %d", common.ErrConflict, aggregate.StateRevision, expectedRevision)
 	}
+	var (
+		previous RuntimeAggregate
+		diff     runtimecontract.RuntimeStateTransitionDiff
+		hasDiff  bool
+	)
 	validate := aggregate.Validate
-	if transaction := c.ownerTransaction; transaction != nil && transaction.loaded {
-		validate = func() error { return transaction.validateAfterImage(aggregate) }
+	if expectedRevision > 0 {
+		if transaction := c.ownerTransaction; transaction != nil && transaction.loaded && transaction.original != nil {
+			previous = RuntimeAggregate(*transaction.original)
+			diff = runtimecontract.ComputeRuntimeStateTransitionDiff(*transaction.original, ownerStateRecord(aggregate))
+			hasDiff = true
+			validate = func() error { return transaction.validateAfterImageWithDiff(aggregate, diff) }
+		}
 	}
 	if err := validate(); err != nil {
 		return fmt.Errorf("runtime transition invariant: %w", err)
@@ -67,17 +77,13 @@ func (c *RuntimeTransitionCoordinator) Commit(ctx context.Context, aggregate Run
 			return fmt.Errorf("%w: initial aggregate cannot carry a terminal material seal", common.ErrConflict)
 		}
 	} else {
-		var previous RuntimeAggregate
-		if transaction := c.ownerTransaction; transaction != nil && transaction.original != nil {
-			// This event already owns the exact detached preimage. The Run CAS is
-			// the atomic concurrency check; a second complete query adds no authority.
-			previous = RuntimeAggregate(*transaction.original)
-		} else {
+		if !hasDiff {
 			var err error
 			previous, err = c.loadTransitionPreimage(ctx, aggregate, expectedRevision)
 			if err != nil {
 				return err
 			}
+			diff = runtimecontract.ComputeRuntimeStateTransitionDiff(ownerStateRecord(previous), ownerStateRecord(aggregate))
 		}
 		if previous.Facts.WorkspaceID != aggregate.Facts.WorkspaceID || previous.Facts.RunID != aggregate.Facts.RunID {
 			return fmt.Errorf("%w: runtime transition preimage scope mismatch", common.ErrConflict)
@@ -86,30 +92,44 @@ func (c *RuntimeTransitionCoordinator) Commit(ctx context.Context, aggregate Run
 			return &RuntimeCASConflictError{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, ExpectedRevision: expectedRevision, ObservedRevision: previous.StateRevision}
 		}
 		if c.ownerTransaction == nil {
-			if err := runtimecontract.ValidateRuntimeCommittedHistoryTransition(ownerStateRecord(previous), ownerStateRecord(aggregate)); err != nil {
+			if err := runtimecontract.ValidateRuntimeCommittedHistoryTransitionWithDiff(ownerStateRecord(previous), ownerStateRecord(aggregate), diff); err != nil {
 				return err
 			}
 		}
-		if err := validatePrerequisiteInvalidationChronologyTransition(previous, aggregate); err != nil {
-			return err
+		if diff.PrerequisiteInvalidations {
+			if err := validatePrerequisiteInvalidationChronologyTransition(previous, aggregate); err != nil {
+				return err
+			}
 		}
-		if err := validateHistoricalBehaviorTransition(previous, aggregate); err != nil {
-			return err
+		if diff.FactsCoverage || diff.ActiveDispatch || diff.CompletedDispatches {
+			if err := validateHistoricalBehaviorTransition(previous, aggregate); err != nil {
+				return err
+			}
 		}
-		if err := validateTerminalMaterialSealTransition(previous, aggregate); err != nil {
-			return err
+		if diff.TerminalMaterialSeal {
+			if err := validateTerminalMaterialSealTransition(previous, aggregate); err != nil {
+				return err
+			}
 		}
-		if err := validateEvidenceApplicabilityObservationTransition(previous, aggregate); err != nil {
-			return err
+		if diff.FactsEvidenceApplicabilityObservations {
+			if err := validateEvidenceApplicabilityObservationTransition(previous, aggregate); err != nil {
+				return err
+			}
 		}
-		if err := validateCommittedAssessmentResultTransition(previous, aggregate); err != nil {
-			return err
+		if diff.FactsAssessments || diff.CompletedDispatches {
+			if err := validateCommittedAssessmentResultTransition(previous, aggregate); err != nil {
+				return err
+			}
 		}
-		if err := validateAssessmentApplicabilitySealTransition(previous, aggregate); err != nil {
-			return err
+		if diff.ActiveDispatch || diff.CompletedDispatches {
+			if err := validateAssessmentApplicabilitySealTransition(previous, aggregate); err != nil {
+				return err
+			}
 		}
-		if err := validateRuntimeCWISuspensionTransition(previous, aggregate); err != nil {
-			return err
+		if diff.FactsCWISuspensions {
+			if err := validateRuntimeCWISuspensionTransition(previous, aggregate); err != nil {
+				return err
+			}
 		}
 	}
 	var err error

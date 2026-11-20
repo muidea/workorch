@@ -364,8 +364,7 @@ func shellProspectiveSatisfactionCommandWithRecipesFixture(t *testing.T, adapter
 			OwnerFactConvergences:                  []runtimecontract.RuntimeOwnerFactConvergence{convergence},
 			OwnerFactAcquisition:                   &acquisition,
 		}},
-		OwnerCatalogs:               []runtimecontract.RuntimeOperationAdmissibility{fileCatalog, shellCatalog},
-		OwnerFactDependencyCatalogs: []runtimecontract.RuntimeOperationAdmissibility{shellCatalog},
+		OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{fileCatalog, shellCatalog},
 	}
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
 	if err := manifest.Validate(); err != nil {

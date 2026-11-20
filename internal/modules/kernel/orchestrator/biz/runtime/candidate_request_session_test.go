@@ -310,7 +310,12 @@ func TestBeginCandidateAttemptRequiresCompletedSessionAndPersistsManifestBinding
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.beginCandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "session-prefix", manifest, session.LogicalRequestID); !errors.Is(err, common.ErrConflict) {
+	candidate := runtimeTestBindCandidateToCurrentFocus(t, aggregate, stateChangeCandidate())
+	candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.admitCandidateProposal(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "session-prefix", manifest, session.LogicalRequestID, candidate); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("prepared session admitted an attempt: %v", err)
 	}
 	if len(repository.aggregate.CandidateAttempts) != 0 {
@@ -323,12 +328,12 @@ func TestBeginCandidateAttemptRequiresCompletedSessionAndPersistsManifestBinding
 	if _, err := controller.completeCandidateRequestDocument(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, physicalCallID); err != nil {
 		t.Fatal(err)
 	}
-	bound, err := controller.beginCandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "session-prefix", manifest, session.LogicalRequestID)
+	bound, err := controller.admitCandidateProposal(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "session-prefix", manifest, session.LogicalRequestID, candidate)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bound.CandidateAttempts) != 1 || bound.CandidateAttempts[0].ManifestHash != manifest.Hash || bound.CandidateAttempts[0].LogicalRequestID != session.LogicalRequestID {
-		t.Fatalf("attempt did not retain complete session identity: %+v", bound.CandidateAttempts)
+	if len(bound.Aggregate.CandidateAttempts) != 1 || bound.Aggregate.CandidateAttempts[0].ManifestHash != manifest.Hash || bound.Aggregate.CandidateAttempts[0].LogicalRequestID != session.LogicalRequestID {
+		t.Fatalf("attempt did not retain complete session identity: %+v", bound.Aggregate.CandidateAttempts)
 	}
 }
 
@@ -398,7 +403,8 @@ func TestBeginCandidateAttemptRejectsSessionManifestDriftWithoutProposalOrDispat
 		t.Fatal(err)
 	}
 	before := repository.aggregate.StateRevision
-	if _, err := controller.beginCandidateAttempt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "drift-prefix", drift, session.LogicalRequestID); !errors.Is(err, common.ErrConflict) {
+	candidate := runtimeTestBindCandidateToCurrentFocus(t, aggregate, stateChangeCandidate())
+	if _, err := controller.admitCandidateProposal(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "drift-prefix", drift, session.LogicalRequestID, candidate); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("manifest drift admitted an attempt: %v", err)
 	}
 	if repository.aggregate.StateRevision != before || len(repository.aggregate.CandidateAttempts) != 0 || repository.aggregate.ActiveDispatch != nil {

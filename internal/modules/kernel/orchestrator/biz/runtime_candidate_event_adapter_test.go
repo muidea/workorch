@@ -619,6 +619,16 @@ func TestPreflightRuntimeCandidateRendersWithoutProviderSubmission(t *testing.T)
 	}
 	defer llm.Stop(ctx)
 
+	usageEvents := 0
+	auditObserver := magicevent.NewSimpleObserver("/llm/consumers/ready-preflight-audit-test", hub)
+	auditObserver.Subscribe(llmevents.TopicLLMUsageRecorded, func(_ magicevent.Event, result magicevent.Result) {
+		usageEvents++
+		if result != nil {
+			result.Set(nil, nil)
+		}
+	})
+	defer auditObserver.Unsubscribe(llmevents.TopicLLMUsageRecorded)
+
 	decision := sealedCandidateTestDecision(t)
 	candidateContext := candidateContextForDecision(decision)
 	candidateContext.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
@@ -689,6 +699,9 @@ func TestPreflightRuntimeCandidateRendersWithoutProviderSubmission(t *testing.T)
 	}
 	if retry.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryAccepted || retry.Audit == nil || retry.Audit.ProviderSubmitted || providerCalls != 0 {
 		t.Fatalf("schema correction preflight response=%+v providerCalls=%d", retry, providerCalls)
+	}
+	if usageEvents != 0 {
+		t.Fatalf("successful preflight emitted %d usage events, want 0", usageEvents)
 	}
 }
 

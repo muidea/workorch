@@ -371,6 +371,9 @@ func cloneRuntimeAssessmentAuthorityInputRaw(in RuntimeAssessmentAuthorityInput)
 	out := in
 	out.ApplicabilityObservations = CloneRuntimeEvidenceApplicabilityObservations(in.ApplicabilityObservations)
 	out.Focus = cloneCoverageFocusRaw(in.Focus)
+	out.CatalogIdentities = cloneRuntimeStateRawSlice(in.CatalogIdentities, func(item RuntimeOperationAdmissibilityCatalogIdentity) RuntimeOperationAdmissibilityCatalogIdentity {
+		return item
+	})
 	out.OperationAdmissibilities = cloneRuntimeStateRawSlice(in.OperationAdmissibilities, func(item RuntimeOperationAdmissibility) RuntimeOperationAdmissibility {
 		return cloneRuntimeOperationAdmissibilityRaw(item)
 	})
@@ -1898,7 +1901,7 @@ func cloneRuntimeSemanticPlanningLedgerRaw(in RuntimeSemanticPlanningLedger) Run
 	out := in
 	out.FailureInputReview = in.FailureInputReview.Clone()
 	out.CompiledOrder = cloneRuntimeStateRawPointer(in.CompiledOrder, func(v RuntimeSemanticCompiledOrder) RuntimeSemanticCompiledOrder { return v })
-	out.DefinitionSeed = cloneRuntimeDefinitionSeedRaw(in.DefinitionSeed)
+	out.CompiledProofBatches = cloneRuntimeStateRawSlice(in.CompiledProofBatches, func(v RuntimeSemanticCompiledProofBatch) RuntimeSemanticCompiledProofBatch { return v })
 	out.Manifest = cloneRuntimeStateRawPointer(in.Manifest, func(item RuntimeSemanticPlanManifest) RuntimeSemanticPlanManifest {
 		return cloneRuntimeSemanticPlanManifestRaw(item)
 	})
@@ -2260,6 +2263,9 @@ func cloneRuntimeValidationSurfaceRaw(in RuntimeValidationSurface) RuntimeValida
 	out.ProofRequirementPreparations = cloneRuntimeStateRawSlice(in.ProofRequirementPreparations, func(item RuntimeValidationProofPreparation) RuntimeValidationProofPreparation {
 		return cloneRuntimeValidationProofPreparationRaw(item)
 	})
+	out.PreparationContentContracts = cloneRuntimeStateRawSlice(in.PreparationContentContracts, func(item RuntimeValidationContentContract) RuntimeValidationContentContract {
+		return item
+	})
 	return out
 }
 
@@ -2333,6 +2339,7 @@ func SnapshotSemanticPlanningLedgerWithSharedHistory(in RuntimeSemanticPlanningL
 	out := in
 	out.FailureInputReview = in.FailureInputReview.Clone()
 	out.CompiledOrder = cloneRuntimeStateRawPointer(in.CompiledOrder, func(v RuntimeSemanticCompiledOrder) RuntimeSemanticCompiledOrder { return v })
+	out.CompiledProofBatches = clipRuntimeStateRawSliceCap(in.CompiledProofBatches)
 	if in.Manifest != nil {
 		manifestCopy := *in.Manifest
 		manifestCopy.FailureInputReview = in.Manifest.FailureInputReview.Clone()

@@ -24,9 +24,9 @@ func referencePreparationBeforeProduct(p RuntimeValidationProofPreparation) erro
 	if strings.Contains(p.DeclarationRef, "*") {
 		return fmt.Errorf("runtime validation proof preparation declaration %q is not CWI-specific", p.DeclarationRef)
 	}
-	if (p.ContentContractRef == "") != (p.ContentRequirements == "") || len(p.ContentContractRef) > 512 || len(p.ContentRequirements) > 4096 || !utf8.ValidString(p.ContentContractRef+p.ContentRequirements) ||
-		strings.IndexFunc(p.ContentContractRef+p.ContentRequirements, func(r rune) bool { return r < 32 || r == 127 }) >= 0 {
-		return fmt.Errorf("runtime validation proof preparation requires bounded owner content contract and requirements together")
+	if len(p.ContentContractRef) > 512 || !utf8.ValidString(p.ContentContractRef) ||
+		strings.IndexFunc(p.ContentContractRef, func(r rune) bool { return r < 32 || r == 127 }) >= 0 {
+		return fmt.Errorf("runtime validation proof preparation requires bounded owner content contract ref")
 	}
 	required := make([]string, 0, len(p.CheckAttestations))
 	for _, attestation := range p.CheckAttestations {
@@ -115,6 +115,9 @@ func referenceSurfaceBeforePreparationProduct(s RuntimeValidationSurface) (Runti
 		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q: %w", strings.TrimSpace(raw.ID), err)
 	}
 	if err := referencePreparationCollectionBeforeProduct(raw.ProofRequirementPreparations); err != nil {
+		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q: %w", strings.TrimSpace(raw.ID), err)
+	}
+	if _, err := validateAndNormalizeRuntimeValidationContentContracts(raw.PreparationContentContracts); err != nil {
 		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q: %w", strings.TrimSpace(raw.ID), err)
 	}
 	seenRequirementHashes := make(map[string]struct{}, len(raw.ProofRequirementBindings))
@@ -222,6 +225,11 @@ func referenceSurfaceBeforePreparationProduct(s RuntimeValidationSurface) (Runti
 	if len(s.ProofRequirementBindings) != 0 && !sameStrings(normalizeStrings(boundChecks), s.CheckRefs) {
 		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q checks do not match exact proof requirement bindings", s.ID)
 	}
+	declaredContentContracts := make(map[string]struct{}, len(s.PreparationContentContracts))
+	for _, contract := range s.PreparationContentContracts {
+		declaredContentContracts[contract.Ref] = struct{}{}
+	}
+	usedContentContracts := make(map[string]struct{}, len(s.PreparationContentContracts))
 	for _, preparation := range s.ProofRequirementPreparations {
 		// 本次已完整校验原 preparation；不重验未改变的规范化 proof 正文。
 		for _, attestation := range preparation.CheckAttestations {
@@ -239,6 +247,17 @@ func referenceSurfaceBeforePreparationProduct(s RuntimeValidationSurface) (Runti
 			constraint.ValidationSurfaceID != s.ID || constraint.ValidationRecipeID != s.ID ||
 			constraint.InputSchemaHash != s.InputSchemaHash {
 			return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q proof preparation identity mismatch", s.ID)
+		}
+		if preparation.ContentContractRef != "" {
+			if _, declared := declaredContentContracts[preparation.ContentContractRef]; !declared {
+				return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q proof preparation %q references missing content contract %q", s.ID, preparation.CoverageWorkItemID, preparation.ContentContractRef)
+			}
+			usedContentContracts[preparation.ContentContractRef] = struct{}{}
+		}
+	}
+	for _, contract := range s.PreparationContentContracts {
+		if _, used := usedContentContracts[contract.Ref]; !used {
+			return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q declares unreferenced content contract %q", s.ID, contract.Ref)
 		}
 	}
 	if len(s.ProofRequirementPreparations) != 0 && s.Readiness == RuntimeValidationSurfaceUnavailable {

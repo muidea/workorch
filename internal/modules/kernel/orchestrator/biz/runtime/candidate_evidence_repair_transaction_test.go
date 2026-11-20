@@ -276,12 +276,22 @@ func TestConfirmedRepairValidationOnlyBindingManifestRetainsSourceLineage(t *tes
 	preRepairObservations := runtimecontract.NormalizeRuntimePrerequisiteObservations(confirmed.Facts.Resources.PrerequisiteObservations)
 	bindingID := confirmed.Facts.Focus.CoverageEvidenceBindings[0].ID
 
-	pending, err := authority.controller.BeginCandidateAttemptForTest(
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+		Kind: runtimecontract.StepKindFileWrite, BindingRefs: []string{bindingID}, TargetRefs: []string{"main.go"},
+		Parameters: runtimeFileWriteParameters("updated"),
+	}}}}}
+	if _, err := authority.controller.BeginCandidateAttemptForTest(
 		ctx, confirmed.Facts.WorkspaceID, confirmed.Facts.RunID, 0, "confirmed-repair-validation-source-binding",
-	)
-	if err != nil {
+	); err != nil {
 		t.Fatalf("begin confirmed repair candidate: %v", err)
 	}
+	admitted, err := authority.controller.AdmitCandidateProposalForTest(
+		ctx, confirmed.Facts.WorkspaceID, confirmed.Facts.RunID, 0, candidate,
+	)
+	if err != nil || !admitted.Admission.Accepted() {
+		t.Fatalf("admit confirmed repair proposal = %+v err=%v", admitted.Admission, err)
+	}
+	pending := admitted.Aggregate
 	if len(pending.CandidateRequestSessions) == 0 {
 		t.Fatal("confirmed repair candidate has no persisted request session")
 	}
@@ -312,11 +322,6 @@ func TestConfirmedRepairValidationOnlyBindingManifestRetainsSourceLineage(t *tes
 	if err != nil || decoded.StateChange == nil || !reflect.DeepEqual(decoded.StateChange.Operations[0].Operation.BindingRefs, []string{bindingID}) {
 		t.Fatalf("confirmed repair request did not compile source binding: candidate=%+v err=%v", decoded, err)
 	}
-
-	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
-		Kind: runtimecontract.StepKindFileWrite, BindingRefs: []string{bindingID}, TargetRefs: []string{"main.go"},
-		Parameters: runtimeFileWriteParameters("updated"),
-	}}}}}
 	if err := RecordFixtureCandidateFeasibilities(
 		ctx, authority.controller, confirmed.Facts.WorkspaceID, confirmed.Facts.RunID, 0, candidate,
 	); err != nil {

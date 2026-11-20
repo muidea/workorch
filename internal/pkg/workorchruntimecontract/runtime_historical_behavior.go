@@ -2,7 +2,6 @@ package workorchruntimecontract
 
 import (
 	"fmt"
-	"reflect"
 	"slices"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -158,7 +157,7 @@ func validateRuntimeHistoricalSemanticStartupSource(sources RuntimeLineageAssert
 		}
 		if ledger.Manifest.DefinitionRevision != sources.Facts.DefinitionRevision ||
 			ledger.Manifest.DefinitionSeedHash != sources.Facts.DefinitionSeed.Hash ||
-			!reflect.DeepEqual(ledger.DefinitionSeed, sources.Facts.DefinitionSeed) {
+			ledger.DefinitionSeedHash != sources.Facts.DefinitionSeed.Hash {
 			return fmt.Errorf("historical semantic source differs from sealed startup seed")
 		}
 		return nil

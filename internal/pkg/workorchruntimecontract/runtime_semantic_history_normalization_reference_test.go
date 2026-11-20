@@ -6,7 +6,7 @@ import "strings"
 func referenceSemanticLedgerNormalization(l RuntimeSemanticPlanningLedger) RuntimeSemanticPlanningLedger {
 	l.SchemaVersion = strings.TrimSpace(l.SchemaVersion)
 	l.Phase = RuntimeSemanticPlanningPhase(strings.TrimSpace(string(l.Phase)))
-	l.DefinitionSeed = l.DefinitionSeed.Clone()
+	l.DefinitionSeedHash = strings.TrimSpace(l.DefinitionSeedHash)
 	l.StablePrefixHash = strings.TrimSpace(l.StablePrefixHash)
 	l.LogicalRequestID = strings.TrimSpace(l.LogicalRequestID)
 	if l.CorrectionDirective != nil {
@@ -20,6 +20,13 @@ func referenceSemanticLedgerNormalization(l RuntimeSemanticPlanningLedger) Runti
 	if l.CompiledOrder != nil {
 		value := *l.CompiledOrder
 		l.CompiledOrder = &value
+	}
+	if len(l.CompiledProofBatches) != 0 {
+		copied := make([]RuntimeSemanticCompiledProofBatch, len(l.CompiledProofBatches))
+		for idx, item := range l.CompiledProofBatches {
+			copied[idx] = item.Normalized()
+		}
+		l.CompiledProofBatches = copied
 	}
 	if l.CoverageOrderDocument != nil {
 		value := l.CoverageOrderDocument.Clone()

@@ -107,7 +107,14 @@ func TestPreparationProductOriginalFieldsAndErrors(t *testing.T) {
 			v.ProofRequirementPreparations[0].ProspectiveTargetSatisfactionConstraint.InputSchemaHash += "-wrong"
 		},
 		func(v *RuntimeValidationSurface) {
-			v.ProofRequirementPreparations[0].ContentRequirements = "missing contract"
+			v.ProofRequirementPreparations[0].ContentContractRef = "missing contract"
+		},
+		func(v *RuntimeValidationSurface) {
+			v.ProofRequirementPreparations[0].ContentContractRef = "owner/contract/v1"
+			v.PreparationContentContracts = []RuntimeValidationContentContract{{Ref: "owner/contract/v1", Requirements: "exact contract"}}
+		},
+		func(v *RuntimeValidationSurface) {
+			v.PreparationContentContracts = []RuntimeValidationContentContract{{Ref: "owner/contract/unused", Requirements: "unused contract"}}
 		},
 	} {
 		value := s.Clone()

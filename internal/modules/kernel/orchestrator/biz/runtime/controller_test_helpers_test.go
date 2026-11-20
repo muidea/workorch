@@ -147,10 +147,10 @@ func RecordFixtureCandidateFeasibilities(ctx context.Context, c *RuntimeControll
 		if !found {
 			return fmt.Errorf("fixture operation %q has no matching owner admissibility inventory", operation.ID)
 		}
-		if _, err := c.recordCandidateFeasibility(ctx, workspaceID, runID, attempt, runtimecontract.RuntimeCandidateFeasibilityRecord{
+		if _, err := c.recordCandidateFeasibilities(ctx, workspaceID, runID, attempt, []runtimecontract.RuntimeCandidateFeasibilityRecord{{
 			OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding,
 			CandidateManifestHash: attemptRecord.ManifestHash, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
-		}); err != nil {
+		}}); err != nil {
 			return err
 		}
 	}

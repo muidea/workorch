@@ -46,7 +46,7 @@ func mutateWorkStatePreimage(r *RuntimeStateRecord, arm uint8, raw string) {
 	case 12:
 		r.Facts.Resources.Manifest = nil
 	case 13:
-		r.SemanticPlanning.DefinitionSeed.Hash = raw
+		r.SemanticPlanning.DefinitionSeedHash = raw
 	}
 }
 

@@ -8,14 +8,11 @@ import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimec
 // request transaction rather than a delivery ledger. This payload cannot carry
 // activation or terminal-delivery state.
 type RuntimeInternalTransactionPayload struct {
-	SemanticManifest                   *runtimecontract.RuntimeSemanticPlanManifest
-	SemanticDocument                   *runtimecontract.RuntimeSemanticPlanDocument
-	SemanticPlanBatch                  *runtimecontract.RuntimeSemanticPlanBatch
-	SemanticPlanBatchNextState         runtimecontract.RuntimeSemanticPlanBatchState
-	SemanticPlanBatchFeasibilityResult *runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult
-	SemanticPlanBatchDocument          *runtimecontract.RuntimeSemanticPlanDocument
-	SemanticPlanMergedDocument         *runtimecontract.RuntimeSemanticPlanDocument
-	SemanticDiagnostic                 *runtimecontract.RuntimeOriginalDiagnostic
+	SemanticManifest          *runtimecontract.RuntimeSemanticPlanManifest
+	SemanticDocument          *runtimecontract.RuntimeSemanticPlanDocument
+	SemanticPlanBatch         *runtimecontract.RuntimeSemanticPlanBatch
+	SemanticPlanBatchDocument *runtimecontract.RuntimeSemanticPlanDocument
+	SemanticDiagnostic        *runtimecontract.RuntimeOriginalDiagnostic
 
 	InputRef         *runtimecontract.RuntimeProviderInputRef
 	StablePrefixHash string
@@ -40,14 +37,14 @@ type RuntimeInternalTransactionPayload struct {
 	ProviderBudgetSettlement *RuntimeProviderBudgetSettlement
 	ExpectedDocument         *runtimecontract.RuntimeExpectedDocumentContract
 
-	Attempt              int
-	Manifest             *runtimecontract.RuntimeCandidateContractManifest
-	Candidate            *runtimecontract.RuntimeCandidate
-	CandidateFailure     *runtimecontract.RuntimeCandidateFailure
-	CandidateConformance *runtimecontract.RuntimeCandidateConformanceRecord
-	CandidateFeasibility *runtimecontract.RuntimeCandidateFeasibilityRecord
-	PrerequisiteRequest  *runtimecontract.RuntimeOperationPrerequisiteRequest
-	Stale                *runtimecontract.RuntimePrerequisiteStale
+	Attempt                int
+	Manifest               *runtimecontract.RuntimeCandidateContractManifest
+	Candidate              *runtimecontract.RuntimeCandidate
+	CandidateFailure       *runtimecontract.RuntimeCandidateFailure
+	CandidateConformances  []runtimecontract.RuntimeCandidateConformanceRecord
+	CandidateFeasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord
+	PrerequisiteRequest    *runtimecontract.RuntimeOperationPrerequisiteRequest
+	Stale                  *runtimecontract.RuntimePrerequisiteStale
 
 	OperationReceipt *runtimecontract.RuntimeOperationReceipt
 	// OperationReceiptOwnerSource is the exact EventHub producer identity
@@ -92,20 +89,17 @@ type RuntimeInternalTransactionPayload struct {
 const (
 	RuntimeInternalEventSemanticPlanRequestStarted               RuntimeInternalEventKind = "semantic_plan_request_started"
 	RuntimeInternalEventSemanticSingletonOrderCompiled           RuntimeInternalEventKind = "semantic_singleton_order_compiled"
+	RuntimeInternalEventSemanticSingletonProofBatchCompiled      RuntimeInternalEventKind = "semantic_singleton_proof_batch_compiled"
 	RuntimeInternalEventSemanticPlanEvaluated                    RuntimeInternalEventKind = "semantic_plan_evaluated"
 	RuntimeInternalEventSemanticPlanCorrectionRequired           RuntimeInternalEventKind = "semantic_plan_correction_required"
 	RuntimeInternalEventCandidateRequestEnsured                  RuntimeInternalEventKind = "candidate_request_ensured"
 	RuntimeInternalEventSemanticPlanBatchCompiled                RuntimeInternalEventKind = "semantic_plan_batch_compiled"
-	RuntimeInternalEventSemanticPlanBatchAdvanced                RuntimeInternalEventKind = "semantic_plan_batch_advanced"
-	RuntimeInternalEventSemanticPlanBatchFeasibilityObserved     RuntimeInternalEventKind = "semantic_plan_batch_feasibility_observed"
 	RuntimeInternalEventSemanticPlanBatchDocumentObserved        RuntimeInternalEventKind = "semantic_plan_batch_document_observed"
-	RuntimeInternalEventSemanticPlanBatchDocumentsMerged         RuntimeInternalEventKind = "semantic_plan_batch_documents_merged"
 	RuntimeInternalEventCandidateRequestSubmitted                RuntimeInternalEventKind = "candidate_request_submitted"
 	RuntimeInternalEventProviderRequestRecoveryCoordinated       RuntimeInternalEventKind = "provider_request_recovery_coordinated"
 	RuntimeInternalEventCandidateDocumentObserved                RuntimeInternalEventKind = "candidate_document_observed"
 	RuntimeInternalEventCandidateRequestStaleObserved            RuntimeInternalEventKind = "candidate_request_stale_observed"
 	RuntimeInternalEventProviderRequestTerminalCoordinated       RuntimeInternalEventKind = "provider_request_terminal_coordinated"
-	RuntimeInternalEventCandidateAttemptBegun                    RuntimeInternalEventKind = "candidate_attempt_begun"
 	RuntimeInternalEventCandidateDocumentRejected                RuntimeInternalEventKind = "candidate_document_rejected"
 	RuntimeInternalEventCandidateProposalObserved                RuntimeInternalEventKind = "candidate_proposal_observed"
 	RuntimeInternalEventCandidateConformanceObserved             RuntimeInternalEventKind = "candidate_conformance_observed"

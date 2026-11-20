@@ -10,24 +10,42 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// recordCandidateConformance is the only SM-3 transition that persists a
-// capability-owner candidate-shape fact. A nonconformant fact and the
+// recordCandidateConformances is the only SM-3 transition that persists one
+// wave of capability-owner candidate-shape facts. A nonconformant fact and the
 // Orchestrator-owned failure/correction disposition are committed in the same
 // aggregate CAS, so restart cannot observe an owner fact without its bounded
 // attempt outcome.
-func (c *candidateDispatchComponent) recordCandidateConformance(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, record runtimecontract.RuntimeCandidateConformanceRecord) (RuntimeAggregate, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) {
+func (c *candidateDispatchComponent) recordCandidateConformances(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, records []runtimecontract.RuntimeCandidateConformanceRecord) (RuntimeAggregate, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) || len(records) == 0 {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	record = record.Clone()
-	if err := runtimecontract.ValidateRuntimeCandidateConformanceRecords([]runtimecontract.RuntimeCandidateConformanceRecord{record}); err != nil {
+	cloned := make([]runtimecontract.RuntimeCandidateConformanceRecord, len(records))
+	seenOps := make(map[string]struct{}, len(records))
+	for i, record := range records {
+		record = record.Clone()
+		if record.OperationID != "" {
+			if _, dup := seenOps[record.OperationID]; dup {
+				return RuntimeAggregate{}, fmt.Errorf("%w: duplicate candidate conformance operation %q in wave", common.ErrConflict, record.OperationID)
+			}
+			seenOps[record.OperationID] = struct{}{}
+		}
+		cloned[i] = record
+	}
+	if err := runtimecontract.ValidateRuntimeCandidateConformanceRecords(cloned); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if duplicateCandidateConformance(aggregate.CandidateAttempts, attempt, record) {
+	allDup := true
+	for _, record := range cloned {
+		if !duplicateCandidateConformance(aggregate.CandidateAttempts, attempt, record) {
+			allDup = false
+			break
+		}
+	}
+	if allDup {
 		return aggregate, nil
 	}
 	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
@@ -38,79 +56,97 @@ func (c *candidateDispatchComponent) recordCandidateConformance(ctx context.Cont
 	if !pending || attemptRecord.Proposal == nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d has no pending proposal for conformance", common.ErrConflict, attempt)
 	}
-	if record.LogicalRequestID != attemptRecord.LogicalRequestID {
-		return RuntimeAggregate{}, fmt.Errorf("%w: candidate conformance logical request does not match the pending proposal", common.ErrConflict)
-	}
-	operation, operationIndex, found := candidateOperationAndIndexByID(*attemptRecord.Proposal, record.OperationID)
-	if !found {
-		return RuntimeAggregate{}, fmt.Errorf("%w: candidate conformance operation %q is absent from the persisted proposal", common.ErrConflict, record.OperationID)
-	}
 	manifest, err := persistedCandidateAttemptManifest(aggregate, attemptRecord)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	authorization, found := runtimeCandidateOperationAuthorization(manifest, operation.Kind)
-	if !found {
-		return RuntimeAggregate{}, fmt.Errorf("%w: candidate conformance operation %q has no sealed authorization", common.ErrConflict, operation.Kind)
-	}
-	request := runtimecontract.RuntimeOperationCandidateConformanceRequest{
-		WorkspaceID: workspaceID, RunID: runID, Transaction: attemptRecord.Transaction,
-		CandidateManifestHash: manifest.Hash, Operation: operation, OperationAuthorization: authorization,
-	}
-	if err := record.Observation.ValidateForRequest(request, authorization.OwnerModuleID); err != nil {
-		return RuntimeAggregate{}, fmt.Errorf("%w: candidate conformance observation is not bound to the persisted proposal: %v", common.ErrConflict, err)
-	}
-	for _, persisted := range attemptRecord.Conformances {
-		if strings.TrimSpace(persisted.OperationID) != record.OperationID {
-			continue
-		}
-		if !reflect.DeepEqual(persisted.Clone(), record) {
-			return RuntimeAggregate{}, fmt.Errorf("%w: candidate conformance result for operation %q changed", common.ErrConflict, record.OperationID)
-		}
-		return aggregate, nil
-	}
 
 	expectedRevision := aggregate.StateRevision
-	aggregate.CandidateAttempts[idx].Conformances = append(aggregate.CandidateAttempts[idx].Conformances, record.Clone())
-	switch record.Observation.Outcome {
-	case runtimecontract.RuntimeOperationCandidateConformant:
-		// The persisted fact is the restart fence; ordinary owner feasibility
-		// remains a separate later read lane.
-	case runtimecontract.RuntimeOperationCandidateNonconformant:
-		violation := record.Observation.Violation
-		if violation == nil {
-			return RuntimeAggregate{}, fmt.Errorf("%w: nonconformant candidate observation has no violation", common.ErrConflict)
+	changed := false
+	for i, record := range cloned {
+		if record.LogicalRequestID != attemptRecord.LogicalRequestID {
+			return RuntimeAggregate{}, fmt.Errorf("%w: candidate conformance logical request does not match the pending proposal", common.ErrConflict)
 		}
-		failure := runtimecontract.RuntimeCandidateFailure{
-			Class: runtimecontract.RuntimeCandidateFailureClassContract,
-			Code:  "candidate_owner_constraint_nonconformant", Signature: "candidate-owner-constraint-nonconformant",
-			Reason: "candidate parameter does not conform to its sealed capability-owner constraint",
-			Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
-				OperationID: operation.ID,
-				Path:        fmt.Sprintf("$.operations[%d].parameters[name=%s]", operationIndex, violation.ParameterName),
-				Actual:      string(violation.ActualShape), ConstraintRef: violation.ConstraintRef,
-				RequiredShape: string(violation.RequiredShape), ManifestHash: manifest.Hash,
-				Objectives: []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConformOwnerConstraint},
-			},
+		operation, operationIndex, found := candidateOperationAndIndexByID(*attemptRecord.Proposal, record.OperationID)
+		if !found {
+			return RuntimeAggregate{}, fmt.Errorf("%w: candidate conformance operation %q is absent from the persisted proposal", common.ErrConflict, record.OperationID)
 		}
-		sealed, correction, sealErr := sealCandidateRejectionWithFrontier(&failure, manifest, candidateCorrectionFrontier{candidate: attemptRecord.Proposal})
-		if sealErr != nil || sealed == nil || correction == nil {
-			return RuntimeAggregate{}, fmt.Errorf("%w: seal owner candidate conformance rejection: %v", common.ErrConflict, sealErr)
+		authorization, found := runtimeCandidateOperationAuthorization(manifest, operation.Kind)
+		if !found {
+			return RuntimeAggregate{}, fmt.Errorf("%w: candidate conformance operation %q has no sealed authorization", common.ErrConflict, operation.Kind)
 		}
-		if err := closeCandidateAttemptWithCorrection(&aggregate, idx, attempt, *sealed, correction); err != nil {
-			return RuntimeAggregate{}, err
+		request := runtimecontract.RuntimeOperationCandidateConformanceRequest{
+			WorkspaceID: workspaceID, RunID: runID, Transaction: attemptRecord.Transaction,
+			CandidateManifestHash: manifest.Hash, Operation: operation, OperationAuthorization: authorization,
 		}
-	case runtimecontract.RuntimeOperationCandidateContractDefect:
-		failure := runtimecontract.RuntimeCandidateFailure{
-			Class: runtimecontract.RuntimeCandidateFailureClassInternal,
-			Code:  "runtime_contract_defect", Signature: "owner-candidate-conformance-contract-defect",
-			Reason: "capability owner could not evaluate its sealed candidate conformance contract",
+		if err := record.Observation.ValidateForRequest(request, authorization.OwnerModuleID); err != nil {
+			return RuntimeAggregate{}, fmt.Errorf("%w: candidate conformance observation is not bound to the persisted proposal: %v", common.ErrConflict, err)
 		}
-		if err := closeCandidateAttempt(&aggregate, idx, attempt, failure); err != nil {
-			return RuntimeAggregate{}, err
+		alreadyPersisted := false
+		for _, persisted := range aggregate.CandidateAttempts[idx].Conformances {
+			if strings.TrimSpace(persisted.OperationID) != record.OperationID {
+				continue
+			}
+			if !reflect.DeepEqual(persisted.Clone(), record) {
+				return RuntimeAggregate{}, fmt.Errorf("%w: candidate conformance result for operation %q changed", common.ErrConflict, record.OperationID)
+			}
+			alreadyPersisted = true
+			break
 		}
-	default:
-		return RuntimeAggregate{}, common.ErrInvalidArgument
+		if alreadyPersisted {
+			continue
+		}
+		aggregate.CandidateAttempts[idx].Conformances = append(aggregate.CandidateAttempts[idx].Conformances, record.Clone())
+		changed = true
+		switch record.Observation.Outcome {
+		case runtimecontract.RuntimeOperationCandidateConformant:
+			// The persisted fact is the restart fence; ordinary owner feasibility
+			// remains a separate later read lane.
+		case runtimecontract.RuntimeOperationCandidateNonconformant:
+			if i+1 != len(cloned) {
+				return RuntimeAggregate{}, fmt.Errorf("%w: candidate conformance wave cannot include trailing observations after closing outcome", common.ErrConflict)
+			}
+			violation := record.Observation.Violation
+			if violation == nil {
+				return RuntimeAggregate{}, fmt.Errorf("%w: nonconformant candidate observation has no violation", common.ErrConflict)
+			}
+			failure := runtimecontract.RuntimeCandidateFailure{
+				Class: runtimecontract.RuntimeCandidateFailureClassContract,
+				Code:  "candidate_owner_constraint_nonconformant", Signature: "candidate-owner-constraint-nonconformant",
+				Reason: "candidate parameter does not conform to its sealed capability-owner constraint",
+				Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+					OperationID: operation.ID,
+					Path:        fmt.Sprintf("$.operations[%d].parameters[name=%s]", operationIndex, violation.ParameterName),
+					Actual:      string(violation.ActualShape), ConstraintRef: violation.ConstraintRef,
+					RequiredShape: string(violation.RequiredShape), ManifestHash: manifest.Hash,
+					Objectives: []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConformOwnerConstraint},
+				},
+			}
+			sealed, correction, sealErr := sealCandidateRejectionWithFrontier(&failure, manifest, candidateCorrectionFrontier{candidate: attemptRecord.Proposal})
+			if sealErr != nil || sealed == nil || correction == nil {
+				return RuntimeAggregate{}, fmt.Errorf("%w: seal owner candidate conformance rejection: %v", common.ErrConflict, sealErr)
+			}
+			if err := closeCandidateAttemptWithCorrection(&aggregate, idx, attempt, *sealed, correction); err != nil {
+				return RuntimeAggregate{}, err
+			}
+		case runtimecontract.RuntimeOperationCandidateContractDefect:
+			if i+1 != len(cloned) {
+				return RuntimeAggregate{}, fmt.Errorf("%w: candidate conformance wave cannot include trailing observations after closing outcome", common.ErrConflict)
+			}
+			failure := runtimecontract.RuntimeCandidateFailure{
+				Class: runtimecontract.RuntimeCandidateFailureClassInternal,
+				Code:  "runtime_contract_defect", Signature: "owner-candidate-conformance-contract-defect",
+				Reason: "capability owner could not evaluate its sealed candidate conformance contract",
+			}
+			if err := closeCandidateAttempt(&aggregate, idx, attempt, failure); err != nil {
+				return RuntimeAggregate{}, err
+			}
+		default:
+			return RuntimeAggregate{}, common.ErrInvalidArgument
+		}
+	}
+	if !changed {
+		return aggregate, nil
 	}
 	aggregate.StateRevision++
 

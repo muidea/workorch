@@ -10,24 +10,6 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// recordValidationFailureObservation is intentionally an identity fence, not
-// a state transition. The receipt/evidence transaction is the only producer
-// of the validation-owner fact; this method makes the following resource-owner
-// handoff explicit and rejects stale/forged observations before any owner query.
-func (c *authorityComponent) recordValidationFailureObservation(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, observation runtimecontract.RuntimeValidationFailureObservation) (RuntimeAggregate, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || observation.Validate() != nil || observation.WorkspaceID != workspaceID || observation.RunID != runID {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	aggregate, err := c.load(ctx, workspaceID, runID)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if aggregate.Facts.Failure == nil || aggregate.Facts.Failure.ValidationFailureObservation == nil || !runtimecontract.SameRuntimeValidationFailureObservation(*aggregate.Facts.Failure.ValidationFailureObservation, observation) || !sealedValidationFailureObservationMatches(aggregate, observation) || !runtimeValidationFailureObservationHasPersistedReceipt(aggregate, observation) {
-		return RuntimeAggregate{}, fmt.Errorf("%w: validation failure observation does not match persisted receipt", common.ErrConflict)
-	}
-	return aggregate, nil
-}
-
 // recordRepairSurfaceConfirmation is the sole SM-2 transition from a typed
 // resource-owner fact to repair authority. The resource owner cannot select
 // the action, and the validation owner cannot promote diagnostic candidates

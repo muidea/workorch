@@ -51,7 +51,7 @@ func TestOwnerStateTransactionCompleteImagesMatchIndependentGates(t *testing.T) 
 						case "converted feedback":
 							checked.ResultFeedbackVersion = 0
 						case "semantic":
-							checked.SemanticPlanning.DefinitionSeed.PolicyHash = "same-hash-raw-drift"
+							checked.SemanticPlanning.DefinitionSeedHash = "same-hash-raw-drift"
 						case "source":
 							checked.EvidenceSequence++
 						case "budget":
@@ -272,7 +272,7 @@ func FuzzOwnerStateTransactionImageOracle(f *testing.F) {
 			case 1:
 				r.Facts.DefinitionRevision = raw
 			case 2:
-				a.SemanticPlanning.DefinitionSeed.PolicyHash = raw
+				a.SemanticPlanning.DefinitionSeedHash = raw
 			case 3:
 				a.ExecutionBudget.Policy.PolicyRevision = raw
 			case 4:

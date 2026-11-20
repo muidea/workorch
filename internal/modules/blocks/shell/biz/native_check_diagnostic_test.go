@@ -20,7 +20,7 @@ func TestNativeCheckUnavailableReportsExactCauseAndAcceptsReachableHelper(t *tes
 	check := attestations[0].NativeCheckRef
 	workspace := newGoValidationWorkspace(t, fmt.Sprintf("package fixture\nimport \"testing\"\nfunc %s(t *testing.T) { t.Run(\"required\", func(child *testing.T) { verify(child) }) }\n", check))
 	manifest := shellTestWorkspaceManifestBinding("tree-helper-missing", []string{"fixture.go", "fixture_test.go", "go.mod"}).Manifest
-	preparation, ready, supported := shellValidationProofPreparation(workspace, manifest, "catalog-before", true, recipe, requirement, attestations)
+	preparation, _, ready, supported := shellValidationProofPreparation(workspace, manifest, "catalog-before", true, recipe, requirement, attestations)
 	if ready || supported || preparation.OriginalDiagnostic != nil {
 		t.Fatalf("unresolved existing check advertised a create-only remedy: %+v", preparation)
 	}
@@ -44,7 +44,7 @@ func TestNativeCheckUnavailableReportsExactCauseAndAcceptsReachableHelper(t *tes
 	writeNativeStructureSource(t, workspace, "helpers_test.go", "package fixture\nimport \"testing\"\nfunc verify(t *testing.T) { if 1 != 1 { t.Fatal(\"bad\") } }\n")
 	manifest.TargetRefs = append(manifest.TargetRefs, "helpers_test.go")
 	manifest.Revision = "tree-helper-ready"
-	preparation, ready, supported = shellValidationProofPreparation(workspace, manifest, "catalog-after", true, recipe, requirement, attestations)
+	preparation, _, ready, supported = shellValidationProofPreparation(workspace, manifest, "catalog-after", true, recipe, requirement, attestations)
 	if !ready || !supported || preparation.TargetRef != "" || preparation.OriginalDiagnostic != nil {
 		t.Fatalf("resolved helper requested another acquisition: %+v ready=%t supported=%t", preparation, ready, supported)
 	}

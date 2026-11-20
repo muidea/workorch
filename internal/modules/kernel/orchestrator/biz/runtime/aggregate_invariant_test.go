@@ -770,10 +770,10 @@ func runtimePendingCandidateFeasibilityAggregate(t *testing.T) RuntimeAggregate 
 		BeforeHash: "target-before-v1", AfterHash: "target-after-v1",
 		AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding,
 	}
-	if _, err := controller.recordCandidateFeasibility(ctx, facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+	if _, err := controller.recordCandidateFeasibilities(ctx, facts.WorkspaceID, facts.RunID, 0, []runtimecontract.RuntimeCandidateFeasibilityRecord{{
 		OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding,
 		CandidateManifestHash: pending.ManifestHash, Observation: &ownerObservation, ReplayProof: &replayProof,
-	}); err != nil {
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := controller.Load(ctx, facts.WorkspaceID, facts.RunID)

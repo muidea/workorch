@@ -143,15 +143,15 @@ func TestIsolatedInputScopeFailsClosedWithoutChangingLegacy(t *testing.T) {
 		})
 	}
 	missingRoot := t.TempDir()
-	prep, ready, ok := shellValidationProofPreparation(missingRoot, runtimecontract.WorkspaceManifest{Revision: "empty"}, "catalog", false, recipe, requirement, checks)
-	if !ok || ready || prep.Validate() != nil || prep.ContentContractRef != shellIsolatedInputContentContractRef || prep.ContentRequirements == "" || prep.TargetRef != target {
+	prep, contentRequirements, ready, ok := shellValidationProofPreparation(missingRoot, runtimecontract.WorkspaceManifest{Revision: "empty"}, "catalog", false, recipe, requirement, checks)
+	if !ok || ready || prep.Validate() != nil || prep.ContentContractRef != shellIsolatedInputContentContractRef || contentRequirements == "" || prep.TargetRef != target {
 		t.Fatalf("create-only input contract unavailable: %+v", prep)
 	}
 	legacy := recipe
 	legacy.AdapterRef = modulecommon.ValidationRecipeAdapterReviewedEntrypoint
 	oldChecks, _ := shellValidationCheckAttestations(legacy, requirement)
-	oldPrep, _, _ := shellValidationProofPreparation(missingRoot, runtimecontract.WorkspaceManifest{Revision: "empty"}, "catalog", false, legacy, requirement, oldChecks)
-	if oldPrep.ContentContractRef != "" || oldChecks[0].ObservationProtocolRef != shellGoEntrypointObservationProtocolRef || !strings.HasSuffix(oldChecks[0].NativeCheckRef, "_EntrypointInput") {
+	oldPrep, oldContentRequirements, _, _ := shellValidationProofPreparation(missingRoot, runtimecontract.WorkspaceManifest{Revision: "empty"}, "catalog", false, legacy, requirement, oldChecks)
+	if oldPrep.ContentContractRef != "" || oldContentRequirements != "" || oldChecks[0].ObservationProtocolRef != shellGoEntrypointObservationProtocolRef || !strings.HasSuffix(oldChecks[0].NativeCheckRef, "_EntrypointInput") {
 		t.Fatal("legacy sealed contract silently upgraded")
 	}
 }

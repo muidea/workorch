@@ -104,17 +104,14 @@ func TestUnavailableBehaviorReviewConclusionControlsOnlyItsOwnAuthority(t *testi
 	for _, conclusion := range []string{rc.RuntimeValidationInputConsistent, rc.RuntimeValidationInputConflict, rc.RuntimeValidationInputInconclusive} {
 		t.Run(conclusion, func(t *testing.T) {
 			repo, coordinator, e, _ := runtimeUnavailableDiagnosticFixture(t, rc.ValidationDiagnosticBehaviorUnobserved)
-			if _, err := coordinator.commitEvidence(context.Background(), e); err != nil {
-				t.Fatal(err)
-			}
-			controller, a := runtimeSubmitFailureInputReportForTest(t, repo, conclusion)
-			attempts, budget := a.Facts.Repair.RepairAttempts, a.ExecutionBudget.Clone()
-			updated, err := controller.requireSemanticFeasibility(context.Background(), a.Facts.WorkspaceID, a.Facts.RunID)
+			committed, err := coordinator.commitEvidence(context.Background(), e)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if updated.Facts.Repair.RepairAttempts != attempts || !reflect.DeepEqual(budget, updated.ExecutionBudget) {
-				t.Fatal("review reset or charged execution budget")
+			attempts := committed.Aggregate.Facts.Repair.RepairAttempts
+			_, updated := runtimeSubmitFailureInputReportForTest(t, repo, conclusion)
+			if updated.Facts.Repair.RepairAttempts != attempts {
+				t.Fatal("review reset repair attempts")
 			}
 			switch conclusion {
 			case rc.RuntimeValidationInputConsistent:

@@ -882,8 +882,7 @@ func beginRuntimeAssessmentAttemptWithoutSemanticReseal(t *testing.T, controller
 			return err
 		}
 	}
-	_, err = controller.beginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, stablePrefixHash, manifest, session.LogicalRequestID)
-	return err
+	return nil
 }
 
 func runtimeTestAssessmentCatalogForPrerequisite(catalogs []runtimecontract.RuntimeOperationAdmissibility, prerequisiteID string) (runtimecontract.RuntimeOperationAdmissibility, bool) {

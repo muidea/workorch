@@ -74,11 +74,30 @@ type RuntimeValidationSurface struct {
 	// technically ready for CWI-A while CWI-B independently requires a bounded
 	// preparation; surface-wide Readiness never collapses those two facts.
 	ProofRequirementPreparations []RuntimeValidationProofPreparation
+	// PreparationContentContracts holds deduplicated owner content contracts
+	// referenced by ProofRequirementPreparations[i].ContentContractRef.
+	PreparationContentContracts []RuntimeValidationContentContract `json:",omitempty"`
 	// Unavailability is per requirement, independent from recipe readiness. It
 	// must never be projected as a prospective preparation or executable proof.
 	ProofRequirementUnavailabilities []RuntimeValidationProofUnavailability `json:",omitempty"`
 	EffectScope                      RuntimeEffectScope
 	IdempotencyClass                 RuntimeOperationIdempotencyClass
+}
+
+// PreparationContentRequirementsFor returns the surface-level content
+// requirements declared for ref, if present.
+func (s RuntimeValidationSurface) PreparationContentRequirementsFor(ref string) (string, bool) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", false
+	}
+	for _, contract := range s.PreparationContentContracts {
+		contract = contract.Normalized()
+		if contract.Ref == ref {
+			return contract.Requirements, true
+		}
+	}
+	return "", false
 }
 
 func (s RuntimeValidationSurface) Normalized() RuntimeValidationSurface {
@@ -101,6 +120,7 @@ func (s RuntimeValidationSurface) Normalized() RuntimeValidationSurface {
 	s.CheckRefs = normalizeStrings(s.CheckRefs)
 	s.ProofRequirementBindings = NormalizeRuntimeValidationProofRequirementBindings(s.ProofRequirementBindings)
 	s.ProofRequirementPreparations = normalizeRuntimeValidationProofPreparations(s.ProofRequirementPreparations)
+	s.PreparationContentContracts = normalizeRuntimeValidationContentContracts(s.PreparationContentContracts)
 	s.ProofRequirementUnavailabilities = normalizeRuntimeValidationProofUnavailabilities(s.ProofRequirementUnavailabilities)
 	s.ProofApplicability = RuntimeValidationProofApplicability(strings.TrimSpace(string(s.ProofApplicability)))
 	s.EffectScope = NormalizeRuntimeEffectScope(s.EffectScope)
@@ -146,6 +166,10 @@ func validateAndNormalizeRuntimeValidationSurface(s RuntimeValidationSurface) (R
 		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q: %w", strings.TrimSpace(raw.ID), err)
 	}
 	preparations, err := validateAndNormalizeRuntimeValidationProofPreparations(raw.ProofRequirementPreparations)
+	if err != nil {
+		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q: %w", strings.TrimSpace(raw.ID), err)
+	}
+	contentContracts, err := validateAndNormalizeRuntimeValidationContentContracts(raw.PreparationContentContracts)
 	if err != nil {
 		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q: %w", strings.TrimSpace(raw.ID), err)
 	}
@@ -198,11 +222,13 @@ func validateAndNormalizeRuntimeValidationSurface(s RuntimeValidationSurface) (R
 	// diagnostics were borrowed only during validation; detach exactly once at
 	// this output boundary, as the original whole-surface normalizer did.
 	s.ProofRequirementPreparations = nil
+	s.PreparationContentContracts = nil
 	s = s.Normalized()
 	for i := range preparations {
 		preparations[i].OriginalDiagnostic = preparations[i].OriginalDiagnostic.CloneOriginal()
 	}
 	s.ProofRequirementPreparations = preparations
+	s.PreparationContentContracts = contentContracts
 	if s.ID == "" || s.OwnerModuleID == "" || s.OperationKind == "" || s.InputSchemaHash == "" {
 		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface requires identity, owner, operation and input schema")
 	}
@@ -262,6 +288,11 @@ func validateAndNormalizeRuntimeValidationSurface(s RuntimeValidationSurface) (R
 	if len(s.ProofRequirementBindings) != 0 && !sameStrings(normalizeStrings(boundChecks), s.CheckRefs) {
 		return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q checks do not match exact proof requirement bindings", s.ID)
 	}
+	declaredContentContracts := make(map[string]struct{}, len(s.PreparationContentContracts))
+	for _, contract := range s.PreparationContentContracts {
+		declaredContentContracts[contract.Ref] = struct{}{}
+	}
+	usedContentContracts := make(map[string]struct{}, len(s.PreparationContentContracts))
 	for _, preparation := range s.ProofRequirementPreparations {
 		// 本次已完整校验原 preparation；不重验未改变的规范化 proof 正文。
 		for _, attestation := range preparation.CheckAttestations {
@@ -279,6 +310,17 @@ func validateAndNormalizeRuntimeValidationSurface(s RuntimeValidationSurface) (R
 			constraint.ValidationSurfaceID != s.ID || constraint.ValidationRecipeID != s.ID ||
 			constraint.InputSchemaHash != s.InputSchemaHash {
 			return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q proof preparation identity mismatch", s.ID)
+		}
+		if preparation.ContentContractRef != "" {
+			if _, declared := declaredContentContracts[preparation.ContentContractRef]; !declared {
+				return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q proof preparation %q references missing content contract %q", s.ID, preparation.CoverageWorkItemID, preparation.ContentContractRef)
+			}
+			usedContentContracts[preparation.ContentContractRef] = struct{}{}
+		}
+	}
+	for _, contract := range s.PreparationContentContracts {
+		if _, used := usedContentContracts[contract.Ref]; !used {
+			return RuntimeValidationSurface{}, fmt.Errorf("runtime validation surface %q declares unreferenced content contract %q", s.ID, contract.Ref)
 		}
 	}
 	if len(s.ProofRequirementPreparations) != 0 && s.Readiness == RuntimeValidationSurfaceUnavailable {

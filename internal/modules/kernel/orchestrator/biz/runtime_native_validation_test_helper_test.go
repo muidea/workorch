@@ -47,17 +47,8 @@ func runtimeTestNativeOwnerFactAcquisitionProposal(
 		return runtimecontract.RuntimeSemanticProofProposal{}, false, nil
 	}
 	acquisition := obligation.OwnerFactAcquisition.Clone()
-	var catalog runtimecontract.RuntimeOperationAdmissibility
-	for _, candidate := range manifest.OwnerFactDependencyCatalogs {
-		if candidate.OwnerModuleID != acquisition.Requirement.OwnerModuleID {
-			continue
-		}
-		if catalog.SnapshotID != "" {
-			return runtimecontract.RuntimeSemanticProofProposal{}, false, fmt.Errorf("native acquisition duplicated dependency catalog for %q", coverageID)
-		}
-		catalog = candidate.Normalized()
-	}
-	if catalog.SnapshotID == "" {
+	catalog, found := manifest.OwnerFactDependencyCatalogForOwner(acquisition.Requirement.OwnerModuleID)
+	if !found {
 		return runtimecontract.RuntimeSemanticProofProposal{}, false, fmt.Errorf("native acquisition has no %q dependency catalog for %q", acquisition.Requirement.OwnerModuleID, coverageID)
 	}
 	preparation, err := runtimecontract.ResolveRuntimeValidationProofPreparation(

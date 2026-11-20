@@ -304,7 +304,7 @@ func retireRuntimeInputReviewForInformation(a *RuntimeAggregate, resolution runt
 		return err
 	}
 	a.SemanticPlanning = runtimecontract.RuntimeSemanticPlanningLedger{
-		SchemaVersion: ledger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningRequired, DefinitionSeed: ledger.DefinitionSeed.Clone(),
+		SchemaVersion: ledger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningRequired, DefinitionSeedHash: ledger.DefinitionSeedHash,
 		FailureInputReview:     ledger.FailureInputReview.Clone(),
 		CatalogRefreshAttempts: ledger.CatalogRefreshAttempts, FeasibilityGaps: ledger.FeasibilityGaps,
 		History: ledger.History, HistoryArchive: ledger.HistoryArchive,

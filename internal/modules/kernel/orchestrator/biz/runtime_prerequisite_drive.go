@@ -44,8 +44,13 @@ func (m *Biz) prepareRuntimePrerequisitesForPurpose(ctx context.Context, aggrega
 		if len(pending) == 0 {
 			return aggregate, nil
 		}
-		progressed := false
-		for _, prerequisite := range runtimeOrderedPrerequisites(pending) {
+		ordered := runtimeOrderedPrerequisites(pending)
+		waveRank := runtimePrerequisiteAcquisitionRank(ordered[0])
+		waveResults := make([]runtime.PrerequisiteResult, 0, len(ordered))
+		for _, prerequisite := range ordered {
+			if runtimePrerequisiteAcquisitionRank(prerequisite) != waveRank {
+				break
+			}
 			// A previous owner result may have committed a new aggregate and
 			// removed this copied pending item. Never resolve stale work.
 			if !runtimePendingPrerequisiteExists(aggregate.Facts.Prerequisites.Pending, prerequisite.ID) {
@@ -58,22 +63,19 @@ func (m *Biz) prepareRuntimePrerequisitesForPurpose(ctx context.Context, aggrega
 				}
 				return runtime.RuntimeAggregate{}, resolveErr
 			}
-			committed, commitErr := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-				Kind: runtime.RuntimeInternalEventPrerequisiteObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{PrerequisiteResult: &result},
-			})
-			aggregate, err = committed.Aggregate, commitErr
-			if err != nil {
-				return runtime.RuntimeAggregate{}, err
-			}
-			progressed = true
-			// Re-read and re-order after every persisted owner fact. Capability
-			// acquisition can add owner-published resource dependencies to the
-			// current graph, and those dependencies must be acquired before an
-			// already-copied dependent inventory item.
-			break
+			waveResults = append(waveResults, result)
 		}
-		if !progressed {
+		if len(waveResults) == 0 {
 			return runtime.RuntimeAggregate{}, fmt.Errorf("runtime prerequisite dispatcher made no progress")
+		}
+		committed, commitErr := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+			Kind:      runtime.RuntimeInternalEventPrerequisiteObserved,
+			Scope:     runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+			Authority: &runtime.RuntimeInternalAuthorityPayload{PrerequisiteResults: waveResults},
+		})
+		aggregate, err = committed.Aggregate, commitErr
+		if err != nil {
+			return runtime.RuntimeAggregate{}, err
 		}
 	}
 }
@@ -123,25 +125,6 @@ func (m *Biz) confirmRuntimeRepairSurface(
 		currentPlan.RequestID != planned.RequestID || currentPlan.IssuedAtStateRevision != planned.IssuedAtStateRevision ||
 		!runtimecontract.SameRuntimeValidationFailureObservation(currentPlan.Observation, planned.Observation) {
 		return runtime.RuntimeAggregate{}, false, fmt.Errorf("%w: repair-surface confirmation plan changed without a Runtime revision", common.ErrConflict)
-	}
-
-	// Keep the receipt-to-confirmation handoff explicit in the owner-local
-	// vocabulary. This identity event deliberately does not mutate aggregate
-	// state; the following confirmation event is the only authority-changing
-	// step.
-	observed, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventValidationFailureObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: current.Facts.WorkspaceID, RunID: current.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{FailureFact: current.Facts.Failure},
-	})
-	if err != nil {
-		return m.rebaseRuntimeRepairSurfaceHandoffError(ctx, current, err)
-	}
-	current = observed.Aggregate
-	currentPlan, err = runtime.CurrentRuntimeRepairSurfaceConfirmationPlan(current)
-	if err != nil {
-		return runtime.RuntimeAggregate{}, false, err
-	}
-	if !currentPlan.Required() {
-		return current, true, nil
 	}
 	workspace, err := (workspaceSnapshotReader{hub: m.EventHub()}).Read(ctx, current.Facts.WorkspaceID)
 	if err != nil {

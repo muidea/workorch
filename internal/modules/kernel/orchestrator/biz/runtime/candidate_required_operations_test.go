@@ -46,7 +46,11 @@ func TestCandidateRequiredOperationsCorrectionRestartAndBound(t *testing.T) {
 		t.Fatalf("strict rejection lost omission: %v", err)
 	}
 	failure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "required-operations-fixture", Reason: "missing required operations", Diagnostic: runtimecontract.RuntimeCandidateFailureDiagnosticFromPayloadDiagnostic(diagnostic)}
-	failed, err := controller.failCandidateAttempt(ctx, ws, run, 0, failure)
+	_, manifest, logicalRequestID0, stablePrefix0, err := candidateAttemptTestBindingWithPrefix(ctx, controller, ws, run, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := controller.rejectCompletedCandidateDocument(ctx, ws, run, 0, stablePrefix0, manifest, logicalRequestID0, nil, failure)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +90,7 @@ func TestCandidateRequiredOperationsCorrectionRestartAndBound(t *testing.T) {
 				t.Fatal(err)
 			}
 			if terminal {
-				ended, err := restarted.failCandidateAttempt(ctx, ws, run, 1, failure)
+				ended, err := restarted.RejectCompletedCandidateDocumentForTest(ctx, ws, run, 1, "required-operations-prefix", failure)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -120,7 +124,7 @@ func TestCandidateRequiredOperationsCorrectionRestartAndBound(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			repo := &failureAuthorityCASRepository{aggregate: pending, mode: mode}
 			c, _ := NewRuntimeController(repo)
-			_, err := c.failCandidateAttempt(ctx, ws, run, 0, failure)
+			_, err := c.rejectCompletedCandidateDocument(ctx, ws, run, 0, stablePrefix0, manifest, logicalRequestID0, nil, failure)
 			if !errors.Is(err, errFailureAuthorityCASCut) {
 				t.Fatalf("missing injected failure: %v", err)
 			}
@@ -129,7 +133,7 @@ func TestCandidateRequiredOperationsCorrectionRestartAndBound(t *testing.T) {
 			}
 			repo.mode = failureAuthorityCASNormal
 			if mode == failureAuthorityCASFailBeforeWrite {
-				if _, err := c.failCandidateAttempt(ctx, ws, run, 0, failure); err != nil {
+				if _, err := c.rejectCompletedCandidateDocument(ctx, ws, run, 0, stablePrefix0, manifest, logicalRequestID0, nil, failure); err != nil {
 					t.Fatal(err)
 				}
 			}

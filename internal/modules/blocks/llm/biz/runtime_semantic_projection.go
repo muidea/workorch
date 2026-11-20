@@ -444,21 +444,25 @@ func runtimeSemanticProofObligationsForProvider(values []runtimecontract.Runtime
 		if value.OwnerFactAcquisition != nil {
 			acquisition := value.OwnerFactAcquisition.Normalized()
 			var preparation *runtimecontract.RuntimeValidationProofPreparation
+			var preparationSurface *runtimecontract.RuntimeValidationSurface
 			if acquisition.Requirement.ValidationProofRequirementHash != "" {
-				for _, catalog := range runtimecontract.NormalizeRuntimeOperationAdmissibilities(dependencyCatalogs) {
+				combinedCatalogs := append(append([]runtimecontract.RuntimeOperationAdmissibility(nil), dependencyCatalogs...), ownerCatalogs...)
+				for _, catalog := range runtimecontract.NormalizeRuntimeOperationAdmissibilities(combinedCatalogs) {
 					if catalog.OwnerModuleID != acquisition.Requirement.OwnerModuleID {
 						continue
 					}
-					resolved, resolveErr := runtimecontract.ResolveRuntimeValidationProofPreparation(catalog, acquisition.Requirement, acquisition.ProspectiveSatisfactionContractRef)
+					resolved, resolvedSurface, resolveErr := runtimecontract.ResolveRuntimeValidationProofPreparationWithSurface(catalog, acquisition.Requirement, acquisition.ProspectiveSatisfactionContractRef)
 					if resolveErr != nil {
 						return nil, resolveErr
 					}
 					resolved = resolved.Clone()
+					resolvedSurface = resolvedSurface.Clone()
 					preparation = &resolved
+					preparationSurface = &resolvedSurface
 					break
 				}
 			}
-			prospectiveConstraint, err := runtimeSemanticProspectiveTargetConstraintForProvider(acquisition.ProspectiveTargetSatisfactionConstraint, preparation)
+			prospectiveConstraint, err := runtimeSemanticProspectiveTargetConstraintForProvider(acquisition.ProspectiveTargetSatisfactionConstraint, preparation, preparationSurface)
 			if err != nil {
 				return nil, err
 			}
@@ -515,7 +519,7 @@ func runtimeSemanticProofObligationsForProvider(values []runtimecontract.Runtime
 	return ret, nil
 }
 
-func runtimeSemanticProspectiveTargetConstraintForProvider(value *runtimecontract.RuntimeProspectiveTargetSatisfactionConstraint, preparation *runtimecontract.RuntimeValidationProofPreparation) (*runtimeSemanticProspectiveTargetConstraintProjection, error) {
+func runtimeSemanticProspectiveTargetConstraintForProvider(value *runtimecontract.RuntimeProspectiveTargetSatisfactionConstraint, preparation *runtimecontract.RuntimeValidationProofPreparation, preparationSurface *runtimecontract.RuntimeValidationSurface) (*runtimeSemanticProspectiveTargetConstraintProjection, error) {
 	if value == nil {
 		return nil, nil
 	}
@@ -551,13 +555,24 @@ func runtimeSemanticProspectiveTargetConstraintForProvider(value *runtimecontrac
 			runtimecontract.StableRuntimeProspectiveTargetSatisfactionConstraintHash(constraint) {
 			return nil, fmt.Errorf("runtime semantic validation proof preparation does not match prospective constraint")
 		}
+		contentRequirements := ""
+		if preparationValue.ContentContractRef != "" {
+			if preparationSurface == nil {
+				return nil, fmt.Errorf("runtime semantic validation proof preparation is missing surface for content contract %q", preparationValue.ContentContractRef)
+			}
+			var ok bool
+			contentRequirements, ok = preparationSurface.PreparationContentRequirementsFor(preparationValue.ContentContractRef)
+			if !ok {
+				return nil, fmt.Errorf("runtime semantic validation proof preparation is missing content contract %q", preparationValue.ContentContractRef)
+			}
+		}
 		for _, attestation := range preparationValue.CheckAttestations {
 			projection.ValidationProofPreparations = append(projection.ValidationProofPreparations, runtimeSemanticNativeCheckAttestationProjection{
 				SourceObligation: runtimePreparationSourceObligation(preparationValue, attestation.RequiredCheckRef),
 				OwnerModuleID:    constraint.OwnerModuleID, CoverageWorkItemID: preparationValue.CoverageWorkItemID, RequirementHash: preparationValue.RequirementHash,
 				ValidationRecipeID: preparationValue.ValidationRecipeID, RequiredCheckRef: attestation.RequiredCheckRef,
 				ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef, SupplementalNativeCheckRef: attestation.SupplementalNativeCheckRef,
-				TargetRef: preparationValue.TargetRef, ContentContractRef: preparationValue.ContentContractRef, ContentRequirements: preparationValue.ContentRequirements,
+				TargetRef: preparationValue.TargetRef, ContentContractRef: preparationValue.ContentContractRef, ContentRequirements: contentRequirements,
 			})
 		}
 	}
@@ -582,13 +597,17 @@ func runtimeSemanticNativeCheckAttestationsForRequirement(catalogs []runtimecont
 				if preparation.RequirementHash != requirement.Hash {
 					continue
 				}
+				contentRequirements := ""
+				if preparation.ContentContractRef != "" {
+					contentRequirements, _ = surface.PreparationContentRequirementsFor(preparation.ContentContractRef)
+				}
 				for _, attestation := range preparation.CheckAttestations {
 					ret = append(ret, runtimeSemanticNativeCheckAttestationProjection{
 						SourceObligation: runtimePreparationSourceObligation(preparation, attestation.RequiredCheckRef),
 						OwnerModuleID:    catalog.OwnerModuleID, CoverageWorkItemID: preparation.CoverageWorkItemID, RequirementHash: preparation.RequirementHash,
 						ValidationRecipeID: preparation.ValidationRecipeID, RequiredCheckRef: attestation.RequiredCheckRef,
 						ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef, SupplementalNativeCheckRef: attestation.SupplementalNativeCheckRef,
-						TargetRef: preparation.TargetRef, ContentContractRef: preparation.ContentContractRef, ContentRequirements: preparation.ContentRequirements,
+						TargetRef: preparation.TargetRef, ContentContractRef: preparation.ContentContractRef, ContentRequirements: contentRequirements,
 					})
 				}
 			}

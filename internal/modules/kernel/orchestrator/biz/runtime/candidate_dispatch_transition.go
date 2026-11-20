@@ -12,49 +12,59 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func (c *candidateDispatchComponent) beginCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string) (RuntimeAggregate, error) {
-	if err := validateBeginCandidateAttemptInput(c, workspaceID, runID, attempt, stablePrefixHash, logicalRequestID); err != nil {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
+type candidateAttemptEnsureMode uint8
+
+const (
+	candidateAttemptEnsureAdmission candidateAttemptEnsureMode = iota
+	candidateAttemptEnsureDocumentRejection
+)
+
+func ensureCandidateAttemptForCompletedDocument(
+	aggregate *RuntimeAggregate,
+	workspaceID common.WorkspaceID,
+	runID common.RunID,
+	attempt int,
+	stablePrefixHash string,
+	manifest runtimecontract.RuntimeCandidateContractManifest,
+	logicalRequestID string,
+	contractID string,
+	transaction runtimecontract.AuthorityTransaction,
+	mode candidateAttemptEnsureMode,
+) (int, int, error) {
+	if aggregate == nil || strings.TrimSpace(stablePrefixHash) == "" {
+		return 0, 0, common.ErrInvalidArgument
 	}
-	aggregate, err := c.load(ctx, workspaceID, runID)
+	switch mode {
+	case candidateAttemptEnsureAdmission:
+		if err := validateCandidateAttemptBeginAuthority(*aggregate); err != nil {
+			return 0, 0, err
+		}
+	case candidateAttemptEnsureDocumentRejection:
+		if !runtimeDecisionAcceptsCandidateDocument(aggregate.Decision.State) {
+			return 0, 0, fmt.Errorf("%w: current runtime action does not request a candidate", common.ErrConflict)
+		}
+	default:
+		return 0, 0, common.ErrInvalidArgument
+	}
+	if err := validateCandidateAttemptSessionBinding(*aggregate, stablePrefixHash, manifest, logicalRequestID); err != nil {
+		return 0, 0, err
+	}
+	sessionIndex, err := candidateRequestSessionManifestBinding(*aggregate, logicalRequestID, manifest)
 	if err != nil {
-		return RuntimeAggregate{}, err
+		return 0, 0, err
 	}
-	if err := validateCandidateAttemptBeginAuthority(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := validateCandidateAttemptSessionBinding(aggregate, stablePrefixHash, manifest, logicalRequestID); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	sessionIndex, err := candidateRequestSessionManifestBinding(aggregate, logicalRequestID, manifest)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	transaction := aggregate.Decision.AuthorityTransaction()
-	if attempt == 1 {
-		if err := validatePersistedCandidateCorrection(aggregate, manifest); err != nil {
-			return RuntimeAggregate{}, fmt.Errorf("%w: %v", common.ErrConflict, err)
+	if attempt == 1 && mode == candidateAttemptEnsureAdmission {
+		if err := validatePersistedCandidateCorrection(*aggregate, manifest); err != nil {
+			return 0, 0, fmt.Errorf("%w: %v", common.ErrConflict, err)
 		}
 	}
-	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, transaction)
 	current := candidateAttemptsForContract(aggregate.CandidateAttempts, workspaceID, runID, contractID)
-	plan, err := planCandidateAttemptBegin(aggregate, workspaceID, runID, attempt, stablePrefixHash, manifest.Hash, logicalRequestID, contractID, transaction, current)
+	plan, err := planCandidateAttemptBegin(*aggregate, workspaceID, runID, attempt, stablePrefixHash, manifest.Hash, logicalRequestID, contractID, transaction, current)
 	if err != nil {
-		return RuntimeAggregate{}, err
+		return 0, 0, err
 	}
-	if plan.duplicate {
-		return aggregate, nil
-	}
-	expectedRevision := aggregate.StateRevision
-	manifestCopy := manifest.Clone()
-	aggregate.CandidateRequestSessions[sessionIndex].CandidateManifest = &manifestCopy
-	applyCandidateAttemptBegin(&aggregate, plan, contractID, transaction, attempt, stablePrefixHash, manifest.Hash, logicalRequestID)
-	aggregate.StateRevision++
-
-	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return aggregate, nil
+	idx := applyCandidateAttemptBegin(aggregate, plan, contractID, transaction, attempt, stablePrefixHash, manifest.Hash, logicalRequestID)
+	return idx, sessionIndex, nil
 }
 
 // candidateRequestSessionManifestBinding resolves the earlier operations
@@ -80,13 +90,6 @@ func candidateRequestSessionManifestBinding(aggregate RuntimeAggregate, logicalR
 type candidateAttemptBeginPlan struct {
 	duplicate    bool
 	recycleIndex int
-}
-
-func validateBeginCandidateAttemptInput(c *candidateDispatchComponent, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash, logicalRequestID string) error {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) || strings.TrimSpace(stablePrefixHash) == "" || strings.TrimSpace(logicalRequestID) == "" {
-		return common.ErrInvalidArgument
-	}
-	return nil
 }
 
 func validateCandidateAttemptBeginAuthority(aggregate RuntimeAggregate) error {
@@ -158,14 +161,19 @@ func candidateAttemptIndex(values []runtimecontract.RuntimeCandidateAttemptRecor
 	return 0, false
 }
 
-func applyCandidateAttemptBegin(aggregate *RuntimeAggregate, plan candidateAttemptBeginPlan, contractID string, transaction runtimecontract.AuthorityTransaction, attempt int, stablePrefixHash, manifestHash, logicalRequestID string) {
+func applyCandidateAttemptBegin(aggregate *RuntimeAggregate, plan candidateAttemptBeginPlan, contractID string, transaction runtimecontract.AuthorityTransaction, attempt int, stablePrefixHash, manifestHash, logicalRequestID string) int {
+	if plan.duplicate {
+		if idx, ok := candidateAttemptIndex(aggregate.CandidateAttempts, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, contractID, attempt); ok {
+			return idx
+		}
+	}
 	record := runtimecontract.RuntimeCandidateAttemptRecord{
 		AuthorityContractID: contractID, Transaction: transaction, Attempt: attempt, StablePrefixHash: stablePrefixHash,
 		ManifestHash: manifestHash, LogicalRequestID: logicalRequestID, State: runtimecontract.RuntimeCandidateAttemptStatePending,
 	}
 	if plan.recycleIndex < 0 {
 		aggregate.CandidateAttempts = append(aggregate.CandidateAttempts, record)
-		return
+		return len(aggregate.CandidateAttempts) - 1
 	}
 	recycled := &aggregate.CandidateAttempts[plan.recycleIndex]
 	recycled.Transaction = transaction
@@ -180,6 +188,11 @@ func applyCandidateAttemptBegin(aggregate *RuntimeAggregate, plan candidateAttem
 	recycled.Failure = nil
 	recycled.Correction = nil
 	recycled.Stale = nil
+	recycled.PrerequisiteRequest = nil
+	recycled.OwnerFeasibility = nil
+	recycled.BindingContradiction = nil
+	recycled.ApplicabilityInvalidationRequest = nil
+	return plan.recycleIndex
 }
 
 func equivalentOwnerInfeasibilityExists(attempts []runtimecontract.RuntimeCandidateAttemptRecord, authorityInputID string) bool {
@@ -224,25 +237,38 @@ func (c *candidateDispatchComponent) rejectCompletedCandidateDocument(ctx contex
 	if duplicate {
 		return aggregate, nil
 	}
-	if err := validateCandidateAttemptSessionBinding(aggregate, stablePrefixHash, manifest, logicalRequestID); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	sessionIndex, err := candidateRequestSessionManifestBinding(aggregate, logicalRequestID, manifest)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if !runtimeDecisionAcceptsCandidateDocument(aggregate.Decision.State) {
-		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not request a candidate", common.ErrConflict)
-	}
-	idx, err := ensurePendingCompletedDocumentAttempt(&aggregate, workspaceID, runID, attempt, stablePrefixHash, manifest.Hash, logicalRequestID, contractID, transaction)
-	if err != nil {
-		return RuntimeAggregate{}, err
+	var idx, sessionIndex int
+	if existingIdx, _, pending := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt); pending {
+		if err := validateCandidateAttemptSessionBinding(aggregate, stablePrefixHash, manifest, logicalRequestID); err != nil {
+			return RuntimeAggregate{}, err
+		}
+		var bindErr error
+		sessionIndex, bindErr = candidateRequestSessionManifestBinding(aggregate, logicalRequestID, manifest)
+		if bindErr != nil {
+			return RuntimeAggregate{}, bindErr
+		}
+		if !runtimeDecisionAcceptsCandidateDocument(aggregate.Decision.State) {
+			return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not request a candidate", common.ErrConflict)
+		}
+		idx = existingIdx
+	} else {
+		var ensureErr error
+		idx, sessionIndex, ensureErr = ensureCandidateAttemptForCompletedDocument(&aggregate, workspaceID, runID, attempt, stablePrefixHash, manifest, logicalRequestID, contractID, transaction, candidateAttemptEnsureDocumentRejection)
+		if ensureErr != nil {
+			return RuntimeAggregate{}, ensureErr
+		}
 	}
 	expectedRevision := aggregate.StateRevision
 	frontier := candidateCorrectionFrontier{}
 	if rejectedCandidate != nil {
 		candidateCopy := *rejectedCandidate
 		frontier = candidateCorrectionFrontierForEvaluation(candidateAdmissionEvaluationInput(aggregate, manifest, candidateCopy))
+	}
+	if strings.TrimSpace(failure.Code) == "" {
+		failure.Code = defaultCandidateFailureCode(failure.Class)
+	}
+	if strings.TrimSpace(failure.Signature) == "" {
+		failure.Signature = failure.Code
 	}
 	sealedFailure, correction, sealErr := sealCandidateRejectionWithFrontier(&failure, manifest, frontier)
 	if sealErr != nil {
@@ -295,39 +321,12 @@ func runtimeDecisionAcceptsCandidateDocument(state runtimecontract.ConvergenceSt
 	}
 }
 
-func ensurePendingCompletedDocumentAttempt(aggregate *RuntimeAggregate, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash, manifestHash, logicalRequestID, contractID string, transaction runtimecontract.AuthorityTransaction) (int, error) {
-	if idx, _, pending := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt); pending {
-		return idx, nil
-	}
-	current := candidateAttemptsForContract(aggregate.CandidateAttempts, workspaceID, runID, contractID)
-	if err := validateCompletedDocumentAttemptSequence(current, attempt, stablePrefixHash, manifestHash, transaction); err != nil {
-		return 0, err
-	}
-	aggregate.CandidateAttempts = append(aggregate.CandidateAttempts, runtimecontract.RuntimeCandidateAttemptRecord{
-		AuthorityContractID: contractID, Transaction: transaction, Attempt: attempt, StablePrefixHash: stablePrefixHash,
-		ManifestHash: manifestHash, LogicalRequestID: logicalRequestID, State: runtimecontract.RuntimeCandidateAttemptStatePending,
-	})
-	return len(aggregate.CandidateAttempts) - 1, nil
-}
-
-func validateCompletedDocumentAttemptSequence(current []runtimecontract.RuntimeCandidateAttemptRecord, attempt int, stablePrefixHash, manifestHash string, transaction runtimecontract.AuthorityTransaction) error {
-	if attempt == 0 {
-		if len(current) != 0 {
-			return fmt.Errorf("%w: candidate attempt 0 is no longer available", common.ErrConflict)
-		}
-		return nil
-	}
-	first, ok := candidateAttemptRecord(current, 0)
-	if !ok || first.State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.StablePrefixHash != stablePrefixHash || first.ManifestHash != manifestHash || !runtimecontract.SameAuthorityContract(first.Transaction, transaction) || !CandidateAttemptIsCorrectableOnce(first) {
-		return fmt.Errorf("%w: candidate attempt 1 requires a failed correctable same-contract attempt 0", common.ErrConflict)
-	}
-	return nil
-}
-
-// admitCandidateProposal atomically persists a candidate proposal or closes the
-// pending attempt with its typed admission rejection. A restart therefore never
-// observes a rejected provider candidate as an open SM-3 transaction.
-func (c *candidateDispatchComponent) admitCandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, candidate runtimecontract.RuntimeCandidate) (CandidateAdmissionCommitResult, error) {
+// admitCandidateProposal atomically creates/recycles the attempt for a
+// completed provider document and either persists a candidate proposal or closes
+// the attempt with its typed admission rejection in one CAS. A restart
+// therefore never observes a proposal-less pending attempt or a rejected
+// candidate as an open SM-3 transaction.
+func (c *candidateDispatchComponent) admitCandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, candidate runtimecontract.RuntimeCandidate) (CandidateAdmissionCommitResult, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) || strings.TrimSpace(logicalRequestID) == "" {
 		return CandidateAdmissionCommitResult{}, common.ErrInvalidArgument
 	}
@@ -346,31 +345,42 @@ func (c *candidateDispatchComponent) admitCandidateProposal(ctx context.Context,
 	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
-	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
+	transaction := aggregate.Decision.AuthorityTransaction()
+	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, transaction)
 	idx, record, ok := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
-	if !ok {
-		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
-	}
-	if err := validateCandidateAttemptSessionBinding(aggregate, "", manifest, logicalRequestID); err != nil {
-		return CandidateAdmissionCommitResult{}, err
-	}
-	if record.ManifestHash != manifest.Hash || record.LogicalRequestID != logicalRequestID {
-		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate proposal does not match pending request-session binding", common.ErrConflict)
-	}
-	sessionIndex, err := candidateRequestSessionManifestBinding(aggregate, logicalRequestID, manifest)
-	if err != nil {
-		return CandidateAdmissionCommitResult{}, err
-	}
-	// A persisted proposal is the owner admission result. Duplicate delivery
-	// consumes that exact result before replay/semantic rules can be reapplied.
-	if record.Proposal != nil {
-		if runtimecontract.StableRuntimeCandidateHash(*record.Proposal) != runtimecontract.StableRuntimeCandidateHash(candidate) {
-			return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: pending candidate attempt proposal changed", common.ErrConflict)
+	var sessionIndex int
+	if ok {
+		if err := validateCandidateAttemptSessionBinding(aggregate, stablePrefixHash, manifest, logicalRequestID); err != nil {
+			return CandidateAdmissionCommitResult{}, err
 		}
-		return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: acceptedCandidateAdmission()}, nil
-	}
-	if err := validateRuntimeCandidatePurposeFence(aggregate); err != nil {
-		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate proposal binding fence: %v", common.ErrConflict, err)
+		if record.ManifestHash != manifest.Hash || record.LogicalRequestID != logicalRequestID {
+			return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate proposal does not match pending request-session binding", common.ErrConflict)
+		}
+		sessionIndex, err = candidateRequestSessionManifestBinding(aggregate, logicalRequestID, manifest)
+		if err != nil {
+			return CandidateAdmissionCommitResult{}, err
+		}
+		// A persisted proposal is the owner admission result. Duplicate delivery
+		// consumes that exact result before replay/semantic rules can be reapplied.
+		if record.Proposal != nil {
+			if runtimecontract.StableRuntimeCandidateHash(*record.Proposal) != runtimecontract.StableRuntimeCandidateHash(candidate) {
+				return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: pending candidate attempt proposal changed", common.ErrConflict)
+			}
+			return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: acceptedCandidateAdmission()}, nil
+		}
+		if err := validateRuntimeCandidatePurposeFence(aggregate); err != nil {
+			return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate proposal binding fence: %v", common.ErrConflict, err)
+		}
+	} else {
+		if strings.TrimSpace(stablePrefixHash) == "" {
+			return CandidateAdmissionCommitResult{}, common.ErrInvalidArgument
+		}
+		idx, sessionIndex, err = ensureCandidateAttemptForCompletedDocument(&aggregate, workspaceID, runID, attempt, stablePrefixHash, manifest, logicalRequestID, contractID, transaction, candidateAttemptEnsureAdmission)
+		if err != nil {
+			return CandidateAdmissionCommitResult{}, err
+		}
+		manifestCopy := manifest.Clone()
+		aggregate.CandidateRequestSessions[sessionIndex].CandidateManifest = &manifestCopy
 	}
 	admission := EvaluateCandidateAdmissionWithManifest(aggregate, manifest, candidate)
 	if !admission.Accepted() {
@@ -420,15 +430,16 @@ func (c *candidateDispatchComponent) admitCandidateProposal(ctx context.Context,
 	return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: admission}, nil
 }
 
-// recordCandidateFeasibility is the sole SM-2/SM-3 commit for one completed,
-// side-effect-free owner probe. The same CAS persists the factual result and,
-// for every non-feasible outcome, its Orchestrator-owned disposition. Restart
-// therefore cannot observe a pending candidate with an undecided owner fact.
-func (c *candidateDispatchComponent) recordCandidateFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, record runtimecontract.RuntimeCandidateFeasibilityRecord) (RuntimeAggregate, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) {
+// recordCandidateFeasibilities is the sole SM-2/SM-3 commit for one wave of
+// completed, side-effect-free owner probes. The same CAS persists the factual
+// results and, for any closing/non-feasible outcome at the wave tail, its
+// Orchestrator-owned disposition. Restart therefore cannot observe a pending
+// candidate with an undecided owner fact.
+func (c *candidateDispatchComponent) recordCandidateFeasibilities(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, records []runtimecontract.RuntimeCandidateFeasibilityRecord) (RuntimeAggregate, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) || len(records) == 0 {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	if err := runtimecontract.ValidateRuntimeCandidateFeasibilityRecords([]runtimecontract.RuntimeCandidateFeasibilityRecord{record}); err != nil {
+	if err := runtimecontract.ValidateRuntimeCandidateFeasibilityRecords(records); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	aggregate, err := c.load(ctx, workspaceID, runID)
@@ -436,7 +447,7 @@ func (c *candidateDispatchComponent) recordCandidateFeasibility(ctx context.Cont
 		return RuntimeAggregate{}, err
 	}
 	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
-		if duplicateCandidateFeasibilityDisposition(aggregate.CandidateAttempts, attempt, record) {
+		if allDuplicateCandidateFeasibilityDispositions(aggregate.CandidateAttempts, attempt, records) {
 			return aggregate, nil
 		}
 		return RuntimeAggregate{}, err
@@ -447,7 +458,7 @@ func (c *candidateDispatchComponent) recordCandidateFeasibility(ctx context.Cont
 		// Only a late delivery may match historical disposition. Never let an
 		// identical record from an older authority shadow a current pending
 		// attempt that must receive its own fact and CAS disposition.
-		if duplicateCandidateFeasibilityDisposition(aggregate.CandidateAttempts, attempt, record) {
+		if allDuplicateCandidateFeasibilityDispositions(aggregate.CandidateAttempts, attempt, records) {
 			return aggregate, nil
 		}
 		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d has no pending proposal", common.ErrConflict, attempt)
@@ -455,71 +466,95 @@ func (c *candidateDispatchComponent) recordCandidateFeasibility(ctx context.Cont
 	if attemptRecord.Proposal == nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d has no pending proposal", common.ErrConflict, attempt)
 	}
-	operation, operationIndex, operationFound := candidateOperationAndIndexByID(*attemptRecord.Proposal, record.OperationID)
-	if !operationFound {
-		return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility operation %q is absent from the persisted proposal", common.ErrConflict, record.OperationID)
-	}
-	if record.CandidateManifestHash != attemptRecord.ManifestHash {
-		return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility operation %q does not match the pending manifest", common.ErrConflict, record.OperationID)
-	}
 	manifest, err := persistedCandidateAttemptManifest(aggregate, attemptRecord)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := validateCandidateFeasibilityObservationBinding(aggregate.Facts.Resources.OperationAdmissibilities, operation, record, manifest, attemptRecord.Transaction); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	for _, persisted := range attemptRecord.Feasibilities {
-		if strings.TrimSpace(persisted.OperationID) != strings.TrimSpace(record.OperationID) {
+	expectedRevision := aggregate.StateRevision
+	changed := false
+	for i, record := range records {
+		operation, operationIndex, operationFound := candidateOperationAndIndexByID(*attemptRecord.Proposal, record.OperationID)
+		if !operationFound {
+			return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility operation %q is absent from the persisted proposal", common.ErrConflict, record.OperationID)
+		}
+		if record.CandidateManifestHash != attemptRecord.ManifestHash {
+			return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility operation %q does not match the pending manifest", common.ErrConflict, record.OperationID)
+		}
+		if err := validateCandidateFeasibilityObservationBinding(aggregate.Facts.Resources.OperationAdmissibilities, operation, record, manifest, attemptRecord.Transaction); err != nil {
+			return RuntimeAggregate{}, err
+		}
+		alreadyPersisted := false
+		for _, persisted := range aggregate.CandidateAttempts[idx].Feasibilities {
+			if strings.TrimSpace(persisted.OperationID) != strings.TrimSpace(record.OperationID) {
+				continue
+			}
+			if persisted.AdmissibilitySnapshotID != record.AdmissibilitySnapshotID || persisted.AcquisitionBinding != record.AcquisitionBinding || !reflect.DeepEqual(persisted.ReplayProof, record.ReplayProof) || !reflect.DeepEqual(persisted.Observation, record.Observation) {
+				return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility result for operation %q changed", common.ErrConflict, record.OperationID)
+			}
+			alreadyPersisted = true
+			break
+		}
+		if alreadyPersisted {
 			continue
 		}
-		if persisted.AdmissibilitySnapshotID != record.AdmissibilitySnapshotID || persisted.AcquisitionBinding != record.AcquisitionBinding || !reflect.DeepEqual(persisted.ReplayProof, record.ReplayProof) || !reflect.DeepEqual(persisted.Observation, record.Observation) {
-			return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility result for operation %q changed", common.ErrConflict, record.OperationID)
+		copyRecord := record
+		if record.Observation != nil {
+			observation := record.Observation.Clone()
+			copyRecord.Observation = &observation
 		}
+		if record.ReplayProof != nil {
+			proof := record.ReplayProof.Clone()
+			copyRecord.ReplayProof = &proof
+		}
+		aggregate.CandidateAttempts[idx].Feasibilities = append(aggregate.CandidateAttempts[idx].Feasibilities, copyRecord)
+		changed = true
+		observation := copyRecord.Observation.Clone()
+		switch observation.Outcome {
+		case runtimecontract.RuntimeOwnerFeasibilityFeasible:
+			// The persisted fact is the restart fence for final admission.
+		case runtimecontract.RuntimeOwnerFeasibilityStale:
+			if i+1 != len(records) {
+				return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility wave cannot include trailing observations after closing outcome", common.ErrConflict)
+			}
+			if err := applyCandidatePrerequisiteStale(&aggregate, idx, *observation.Stale); err != nil {
+				return RuntimeAggregate{}, err
+			}
+		case runtimecontract.RuntimeOwnerFeasibilityPrerequisiteRequired:
+			if i+1 != len(records) {
+				return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility wave cannot include trailing observations after closing outcome", common.ErrConflict)
+			}
+			if err := validateCandidateFeasibilityPrerequisiteDisposition(aggregate, aggregate.CandidateAttempts[idx], operation, *observation.PrerequisiteRequest); err != nil {
+				return RuntimeAggregate{}, err
+			}
+			if err := applyCandidateFeasibilityPrerequisite(&aggregate, idx, *observation.PrerequisiteRequest); err != nil {
+				return RuntimeAggregate{}, err
+			}
+		case runtimecontract.RuntimeOwnerFeasibilityCandidateConstraintViolated:
+			if i+1 != len(records) {
+				return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility wave cannot include trailing observations after closing outcome", common.ErrConflict)
+			}
+			failure := candidateApplicabilityConstraintFailure(operation, operationIndex, manifest, *observation.CandidateConstraintViolation)
+			sealed, correction, sealErr := sealCandidateRejectionWithFrontier(&failure, manifest, candidateCorrectionFrontier{candidate: attemptRecord.Proposal})
+			if sealErr != nil || sealed == nil || correction == nil {
+				return RuntimeAggregate{}, fmt.Errorf("%w: seal owner candidate applicability rejection: %v", common.ErrConflict, sealErr)
+			}
+			if err := closeCandidateAttemptWithCorrection(&aggregate, idx, attempt, *sealed, correction); err != nil {
+				return RuntimeAggregate{}, err
+			}
+		case runtimecontract.RuntimeOwnerFeasibilityInfeasible, runtimecontract.RuntimeOwnerFeasibilityContractDefect:
+			if i+1 != len(records) {
+				return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility wave cannot include trailing observations after closing outcome", common.ErrConflict)
+			}
+			currentAttempt := aggregate.CandidateAttempts[idx]
+			if err := applyCandidateOwnerInfeasibility(&aggregate, idx, currentAttempt, copyRecord, observation); err != nil {
+				return RuntimeAggregate{}, err
+			}
+		default:
+			return RuntimeAggregate{}, common.ErrInvalidArgument
+		}
+	}
+	if !changed {
 		return aggregate, nil
-	}
-	expectedRevision := aggregate.StateRevision
-	copyRecord := record
-	if record.Observation != nil {
-		observation := record.Observation.Clone()
-		copyRecord.Observation = &observation
-	}
-	if record.ReplayProof != nil {
-		proof := record.ReplayProof.Clone()
-		copyRecord.ReplayProof = &proof
-	}
-	aggregate.CandidateAttempts[idx].Feasibilities = append(aggregate.CandidateAttempts[idx].Feasibilities, copyRecord)
-	observation := copyRecord.Observation.Clone()
-	switch observation.Outcome {
-	case runtimecontract.RuntimeOwnerFeasibilityFeasible:
-		// The persisted fact is the restart fence for final admission.
-	case runtimecontract.RuntimeOwnerFeasibilityStale:
-		if err := applyCandidatePrerequisiteStale(&aggregate, idx, *observation.Stale); err != nil {
-			return RuntimeAggregate{}, err
-		}
-	case runtimecontract.RuntimeOwnerFeasibilityPrerequisiteRequired:
-		if err := validateCandidateFeasibilityPrerequisiteDisposition(aggregate, aggregate.CandidateAttempts[idx], operation, *observation.PrerequisiteRequest); err != nil {
-			return RuntimeAggregate{}, err
-		}
-		if err := applyCandidateFeasibilityPrerequisite(&aggregate, idx, *observation.PrerequisiteRequest); err != nil {
-			return RuntimeAggregate{}, err
-		}
-	case runtimecontract.RuntimeOwnerFeasibilityCandidateConstraintViolated:
-		failure := candidateApplicabilityConstraintFailure(operation, operationIndex, manifest, *observation.CandidateConstraintViolation)
-		sealed, correction, sealErr := sealCandidateRejectionWithFrontier(&failure, manifest, candidateCorrectionFrontier{candidate: attemptRecord.Proposal})
-		if sealErr != nil || sealed == nil || correction == nil {
-			return RuntimeAggregate{}, fmt.Errorf("%w: seal owner candidate applicability rejection: %v", common.ErrConflict, sealErr)
-		}
-		if err := closeCandidateAttemptWithCorrection(&aggregate, idx, attempt, *sealed, correction); err != nil {
-			return RuntimeAggregate{}, err
-		}
-	case runtimecontract.RuntimeOwnerFeasibilityInfeasible, runtimecontract.RuntimeOwnerFeasibilityContractDefect:
-		currentAttempt := aggregate.CandidateAttempts[idx]
-		if err := applyCandidateOwnerInfeasibility(&aggregate, idx, currentAttempt, copyRecord, observation); err != nil {
-			return RuntimeAggregate{}, err
-		}
-	default:
-		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	aggregate.StateRevision++
 
@@ -527,6 +562,18 @@ func (c *candidateDispatchComponent) recordCandidateFeasibility(ctx context.Cont
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+func allDuplicateCandidateFeasibilityDispositions(attempts []runtimecontract.RuntimeCandidateAttemptRecord, attempt int, records []runtimecontract.RuntimeCandidateFeasibilityRecord) bool {
+	if len(records) == 0 {
+		return false
+	}
+	for _, record := range records {
+		if !duplicateCandidateFeasibilityDisposition(attempts, attempt, record) {
+			return false
+		}
+	}
+	return true
 }
 
 func duplicateCandidateFeasibilityDisposition(attempts []runtimecontract.RuntimeCandidateAttemptRecord, attempt int, record runtimecontract.RuntimeCandidateFeasibilityRecord) bool {
@@ -928,7 +975,8 @@ func admitRuntimeDispatch(aggregate RuntimeAggregate, manifest runtimecontract.R
 			SourceID:                               source.AssessmentID,
 			SourceText:                             source.AssessmentText,
 			Focus:                                  focus,
-			OperationAdmissibilities:               runtimecontract.CloneRuntimeOperationAdmissibilities(aggregate.Facts.Resources.OperationAdmissibilities),
+			CatalogIdentities:                      runtimecontract.RuntimeOperationAdmissibilityCatalogIdentities(aggregate.Facts.Resources.OperationAdmissibilities),
+			OperationAdmissibilities:               runtimecontract.RuntimeAssessmentRequiredOperationAdmissibilities(aggregate.Facts.Resources.OperationAdmissibilities, focus.RequiredOwnerFacts),
 			ApplicabilityObservations:              runtimecontract.CloneRuntimeEvidenceApplicabilityObservations(aggregate.Facts.EvidenceApplicabilityObservations),
 			ApplicabilityReconciliationRequestHash: aggregate.Reconciliation.RequestHash,
 		}.Normalized()

@@ -19,7 +19,7 @@ func runtimeTestControllerInitialize(controller *runtime.RuntimeController, ctx 
 }
 
 func runtimeTestControllerCommitPrerequisite(controller *runtime.RuntimeController, ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, prerequisite runtime.PrerequisiteResult) (runtime.RuntimeAggregate, error) {
-	result, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventPrerequisiteObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Authority: &runtime.RuntimeInternalAuthorityPayload{PrerequisiteResult: &prerequisite}})
+	result, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventPrerequisiteObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Authority: &runtime.RuntimeInternalAuthorityPayload{PrerequisiteResults: []runtime.PrerequisiteResult{prerequisite}}})
 	return result.Aggregate, err
 }
 
@@ -85,13 +85,8 @@ func runtimeTestControllerCompleteCandidateDocument(controller *runtime.RuntimeC
 	return result.Aggregate, err
 }
 
-func runtimeTestControllerBeginCandidateAttempt(controller *runtime.RuntimeController, ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string) (runtime.RuntimeAggregate, error) {
-	result, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventCandidateAttemptBegun, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Transaction: &runtime.RuntimeInternalTransactionPayload{Attempt: attempt, StablePrefixHash: stablePrefixHash, Manifest: &manifest, LogicalRequestID: logicalRequestID}})
-	return result.Aggregate, err
-}
-
-func runtimeTestControllerAdmitCandidateProposal(controller *runtime.RuntimeController, ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, candidate runtimecontract.RuntimeCandidate) (runtime.CandidateAdmissionCommitResult, error) {
-	result, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventCandidateProposalObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Transaction: &runtime.RuntimeInternalTransactionPayload{Attempt: attempt, Manifest: &manifest, LogicalRequestID: logicalRequestID, Candidate: &candidate}})
+func runtimeTestControllerAdmitCandidateProposal(controller *runtime.RuntimeController, ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, candidate runtimecontract.RuntimeCandidate) (runtime.CandidateAdmissionCommitResult, error) {
+	result, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventCandidateProposalObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Transaction: &runtime.RuntimeInternalTransactionPayload{Attempt: attempt, StablePrefixHash: stablePrefixHash, Manifest: &manifest, LogicalRequestID: logicalRequestID, Candidate: &candidate}})
 	if result.Admission == nil {
 		return runtime.CandidateAdmissionCommitResult{Aggregate: result.Aggregate}, err
 	}
@@ -99,7 +94,7 @@ func runtimeTestControllerAdmitCandidateProposal(controller *runtime.RuntimeCont
 }
 
 func runtimeTestControllerRecordCandidateFeasibility(controller *runtime.RuntimeController, ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, feasibility runtimecontract.RuntimeCandidateFeasibilityRecord) (runtime.RuntimeAggregate, error) {
-	result, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventCandidateFeasibilityObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Transaction: &runtime.RuntimeInternalTransactionPayload{Attempt: attempt, CandidateFeasibility: &feasibility}})
+	result, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventCandidateFeasibilityObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Transaction: &runtime.RuntimeInternalTransactionPayload{Attempt: attempt, CandidateFeasibilities: []runtimecontract.RuntimeCandidateFeasibilityRecord{feasibility}}})
 	return result.Aggregate, err
 }
 

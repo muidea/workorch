@@ -225,7 +225,7 @@ func retireSemanticPlanningGeneration(aggregate *RuntimeAggregate, reason runtim
 		FailureInputReview:     ledger.FailureInputReview.Clone(),
 		SchemaVersion:          ledger.SchemaVersion,
 		Phase:                  runtimecontract.RuntimeSemanticPlanningRequired,
-		DefinitionSeed:         ledger.DefinitionSeed.Clone(),
+		DefinitionSeedHash:     ledger.DefinitionSeedHash,
 		FeasibilityGaps:        append([]runtimecontract.RuntimeSemanticFeasibilityGap(nil), ledger.FeasibilityGaps...),
 		CatalogRefreshAttempts: ledger.CatalogRefreshAttempts,
 		History:                ledger.History, HistoryArchive: ledger.HistoryArchive,
@@ -360,7 +360,7 @@ func retireSemanticPlanningGenerationForCWIReopen(aggregate *RuntimeAggregate, r
 		FailureInputReview:     ledger.FailureInputReview.Clone(),
 		SchemaVersion:          ledger.SchemaVersion,
 		Phase:                  runtimecontract.RuntimeSemanticPlanningRequired,
-		DefinitionSeed:         ledger.DefinitionSeed.Clone(),
+		DefinitionSeedHash:     ledger.DefinitionSeedHash,
 		CatalogRefreshAttempts: ledger.CatalogRefreshAttempts,
 		History:                ledger.History, HistoryArchive: ledger.HistoryArchive,
 	}
@@ -410,7 +410,7 @@ func retireSemanticPlanningGenerationForBindingContradiction(aggregate *RuntimeA
 		FailureInputReview:     ledger.FailureInputReview.Clone(),
 		SchemaVersion:          ledger.SchemaVersion,
 		Phase:                  runtimecontract.RuntimeSemanticPlanningRequired,
-		DefinitionSeed:         ledger.DefinitionSeed.Clone(),
+		DefinitionSeedHash:     ledger.DefinitionSeedHash,
 		CatalogRefreshAttempts: ledger.CatalogRefreshAttempts,
 		History:                ledger.History, HistoryArchive: ledger.HistoryArchive,
 	}
@@ -513,7 +513,7 @@ func retireSemanticPlanningGenerationForEligibilityChange(aggregate *RuntimeAggr
 	newLedger := runtimecontract.RuntimeSemanticPlanningLedger{
 		FailureInputReview: ledger.FailureInputReview.Clone(),
 		SchemaVersion:      ledger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningRequired,
-		DefinitionSeed: ledger.DefinitionSeed.Clone(), FeasibilityGaps: append([]runtimecontract.RuntimeSemanticFeasibilityGap(nil), ledger.FeasibilityGaps...),
+		DefinitionSeedHash: ledger.DefinitionSeedHash, FeasibilityGaps: append([]runtimecontract.RuntimeSemanticFeasibilityGap(nil), ledger.FeasibilityGaps...),
 		CatalogRefreshAttempts: ledger.CatalogRefreshAttempts,
 		History:                ledger.History, HistoryArchive: ledger.HistoryArchive,
 	}
@@ -829,97 +829,6 @@ func currentRuntimeCWIBindingExecutionLocked(aggregate RuntimeAggregate) bool {
 	return false
 }
 
-func (c *planningTransactionComponent) advanceSemanticPlanBatch(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, identity runtimecontract.RuntimeSemanticPlanBatch, next runtimecontract.RuntimeSemanticPlanBatchState) (RuntimeAggregate, error) {
-	transaction, err := c.beginSemanticPlanningMutation(ctx, workspaceID, runID)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	changed, err := func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
-		for idx := range ledger.Batches {
-			if ledger.Batches[idx].BatchID != identity.BatchID {
-				continue
-			}
-			persisted := ledger.Batches[idx].Clone()
-			identity = identity.Normalized()
-			if !runtimecontract.SameRuntimeSemanticPlanBatchImmutableIdentity(persisted, identity) {
-				return false, fmt.Errorf("%w: semantic batch immutable identity is stale", common.ErrConflict)
-			}
-			if persisted.State == next {
-				return false, nil
-			}
-			if persisted.Hash != identity.Hash || persisted.State != identity.State {
-				return false, fmt.Errorf("%w: semantic batch identity is stale", common.ErrConflict)
-			}
-			advanced, err := advanceRuntimeSemanticPlanBatch(persisted, next)
-			if err != nil {
-				return false, err
-			}
-			ledger.Batches[idx] = advanced
-			return true, nil
-		}
-		return false, fmt.Errorf("%w: semantic batch is missing", common.ErrConflict)
-	}(transaction.aggregate, &transaction.ledger)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
-}
-
-func (c *planningTransactionComponent) observeSemanticPlanBatchFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, result runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult) (RuntimeAggregate, error) {
-	transaction, err := c.beginSemanticPlanningMutation(ctx, workspaceID, runID)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	changed, err := func(aggregate RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
-		for _, existing := range ledger.BatchFeasibilityResults {
-			if existing.BatchID != result.BatchID {
-				continue
-			}
-			if existing.Hash == result.Hash {
-				return false, nil
-			}
-			return false, fmt.Errorf("%w: conflicting semantic batch feasibility result", common.ErrConflict)
-		}
-		var batch *runtimecontract.RuntimeSemanticPlanBatch
-		for idx := range ledger.Batches {
-			if ledger.Batches[idx].BatchID == result.BatchID {
-				value := ledger.Batches[idx]
-				batch = &value
-				break
-			}
-		}
-		if batch == nil || batch.Hash != result.BatchHash {
-			return false, fmt.Errorf("%w: semantic batch feasibility result is stale", common.ErrConflict)
-		}
-		if batch.BatchID != ledger.ActiveBatchID || batch.State != runtimecontract.RuntimeSemanticPlanBatchAccepted {
-			return false, fmt.Errorf("%w: semantic batch feasibility result is not for the accepted active batch", common.ErrConflict)
-		}
-		var document *runtimecontract.RuntimeSemanticPlanDocument
-		for idx := range ledger.BatchDocuments {
-			if ledger.BatchDocuments[idx].BatchID == result.BatchID {
-				value := ledger.BatchDocuments[idx].Clone()
-				document = &value
-				break
-			}
-		}
-		if document == nil {
-			return false, fmt.Errorf("%w: semantic batch feasibility result has no document", common.ErrConflict)
-		}
-		if err := result.Validate(*batch, *document, *ledger.Manifest); err != nil {
-			return false, err
-		}
-		if result.Hash != runtimecontract.StableRuntimeSemanticPlanBatchFeasibilityResultHash(result) {
-			return false, fmt.Errorf("%w: semantic batch feasibility result hash mismatch", common.ErrConflict)
-		}
-		ledger.BatchFeasibilityResults = append(ledger.BatchFeasibilityResults, result.Normalized())
-		return true, nil
-	}(transaction.aggregate, &transaction.ledger)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
-}
-
 func (c *planningTransactionComponent) observeSemanticPlanBatchDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, document runtimecontract.RuntimeSemanticPlanDocument) (RuntimeAggregate, error) {
 	document = document.Normalized()
 	if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch && len(document.CoverageOrder) != 0 {
@@ -966,75 +875,6 @@ func (c *planningTransactionComponent) observeSemanticPlanBatchDocument(ctx cont
 			}
 		}
 		ledger.Phase = runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted
-		return true, nil
-	}(transaction.aggregate, &transaction.ledger)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
-}
-
-func (c *planningTransactionComponent) mergeSemanticPlanBatchDocuments(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, merged runtimecontract.RuntimeSemanticPlanDocument) (RuntimeAggregate, error) {
-	transaction, err := c.beginSemanticPlanningMutation(ctx, workspaceID, runID)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	changed, err := func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
-		// A response-loss replay arrives after the durable merge CAS cleared the
-		// active batch. Match the persisted immutable hash before consulting the
-		// working-state guards; duplicate private events are a read-only no-op and
-		// must not be misclassified as "no coverage order".
-		incomingHash := runtimecontract.StableRuntimeSemanticPlanDocumentHash(merged)
-		if ledger.MergedDocumentHash == incomingHash && ledger.MergedDocument != nil &&
-			runtimecontract.StableRuntimeSemanticPlanDocumentHash(*ledger.MergedDocument) == incomingHash {
-			return false, nil
-		}
-		if ledger.Manifest == nil || ledger.CoverageOrderDocument == nil || ledger.Document == nil || ledger.Document.PlanStep != runtimecontract.RuntimeSemanticPlanStepCoverageOrder || ledger.ActiveBatchID == "" {
-			return false, fmt.Errorf("%w: semantic merge has no coverage order", common.ErrConflict)
-		}
-		var batch *runtimecontract.RuntimeSemanticPlanBatch
-		for idx := range ledger.Batches {
-			if ledger.Batches[idx].BatchID == ledger.ActiveBatchID {
-				value := ledger.Batches[idx].Clone()
-				batch = &value
-				break
-			}
-		}
-		if batch == nil || batch.State != runtimecontract.RuntimeSemanticPlanBatchAccepted {
-			return false, fmt.Errorf("%w: semantic merge has no accepted active batch", common.ErrConflict)
-		}
-		batchDocument, found := runtimeSemanticBatchDocument(ledger.BatchDocuments, batch.BatchID)
-		if !found {
-			return false, fmt.Errorf("%w: semantic merge has no active batch document", common.ErrConflict)
-		}
-		expected, err := runtimecontract.MergeRuntimeSemanticPlanFocusBatchDocument(*ledger.Manifest, *batch, batchDocument)
-		if err != nil {
-			return false, err
-		}
-		hash := runtimecontract.StableRuntimeSemanticPlanDocumentHash(expected)
-		if hash != runtimecontract.StableRuntimeSemanticPlanDocumentHash(merged) {
-			return false, fmt.Errorf("%w: semantic merge expands or changes the active focus batch", common.ErrConflict)
-		}
-		if ledger.MergedDocumentHash == hash {
-			return false, nil
-		}
-		if ledger.MergedDocumentHash != "" {
-			return false, fmt.Errorf("%w: conflicting merged semantic document", common.ErrConflict)
-		}
-		value := expected.Clone()
-		ledger.MergedDocument = &value
-		ledger.MergedDocumentHash = hash
-		ledger.Document = &value
-		ledger.DocumentHash = hash
-		ledger.FeasibilityBatchID = runtimecontract.StableRuntimeSemanticFeasibilityBatchID(*ledger.Manifest, value)
-		if !containsString(ledger.CompletedBatchIDs, batch.BatchID) {
-			ledger.CompletedBatchIDs = append(ledger.CompletedBatchIDs, batch.BatchID)
-		}
-		ledger.ActiveBatchID = ""
-		// Pending coverage belongs to the immutable global order lineage, not
-		// to this focus's binding set.  Keep it so the next focus can open its
-		// own bounded proof batch after this one settles.
-		ledger.Phase = runtimecontract.RuntimeSemanticPlanningFeasibilityRequired
 		return true, nil
 	}(transaction.aggregate, &transaction.ledger)
 	if err != nil {
@@ -1101,13 +941,7 @@ func runtimeSemanticCatalogForOwner(manifest runtimecontract.RuntimeSemanticPlan
 }
 
 func runtimeSemanticDependencyCatalogForOwner(manifest runtimecontract.RuntimeSemanticPlanManifest, ownerModuleID string) (runtimecontract.RuntimeOperationAdmissibility, bool) {
-	ownerModuleID = strings.TrimSpace(ownerModuleID)
-	for _, catalog := range manifest.Normalized().OwnerFactDependencyCatalogs {
-		if catalog.OwnerModuleID == ownerModuleID {
-			return catalog, true
-		}
-	}
-	return runtimecontract.RuntimeOperationAdmissibility{}, false
+	return manifest.OwnerFactDependencyCatalogForOwner(ownerModuleID)
 }
 
 func semanticCatalogPrerequisiteObservation(facts runtimecontract.RuntimeFacts, catalog runtimecontract.RuntimeOperationAdmissibility, observationID string) (runtimecontract.RuntimePrerequisiteObservation, bool) {
@@ -1177,8 +1011,9 @@ func (c *planningTransactionComponent) startSemanticPlanRequest(ctx context.Cont
 	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
 }
 
-// evaluateSemanticPlan persists one complete accepted provider document. It
-// cannot create feasibility, binding, dispatch, coverage or terminal facts.
+// evaluateSemanticPlan persists one complete accepted provider document and
+// classifies any attached validation-input review or advances an ordinary
+// proof batch directly to feasibility-required in the same owner-local CAS.
 func (c *planningTransactionComponent) evaluateSemanticPlan(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, document runtimecontract.RuntimeSemanticPlanDocument) (RuntimeAggregate, error) {
 	logicalRequestID = strings.TrimSpace(logicalRequestID)
 	document = canonicalRuntimeSemanticPlanDocument(document)
@@ -1189,6 +1024,17 @@ func (c *planningTransactionComponent) evaluateSemanticPlan(ctx context.Context,
 	changed, err := evaluateSemanticPlanMutation(transaction.aggregate, &transaction.ledger, logicalRequestID, document)
 	if err != nil {
 		return RuntimeAggregate{}, err
+	}
+	if changed && transaction.ledger.Phase == runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted {
+		handled, reviewChanged, reviewErr := classifyRuntimeInputReview(&transaction)
+		if reviewErr != nil {
+			return RuntimeAggregate{}, reviewErr
+		}
+		if handled {
+			changed = changed || reviewChanged
+		} else if err := advanceProofBatchToFeasibilityRequired(&transaction.ledger); err != nil {
+			return RuntimeAggregate{}, err
+		}
 	}
 	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
 }
@@ -1221,6 +1067,70 @@ func (c *planningTransactionComponent) compileSingletonSemanticOrder(ctx context
 		return RuntimeAggregate{}, err
 	}
 	ledger.CompiledOrder = runtimecontract.NewRuntimeSemanticCompiledOrder(*ledger.Manifest, order)
+	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
+}
+
+// compileSingletonProofBatch deterministically compiles an unambiguous single-CWI
+// proof batch using the same private SM-3 document transition, recording explicit
+// compiler provenance with no provider session or budget credit, and advancing
+// directly to owner feasibility probing.
+func (c *planningTransactionComponent) compileSingletonProofBatch(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logical string) (RuntimeAggregate, error) {
+	logical = strings.TrimSpace(logical)
+	transaction, err := c.beginSemanticPlanningMutation(ctx, workspaceID, runID)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	ledger := &transaction.ledger
+	if ledger.Manifest == nil || logical == "" {
+		return RuntimeAggregate{}, common.ErrConflict
+	}
+	var batch runtimecontract.RuntimeSemanticPlanBatch
+	batchFound := false
+	for _, candidate := range ledger.Batches {
+		if candidate.RequestLogicalID == logical {
+			batch = candidate.Clone()
+			batchFound = true
+			break
+		}
+	}
+	if !batchFound {
+		return RuntimeAggregate{}, common.ErrConflict
+	}
+	for _, existing := range ledger.CompiledProofBatches {
+		if existing.BatchID != batch.BatchID {
+			continue
+		}
+		if existing.ManifestHash != ledger.Manifest.Hash {
+			return RuntimeAggregate{}, common.ErrConflict
+		}
+		return transaction.aggregate, nil
+	}
+	if ledger.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen ||
+		ledger.ActiveBatchID != batch.BatchID ||
+		ledger.LogicalRequestID != logical ||
+		ledger.Attempt != 0 ||
+		ledger.FailureInputReview != nil {
+		return RuntimeAggregate{}, common.ErrConflict
+	}
+	for _, session := range transaction.aggregate.CandidateRequestSessions {
+		if session.LogicalRequestID == logical {
+			return RuntimeAggregate{}, fmt.Errorf("%w: provider transaction already exists", common.ErrConflict)
+		}
+	}
+	doc, rule, ok := runtimecontract.CompileRuntimeSingletonProofBatch(*ledger.Manifest, batch)
+	if !ok {
+		return RuntimeAggregate{}, common.ErrConflict
+	}
+	changed, err := evaluateSemanticPlanMutation(transaction.aggregate, ledger, logical, doc)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if changed {
+		if err := advanceProofBatchToFeasibilityRequired(ledger); err != nil {
+			return RuntimeAggregate{}, err
+		}
+		ledger.CompiledProofBatches = append(ledger.CompiledProofBatches, *runtimecontract.NewRuntimeSemanticCompiledProofBatch(*ledger.Manifest, batch, rule, doc))
+	}
 	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
 }
 
@@ -1384,7 +1294,8 @@ func advanceSemanticProofBatchDocument(ledger *runtimecontract.RuntimeSemanticPl
 }
 
 // requireSemanticFeasibility is the SM-2 handoff from an accepted proposal to
-// a bounded owner-probe batch.
+// a bounded owner-probe batch (used for inconclusive input-review recovery and
+// replay of already-advanced batches).
 func (c *planningTransactionComponent) requireSemanticFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
 	transaction, err := c.beginSemanticPlanningMutation(ctx, workspaceID, runID)
 	if err != nil {
@@ -1397,29 +1308,9 @@ func (c *planningTransactionComponent) requireSemanticFeasibility(ctx context.Co
 		if ledger.Phase == runtimecontract.RuntimeSemanticPlanningFeasibilityRequired {
 			return false, nil
 		}
-		if ledger.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted || ledger.Manifest == nil || ledger.Document == nil || ledger.ActiveBatchID == "" {
-			return false, fmt.Errorf("%w: semantic feasibility requires an accepted focus proof batch", common.ErrConflict)
+		if err := advanceProofBatchToFeasibilityRequired(ledger); err != nil {
+			return false, err
 		}
-		batch, found := runtimeSemanticBatch(ledger.Batches, ledger.ActiveBatchID)
-		if !found || batch.State != runtimecontract.RuntimeSemanticPlanBatchDocumentComplete {
-			return false, fmt.Errorf("%w: semantic feasibility has no document-complete active batch", common.ErrConflict)
-		}
-		feasibilityDocument, found := runtimeSemanticBatchDocument(ledger.BatchDocuments, ledger.ActiveBatchID)
-		if !found || feasibilityDocument.PlanStep != runtimecontract.RuntimeSemanticPlanStepProofBatch {
-			return false, fmt.Errorf("%w: semantic feasibility has no active proof document", common.ErrConflict)
-		}
-		ledger.Phase = runtimecontract.RuntimeSemanticPlanningFeasibilityRequired
-		for idx := range ledger.Batches {
-			if ledger.Batches[idx].BatchID == ledger.ActiveBatchID {
-				advanced, advanceErr := advanceRuntimeSemanticPlanBatch(ledger.Batches[idx], runtimecontract.RuntimeSemanticPlanBatchFeasibilityPending)
-				if advanceErr != nil {
-					return false, advanceErr
-				}
-				ledger.Batches[idx] = advanced
-				break
-			}
-		}
-		ledger.FeasibilityBatchID = runtimecontract.StableRuntimeSemanticFeasibilityBatchID(*ledger.Manifest, feasibilityDocument)
 		return true, nil
 	}(transaction.aggregate, &transaction.ledger)
 	if err != nil {
@@ -1428,10 +1319,52 @@ func (c *planningTransactionComponent) requireSemanticFeasibility(ctx context.Co
 	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
 }
 
-// observeSemanticFeasibility persists one canonical owner's factual result.
-// Conflicting duplicates are rejected instead of replacing owner history.
-func (c *planningTransactionComponent) observeSemanticFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, batchID string, observation runtimecontract.RuntimeSemanticProofFeasibility) (RuntimeAggregate, error) {
+func advanceProofBatchToFeasibilityRequired(ledger *runtimecontract.RuntimeSemanticPlanningLedger) error {
+	if ledger.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted || ledger.Manifest == nil || ledger.Document == nil || ledger.ActiveBatchID == "" {
+		return fmt.Errorf("%w: semantic feasibility requires an accepted focus proof batch", common.ErrConflict)
+	}
+	batch, found := runtimeSemanticBatch(ledger.Batches, ledger.ActiveBatchID)
+	if !found || batch.State != runtimecontract.RuntimeSemanticPlanBatchDocumentComplete {
+		return fmt.Errorf("%w: semantic feasibility has no document-complete active batch", common.ErrConflict)
+	}
+	feasibilityDocument, found := runtimeSemanticBatchDocument(ledger.BatchDocuments, ledger.ActiveBatchID)
+	if !found || feasibilityDocument.PlanStep != runtimecontract.RuntimeSemanticPlanStepProofBatch {
+		return fmt.Errorf("%w: semantic feasibility has no active proof document", common.ErrConflict)
+	}
+	ledger.Phase = runtimecontract.RuntimeSemanticPlanningFeasibilityRequired
+	for idx := range ledger.Batches {
+		if ledger.Batches[idx].BatchID == ledger.ActiveBatchID {
+			advanced, advanceErr := advanceRuntimeSemanticPlanBatch(ledger.Batches[idx], runtimecontract.RuntimeSemanticPlanBatchFeasibilityPending)
+			if advanceErr != nil {
+				return advanceErr
+			}
+			ledger.Batches[idx] = advanced
+			break
+		}
+	}
+	ledger.FeasibilityBatchID = runtimecontract.StableRuntimeSemanticFeasibilityBatchID(*ledger.Manifest, feasibilityDocument)
+	return nil
+}
+
+// observeSemanticFeasibilities persists one wave of canonical owner factual
+// results in a single aggregate CAS. Conflicting duplicates are rejected instead
+// of replacing owner history.
+func (c *planningTransactionComponent) observeSemanticFeasibilities(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, batchID string, observations []runtimecontract.RuntimeSemanticProofFeasibility) (RuntimeAggregate, error) {
 	batchID = strings.TrimSpace(batchID)
+	if len(observations) == 0 {
+		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	seenProposals := make(map[string]struct{}, len(observations))
+	for _, observation := range observations {
+		proposalHash := strings.TrimSpace(observation.ProposalHash)
+		if proposalHash == "" {
+			return RuntimeAggregate{}, common.ErrInvalidArgument
+		}
+		if _, dup := seenProposals[proposalHash]; dup {
+			return RuntimeAggregate{}, fmt.Errorf("%w: duplicate semantic feasibility proposal %q in wave", common.ErrConflict, proposalHash)
+		}
+		seenProposals[proposalHash] = struct{}{}
+	}
 	transaction, err := c.beginSemanticPlanningMutation(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
@@ -1461,49 +1394,67 @@ func (c *planningTransactionComponent) observeSemanticFeasibility(ctx context.Co
 			if ledger.Manifest == nil || ledger.Document == nil || ledger.FeasibilityBatchID != batchID {
 				return false, fmt.Errorf("%w: semantic feasibility batch is stale", common.ErrConflict)
 			}
-			// The final owner fact advances a proof batch to its completed phase in
-			// the same CAS. A duplicate delivery can therefore arrive after that
-			// transition (or after seal); compare the persisted fact before applying
-			// the phase gate so exact replays are read-only and conflicting facts are
-			// still rejected.
-			incomingHash := runtimecontract.StableRuntimeSemanticFeasibilitySetHash([]runtimecontract.RuntimeSemanticProofFeasibility{observation})
-			for _, existing := range ledger.Feasibilities {
-				if existing.ProposalHash != observation.ProposalHash {
+			var feasibilityDocument runtimecontract.RuntimeSemanticPlanDocument
+			docLoaded := false
+			anyAdded := false
+			for _, observation := range observations {
+				// The final owner fact advances a proof batch to its completed phase in
+				// the same CAS. A duplicate delivery can therefore arrive after that
+				// transition (or after seal); compare the persisted fact before applying
+				// the phase gate so exact replays are read-only and conflicting facts are
+				// still rejected.
+				incomingHash := runtimecontract.StableRuntimeSemanticFeasibilitySetHash([]runtimecontract.RuntimeSemanticProofFeasibility{observation})
+				alreadyPersisted := false
+				for _, existing := range ledger.Feasibilities {
+					if existing.ProposalHash != observation.ProposalHash {
+						continue
+					}
+					existingHash := runtimecontract.StableRuntimeSemanticFeasibilitySetHash([]runtimecontract.RuntimeSemanticProofFeasibility{existing})
+					if existingHash == incomingHash && (ledger.Phase == runtimecontract.RuntimeSemanticPlanningFeasibilityRequired || ledger.Phase == runtimecontract.RuntimeSemanticPlanningProofBatchFeasibilityComplete || ledger.Phase == runtimecontract.RuntimeSemanticPlanningSealed) {
+						alreadyPersisted = true
+						break
+					}
+					return false, fmt.Errorf("%w: conflicting semantic feasibility observation", common.ErrConflict)
+				}
+				if alreadyPersisted {
 					continue
 				}
-				existingHash := runtimecontract.StableRuntimeSemanticFeasibilitySetHash([]runtimecontract.RuntimeSemanticProofFeasibility{existing})
-				if existingHash == incomingHash && (ledger.Phase == runtimecontract.RuntimeSemanticPlanningFeasibilityRequired || ledger.Phase == runtimecontract.RuntimeSemanticPlanningProofBatchFeasibilityComplete || ledger.Phase == runtimecontract.RuntimeSemanticPlanningSealed) {
-					return false, nil
+				if ledger.ActiveBatchID == "" {
+					return false, fmt.Errorf("%w: semantic feasibility batch is stale", common.ErrConflict)
 				}
-				return false, fmt.Errorf("%w: conflicting semantic feasibility observation", common.ErrConflict)
+				if ledger.Phase != runtimecontract.RuntimeSemanticPlanningFeasibilityRequired {
+					return false, fmt.Errorf("%w: semantic feasibility batch is stale", common.ErrConflict)
+				}
+				if !docLoaded {
+					var found bool
+					feasibilityDocument, found = runtimeSemanticBatchDocument(ledger.BatchDocuments, ledger.ActiveBatchID)
+					if !found || feasibilityDocument.PlanStep != runtimecontract.RuntimeSemanticPlanStepProofBatch {
+						return false, fmt.Errorf("%w: semantic feasibility document is missing", common.ErrConflict)
+					}
+					docLoaded = true
+				}
+				proposal, found := runtimecontract.RuntimeSemanticProofProposalForHash(feasibilityDocument, observation.ProposalHash)
+				if !found {
+					return false, fmt.Errorf("%w: semantic feasibility references unknown proof", common.ErrConflict)
+				}
+				if err := observation.ValidateCompositeForProposal(*ledger.Manifest, proposal); err != nil {
+					return false, err
+				}
+				if err := validateRuntimeSemanticProspectiveObservationRequest(aggregate, *ledger.Manifest, proposal, batchID, observation); err != nil {
+					return false, err
+				}
+				if gaps := SemanticProspectiveFeasibilityFreshnessGaps(aggregate, *ledger.Manifest, observation); len(gaps) != 0 {
+					return false, fmt.Errorf("%w: prospective semantic feasibility observation is no longer current", common.ErrConflict)
+				}
+				ledger.Feasibilities = append(ledger.Feasibilities, observation.Clone())
+				anyAdded = true
 			}
-			if ledger.ActiveBatchID == "" {
-				return false, fmt.Errorf("%w: semantic feasibility batch is stale", common.ErrConflict)
+			if !anyAdded {
+				return false, nil
 			}
-			if ledger.Phase != runtimecontract.RuntimeSemanticPlanningFeasibilityRequired {
-				return false, fmt.Errorf("%w: semantic feasibility batch is stale", common.ErrConflict)
-			}
-			feasibilityDocument, found := runtimeSemanticBatchDocument(ledger.BatchDocuments, ledger.ActiveBatchID)
-			if !found || feasibilityDocument.PlanStep != runtimecontract.RuntimeSemanticPlanStepProofBatch {
-				return false, fmt.Errorf("%w: semantic feasibility document is missing", common.ErrConflict)
-			}
-			proposal, found := runtimecontract.RuntimeSemanticProofProposalForHash(feasibilityDocument, observation.ProposalHash)
-			if !found {
-				return false, fmt.Errorf("%w: semantic feasibility references unknown proof", common.ErrConflict)
-			}
-			if err := observation.ValidateCompositeForProposal(*ledger.Manifest, proposal); err != nil {
-				return false, err
-			}
-			if err := validateRuntimeSemanticProspectiveObservationRequest(aggregate, *ledger.Manifest, proposal, batchID, observation); err != nil {
-				return false, err
-			}
-			if gaps := SemanticProspectiveFeasibilityFreshnessGaps(aggregate, *ledger.Manifest, observation); len(gaps) != 0 {
-				return false, fmt.Errorf("%w: prospective semantic feasibility observation is no longer current", common.ErrConflict)
-			}
-			ledger.Feasibilities = append(ledger.Feasibilities, observation.Clone())
 			ledger.FeasibilitySetHash = runtimecontract.StableRuntimeSemanticFeasibilitySetHash(ledger.Feasibilities)
 			// Only an all-feasible owner set may advance the batch to the
-			// completed/accepted state.  Stale, prerequisite-required, and
+			// completed/accepted state. Stale, prerequisite-required, and
 			// infeasible facts remain in the feasibility-required phase so the
 			// SM-4 driver can route them through the bounded refresh/terminal
 			// path before any batch merge or binding authority is created.

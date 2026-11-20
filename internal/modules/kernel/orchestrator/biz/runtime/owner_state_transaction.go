@@ -126,13 +126,21 @@ func (t *ownerStateTransaction) validateAfterImage(aggregate RuntimeAggregate) e
 	if t.original == nil || t.committed {
 		return fmt.Errorf("%w: owner transaction has no formal preimage or is closed", common.ErrInvalidArgument)
 	}
+	diff := runtimecontract.ComputeRuntimeStateTransitionDiff(*t.original, ownerStateRecord(aggregate))
+	return t.validateAfterImageWithDiff(aggregate, diff)
+}
+
+func (t *ownerStateTransaction) validateAfterImageWithDiff(aggregate RuntimeAggregate, diff runtimecontract.RuntimeStateTransitionDiff) error {
+	if t.original == nil || t.committed {
+		return fmt.Errorf("%w: owner transaction has no formal preimage or is closed", common.ErrInvalidArgument)
+	}
 	t.committed = true
 	previous := RuntimeAggregate(*t.original)
 	image := ownerStateSourceImage(nil, aggregate)
 	image.AggregateJoins = func(gate *runtimecontract.RuntimeOwnerInvariantSourceGate) error {
-		return aggregate.validateOwnerAggregateTransition(&previous, gate)
+		return aggregate.validateOwnerAggregateTransitionWithDiff(&previous, diff, gate)
 	}
-	return runtimecontract.CompileRuntimeOwnerStateTransition(*t.original, image)
+	return runtimecontract.CompileRuntimeOwnerStateTransitionWithDiff(*t.original, image, diff)
 }
 
 // Trace is diagnostic only; a nil business context must not become a new panic

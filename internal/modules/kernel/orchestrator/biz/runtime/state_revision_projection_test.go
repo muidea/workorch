@@ -44,7 +44,7 @@ func TestRuntimeStateRevisionProjectionKeepsCompleteGate(t *testing.T) {
 				value.Definition.Revision, value.Facts.ExecutionBudgetPolicy.PolicyHash = "different", "different"
 				expected = "policy hash"
 			case "invalid-seed-before-mismatch":
-				value.Definition.Revision, value.SemanticPlanning.DefinitionSeed.Hash = "different", "different"
+				value.Definition.Revision, value.SemanticPlanning.DefinitionSeedHash = "different", "different"
 				expected = "seed"
 			}
 			before := value.Clone()

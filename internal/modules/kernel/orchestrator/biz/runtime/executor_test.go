@@ -915,10 +915,10 @@ func runtimeSealReplayProofOperation(t *testing.T, repository *controllerReposit
 		OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationID: operationID, TargetRefs: []string{target},
 		BeforeHash: "before", AfterHash: "after", AdmissibilitySnapshotID: catalog.SnapshotID, AcquisitionBinding: catalog.AcquisitionBinding,
 	}
-	if _, err := controller.recordCandidateFeasibility(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+	if _, err := controller.recordCandidateFeasibilities(context.Background(), "ws-v2", "run-v2", 0, []runtimecontract.RuntimeCandidateFeasibilityRecord{{
 		OperationID: operationID, AdmissibilitySnapshotID: catalog.SnapshotID, AcquisitionBinding: catalog.AcquisitionBinding,
 		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, "ws-v2", "run-v2", 0), Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}, ReplayProof: &proof,
-	}); err != nil {
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	sealed, err := controller.AdmitAndSealCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, candidate)

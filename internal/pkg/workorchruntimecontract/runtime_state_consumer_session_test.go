@@ -62,7 +62,7 @@ func mutateRuntimeStateConsumerSession(r *RuntimeStateRecord, arm uint8, raw str
 	case 8:
 		r.Facts.EvidenceRevision = InitialRuntimeEvidenceRevision
 	case 9:
-		r.SemanticPlanning.DefinitionSeed.PolicyHash = raw
+		r.SemanticPlanning.DefinitionSeedHash = raw
 	case 10:
 		if r.SemanticPlanning.Manifest != nil && len(r.SemanticPlanning.Manifest.OwnerCatalogs) > 0 {
 			r.SemanticPlanning.Manifest.OwnerCatalogs[0].SnapshotID = raw
@@ -85,7 +85,7 @@ func mutateRuntimeStateConsumerSession(r *RuntimeStateRecord, arm uint8, raw str
 		r.Facts.DefinitionSeed.Hash = raw
 	case 16:
 		if len(r.SemanticPlanning.History) > 0 {
-			r.SemanticPlanning.History[0].Snapshot.DefinitionSeed.Hash = raw
+			r.SemanticPlanning.History[0].Snapshot.DefinitionSeedHash = raw
 		}
 	case 17:
 		if len(r.CandidateAttempts) > 0 {

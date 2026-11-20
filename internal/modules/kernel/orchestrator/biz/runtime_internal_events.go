@@ -234,8 +234,8 @@ func (m *Biz) runtimeCandidateDocument(ctx context.Context, aggregate runtime.Ru
 	return m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: kind, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{Attempt: attempt, StablePrefixHash: stablePrefixHash, Manifest: &manifest, LogicalRequestID: logicalRequestID, Candidate: candidate, CandidateFailure: failure}})
 }
 
-func (m *Biz) runtimeRecordCandidateFeasibility(ctx context.Context, aggregate runtime.RuntimeAggregate, attempt int, record runtimecontract.RuntimeCandidateFeasibilityRecord) (runtime.RuntimeAggregate, error) {
-	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventCandidateFeasibilityObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{Attempt: attempt, CandidateFeasibility: &record}})
+func (m *Biz) runtimeRecordCandidateFeasibilities(ctx context.Context, aggregate runtime.RuntimeAggregate, attempt int, records []runtimecontract.RuntimeCandidateFeasibilityRecord) (runtime.RuntimeAggregate, error) {
+	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventCandidateFeasibilityObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{Attempt: attempt, CandidateFeasibilities: records}})
 	return result.Aggregate, err
 }
 

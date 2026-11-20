@@ -490,7 +490,7 @@ func testImplementationWorkRealFileTwoRounds(t *testing.T, rules []runtimecontra
 		default:
 			t.Fatalf("fresh work prerequisite unsupported by real File fixture: %#v", pending)
 		}
-		result, err := owner.controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{Kind: RuntimeInternalEventPrerequisiteObserved, Scope: RuntimeInternalEventScope{WorkspaceID: first.Facts.WorkspaceID, RunID: first.Facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{PrerequisiteResult: &observed}})
+		result, err := owner.controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{Kind: RuntimeInternalEventPrerequisiteObserved, Scope: RuntimeInternalEventScope{WorkspaceID: first.Facts.WorkspaceID, RunID: first.Facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{PrerequisiteResults: []PrerequisiteResult{observed}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -683,19 +683,13 @@ func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.Run
 		}
 		proof := runtimecontract.RuntimeSemanticPlanDocument{SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: workManifest.Hash, DefinitionSeedHash: workManifest.DefinitionSeedHash, PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch, BatchID: batch.BatchID, BatchSequence: batch.Sequence, BatchCoverageWorkItemIDs: batch.CoverageWorkItemIDs, Proposals: []runtimecontract.RuntimeSemanticProofProposal{proposal}}
 		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &proof, LogicalRequestID: batch.RequestLogicalID}})
-		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired, Authority: &RuntimeInternalAuthorityPayload{}})
 		catalog := workManifest.OwnerCatalogs[0]
 		catalogObservation := aggregate.Facts.Resources.PrerequisiteObservations[0]
 		feasibility := runtimecontract.RuntimeSemanticProofFeasibility{SchemaVersion: runtimecontract.RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: workManifest.Hash, DefinitionSeedHash: workManifest.DefinitionSeedHash, CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: runtimecontract.StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: catalog.SnapshotID, CatalogObservationID: catalogObservation.ObservationID, Status: runtimecontract.RuntimeSemanticFeasibilityFeasible, ObservedRevision: catalog.ObservedRevision, TargetRefs: targets}
 		if owner != nil {
 			feasibility = owner.semanticFeasibility(t, aggregate, workManifest, proposal)
 		}
-		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, Authority: &RuntimeInternalAuthorityPayload{SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibility}})
-		merged, err := runtimecontract.MergeRuntimeSemanticPlanFocusBatchDocument(workManifest, aggregate.SemanticPlanning.Batches[0], proof)
-		if err != nil {
-			t.Fatal(err)
-		}
-		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchDocumentsMerged, Transaction: &RuntimeInternalTransactionPayload{SemanticPlanMergedDocument: &merged}})
+		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, Authority: &RuntimeInternalAuthorityPayload{SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibilities: []runtimecontract.RuntimeSemanticProofFeasibility{feasibility}}})
 		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed, Authority: &RuntimeInternalAuthorityPayload{}})
 		if aggregate.ImplementationWork.Rounds[priorRounds].WorkingBinding == nil || aggregate.Decision.RequiredOutput.ImplementationWorkBindingHash == "" || aggregate.Facts.Coverage[0].CurrentBindingRef != nil || len(aggregate.Facts.Evidence.Accepted) != priorEvidence {
 			t.Fatal("working seal did not preserve no-credit purpose")
@@ -721,7 +715,6 @@ func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.Run
 		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventCandidateRequestSubmitted, Transaction: &RuntimeInternalTransactionPayload{LogicalRequestID: session.LogicalRequestID, Sequence: session.NextSequence, PhysicalCallID: physicalID}})
 		settlement := runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, physicalID, nil)
 		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventCandidateDocumentObserved, Transaction: &RuntimeInternalTransactionPayload{LogicalRequestID: session.LogicalRequestID, PhysicalCallID: physicalID, ProviderBudgetSettlement: settlement}})
-		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventCandidateAttemptBegun, Transaction: &RuntimeInternalTransactionPayload{StablePrefixHash: session.StablePrefixHash, LogicalRequestID: session.LogicalRequestID, Manifest: &candidateManifest}})
 		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{}}
 		for i, requirement := range candidateManifest.RequiredOperationSequence {
 			candidate.StateChange.Operations = append(candidate.StateChange.Operations, runtimecontract.StateChangingOperation{Operation: runtimecontract.RuntimeOperation{ID: fmt.Sprintf("work-op-%d", i), Kind: runtimecontract.StepKindFileWrite, RequiredOperationRef: requirement.RequirementID, TargetRefs: []string{requirement.TargetRef}, Parameters: runtimeFileWriteParameters(fmt.Sprintf("实际工作内容-%d", priorRounds+1))}})
@@ -753,13 +746,13 @@ func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.Run
 		if err := candidate.ValidateWithActivation(aggregate.Decision, runtimecontract.RuntimeActivationForFacts(aggregate.Facts)); err != nil {
 			t.Fatalf("real pipeline candidate activation validation: %v", err)
 		}
-		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventCandidateProposalObserved, Transaction: &RuntimeInternalTransactionPayload{Manifest: &candidateManifest, LogicalRequestID: session.LogicalRequestID, Candidate: &candidate}})
+		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventCandidateProposalObserved, Transaction: &RuntimeInternalTransactionPayload{StablePrefixHash: session.StablePrefixHash, Manifest: &candidateManifest, LogicalRequestID: session.LogicalRequestID, Candidate: &candidate}})
 		feasibilities := runtimeTestCurrentCandidateFeasibilities(t, aggregate, candidateManifest, candidate)
 		if owner != nil {
 			feasibilities = owner.candidateFeasibilities(t, aggregate, candidateManifest, candidate)
 		}
 		for _, fact := range feasibilities {
-			apply(RuntimeInternalEvent{Kind: RuntimeInternalEventCandidateFeasibilityObserved, Transaction: &RuntimeInternalTransactionPayload{CandidateFeasibility: &fact}})
+			apply(RuntimeInternalEvent{Kind: RuntimeInternalEventCandidateFeasibilityObserved, Transaction: &RuntimeInternalTransactionPayload{CandidateFeasibilities: []runtimecontract.RuntimeCandidateFeasibilityRecord{fact}}})
 		}
 		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventCandidateSealed, Transaction: &RuntimeInternalTransactionPayload{Manifest: &candidateManifest, LogicalRequestID: session.LogicalRequestID, Candidate: &candidate}})
 		if aggregate.ActiveDispatch == nil || aggregate.ActiveDispatch.ImplementationWorkCommitment == nil {

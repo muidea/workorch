@@ -1811,7 +1811,7 @@ C4 携带 complete source-bound 原生断言与反馈，并沿原64KiB execution
 `TestDriveRuntimeDynamicObservationsRepairAndRecovery` 使用真实Shell/File/Run/Result/Workspace，只有provider文档脚本化，
 动态普通日志→独立来源复现→原receipt重审→File修复→fresh all-of→assessment→三ACK；覆盖receipt、重审文档、修复effect及三owner持久化后响应丢失。
 该fixture不代表live项目全部义务或原300秒可行性。SM-2消费Shell正式typed来源/隔离/行为事实，不解析日志；SM-3保持唯一dispatch/key/fence/receipt，
-SM-4恢复不重复执行，SM-1无新transition。其它验证入口：`TestFailureInputReview*`、`TestDriveRuntimeProjectMultiFailureConfirmedRepair`、
+SM-4恢复不重复执行，SM-1无新transition。其它验证入口：`TestFailureInputReviewOpensOnceFromOriginalReceiptAndRecovers`、`TestFailureInputReviewConflictOpensOnlyProtectedInputMaintenance`、`TestDriveRuntimeProjectMultiFailureConfirmedRepair`、
 `TestDriveRuntimeFailedValidationInputRevisionAndRecovery`、Shell 原生正文/多行/超界测试及 LLM exact C4 渲染恢复测试。
 `TestDriveRuntimeSequentialFailuresToAcceptanceAndRecovery` 在同一 Run 中连接失败后的conflict受保护输入维护、
 consistent实施修复、修复引入的真实build失败、另一个body/value变化的业务失败、fresh普通all-of、

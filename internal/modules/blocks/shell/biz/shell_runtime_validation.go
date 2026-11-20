@@ -161,6 +161,8 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 		bindings := make([]runtimemodel.RuntimeValidationProofRequirementBinding, 0)
 		checks := make([]string, 0)
 		preparations := make([]runtimemodel.RuntimeValidationProofPreparation, 0)
+		contentContracts := make([]runtimemodel.RuntimeValidationContentContract, 0)
+		contentContractsByRef := make(map[string]string)
 		unavailabilities := make([]runtimemodel.RuntimeValidationProofUnavailability, 0)
 		compatibleRequirements := 0
 		var inputTargets []string
@@ -208,9 +210,22 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 					})
 					continue
 				}
-				preparation, observableNow, preparable := shellValidationProofPreparationFromInspection(inspection, binding.Manifest, catalogObservedRevision, readyIDs[recipe.ID], recipe, requirement, attestations)
+				preparation, contentRequirements, observableNow, preparable := shellValidationProofPreparationFromInspection(inspection, binding.Manifest, catalogObservedRevision, readyIDs[recipe.ID], recipe, requirement, attestations)
 				if !observableNow {
 					if preparable {
+						if preparation.ContentContractRef != "" {
+							if existing, exists := contentContractsByRef[preparation.ContentContractRef]; exists {
+								if existing != contentRequirements {
+									continue
+								}
+							} else {
+								contentContractsByRef[preparation.ContentContractRef] = contentRequirements
+								contentContracts = append(contentContracts, runtimemodel.RuntimeValidationContentContract{
+									Ref:          preparation.ContentContractRef,
+									Requirements: contentRequirements,
+								})
+							}
+						}
 						preparations = append(preparations, preparation)
 					}
 					continue
@@ -258,8 +273,8 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 		surface := runtimemodel.RuntimeValidationSurface{
 			ID: recipe.ID, OwnerModuleID: ModuleID, OperationKind: runtimemodel.RuntimeBlockKindManagedValidationSession,
 			CheckRefs: normalizeShellStrings(checks), ProofRequirementBindings: bindings, ProofRequirementPreparations: preparations,
-			ProofRequirementUnavailabilities: unavailabilities,
-			ProofApplicability:               runtimemodel.RuntimeValidationProofNotDeclared, EffectScope: runtimemodel.RuntimeEffectEphemeralSession,
+			PreparationContentContracts: contentContracts, ProofRequirementUnavailabilities: unavailabilities,
+			ProofApplicability: runtimemodel.RuntimeValidationProofNotDeclared, EffectScope: runtimemodel.RuntimeEffectEphemeralSession,
 			IdempotencyClass: runtimemodel.RuntimeOperationIdempotencyAtMostOnce,
 			InputSchemaHash:  schemaHash,
 		}
@@ -418,7 +433,7 @@ func shellValidationNativeCheckTargetRef(requirement runtimemodel.RuntimeValidat
 	return "workorch_validation/cwi_" + hex.EncodeToString(digest[:10]) + "_test.go"
 }
 
-func shellValidationProofPreparation(workspaceDirectory string, manifest runtimemodel.WorkspaceManifest, catalogObservedRevision string, recipeReady bool, recipe runtimemodel.RuntimeValidationRecipe, requirement runtimemodel.RuntimeValidationProofRequirement, attestations []runtimemodel.RuntimeValidationCheckAttestationBinding) (runtimemodel.RuntimeValidationProofPreparation, bool, bool) {
+func shellValidationProofPreparation(workspaceDirectory string, manifest runtimemodel.WorkspaceManifest, catalogObservedRevision string, recipeReady bool, recipe runtimemodel.RuntimeValidationRecipe, requirement runtimemodel.RuntimeValidationProofRequirement, attestations []runtimemodel.RuntimeValidationCheckAttestationBinding) (runtimemodel.RuntimeValidationProofPreparation, string, bool, bool) {
 	inspection := inspectShellNativeValidationChecks(workspaceDirectory, manifest.TargetRefs, attestations)
 	return shellValidationProofPreparationFromInspection(inspection, manifest, catalogObservedRevision, recipeReady, recipe, requirement, attestations)
 }
@@ -441,13 +456,13 @@ func shellNativeCheckInspectionPreparable(inspection shellNativeCheckInspection,
 	return true
 }
 
-func shellValidationProofPreparationFromInspection(inspection shellNativeCheckInspection, manifest runtimemodel.WorkspaceManifest, catalogObservedRevision string, recipeReady bool, recipe runtimemodel.RuntimeValidationRecipe, requirement runtimemodel.RuntimeValidationProofRequirement, attestations []runtimemodel.RuntimeValidationCheckAttestationBinding) (runtimemodel.RuntimeValidationProofPreparation, bool, bool) {
+func shellValidationProofPreparationFromInspection(inspection shellNativeCheckInspection, manifest runtimemodel.WorkspaceManifest, catalogObservedRevision string, recipeReady bool, recipe runtimemodel.RuntimeValidationRecipe, requirement runtimemodel.RuntimeValidationProofRequirement, attestations []runtimemodel.RuntimeValidationCheckAttestationBinding) (runtimemodel.RuntimeValidationProofPreparation, string, bool, bool) {
 	if !shellNativeCheckInspectionPreparable(inspection, requirement, manifest.TargetRefs, attestations) {
-		return runtimemodel.RuntimeValidationProofPreparation{}, false, false
+		return runtimemodel.RuntimeValidationProofPreparation{}, "", false, false
 	}
 	nativeChecksDeclared := inspection.Code == ""
 	if nativeChecksDeclared && recipeReady {
-		return runtimemodel.RuntimeValidationProofPreparation{}, true, true
+		return runtimemodel.RuntimeValidationProofPreparation{}, "", true, true
 	}
 	targetRef := ""
 	if !nativeChecksDeclared {
@@ -459,7 +474,7 @@ func shellValidationProofPreparationFromInspection(inspection shellNativeCheckIn
 	}
 	constraint, ok := shellProspectiveTargetSatisfactionConstraint(recipe, manifest.TargetRefs, catalogObservedRevision, requiredTargets...)
 	if !ok {
-		return runtimemodel.RuntimeValidationProofPreparation{}, false, false
+		return runtimemodel.RuntimeValidationProofPreparation{}, "", false, false
 	}
 	preparation := runtimemodel.RuntimeValidationProofPreparation{
 		RequirementHash: requirement.Hash, DefinitionRevision: requirement.DefinitionRevision,
@@ -470,22 +485,31 @@ func shellValidationProofPreparationFromInspection(inspection shellNativeCheckIn
 		SourceObligationChecks:                  runtimemodel.CloneRuntimeSourceObligationChecks(requirement.SourceObligationChecks),
 		ProspectiveTargetSatisfactionConstraint: constraint,
 	}.Normalized()
+	contentRequirements := ""
 	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterIsolatedEntrypoint && targetRef != "" {
 		preparation.ContentContractRef = shellIsolatedInputContentContractRef
-		preparation.ContentRequirements = shellIsolatedInputContentRequirements + shellAssertionFeedbackRequirements
+		contentRequirements = strings.TrimSpace(shellIsolatedInputContentRequirements + shellAssertionFeedbackRequirements)
 	}
 	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint && targetRef != "" {
 		preparation.ContentContractRef = shellConjunctiveInputContentContractRef
-		preparation.ContentRequirements = shellConjunctiveInputContentRequirements + shellAssertionFeedbackRequirements
+		contentRequirements = strings.TrimSpace(shellConjunctiveInputContentRequirements + shellAssertionFeedbackRequirements)
 	}
 	if shellProjectAdapter(recipe.AdapterRef) && targetRef != "" {
 		preparation.ContentContractRef = shellProjectInputContentContractRef
-		preparation.ContentRequirements = shellProjectContentRequirements(recipe.AdapterRef) + shellValidationDeclaredDeadlineRequirement(recipe.TimeoutMillis) + shellAssertionFeedbackRequirements
+		contentRequirements = strings.TrimSpace(shellProjectContentRequirements(recipe.AdapterRef) + shellValidationDeclaredDeadlineRequirement(recipe.TimeoutMillis) + shellAssertionFeedbackRequirements)
+	}
+	if preparation.ContentContractRef != "" {
+		contract := runtimemodel.RuntimeValidationContentContract{Ref: preparation.ContentContractRef, Requirements: contentRequirements}.Normalized()
+		if contract.Validate() != nil {
+			return runtimemodel.RuntimeValidationProofPreparation{}, "", false, false
+		}
+		preparation.ContentContractRef = contract.Ref
+		contentRequirements = contract.Requirements
 	}
 	if preparation.Validate() != nil {
-		return runtimemodel.RuntimeValidationProofPreparation{}, false, false
+		return runtimemodel.RuntimeValidationProofPreparation{}, "", false, false
 	}
-	return preparation, false, true
+	return preparation, contentRequirements, false, true
 }
 
 func shellNativeValidationChecksDeclared(workspaceDirectory string, targetRefs []string, attestations []runtimemodel.RuntimeValidationCheckAttestationBinding) bool {

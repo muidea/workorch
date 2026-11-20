@@ -288,13 +288,17 @@ func runtimeCandidateValidationProofPreparations(focus runtimecontract.CoverageF
 					!runtimecontract.RuntimeProspectiveTargetsSatisfyConstraint(focus.ProspectiveTargetRefs, preparation.ProspectiveTargetSatisfactionConstraint) {
 					continue
 				}
+				contentRequirements := ""
+				if preparation.ContentContractRef != "" {
+					contentRequirements, _ = surface.PreparationContentRequirementsFor(preparation.ContentContractRef)
+				}
 				for _, attestation := range preparation.CheckAttestations {
 					ret = append(ret, runtimeSemanticNativeCheckAttestationProjection{
 						SourceObligation: runtimePreparationSourceObligation(preparation, attestation.RequiredCheckRef),
 						OwnerModuleID:    catalog.OwnerModuleID, CoverageWorkItemID: preparation.CoverageWorkItemID, RequirementHash: preparation.RequirementHash,
 						ValidationRecipeID: preparation.ValidationRecipeID, RequiredCheckRef: attestation.RequiredCheckRef,
 						ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef, SupplementalNativeCheckRef: attestation.SupplementalNativeCheckRef,
-						TargetRef: preparation.TargetRef, ContentContractRef: preparation.ContentContractRef, ContentRequirements: preparation.ContentRequirements,
+						TargetRef: preparation.TargetRef, ContentContractRef: preparation.ContentContractRef, ContentRequirements: contentRequirements,
 					})
 				}
 			}

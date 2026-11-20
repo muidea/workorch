@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -968,4 +969,129 @@ func candidateBoundaryValidationCheckAttestations(requiredCheckRefs []string) []
 		})
 	}
 	return runtimecontract.NormalizeRuntimeValidationCheckAttestationBindings(ret)
+}
+
+func TestValidateCandidateRequestFrozenInputIntegrityAndTamperRejection(t *testing.T) {
+	attachFrozen := func(t *testing.T, r *llmmodels.RuntimeCandidateRequest, mutateEnvelope func(*frozenCandidateInputEnvelope)) {
+		t.Helper()
+		ws := string(r.CandidateContext.WorkspaceID)
+		run := string(r.CandidateContext.RunID)
+		ceiling := r.CandidateContext.Resources.ProviderCeiling
+		if r.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+			ws = string(r.SemanticContext.WorkspaceID)
+			run = string(r.SemanticContext.RunID)
+			ceiling = r.SemanticContext.ProviderCeiling
+		}
+		env := frozenCandidateInputEnvelope{
+			Expected:         r.ExpectedDocument.Clone(),
+			Messages:         json.RawMessage(`[]`),
+			CacheKey:         "cache-key-test",
+			LogicalRequestID: r.RequestIdentity.LogicalRequestID,
+			ExpectedHash:     r.ExpectedDocument.Hash,
+			DocumentKind:     r.DocumentKind,
+			ManifestHash:     r.ExpectedDocument.ManifestHash,
+			StablePrefixHash: r.StablePrefixHash,
+			Ceiling:          ceiling.Normalized(),
+			Request: llmmodels.ProviderRequest{
+				WorkspaceID: ws,
+				RunID:       run,
+			},
+		}
+		if mutateEnvelope != nil {
+			mutateEnvelope(&env)
+		}
+		raw, err := json.Marshal(env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.FrozenInput = raw
+		r.FrozenInputRef = &runtimecontract.RuntimeProviderInputRef{
+			Hash:  runtimecontract.RuntimeProviderInputHash(raw),
+			Bytes: len(raw),
+		}
+	}
+
+	for _, name := range []string{"operations", "semantic"} {
+		t.Run(name, func(t *testing.T) {
+			var req llmmodels.RuntimeCandidateRequest
+			if name == "operations" {
+				req = candidateRequest(t, runtimecontract.ConvergenceStateNeedStateChange)
+			} else {
+				req = semanticBoundaryRequest(t)
+			}
+			attachFrozen(t, &req, nil)
+			if err := validateCandidateRequest(req); err != nil {
+				t.Fatalf("valid frozen %s request rejected: %v", name, err)
+			}
+
+			// Tampered raw bytes against intact ref
+			tamperBytes := req
+			tamperBytes.FrozenInput = append(append([]byte(nil), req.FrozenInput...), ' ')
+			if err := validateCandidateRequest(tamperBytes); err == nil {
+				t.Fatal("tampered frozen bytes accepted")
+			}
+
+			// Tampered ref hash
+			tamperRef := req
+			refCopy := req.FrozenInputRef.Clone()
+			refCopy.Hash = "0000"
+			tamperRef.FrozenInputRef = refCopy
+			if err := validateCandidateRequest(tamperRef); err == nil {
+				t.Fatal("tampered frozen ref hash accepted")
+			}
+
+			// Missing FrozenInput with non-nil ref
+			missingBytes := req
+			missingBytes.FrozenInput = nil
+			if err := validateCandidateRequest(missingBytes); err == nil {
+				t.Fatal("nil FrozenInput with non-nil ref accepted")
+			}
+
+			// Envelope mismatch checks
+			for caseName, mut := range map[string]func(*frozenCandidateInputEnvelope){
+				"manifest_hash":     func(e *frozenCandidateInputEnvelope) { e.ManifestHash = "other-manifest" },
+				"stable_prefix":     func(e *frozenCandidateInputEnvelope) { e.StablePrefixHash = "other-prefix" },
+				"logical_request":   func(e *frozenCandidateInputEnvelope) { e.LogicalRequestID = "other-logical" },
+				"ceiling_max_bytes": func(e *frozenCandidateInputEnvelope) { e.Ceiling.MaxBytes++ },
+				"expected_hash":     func(e *frozenCandidateInputEnvelope) { e.ExpectedHash = "other-expected" },
+				"workspace_scope":   func(e *frozenCandidateInputEnvelope) { e.Request.WorkspaceID = "other-ws" },
+				"non_empty_config": func(e *frozenCandidateInputEnvelope) {
+					e.Request.Config = llmmodels.RedactedProviderConfig{ID: "forged-provider-id"}
+				},
+			} {
+				bad := req
+				attachFrozen(t, &bad, mut)
+				if err := validateCandidateRequest(bad); err == nil {
+					t.Fatalf("envelope tamper %q accepted", caseName)
+				}
+			}
+
+			// Unknown JSON field in frozen envelope
+			unknownField := req
+			rawObj := append([]byte(nil), req.FrozenInput[:len(req.FrozenInput)-1]...)
+			rawObj = append(rawObj, []byte(`,"unknownField":true}`)...)
+			unknownField.FrozenInput = rawObj
+			unknownField.FrozenInputRef = &runtimecontract.RuntimeProviderInputRef{
+				Hash:  runtimecontract.RuntimeProviderInputHash(rawObj),
+				Bytes: len(rawObj),
+			}
+			if err := validateCandidateRequest(unknownField); err == nil {
+				t.Fatal("frozen envelope with unknown JSON field accepted")
+			}
+
+			// Lightweight/state/transaction guards remain enforced even when frozen input verifies.
+			if name == "operations" {
+				badTx := req
+				badTx.Transaction.FocusID = "other-focus"
+				if err := validateCandidateRequest(badTx); err == nil {
+					t.Fatal("operations frozen request bypassed transaction guard")
+				}
+				badState := req
+				badState.Decision.State = runtimecontract.ConvergenceStateComplete
+				if err := validateCandidateRequest(badState); err == nil {
+					t.Fatal("operations frozen request bypassed state guard")
+				}
+			}
+		})
+	}
 }

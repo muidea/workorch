@@ -319,6 +319,9 @@ func TestPrerequisiteStaleInvalidatesPendingCandidateRequestWithoutCandidateDebt
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-1", "run-1", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
+	if admitted, err := controller.AdmitCandidateProposalForTest(ctx, "ws-1", "run-1", 0, runtimeTestBindCandidateToCurrentFocus(t, repository.aggregate, stateChangeCandidate())); err != nil || !admitted.Admission.Accepted() {
+		t.Fatalf("admit proposal = %+v err=%v", admitted.Admission, err)
+	}
 	stale := runtimecontract.RuntimePrerequisiteStale{
 		PrerequisiteID: prerequisite.ID, ObservationID: observation.ObservationID,
 		Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
@@ -383,6 +386,9 @@ func TestTargetSnapshotReadOnlyStaleReacquiresOnlyFileSnapshot(t *testing.T) {
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "target-snapshot-stale-prefix"); err != nil {
 		t.Fatal(err)
+	}
+	if admitted, err := controller.AdmitCandidateProposalForTest(ctx, "ws-v2", "run-v2", 0, runtimeTestBindCandidateToCurrentFocus(t, *repository.aggregate, controllerFileWriteCandidate())); err != nil || !admitted.Admission.Accepted() {
+		t.Fatalf("admit proposal = %+v err=%v", admitted.Admission, err)
 	}
 	stale := runtimecontract.RuntimePrerequisiteStale{
 		PrerequisiteID: prerequisite.ID, ObservationID: observation.ObservationID,
@@ -504,10 +510,10 @@ func TestFeasibilityPrerequisiteInvalidatesAttemptWithoutRetryOrRepairDebt(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.recordCandidateFeasibility(ctx, "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+	if _, err := controller.recordCandidateFeasibilities(ctx, "ws-v2", "run-v2", 0, []runtimecontract.RuntimeCandidateFeasibilityRecord{{
 		OperationID: operationID, AdmissibilitySnapshotID: inventory.SnapshotID,
 		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, "ws-v2", "run-v2", 0), Observation: &ownerObservation,
-	}); err != nil {
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	invalidated, err := controller.invalidateCandidateAttemptForFeasibilityPrerequisite(ctx, "ws-v2", "run-v2", 0, request)
@@ -610,10 +616,10 @@ func TestOwnerInfeasibilityInvalidatesAttemptAndFormsNewAuthorityWithoutCorrecti
 		Outcome: runtimecontract.RuntimeOwnerFeasibilityInfeasible, Feedback: &feedback,
 		OwnerPolicy: runtimecontract.RuntimeOwnerPolicyIdentity{OwnerModuleID: runtimecontract.RuntimeModuleFile, PolicyRevision: "file-owner-feasibility", CatalogSnapshotID: inventory.SnapshotID},
 	}
-	if _, err := controller.recordCandidateFeasibility(ctx, facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+	if _, err := controller.recordCandidateFeasibilities(ctx, facts.WorkspaceID, facts.RunID, 0, []runtimecontract.RuntimeCandidateFeasibilityRecord{{
 		OperationID: operationID, AdmissibilitySnapshotID: inventory.SnapshotID,
 		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, facts.WorkspaceID, facts.RunID, 0), Observation: &ownerObservation,
-	}); err != nil {
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	savesBeforeWrongEvent := repository.saves
@@ -638,7 +644,7 @@ func TestOwnerInfeasibilityInvalidatesAttemptAndFormsNewAuthorityWithoutCorrecti
 		invalidated.Facts.Failure == nil || invalidated.Facts.Failure.Class != runtimecontract.FailureClassCandidateInfeasible || invalidated.Facts.Repair.RepairAttempts != 0 {
 		t.Fatalf("owner infeasibility did not form a clean new authority: %+v", invalidated)
 	}
-	if _, err := controller.BeginCandidateAttemptForTest(ctx, facts.WorkspaceID, facts.RunID, 1, "owner-infeasible-prefix"); err == nil {
+	if _, err := controller.RejectCompletedCandidateDocumentForTest(ctx, facts.WorkspaceID, facts.RunID, 1, "owner-infeasible-prefix", runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassSchema)); err == nil {
 		t.Fatal("owner infeasibility incorrectly opened correction attempt 1")
 	}
 	// Recreate the controller over the same persisted aggregate. No process-local
@@ -839,7 +845,7 @@ func TestOwnerBindingContradictionRetiresExactBindingWithoutEffectAndIsRestartId
 		t.Fatal("binding contradiction accepted an unknown semantic generation")
 	}
 	committed, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
-		Kind: RuntimeInternalEventCandidateFeasibilityObserved, Scope: RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID}, Transaction: &RuntimeInternalTransactionPayload{Attempt: 0, CandidateFeasibility: &feasibilityRecord},
+		Kind: RuntimeInternalEventCandidateFeasibilityObserved, Scope: RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID}, Transaction: &RuntimeInternalTransactionPayload{Attempt: 0, CandidateFeasibilities: []runtimecontract.RuntimeCandidateFeasibilityRecord{feasibilityRecord}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -924,7 +930,7 @@ func TestOwnerBindingContradictionRetiresExactBindingWithoutEffectAndIsRestartId
 	}
 	saves := repository.saves
 	duplicate, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
-		Kind: RuntimeInternalEventCandidateFeasibilityObserved, Scope: RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID}, Transaction: &RuntimeInternalTransactionPayload{Attempt: 0, CandidateFeasibility: &feasibilityRecord},
+		Kind: RuntimeInternalEventCandidateFeasibilityObserved, Scope: RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID}, Transaction: &RuntimeInternalTransactionPayload{Attempt: 0, CandidateFeasibilities: []runtimecontract.RuntimeCandidateFeasibilityRecord{feasibilityRecord}},
 	})
 	if err != nil || duplicate.Aggregate.StateRevision != retired.StateRevision || repository.saves != saves {
 		t.Fatalf("duplicate binding contradiction was not a no-op: %+v err=%v saves=%d", duplicate.Aggregate, err, repository.saves)
@@ -1013,10 +1019,10 @@ func TestOwnerContractDefectFailsFastWithoutCorrectionOrEffect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.recordCandidateFeasibility(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+	if _, err := controller.recordCandidateFeasibilities(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID, 0, []runtimecontract.RuntimeCandidateFeasibilityRecord{{
 		OperationID: operationID, AdmissibilitySnapshotID: currentInventory.SnapshotID, AcquisitionBinding: currentInventory.AcquisitionBinding,
 		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, initialized.Facts.WorkspaceID, initialized.Facts.RunID, 0), Observation: &ownerObservation,
-	}); err != nil {
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	committed, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
@@ -1611,6 +1617,9 @@ func TestGitAdmissibilityReadOnlyStaleRetiresOnlyGitInventory(t *testing.T) {
 	}
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "git-admissibility-stale-prefix"); err != nil {
 		t.Fatal(err)
+	}
+	if admitted, err := controller.AdmitCandidateProposalForTest(ctx, "ws-v2", "run-v2", 0, runtimeTestBindCandidateToCurrentFocus(t, *repository.aggregate, controllerFileWriteCandidate())); err != nil || !admitted.Admission.Accepted() {
+		t.Fatalf("admit proposal = %+v err=%v", admitted.Admission, err)
 	}
 	stale := runtimecontract.RuntimePrerequisiteStale{
 		PrerequisiteID: gitPrerequisite.ID, ObservationID: gitObservation.ObservationID,
@@ -2232,5 +2241,175 @@ func TestRuntimeSemanticCatalogScopeGapDetectsMissingFocusTargetInBoundedExistin
 	prospective.Facts.Focus.ProspectiveTargetRefs = []string{"new_file.txt"}
 	if gap, found := NextRuntimeSemanticCatalogScopeGap(prospective); found {
 		t.Fatalf("prospective focus with ProspectiveOwnerTarget selector unexpectedly reported scope gap: %+v", gap)
+	}
+}
+
+func TestCommitPrerequisitesBatchWaveAndAtomicStaleRejection(t *testing.T) {
+	ctx := context.Background()
+	requirements := normalizeRuntimeRequirements([]runtimecontract.RuntimeRequirement{
+		{
+			Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindFileWrite},
+			Reason: "need file capability",
+		},
+		{
+			Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+			Reason: "need shell capability",
+		},
+		{
+			Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleGit,
+			CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindGitWrite},
+			Reason: "need git capability",
+		},
+		{
+			Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", Reason: "need manifest",
+		},
+	})
+	idFor := func(kind runtimecontract.PrerequisiteKind, owner string) string {
+		for _, r := range requirements {
+			if r.Kind == kind && r.OwnerModuleID == owner {
+				return runtimePrerequisiteID(r)
+			}
+		}
+		t.Fatalf("missing requirement %s/%s", kind, owner)
+		return ""
+	}
+	fileCapID := idFor(runtimecontract.PrerequisiteKindCapability, runtimecontract.RuntimeModuleFile)
+	shellCapID := idFor(runtimecontract.PrerequisiteKindCapability, runtimecontract.RuntimeModuleShell)
+	gitCapID := idFor(runtimecontract.PrerequisiteKindCapability, runtimecontract.RuntimeModuleGit)
+	manifestID := idFor(runtimecontract.PrerequisiteKindManifest, runtimecontract.RuntimeModuleFile)
+
+	facts := controllerFacts()
+	facts.Capabilities = runtimecontract.RuntimeCapabilities{}
+	facts.Resources.Manifest = nil
+
+	repo := &controllerRepository{}
+	controller, err := NewRuntimeController(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized, err := controller.initialize(ctx, facts, controllerDefinition(), requirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	savesBefore := repo.saves
+	revBefore := initialized.StateRevision
+
+	fileObs := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: fileCapID, Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, ContentHash: "cap-file-v1",
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "capability_catalog", Revision: "cap-file-v1"}},
+	}
+	fileObs.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(fileObs)
+	shellObs := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: shellCapID, Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell, ContentHash: "cap-shell-v1",
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleShell, SubjectRef: "capability_catalog", Revision: "cap-shell-v1"}},
+	}
+	shellObs.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(shellObs)
+	gitObs := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: gitCapID, Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleGit, ContentHash: "cap-git-v1",
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleGit, SubjectRef: "capability_catalog", Revision: "cap-git-v1"}},
+	}
+	gitObs.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(gitObs)
+	manifest := runtimecontract.WorkspaceManifest{Revision: "tree-wave-1", TargetRefs: []string{"target.txt"}}
+	manifestObs := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: manifestID, Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile, ContentHash: "tree-wave-1",
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: "tree-wave-1"}},
+	}
+	manifestObs.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(manifestObs)
+
+	wave := []PrerequisiteResult{
+		{PrerequisiteID: fileCapID, Capabilities: &runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.StepKindFileWrite}}, Observation: &fileObs},
+		{PrerequisiteID: shellCapID, Capabilities: &runtimecontract.RuntimeCapabilities{ValidationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}}, Observation: &shellObs},
+		{PrerequisiteID: gitCapID, Capabilities: &runtimecontract.RuntimeCapabilities{StateChangeKinds: []string{runtimecontract.StepKindGitWrite}}, Observation: &gitObs},
+		{PrerequisiteID: manifestID, Manifest: &manifest, Observation: &manifestObs},
+	}
+	committed, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind:      RuntimeInternalEventPrerequisiteObserved,
+		Scope:     RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID},
+		Authority: &RuntimeInternalAuthorityPayload{PrerequisiteResults: wave},
+	})
+	if err != nil {
+		t.Fatalf("wave commit failed: %v", err)
+	}
+	if repo.saves != savesBefore+1 || committed.Aggregate.StateRevision != revBefore+1 {
+		t.Fatalf("wave commit saves=%d rev=%d, want saves=%d rev=%d", repo.saves, committed.Aggregate.StateRevision, savesBefore+1, revBefore+1)
+	}
+	caps := committed.Aggregate.Facts.Capabilities
+	if !sameFreshnessStrings(caps.StateChangeKinds, []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindGitWrite}) ||
+		!sameFreshnessStrings(caps.ValidationKinds, []string{runtimecontract.RuntimeBlockKindManagedValidationSession}) {
+		t.Fatalf("multi-owner capability merge lost kinds: %+v", caps)
+	}
+	if committed.Aggregate.Facts.Resources.Manifest == nil || committed.Aggregate.Facts.Resources.Manifest.Revision != "tree-wave-1" {
+		t.Fatalf("wave manifest not committed: %+v", committed.Aggregate.Facts.Resources.Manifest)
+	}
+	// Duplicate replay of an already-committed wave returns error and performs 0 saves.
+	savesAfterCommit := repo.saves
+	if _, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind:      RuntimeInternalEventPrerequisiteObserved,
+		Scope:     RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID},
+		Authority: &RuntimeInternalAuthorityPayload{PrerequisiteResults: wave},
+	}); err == nil || repo.saves != savesAfterCommit {
+		t.Fatalf("duplicate wave replay err=%v saves=%d (want error and 0 extra saves)", err, repo.saves-savesAfterCommit)
+	}
+
+	// Atomic rollback: if any item in a wave is stale, the entire batch fails with 0 saves and no partial commit.
+	atomicReqs := normalizeRuntimeRequirements([]runtimecontract.RuntimeRequirement{
+		{Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Reason: "need manifest"},
+		{Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "target.txt", Reason: "need snapshot"},
+	})
+	atomicManifestID := runtimePrerequisiteID(atomicReqs[0])
+	atomicSnapshotID := runtimePrerequisiteID(atomicReqs[1])
+	if atomicReqs[0].Kind != runtimecontract.PrerequisiteKindManifest {
+		atomicManifestID, atomicSnapshotID = atomicSnapshotID, atomicManifestID
+	}
+	atomicFacts := controllerFacts()
+	atomicFacts.Resources.Manifest = nil
+	atomicFacts.Resources.TargetSnapshots = nil
+	staleSnap := runtimecontract.TargetSnapshot{TargetRef: "target.txt", Content: "old", ContentHash: "target-v1", ContentState: runtimecontract.SnapshotContentStateComplete}
+	staleSnapObs := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: atomicSnapshotID, Kind: runtimecontract.PrerequisiteKindTargetSnapshot, OwnerModuleID: runtimecontract.RuntimeModuleFile, ContentHash: "target-v1",
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "target.txt", Revision: "target-v1"}},
+	}
+	staleSnapObs.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(staleSnapObs)
+	atomicRepo := &controllerRepository{}
+	atomicController, err := NewRuntimeController(atomicRepo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	atomicInit, err := atomicController.initialize(ctx, atomicFacts, controllerDefinition(), atomicReqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidation := runtimecontract.RuntimePrerequisiteInvalidationRecord{
+		Signature:               "stale-target-wave-test",
+		PrerequisiteIDs:         []string{atomicSnapshotID},
+		ObservationIDs:          []string{staleSnapObs.ObservationID},
+		InvalidatedDependencies: staleSnapObs.Dependencies,
+		Stale: &runtimecontract.RuntimePrerequisiteStale{
+			PrerequisiteID: atomicSnapshotID, ObservationID: staleSnapObs.ObservationID,
+			Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "target.txt", ExpectedRevision: "target-v1", ObservedRevision: "target-v2", Reason: "stale target snapshot",
+		},
+	}
+	atomicInit.PrerequisiteInvalidations = []runtimecontract.RuntimePrerequisiteInvalidationRecord{invalidation}
+	atomicRepo.aggregate = &atomicInit
+	atomicSaves := atomicRepo.saves
+
+	atomicManifestObs := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: atomicManifestID, Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile, ContentHash: "tree-atomic-1",
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: "tree-atomic-1"}},
+	}
+	atomicManifestObs.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(atomicManifestObs)
+	if _, err := atomicController.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind:  RuntimeInternalEventPrerequisiteObserved,
+		Scope: RuntimeInternalEventScope{WorkspaceID: atomicFacts.WorkspaceID, RunID: atomicFacts.RunID},
+		Authority: &RuntimeInternalAuthorityPayload{PrerequisiteResults: []PrerequisiteResult{
+			{PrerequisiteID: atomicManifestID, Manifest: &runtimecontract.WorkspaceManifest{Revision: "tree-atomic-1", TargetRefs: []string{"target.txt"}}, Observation: &atomicManifestObs},
+			{PrerequisiteID: atomicSnapshotID, TargetSnapshot: &staleSnap, Observation: &staleSnapObs},
+		}},
+	}); !errors.Is(err, common.ErrConflict) || atomicRepo.saves != atomicSaves || atomicRepo.aggregate.Facts.Resources.Manifest != nil {
+		t.Fatalf("stale item in wave leaked partial state or skipped conflict: err=%v saves=%d manifest=%+v", err, atomicRepo.saves, atomicRepo.aggregate.Facts.Resources.Manifest)
 	}
 }

@@ -81,11 +81,19 @@ func CompileRuntimeOwnerStateTransition(previous RuntimeStateRecord, image Runti
 	if image.Converted == nil || image.Original != nil {
 		return fmt.Errorf("runtime transition requires complete postimage")
 	}
-	if err := ValidateRuntimeCommittedHistoryTransition(previous, *image.Converted); err != nil {
+	return CompileRuntimeOwnerStateTransitionWithDiff(previous, image, ComputeRuntimeStateTransitionDiff(previous, *image.Converted))
+}
+
+func CompileRuntimeOwnerStateTransitionWithDiff(previous RuntimeStateRecord, image RuntimeOwnerStateSourceImage, diff RuntimeStateTransitionDiff) error {
+	if image.Converted == nil || image.Original != nil {
+		return fmt.Errorf("runtime transition requires complete postimage")
+	}
+	if err := ValidateRuntimeCommittedHistoryTransitionWithDiff(previous, *image.Converted, diff); err != nil {
 		return err
 	}
 	session := newRuntimeSemanticValidationSession()
 	session.committedPreimage = &previous
+	session.transitionDiff = &diff
 	return validateRuntimeOwnerStateSourceImage(image, session, &runtimeHistoricalPreimageSession{semantic: session})
 }
 

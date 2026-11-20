@@ -14,21 +14,18 @@ func (c *RuntimeController) applyTransactionInternalEvent(ctx context.Context, e
 	case RuntimeInternalEventSemanticPlanRequestStarted,
 		RuntimeInternalEventSemanticPlanEvaluated,
 		RuntimeInternalEventSemanticSingletonOrderCompiled,
+		RuntimeInternalEventSemanticSingletonProofBatchCompiled,
 		RuntimeInternalEventSemanticPlanCorrectionRequired,
 		RuntimeInternalEventCandidateRequestEnsured,
 		RuntimeInternalEventSemanticPlanBatchCompiled,
-		RuntimeInternalEventSemanticPlanBatchAdvanced,
-		RuntimeInternalEventSemanticPlanBatchFeasibilityObserved,
 		RuntimeInternalEventSemanticPlanBatchDocumentObserved,
-		RuntimeInternalEventSemanticPlanBatchDocumentsMerged,
 		RuntimeInternalEventCandidateRequestSubmitted,
 		RuntimeInternalEventProviderRequestRecoveryCoordinated,
 		RuntimeInternalEventCandidateDocumentObserved,
 		RuntimeInternalEventCandidateRequestStaleObserved,
 		RuntimeInternalEventProviderRequestTerminalCoordinated:
 		return c.applyPlanningTransactionInternalEvent(ctx, event)
-	case RuntimeInternalEventCandidateAttemptBegun,
-		RuntimeInternalEventCandidateDocumentRejected,
+	case RuntimeInternalEventCandidateDocumentRejected,
 		RuntimeInternalEventCandidateProposalObserved,
 		RuntimeInternalEventCandidateConformanceObserved,
 		RuntimeInternalEventCandidateFeasibilityObserved,
@@ -67,6 +64,10 @@ func (c *RuntimeController) applyPlanningTransactionInternalEvent(ctx context.Co
 		aggregate, err := c.planning.compileSingletonSemanticOrder(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID)
 		result.Aggregate = aggregate
 		return result, err
+	case RuntimeInternalEventSemanticSingletonProofBatchCompiled:
+		aggregate, err := c.planning.compileSingletonProofBatch(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID)
+		result.Aggregate = aggregate
+		return result, err
 	case RuntimeInternalEventSemanticPlanEvaluated:
 		if event.Transaction.SemanticDocument == nil {
 			return result, common.ErrInvalidArgument
@@ -100,32 +101,11 @@ func (c *RuntimeController) applyPlanningTransactionInternalEvent(ctx context.Co
 		aggregate, err := c.planning.compileSemanticPlanBatch(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Transaction.SemanticPlanBatch)
 		result.Aggregate = aggregate
 		return result, err
-	case RuntimeInternalEventSemanticPlanBatchAdvanced:
-		if event.Transaction.SemanticPlanBatch == nil {
-			return result, common.ErrInvalidArgument
-		}
-		aggregate, err := c.planning.advanceSemanticPlanBatch(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Transaction.SemanticPlanBatch, event.Transaction.SemanticPlanBatchNextState)
-		result.Aggregate = aggregate
-		return result, err
-	case RuntimeInternalEventSemanticPlanBatchFeasibilityObserved:
-		if event.Transaction.SemanticPlanBatchFeasibilityResult == nil {
-			return result, common.ErrInvalidArgument
-		}
-		aggregate, err := c.planning.observeSemanticPlanBatchFeasibility(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Transaction.SemanticPlanBatchFeasibilityResult)
-		result.Aggregate = aggregate
-		return result, err
 	case RuntimeInternalEventSemanticPlanBatchDocumentObserved:
 		if event.Transaction.SemanticPlanBatchDocument == nil {
 			return result, common.ErrInvalidArgument
 		}
 		aggregate, err := c.planning.observeSemanticPlanBatchDocument(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Transaction.SemanticPlanBatchDocument)
-		result.Aggregate = aggregate
-		return result, err
-	case RuntimeInternalEventSemanticPlanBatchDocumentsMerged:
-		if event.Transaction.SemanticPlanMergedDocument == nil {
-			return result, common.ErrInvalidArgument
-		}
-		aggregate, err := c.planning.mergeSemanticPlanBatchDocuments(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Transaction.SemanticPlanMergedDocument)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateRequestSubmitted:
@@ -165,13 +145,6 @@ func (c *RuntimeController) applyPlanningTransactionInternalEvent(ctx context.Co
 func (c *RuntimeController) applyCandidateDispatchTransactionInternalEvent(ctx context.Context, event RuntimeInternalEvent) (RuntimeInternalEventResult, error) {
 	result := RuntimeInternalEventResult{}
 	switch event.Kind {
-	case RuntimeInternalEventCandidateAttemptBegun:
-		if event.Transaction.Manifest == nil {
-			return result, common.ErrInvalidArgument
-		}
-		aggregate, err := c.candidateDispatch.beginCandidateAttempt(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Attempt, event.Transaction.StablePrefixHash, *event.Transaction.Manifest, event.Transaction.LogicalRequestID)
-		result.Aggregate = aggregate
-		return result, err
 	case RuntimeInternalEventCandidateDocumentRejected:
 		if event.Transaction.Manifest == nil || event.Transaction.CandidateFailure == nil {
 			return result, common.ErrInvalidArgument
@@ -183,22 +156,22 @@ func (c *RuntimeController) applyCandidateDispatchTransactionInternalEvent(ctx c
 		if event.Transaction.Manifest == nil || event.Transaction.Candidate == nil {
 			return result, common.ErrInvalidArgument
 		}
-		admission, err := c.candidateDispatch.admitCandidateProposal(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Attempt, *event.Transaction.Manifest, event.Transaction.LogicalRequestID, *event.Transaction.Candidate)
+		admission, err := c.candidateDispatch.admitCandidateProposal(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Attempt, event.Transaction.StablePrefixHash, *event.Transaction.Manifest, event.Transaction.LogicalRequestID, *event.Transaction.Candidate)
 		result.Aggregate = admission.Aggregate
 		result.Admission = &admission
 		return result, err
 	case RuntimeInternalEventCandidateConformanceObserved:
-		if event.Transaction.CandidateConformance == nil {
+		if len(event.Transaction.CandidateConformances) == 0 {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.candidateDispatch.recordCandidateConformance(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Attempt, *event.Transaction.CandidateConformance)
+		aggregate, err := c.candidateDispatch.recordCandidateConformances(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Attempt, event.Transaction.CandidateConformances)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateFeasibilityObserved:
-		if event.Transaction.CandidateFeasibility == nil {
+		if len(event.Transaction.CandidateFeasibilities) == 0 {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.candidateDispatch.recordCandidateFeasibility(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Attempt, *event.Transaction.CandidateFeasibility)
+		aggregate, err := c.candidateDispatch.recordCandidateFeasibilities(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Attempt, event.Transaction.CandidateFeasibilities)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidatePrerequisiteStaleObserved:

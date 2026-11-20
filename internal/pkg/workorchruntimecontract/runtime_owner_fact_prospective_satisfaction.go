@@ -606,9 +606,37 @@ func normalizeRuntimeProspectiveManifestProjection(manifest RuntimeSemanticPlanM
 	return projection
 }
 
+func normalizeRuntimeProspectiveManifestForOwner(manifest RuntimeSemanticPlanManifest, ownerModuleID string) RuntimeSemanticPlanManifest {
+	projection := normalizeRuntimeProspectiveManifestProjection(manifest)
+	ownerModuleID = strings.TrimSpace(ownerModuleID)
+	if ownerModuleID != "" {
+		foundInDependency := false
+		for _, catalog := range projection.OwnerFactDependencyCatalogs {
+			if catalog.OwnerModuleID == ownerModuleID {
+				foundInDependency = true
+				break
+			}
+		}
+		if !foundInDependency {
+			for _, catalog := range manifest.OwnerCatalogs {
+				if strings.TrimSpace(catalog.OwnerModuleID) == ownerModuleID {
+					projection.OwnerFactDependencyCatalogs = append(projection.OwnerFactDependencyCatalogs, catalog.Normalized())
+					break
+				}
+			}
+		}
+	}
+	return projection
+}
+
 func runtimeProspectiveDependencyCatalogFor(manifest RuntimeSemanticPlanManifest, ownerModuleID string) (RuntimeOperationAdmissibility, bool) {
 	ownerModuleID = strings.TrimSpace(ownerModuleID)
 	for _, catalog := range NormalizeRuntimeOperationAdmissibilities(manifest.OwnerFactDependencyCatalogs) {
+		if catalog.OwnerModuleID == ownerModuleID {
+			return catalog.Normalized(), true
+		}
+	}
+	for _, catalog := range NormalizeRuntimeOperationAdmissibilities(manifest.OwnerCatalogs) {
 		if catalog.OwnerModuleID == ownerModuleID {
 			return catalog.Normalized(), true
 		}
@@ -618,7 +646,7 @@ func runtimeProspectiveDependencyCatalogFor(manifest RuntimeSemanticPlanManifest
 
 func validateRuntimeOwnerFactProspectiveSatisfactionObservationForProposal(value RuntimeOwnerFactProspectiveSatisfactionObservation, manifest RuntimeSemanticPlanManifest, proposal RuntimeSemanticProofProposal, acquisition RuntimeSemanticOwnerFactAcquisition, delta RuntimeProspectiveWorkspaceManifestDelta) error {
 	value = value.Normalized()
-	manifest = normalizeRuntimeProspectiveManifestProjection(manifest)
+	manifest = normalizeRuntimeProspectiveManifestForOwner(manifest, acquisition.Requirement.OwnerModuleID)
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -635,7 +663,7 @@ func validateRuntimeOwnerFactProspectiveSatisfactionObservationForProposal(value
 
 func validateRuntimeOwnerFactProspectiveSatisfactionForProposal(value RuntimeOwnerFactProspectiveSatisfaction, manifest RuntimeSemanticPlanManifest, proposal RuntimeSemanticProofProposal, acquisition RuntimeSemanticOwnerFactAcquisition, delta RuntimeProspectiveWorkspaceManifestDelta) error {
 	value = value.Normalized()
-	manifest = normalizeRuntimeProspectiveManifestProjection(manifest)
+	manifest = normalizeRuntimeProspectiveManifestForOwner(manifest, acquisition.Requirement.OwnerModuleID)
 	proposal = proposal.Normalized()
 	acquisition = acquisition.Normalized()
 	delta = delta.Normalized()
@@ -696,12 +724,25 @@ func runtimeSemanticOwnerCatalogFor(manifest RuntimeSemanticPlanManifest, ownerM
 
 func runtimeSemanticOwnerFactDependencyCatalogFor(manifest RuntimeSemanticPlanManifest, ownerModuleID string) (RuntimeOperationAdmissibility, bool) {
 	ownerModuleID = strings.TrimSpace(ownerModuleID)
-	for _, catalog := range manifest.Normalized().OwnerFactDependencyCatalogs {
+	manifest = manifest.Normalized()
+	for _, catalog := range manifest.OwnerFactDependencyCatalogs {
+		if catalog.OwnerModuleID == ownerModuleID {
+			return catalog.Normalized(), true
+		}
+	}
+	for _, catalog := range manifest.OwnerCatalogs {
 		if catalog.OwnerModuleID == ownerModuleID {
 			return catalog.Normalized(), true
 		}
 	}
 	return RuntimeOperationAdmissibility{}, false
+}
+
+// OwnerFactDependencyCatalogForOwner resolves the sealed dependency catalog for
+// ownerModuleID from OwnerFactDependencyCatalogs, falling back to OwnerCatalogs
+// when that owner is already selectable.
+func (m RuntimeSemanticPlanManifest) OwnerFactDependencyCatalogForOwner(ownerModuleID string) (RuntimeOperationAdmissibility, bool) {
+	return runtimeSemanticOwnerFactDependencyCatalogFor(m, ownerModuleID)
 }
 
 func runtimeProspectiveSatisfactionContractRecipeRefs(catalog RuntimeOperationAdmissibility, requirement RuntimeOwnerFactRequirement, contractRef string) []string {

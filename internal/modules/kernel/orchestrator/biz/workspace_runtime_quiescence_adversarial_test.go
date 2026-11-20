@@ -36,7 +36,7 @@ func TestWorkspaceRuntimeQuiescencePendingTerminalAckDrainsBeforeFreeze(t *testi
 	}
 	for _, event := range []runtime.RuntimeInternalEvent{
 		{Kind: runtime.RuntimeInternalEventFailureObserved, Scope: adversarialRuntimeScope(fixture)},
-		{Kind: runtime.RuntimeInternalEventCandidateAttemptBegun, Scope: adversarialRuntimeScope(fixture)},
+		{Kind: runtime.RuntimeInternalEventCandidateProposalObserved, Scope: adversarialRuntimeScope(fixture)},
 		{Kind: runtime.RuntimeInternalEventDriveLeaseScheduled, Scope: adversarialRuntimeScope(fixture), Delivery: &runtime.RuntimeInternalDeliveryPayload{DriveLease: &runtimecontract.RuntimeDriveLease{
 			WorkspaceID: fixture.workspaceID, RunID: fixture.runID, Reason: runtimecontract.RuntimeDriveLeaseReasonProviderRetry,
 			FailureSignature: "ordinary-provider-retry", DueAt: "2026-08-26T00:00:00Z",
@@ -68,7 +68,7 @@ func TestWorkspaceRuntimeQuiescencePendingTerminalAckDrainsBeforeFreeze(t *testi
 	}
 	blockedEvents := []runtime.RuntimeInternalEvent{
 		{Kind: runtime.RuntimeInternalEventFailureObserved, Scope: adversarialRuntimeScope(fixture)},
-		{Kind: runtime.RuntimeInternalEventCandidateAttemptBegun, Scope: adversarialRuntimeScope(fixture)},
+		{Kind: runtime.RuntimeInternalEventCandidateProposalObserved, Scope: adversarialRuntimeScope(fixture)},
 		{Kind: runtime.RuntimeInternalEventTerminalDeliveryAcknowledged, Scope: adversarialRuntimeScope(fixture), Delivery: &runtime.RuntimeInternalDeliveryPayload{DeliveryAcknowledgement: &runAck}},
 		{Kind: runtime.RuntimeInternalEventDriveLeaseScheduled, Scope: adversarialRuntimeScope(fixture), Delivery: &runtime.RuntimeInternalDeliveryPayload{DriveLease: &runtimecontract.RuntimeDriveLease{WorkspaceID: fixture.workspaceID, RunID: fixture.runID}}},
 	}

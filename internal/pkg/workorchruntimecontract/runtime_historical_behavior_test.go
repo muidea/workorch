@@ -89,7 +89,7 @@ func historicalBehaviorSemanticFixture(t *testing.T, definition RuntimeDefinitio
 	batch.State, batch.DocumentHash = RuntimeSemanticPlanBatchAccepted, StableRuntimeSemanticPlanDocumentHash(document)
 	batch.Hash = StableRuntimeSemanticPlanBatchHash(batch)
 	ledger := RuntimeSemanticPlanningLedger{SchemaVersion: RuntimeSemanticPlanningLedgerSchemaCurrent, Phase: RuntimeSemanticPlanningSealed,
-		DefinitionSeed: seed, Manifest: &manifest, StablePrefixHash: "original-stable-prefix", LogicalRequestID: requestID,
+		DefinitionSeedHash: seed.Hash, Manifest: &manifest, StablePrefixHash: "original-stable-prefix", LogicalRequestID: requestID,
 		CoverageOrderDocument: &order, Document: &document, DocumentHash: batch.DocumentHash, Batches: []RuntimeSemanticPlanBatch{batch},
 		NextBatchSequence: 1, CompletedBatchIDs: []string{batch.BatchID}, BatchDocuments: []RuntimeSemanticPlanDocument{document},
 		MergedDocument: &document, MergedDocumentHash: batch.DocumentHash, FeasibilityBatchID: StableRuntimeSemanticFeasibilityBatchID(manifest, document),
@@ -167,7 +167,7 @@ func TestHistoricalBehaviorRejectsPartialWeakUnconfirmedAndCoordinatedLineage(t 
 		},
 		"no semantic": func(s *RuntimeLineageAssertionSources) { s.Semantic = RuntimeSemanticPlanningLedger{} },
 		"semantic startup substitution": func(s *RuntimeLineageAssertionSources) {
-			s.Semantic.DefinitionSeed.Hash = "another-startup-seed"
+			s.Semantic.DefinitionSeedHash = "another-startup-seed"
 		},
 		"no accepted document":      func(s *RuntimeLineageAssertionSources) { s.Semantic.BatchDocuments = nil },
 		"missing owner feasibility": func(s *RuntimeLineageAssertionSources) { s.Semantic.Feasibilities = nil },

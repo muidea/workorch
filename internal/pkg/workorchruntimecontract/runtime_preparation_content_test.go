@@ -10,26 +10,46 @@ func TestPreparationContentContractIsOptionalBoundedAndHashBound(t *testing.T) {
 	catalog := RuntimeOperationAdmissibility{PrerequisiteID: "catalog", OwnerModuleID: RuntimeModuleShell, ValidationSurfaces: []RuntimeValidationSurface{runtimeExactProofClonePreparingSurfaceFixture("recipe").Normalized()}}
 	legacy, _ := json.Marshal(catalog)
 	legacyHash := StableRuntimeOperationAdmissibilitySnapshotID(catalog)
-	if strings.Contains(string(legacy), "ContentContractRef") || strings.Contains(string(legacy), "ContentRequirements") {
+	if strings.Contains(string(legacy), "ContentContractRef") || strings.Contains(string(legacy), "PreparationContentContracts") {
 		t.Fatal("absent content contract changed legacy JSON")
 	}
-	p := &catalog.ValidationSurfaces[0].ProofRequirementPreparations[0]
-	p.ContentContractRef, p.ContentRequirements = "owner/input/v1", "exact owner-authored syntax"
-	if err := p.Validate(); err != nil {
+	surface := &catalog.ValidationSurfaces[0]
+	p := &surface.ProofRequirementPreparations[0]
+	p.ContentContractRef = "owner/input/v1"
+	surface.PreparationContentContracts = []RuntimeValidationContentContract{{
+		Ref:          "owner/input/v1",
+		Requirements: "exact owner-authored syntax",
+	}}
+	if err := surface.Validate(); err != nil {
 		t.Fatal(err)
+	}
+	if got, ok := surface.PreparationContentRequirementsFor("owner/input/v1"); !ok || got != "exact owner-authored syntax" {
+		t.Fatalf("surface failed to resolve deduplicated content contract: ok=%v got=%q", ok, got)
 	}
 	hash := StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	if hash == legacyHash {
 		t.Fatal("content contract not sealed in catalog identity")
 	}
 	copy := catalog.Normalized()
-	copy.ValidationSurfaces[0].ProofRequirementPreparations[0].ContentRequirements += " changed"
-	if StableRuntimeOperationAdmissibilitySnapshotID(copy) == hash || p.ContentRequirements != "exact owner-authored syntax" {
+	copy.ValidationSurfaces[0].PreparationContentContracts[0].Requirements += " changed"
+	if StableRuntimeOperationAdmissibilitySnapshotID(copy) == hash || surface.PreparationContentContracts[0].Requirements != "exact owner-authored syntax" {
 		t.Fatal("copy aliased or omitted content requirements")
 	}
+	missingContractSurface := surface.Clone()
+	missingContractSurface.PreparationContentContracts = nil
+	if missingContractSurface.Validate() == nil {
+		t.Fatal("surface with missing content contract ref was accepted")
+	}
+	orphanContractSurface := surface.Clone()
+	orphanContractSurface.PreparationContentContracts = append(orphanContractSurface.PreparationContentContracts, RuntimeValidationContentContract{
+		Ref:          "owner/input/unused",
+		Requirements: "unused requirements",
+	})
+	if orphanContractSurface.Validate() == nil {
+		t.Fatal("surface with unreferenced content contract was accepted")
+	}
 	for _, contents := range [][2]string{{"", "unbound"}, {"ref", ""}, {"ref", strings.Repeat("x", 4097)}, {"ref", "multiline\ncontract"}, {"ref", string([]byte{0xff})}} {
-		bad := p.Clone()
-		bad.ContentContractRef, bad.ContentRequirements = contents[0], contents[1]
+		bad := RuntimeValidationContentContract{Ref: contents[0], Requirements: contents[1]}
 		if bad.Validate() == nil {
 			t.Fatal("partial or unbounded content contract accepted")
 		}

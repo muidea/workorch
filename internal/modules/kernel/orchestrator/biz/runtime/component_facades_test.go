@@ -105,32 +105,11 @@ func (c *RuntimeController) compileSemanticPlanBatch(ctx context.Context, worksp
 	return c.planning.compileSemanticPlanBatch(ctx, workspaceID, runID, batch)
 }
 
-func (c *RuntimeController) advanceSemanticPlanBatch(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, identity runtimecontract.RuntimeSemanticPlanBatch, next runtimecontract.RuntimeSemanticPlanBatchState) (RuntimeAggregate, error) {
-	if c == nil || c.planning == nil {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	return c.planning.advanceSemanticPlanBatch(ctx, workspaceID, runID, identity, next)
-}
-
-func (c *RuntimeController) observeSemanticPlanBatchFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, result runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult) (RuntimeAggregate, error) {
-	if c == nil || c.planning == nil {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	return c.planning.observeSemanticPlanBatchFeasibility(ctx, workspaceID, runID, result)
-}
-
 func (c *RuntimeController) observeSemanticPlanBatchDocument(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, document runtimecontract.RuntimeSemanticPlanDocument) (RuntimeAggregate, error) {
 	if c == nil || c.planning == nil {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	return c.planning.observeSemanticPlanBatchDocument(ctx, workspaceID, runID, document)
-}
-
-func (c *RuntimeController) mergeSemanticPlanBatchDocuments(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, merged runtimecontract.RuntimeSemanticPlanDocument) (RuntimeAggregate, error) {
-	if c == nil || c.planning == nil {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	return c.planning.mergeSemanticPlanBatchDocuments(ctx, workspaceID, runID, merged)
 }
 
 func (c *RuntimeController) mergeSemanticPlanBatchFeasibilities(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, values []runtimecontract.RuntimeSemanticProofFeasibility) (RuntimeAggregate, error) {
@@ -161,11 +140,11 @@ func (c *RuntimeController) requireSemanticFeasibility(ctx context.Context, work
 	return c.planning.requireSemanticFeasibility(ctx, workspaceID, runID)
 }
 
-func (c *RuntimeController) observeSemanticFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, batchID string, observation runtimecontract.RuntimeSemanticProofFeasibility) (RuntimeAggregate, error) {
+func (c *RuntimeController) observeSemanticFeasibilities(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, batchID string, observations []runtimecontract.RuntimeSemanticProofFeasibility) (RuntimeAggregate, error) {
 	if c == nil || c.planning == nil {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	return c.planning.observeSemanticFeasibility(ctx, workspaceID, runID, batchID, observation)
+	return c.planning.observeSemanticFeasibilities(ctx, workspaceID, runID, batchID, observations)
 }
 
 func (c *RuntimeController) requireSemanticPlanCorrection(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, stablePrefixHash, logicalRequestID string, expected runtimecontract.RuntimeExpectedDocumentContract, rejection runtimecontract.RuntimeOriginalDiagnostic) (RuntimeAggregate, error) {
@@ -217,18 +196,18 @@ func (c *RuntimeController) rejectCompletedCandidateDocument(ctx context.Context
 	return c.candidateDispatch.rejectCompletedCandidateDocument(ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, logicalRequestID, rejectedCandidate, failure)
 }
 
-func (c *RuntimeController) admitCandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, candidate runtimecontract.RuntimeCandidate) (CandidateAdmissionCommitResult, error) {
+func (c *RuntimeController) admitCandidateProposal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, candidate runtimecontract.RuntimeCandidate) (CandidateAdmissionCommitResult, error) {
 	if c == nil || c.candidateDispatch == nil {
 		return CandidateAdmissionCommitResult{}, common.ErrInvalidArgument
 	}
-	return c.candidateDispatch.admitCandidateProposal(ctx, workspaceID, runID, attempt, manifest, logicalRequestID, candidate)
+	return c.candidateDispatch.admitCandidateProposal(ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, logicalRequestID, candidate)
 }
 
-func (c *RuntimeController) recordCandidateFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, record runtimecontract.RuntimeCandidateFeasibilityRecord) (RuntimeAggregate, error) {
+func (c *RuntimeController) recordCandidateFeasibilities(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, records []runtimecontract.RuntimeCandidateFeasibilityRecord) (RuntimeAggregate, error) {
 	if c == nil || c.candidateDispatch == nil {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	return c.candidateDispatch.recordCandidateFeasibility(ctx, workspaceID, runID, attempt, record)
+	return c.candidateDispatch.recordCandidateFeasibilities(ctx, workspaceID, runID, attempt, records)
 }
 
 func (c *RuntimeController) admitAndSealCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, candidate runtimecontract.RuntimeCandidate) (CandidateAdmissionCommitResult, error) {
@@ -405,7 +384,7 @@ func (c *RuntimeController) commitPrerequisite(ctx context.Context, workspaceID 
 	if c == nil || c.authority == nil {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	return c.authority.commitPrerequisite(ctx, workspaceID, runID, result)
+	return c.authority.commitPrerequisites(ctx, workspaceID, runID, []PrerequisiteResult{result})
 }
 
 func (c *RuntimeController) commitAssessment(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
@@ -427,13 +406,6 @@ func (c *RuntimeController) retireRuntimeCWIBinding(ctx context.Context, workspa
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	return c.authority.retireRuntimeCWIBinding(ctx, workspaceID, runID, fact)
-}
-
-func (c *RuntimeController) recordValidationFailureObservation(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, observation runtimecontract.RuntimeValidationFailureObservation) (RuntimeAggregate, error) {
-	if c == nil || c.authority == nil {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	return c.authority.recordValidationFailureObservation(ctx, workspaceID, runID, observation)
 }
 
 func (c *RuntimeController) recordRepairSurfaceConfirmation(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, confirmation runtimecontract.RuntimeRepairSurfaceConfirmation) (RuntimeAggregate, error) {
@@ -462,13 +434,6 @@ func (c *RuntimeController) requestTermination(ctx context.Context, workspaceID 
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	return c.driveDelivery.requestTermination(ctx, workspaceID, runID, kind, requestedBy, reason)
-}
-
-func (c *RuntimeController) beginCandidateAttempt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string) (RuntimeAggregate, error) {
-	if c == nil || c.candidateDispatch == nil {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	return c.candidateDispatch.beginCandidateAttempt(ctx, workspaceID, runID, attempt, stablePrefixHash, manifest, logicalRequestID)
 }
 
 func (c *RuntimeController) ensureCandidateRequestSessionWithExpected(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, documentKind runtimecontract.RuntimeProviderDocumentKind, stablePrefixHash, manifestHash, correctionHash string, expected *runtimecontract.RuntimeExpectedDocumentContract) (RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession, error) {

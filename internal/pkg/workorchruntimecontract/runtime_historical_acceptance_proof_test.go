@@ -76,7 +76,7 @@ func historicalAcceptanceProofFixture(t *testing.T) RuntimeLineageAssertionSourc
 	}
 	batch.State, batch.DocumentHash = RuntimeSemanticPlanBatchAccepted, StableRuntimeSemanticPlanDocumentHash(document)
 	batch.Hash = StableRuntimeSemanticPlanBatchHash(batch)
-	sources.Semantic = RuntimeSemanticPlanningLedger{SchemaVersion: RuntimeSemanticPlanningLedgerSchemaCurrent, Phase: RuntimeSemanticPlanningSealed, DefinitionSeed: sources.Facts.DefinitionSeed,
+	sources.Semantic = RuntimeSemanticPlanningLedger{SchemaVersion: RuntimeSemanticPlanningLedgerSchemaCurrent, Phase: RuntimeSemanticPlanningSealed, DefinitionSeedHash: sources.Facts.DefinitionSeed.Hash,
 		Manifest: &manifest, StablePrefixHash: "original-prefix", LogicalRequestID: requestID, CoverageOrderDocument: &order, Document: &document, DocumentHash: batch.DocumentHash,
 		Batches: []RuntimeSemanticPlanBatch{batch}, NextBatchSequence: 1, CompletedBatchIDs: []string{batch.BatchID}, BatchDocuments: []RuntimeSemanticPlanDocument{document},
 		MergedDocument: &document, MergedDocumentHash: batch.DocumentHash, FeasibilityBatchID: StableRuntimeSemanticFeasibilityBatchID(manifest, document), Feasibilities: feasibilities, FeasibilitySetHash: StableRuntimeSemanticFeasibilitySetHash(feasibilities)}

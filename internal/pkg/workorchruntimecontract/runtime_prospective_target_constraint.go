@@ -184,6 +184,70 @@ type RuntimeProspectiveTargetSatisfactionConstraint struct {
 	AllOf                              []RuntimeProspectiveTargetClause
 }
 
+// RuntimeValidationContentContract deduplicates repeated owner content requirements
+// across a validation surface's ProofRequirementPreparations.
+type RuntimeValidationContentContract struct {
+	Ref          string
+	Requirements string
+}
+
+func (c RuntimeValidationContentContract) Normalized() RuntimeValidationContentContract {
+	c.Ref = strings.TrimSpace(c.Ref)
+	c.Requirements = strings.TrimSpace(c.Requirements)
+	return c
+}
+
+func (c RuntimeValidationContentContract) Clone() RuntimeValidationContentContract {
+	return c.Normalized()
+}
+
+func (c RuntimeValidationContentContract) Validate() error {
+	c = c.Normalized()
+	if c.Ref == "" || c.Requirements == "" || len(c.Ref) > 512 || len(c.Requirements) > 4096 ||
+		!utf8.ValidString(c.Ref) || !utf8.ValidString(c.Requirements) ||
+		strings.IndexFunc(c.Ref, runtimeProspectiveControlRune) >= 0 ||
+		strings.IndexFunc(c.Requirements, runtimeProspectiveControlRune) >= 0 {
+		return fmt.Errorf("runtime validation content contract requires bounded owner ref and requirements together")
+	}
+	return nil
+}
+
+func normalizeRuntimeValidationContentContracts(values []RuntimeValidationContentContract) []RuntimeValidationContentContract {
+	ret := make([]RuntimeValidationContentContract, 0, len(values))
+	for _, value := range values {
+		value = value.Normalized()
+		if value.Ref == "" && value.Requirements == "" {
+			continue
+		}
+		ret = append(ret, value)
+	}
+	sort.SliceStable(ret, func(i, j int) bool {
+		if ret[i].Ref != ret[j].Ref {
+			return ret[i].Ref < ret[j].Ref
+		}
+		return ret[i].Requirements < ret[j].Requirements
+	})
+	return nilIfEmpty(ret)
+}
+
+func validateAndNormalizeRuntimeValidationContentContracts(values []RuntimeValidationContentContract) ([]RuntimeValidationContentContract, error) {
+	seen := make(map[string]struct{}, len(values))
+	canonical := make([]RuntimeValidationContentContract, 0, len(values))
+	for _, raw := range values {
+		if err := raw.Validate(); err != nil {
+			return nil, err
+		}
+		value := raw.Normalized()
+		if _, duplicate := seen[value.Ref]; duplicate {
+			return nil, fmt.Errorf("runtime validation content contract %q is duplicated", value.Ref)
+		}
+		seen[value.Ref] = struct{}{}
+		canonical = append(canonical, value)
+	}
+	sort.SliceStable(canonical, func(i, j int) bool { return canonical[i].Ref < canonical[j].Ref })
+	return nilIfEmpty(canonical), nil
+}
+
 type RuntimeValidationProofPreparation struct {
 	RequirementHash        string
 	DefinitionRevision     string
@@ -193,10 +257,11 @@ type RuntimeValidationProofPreparation struct {
 	TargetRef              string
 	CheckAttestations      []RuntimeValidationCheckAttestationBinding
 	SourceObligationChecks []RuntimeSourceObligationCheck `json:",omitempty"`
-	// Optional owner-authored content syntax. Core preserves it in the catalog
-	// and provider projection; it is neither mutation nor acceptance authority.
-	ContentContractRef  string `json:",omitempty"`
-	ContentRequirements string `json:",omitempty"`
+	// Optional owner-authored content contract reference resolved against
+	// RuntimeValidationSurface.PreparationContentContracts. Core preserves it
+	// in the catalog and provider projection; it is neither mutation nor
+	// acceptance authority.
+	ContentContractRef string `json:",omitempty"`
 	// OriginalDiagnostic is owner-authored observation, never an action or a
 	// repair authorization. Omission preserves historical catalog identities.
 	OriginalDiagnostic *RuntimeOriginalDiagnostic `json:",omitempty"`
@@ -217,7 +282,6 @@ func (p RuntimeValidationProofPreparation) Normalized() RuntimeValidationProofPr
 	p.CheckAttestations = NormalizeRuntimeValidationCheckAttestationBindings(p.CheckAttestations)
 	p.SourceObligationChecks = CloneRuntimeSourceObligationChecks(p.SourceObligationChecks)
 	p.ContentContractRef = strings.TrimSpace(p.ContentContractRef)
-	p.ContentRequirements = strings.TrimSpace(p.ContentRequirements)
 	p.OriginalDiagnostic = p.OriginalDiagnostic.CloneOriginal()
 	p.ProspectiveTargetSatisfactionConstraint = p.ProspectiveTargetSatisfactionConstraint.Normalized()
 	return p
@@ -252,11 +316,9 @@ func validateAndNormalizeRuntimeValidationProofPreparation(p RuntimeValidationPr
 	if strings.Contains(p.DeclarationRef, "*") {
 		return RuntimeValidationProofPreparation{}, fmt.Errorf("runtime validation proof preparation declaration %q is not CWI-specific", p.DeclarationRef)
 	}
-	if (p.ContentContractRef == "") != (p.ContentRequirements == "") || len(p.ContentContractRef) > 512 || len(p.ContentRequirements) > 4096 ||
-		!utf8.ValidString(p.ContentContractRef) || !utf8.ValidString(p.ContentRequirements) ||
-		strings.IndexFunc(p.ContentContractRef, runtimeProspectiveControlRune) >= 0 ||
-		strings.IndexFunc(p.ContentRequirements, runtimeProspectiveControlRune) >= 0 {
-		return RuntimeValidationProofPreparation{}, fmt.Errorf("runtime validation proof preparation requires bounded owner content contract and requirements together")
+	if len(p.ContentContractRef) > 512 || !utf8.ValidString(p.ContentContractRef) ||
+		strings.IndexFunc(p.ContentContractRef, runtimeProspectiveControlRune) >= 0 {
+		return RuntimeValidationProofPreparation{}, fmt.Errorf("runtime validation proof preparation requires bounded owner content contract ref")
 	}
 	required := make([]string, 0, len(p.CheckAttestations))
 	for _, attestation := range p.CheckAttestations {
@@ -546,19 +608,31 @@ func ResolveRuntimeProspectiveTargetSatisfactionConstraint(catalog RuntimeOperat
 // interprets the opaque native check protocol and cannot turn the preparation
 // into evidence credit.
 func ResolveRuntimeValidationProofPreparation(catalog RuntimeOperationAdmissibility, requirement RuntimeOwnerFactRequirement, contractRef string) (RuntimeValidationProofPreparation, error) {
+	preparation, _, err := ResolveRuntimeValidationProofPreparationWithSurface(catalog, requirement, contractRef)
+	return preparation, err
+}
+
+// ResolveRuntimeValidationProofPreparationWithSurface returns both the matched
+// preparation record and its enclosing validation surface so callers can resolve
+// surface-deduplicated PreparationContentContracts.
+func ResolveRuntimeValidationProofPreparationWithSurface(catalog RuntimeOperationAdmissibility, requirement RuntimeOwnerFactRequirement, contractRef string) (RuntimeValidationProofPreparation, RuntimeValidationSurface, error) {
 	catalog = catalog.Normalized()
 	requirement = requirement.Normalized()
 	contractRef = strings.TrimSpace(contractRef)
 	if err := catalog.Validate(); err != nil {
-		return RuntimeValidationProofPreparation{}, err
+		return RuntimeValidationProofPreparation{}, RuntimeValidationSurface{}, err
 	}
 	if err := requirement.Validate(); err != nil {
-		return RuntimeValidationProofPreparation{}, err
+		return RuntimeValidationProofPreparation{}, RuntimeValidationSurface{}, err
 	}
 	if requirement.ValidationProofRequirementHash == "" || contractRef == "" || catalog.OwnerModuleID != requirement.OwnerModuleID {
-		return RuntimeValidationProofPreparation{}, fmt.Errorf("runtime validation proof preparation requires exact owner-fact requirement and contract")
+		return RuntimeValidationProofPreparation{}, RuntimeValidationSurface{}, fmt.Errorf("runtime validation proof preparation requires exact owner-fact requirement and contract")
 	}
-	var matched []RuntimeValidationProofPreparation
+	type matchedPreparation struct {
+		preparation RuntimeValidationProofPreparation
+		surface     RuntimeValidationSurface
+	}
+	var matched []matchedPreparation
 	for _, surface := range catalog.ValidationSurfaces {
 		surface = surface.Normalized()
 		if surface.OwnerModuleID != requirement.OwnerModuleID || surface.OperationKind != requirement.OperationKind ||
@@ -568,14 +642,17 @@ func ResolveRuntimeValidationProofPreparation(catalog RuntimeOperationAdmissibil
 		for _, preparation := range surface.ProofRequirementPreparations {
 			if preparation.RequirementHash == requirement.ValidationProofRequirementHash &&
 				preparation.ProspectiveTargetSatisfactionConstraint.ProspectiveSatisfactionContractRef == contractRef {
-				matched = append(matched, preparation.Clone())
+				matched = append(matched, matchedPreparation{
+					preparation: preparation.Clone(),
+					surface:     surface.Clone(),
+				})
 			}
 		}
 	}
 	if len(matched) != 1 {
-		return RuntimeValidationProofPreparation{}, fmt.Errorf("runtime validation proof requirement %q requires exactly one preparation, got %d", requirement.ValidationProofRequirementHash, len(matched))
+		return RuntimeValidationProofPreparation{}, RuntimeValidationSurface{}, fmt.Errorf("runtime validation proof requirement %q requires exactly one preparation, got %d", requirement.ValidationProofRequirementHash, len(matched))
 	}
-	return matched[0].Clone(), nil
+	return matched[0].preparation.Clone(), matched[0].surface.Clone(), nil
 }
 
 func runtimeProspectiveConstraintForOwnerFactRequirement(surface RuntimeValidationSurface, requirement RuntimeOwnerFactRequirement, contractRef string) (RuntimeProspectiveTargetSatisfactionConstraint, bool) {

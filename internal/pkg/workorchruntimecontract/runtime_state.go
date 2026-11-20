@@ -380,94 +380,59 @@ func (r RuntimeStateRecord) Validate() error {
 
 func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSemanticValidationSession, historicalSession *runtimeHistoricalPreimageSession) error {
 	previous := semanticSession.committedPreimage
-	changedActiveDispatch := previous == nil || !runtimeRawEqual(r.ActiveDispatch, previous.ActiveDispatch)
-	changedCandidateAttempts := previous == nil || !runtimeRawEqual(r.CandidateAttempts, previous.CandidateAttempts)
-	changedCandidateRequestSessions := previous == nil || !runtimeRawEqual(r.CandidateRequestSessions, previous.CandidateRequestSessions)
-	changedCompletedDispatches := previous == nil || !runtimeRawEqual(r.CompletedDispatches, previous.CompletedDispatches)
-	changedCoverageProofLineage := previous == nil || !runtimeRawEqual(r.CoverageProofLineage, previous.CoverageProofLineage)
-	changedDecision := previous == nil || !runtimeRawEqual(r.Decision, previous.Decision)
-	changedDefinition := previous == nil || !runtimeRawEqual(r.Definition, previous.Definition)
-	changedDefinitionClarification := previous == nil || !runtimeRawEqual(r.DefinitionClarification, previous.DefinitionClarification)
-	changedDriveLease := previous == nil || !runtimeRawEqual(r.DriveLease, previous.DriveLease)
-	changedEvidenceSequence := previous == nil || !runtimeRawEqual(r.EvidenceSequence, previous.EvidenceSequence)
-	changedExecutionBudget := previous == nil || !runtimeRawEqual(r.ExecutionBudget, previous.ExecutionBudget)
-	changedGovernanceRequests := previous == nil || !runtimeRawEqual(r.GovernanceRequests, previous.GovernanceRequests)
-	changedGovernanceResolutions := previous == nil || !runtimeRawEqual(r.GovernanceResolutions, previous.GovernanceResolutions)
-	changedImplementationWork := previous == nil || !runtimeRawEqual(r.ImplementationWork, previous.ImplementationWork)
-	changedOperationGovernanceBindings := previous == nil || !runtimeRawEqual(r.OperationGovernanceBindings, previous.OperationGovernanceBindings)
-	changedOperationReceipts := previous == nil || !runtimeRawEqual(r.OperationReceipts, previous.OperationReceipts)
-	changedOperationRecoveryAuthorizations := previous == nil || !runtimeRawEqual(r.OperationRecoveryAuthorizations, previous.OperationRecoveryAuthorizations)
-	changedPrerequisiteInvalidations := previous == nil || !runtimeRawEqual(r.PrerequisiteInvalidations, previous.PrerequisiteInvalidations)
-	changedReconciliation := previous == nil || !runtimeRawEqual(r.Reconciliation, previous.Reconciliation)
-	changedRepairSurfaceConfirmations := previous == nil || !runtimeRawEqual(r.RepairSurfaceConfirmations, previous.RepairSurfaceConfirmations)
-	changedResultFeedbackVersion := previous == nil || !runtimeRawEqual(r.ResultFeedbackVersion, previous.ResultFeedbackVersion)
-	changedSemanticPlanning := previous == nil || !runtimeRawEqual(r.SemanticPlanning, previous.SemanticPlanning)
-	changedStateRevision := previous == nil || !runtimeRawEqual(r.StateRevision, previous.StateRevision)
-	changedTerminalMaterialSeal := previous == nil || !runtimeRawEqual(r.TerminalMaterialSeal, previous.TerminalMaterialSeal)
-	changedTermination := previous == nil || !runtimeRawEqual(r.Termination, previous.Termination)
-	changedFactsScope := previous == nil
-	changedFactsDefinitionRev := previous == nil
-	changedFactsCWILedgerSchema := previous == nil
-	changedFactsSeed := previous == nil
-	changedFactsDefFocuses := previous == nil
-	changedFactsCapabilities := previous == nil
-	changedFactsActivation := previous == nil
-	changedFactsPolicies := previous == nil
-	changedFactsSlices := previous == nil
-	changedFactsFocusQueues := previous == nil
-	changedFactsAssessments := previous == nil
-	changedFactsEvidence := previous == nil
-	changedFactsCoverage := previous == nil
-	changedFactsReconciliationContract := previous == nil
-	changedFactsSuspensions := previous == nil
-	changedFactsFeasibility := previous == nil
-	changedFactsFailure := previous == nil
-	changedFactsRepair := previous == nil
-	changedFactsRepairDirective := previous == nil
-	changedFactsRecovery := previous == nil
-	changedFactsStateChange := previous == nil
-	changedFactsPrerequisites := previous == nil
-	changedFactsResources := previous == nil
-	changedFactsEvidenceRev := previous == nil
-	changedFactsObs := previous == nil
-	if previous != nil {
-		changedFactsScope = r.Facts.WorkspaceID != previous.Facts.WorkspaceID || r.Facts.RunID != previous.Facts.RunID
-		changedFactsDefinitionRev = r.Facts.DefinitionRevision != previous.Facts.DefinitionRevision
-		changedFactsCWILedgerSchema = r.Facts.CWILedgerSchemaVersion != previous.Facts.CWILedgerSchemaVersion
-		changedFactsEvidenceRev = r.Facts.EvidenceRevision != previous.Facts.EvidenceRevision
-		changedFactsObs = !runtimeRawEqual(r.Facts.EvidenceApplicabilityObservations, previous.Facts.EvidenceApplicabilityObservations)
-		changedFactsSeed = !runtimeRawEqual(r.Facts.DefinitionSeed, previous.Facts.DefinitionSeed)
-		changedFactsDefFocuses = !runtimeRawEqual(r.Facts.DefinitionFocuses, previous.Facts.DefinitionFocuses)
-		changedFactsCapabilities = !runtimeRawEqual(r.Facts.Capabilities, previous.Facts.Capabilities)
-		changedFactsActivation = !runtimeRawEqual(r.Facts.Activation, previous.Facts.Activation)
-		changedFactsPolicies = !runtimeRawEqual(r.Facts.ConvergencePolicy, previous.Facts.ConvergencePolicy) ||
-			!runtimeRawEqual(r.Facts.RecoveryPolicy, previous.Facts.RecoveryPolicy) ||
-			!runtimeRawEqual(r.Facts.ExecutionBudgetPolicy, previous.Facts.ExecutionBudgetPolicy)
-		changedFactsSlices = !runtimeRawEqual(r.Facts.Slices, previous.Facts.Slices)
-		changedFactsFocusQueues = !runtimeRawEqual(r.Facts.Focus, previous.Facts.Focus) ||
-			!runtimeRawEqual(r.Facts.RemainingFocuses, previous.Facts.RemainingFocuses) ||
-			!runtimeRawEqual(r.Facts.CompletedFocuses, previous.Facts.CompletedFocuses)
-		changedFactsCoverage = !runtimeRawEqual(r.Facts.Coverage, previous.Facts.Coverage)
-		changedFactsReconciliationContract = !runtimeRawEqual(r.Facts.ReconciliationContract, previous.Facts.ReconciliationContract)
-		changedFactsEvidence = !runtimeRawEqual(r.Facts.Evidence, previous.Facts.Evidence)
-		changedFactsAssessments = !runtimeRawEqual(r.Facts.Assessments, previous.Facts.Assessments)
-		changedFactsSuspensions = !runtimeRawEqual(r.Facts.CWISuspensions, previous.Facts.CWISuspensions)
-		changedFactsFeasibility = !runtimeRawEqual(r.Facts.Feasibility, previous.Facts.Feasibility)
-		changedFactsFailure = !runtimeRawEqual(r.Facts.Failure, previous.Facts.Failure)
-		changedFactsRepair = !runtimeRawEqual(r.Facts.Repair, previous.Facts.Repair)
-		changedFactsRepairDirective = !runtimeRawEqual(r.Facts.RepairDirective, previous.Facts.RepairDirective)
-		changedFactsRecovery = !runtimeRawEqual(r.Facts.Recovery, previous.Facts.Recovery)
-		changedFactsStateChange = !runtimeRawEqual(r.Facts.StateChange, previous.Facts.StateChange)
-		changedFactsPrerequisites = !runtimeRawEqual(r.Facts.Prerequisites, previous.Facts.Prerequisites)
-		changedFactsResources = !runtimeRawEqual(r.Facts.Resources, previous.Facts.Resources)
+	var diff RuntimeStateTransitionDiff
+	if previous == nil {
+		diff = FullRuntimeStateTransitionDiff()
+	} else if semanticSession.transitionDiff != nil {
+		diff = *semanticSession.transitionDiff
+	} else {
+		diff = ComputeRuntimeStateTransitionDiff(*previous, r)
 	}
-	changedFactsCore := previous == nil || changedFactsScope || changedFactsDefinitionRev || changedFactsCWILedgerSchema ||
-		changedFactsSeed || changedFactsDefFocuses || changedFactsCapabilities || changedFactsActivation || changedFactsPolicies ||
-		changedFactsFocusQueues || changedFactsAssessments || changedFactsEvidence || changedFactsCoverage ||
-		changedFactsReconciliationContract || changedFactsFeasibility || changedFactsFailure || changedFactsRepair ||
-		changedFactsRepairDirective || changedFactsRecovery || changedFactsStateChange || changedFactsPrerequisites ||
-		changedFactsResources || changedFactsEvidenceRev
-	_ = changedFactsSlices
+	changedActiveDispatch := diff.ActiveDispatch
+	changedCandidateAttempts := diff.CandidateAttempts
+	changedCandidateRequestSessions := diff.CandidateRequestSessions
+	changedCompletedDispatches := diff.CompletedDispatches
+	changedCoverageProofLineage := diff.CoverageProofLineage
+	changedDecision := diff.Decision
+	changedDefinition := diff.Definition
+	changedDefinitionClarification := diff.DefinitionClarification
+	changedDriveLease := diff.DriveLease
+	changedEvidenceSequence := diff.EvidenceSequence
+	changedExecutionBudget := diff.ExecutionBudget
+	changedGovernanceRequests := diff.GovernanceRequests
+	changedGovernanceResolutions := diff.GovernanceResolutions
+	changedImplementationWork := diff.ImplementationWork
+	changedOperationGovernanceBindings := diff.OperationGovernanceBindings
+	changedOperationReceipts := diff.OperationReceipts
+	changedOperationRecoveryAuthorizations := diff.OperationRecoveryAuthorizations
+	changedPrerequisiteInvalidations := diff.PrerequisiteInvalidations
+	changedReconciliation := diff.Reconciliation
+	changedRepairSurfaceConfirmations := diff.RepairSurfaceConfirmations
+	changedResultFeedbackVersion := diff.ResultFeedbackVersion
+	changedSemanticPlanning := diff.SemanticPlanning
+	changedStateRevision := diff.StateRevision
+	changedTerminalMaterialSeal := diff.TerminalMaterialSeal
+	changedTermination := diff.Termination
+	changedFactsScope := diff.FactsScope
+	changedFactsDefinitionRev := diff.FactsDefinitionRevision
+	changedFactsCWILedgerSchema := diff.FactsCWILedgerSchemaVersion
+	changedFactsSeed := diff.FactsDefinitionSeed
+	changedFactsDefFocuses := diff.FactsDefinitionFocuses
+	changedFactsActivation := diff.FactsActivation()
+	changedFactsPolicies := diff.FactsPolicies
+	changedFactsFocusQueues := diff.FactsFocusQueues
+	changedFactsAssessments := diff.FactsAssessments
+	changedFactsEvidence := diff.FactsEvidence()
+	changedFactsCoverage := diff.FactsCoverage
+	changedFactsReconciliationContract := diff.FactsReconciliationContract
+	changedFactsSuspensions := diff.FactsCWISuspensions
+	changedFactsFailure := diff.FactsFailure
+	changedFactsRepairDirective := diff.FactsRepairDirective
+	changedFactsRecovery := diff.FactsRecovery
+	changedFactsResources := diff.FactsResources()
+	changedFactsEvidenceRev := diff.FactsEvidenceRevision
+	changedFactsObs := diff.FactsEvidenceApplicabilityObservations
+	changedFactsCore := diff.FactsCore()
 
 	if changedResultFeedbackVersion {
 		if err := ValidateRuntimeResultFeedbackVersion(r.ResultFeedbackVersion); err != nil {
@@ -585,8 +550,8 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 		}
 	}
 	if changedFactsSeed || changedSemanticPlanning {
-		if r.SemanticPlanning.DefinitionSeed.Hash != r.Facts.DefinitionSeed.Hash {
-			return fmt.Errorf("runtime semantic planning seed does not match facts")
+		if err := ValidateRuntimeSemanticHistoryCoverage(r.SemanticPlanning, r.Facts.DefinitionSeed); err != nil {
+			return err
 		}
 	}
 	if changedReconciliation {

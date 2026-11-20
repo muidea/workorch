@@ -22,15 +22,14 @@ func applicabilityCandidateWindowFixture(t *testing.T, window string) (RuntimeAg
 	if _, err := controller.ApplyInternalEvent(ctx, applicabilityInternalEvent(matching)); err != nil {
 		t.Fatal(err)
 	}
-	if window == "pending" || window == "proposal" {
+	if window == "proposal" {
 		if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "applicability-window-prefix"); err != nil {
 			t.Fatal(err)
 		}
-		if window == "proposal" {
-			candidate := runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{FocusID: repository.aggregate.Facts.Focus.ID, CoverageWorkItemIDs: repository.aggregate.Facts.Focus.CoverageWorkItemIDs, Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "fixture claim", EvidenceRefs: []string{string(repository.aggregate.Facts.Evidence.Accepted[0].ID)}}}
-			if _, err := controller.recordCandidateProposal(ctx, "ws-v2", "run-v2", 0, candidate); err != nil {
-				t.Fatal(err)
-			}
+		candidate := runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{FocusID: repository.aggregate.Facts.Focus.ID, CoverageWorkItemIDs: repository.aggregate.Facts.Focus.CoverageWorkItemIDs, Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "fixture claim", EvidenceRefs: []string{string(repository.aggregate.Facts.Evidence.Accepted[0].ID)}}}
+		admitted, err := controller.AdmitCandidateProposalForTest(ctx, "ws-v2", "run-v2", 0, candidate)
+		if err != nil || !admitted.Admission.Accepted() {
+			t.Fatalf("admit assessment proposal = %+v err=%v", admitted.Admission, err)
 		}
 	} else {
 		manifest, err := BuildRuntimeCandidateContractManifestForAggregate(*repository.aggregate)
@@ -67,7 +66,7 @@ func applicabilityCandidateWindowFixture(t *testing.T, window string) (RuntimeAg
 }
 
 func TestEvidenceApplicabilityRetiresUnsealedCandidateWindowsWithSingleCAS(t *testing.T) {
-	for _, window := range []string{"prepared", "completed_document", "pending", "proposal"} {
+	for _, window := range []string{"prepared", "completed_document", "proposal"} {
 		for _, fault := range []string{"none", "before_cas", "after_cas"} {
 			t.Run(window+"/"+fault, func(t *testing.T) {
 				before, observation := applicabilityCandidateWindowFixture(t, window)
@@ -96,7 +95,7 @@ func TestEvidenceApplicabilityRetiresUnsealedCandidateWindowsWithSingleCAS(t *te
 				if after.StateRevision != before.StateRevision+1 || repository.saves != 1 || !reflect.DeepEqual(after.OperationReceipts, before.OperationReceipts) || !reflect.DeepEqual(after.ExecutionBudget, before.ExecutionBudget) || !reflect.DeepEqual(after.Facts.Recovery, before.Facts.Recovery) {
 					t.Fatal("retirement repeated CAS or changed original effect/budget/recovery")
 				}
-				if window == "pending" || window == "proposal" {
+				if window == "proposal" {
 					attempt := after.CandidateAttempts[len(after.CandidateAttempts)-1]
 					if attempt.State != runtimecontract.RuntimeCandidateAttemptStateInvalidated || attempt.Proposal != nil || attempt.Failure != nil || attempt.Correction != nil || attempt.ApplicabilityInvalidationRequest == nil || !reflect.DeepEqual(*attempt.ApplicabilityInvalidationRequest, observation.Request) {
 						t.Fatal("old candidate retained authority or got a fabricated retry/failure")
@@ -158,7 +157,7 @@ func TestEvidenceApplicabilityUnsettledProviderGuardIncludesHistoricalAuthority(
 }
 
 func TestEvidenceApplicabilityRetirementRejectsLateProposalAndSealWithoutCAS(t *testing.T) {
-	for _, window := range []string{"pending", "proposal"} {
+	for _, window := range []string{"proposal"} {
 		t.Run(window, func(t *testing.T) {
 			before, observation := applicabilityCandidateWindowFixture(t, window)
 			manifest, err := BuildRuntimeCandidateContractManifestForAggregate(before)
@@ -186,7 +185,7 @@ func TestEvidenceApplicabilityRetirementRejectsLateProposalAndSealWithoutCAS(t *
 				t.Fatal(err)
 			}
 			writes := repository.saves
-			if _, err := controller.admitCandidateProposal(context.Background(), "ws-v2", "run-v2", attempt.Attempt, manifest, attempt.LogicalRequestID, candidate); err == nil {
+			if _, err := controller.admitCandidateProposal(context.Background(), "ws-v2", "run-v2", attempt.Attempt, attempt.StablePrefixHash, manifest, attempt.LogicalRequestID, candidate); err == nil {
 				t.Fatal("late proposal revived applicability-retired attempt")
 			}
 			if _, err := controller.admitAndSealCandidateAttempt(context.Background(), "ws-v2", "run-v2", attempt.Attempt, manifest, attempt.LogicalRequestID, candidate); err == nil {

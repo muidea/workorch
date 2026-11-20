@@ -47,7 +47,7 @@ func retireRuntimeInputReviewForRevision(a RuntimeAggregate) (RuntimeAggregate, 
 	if err := retireSemanticPlanningRequestSessions(&a, ledger, runtimecontract.RuntimeValidationInputRevisionRetirementOutcome); err != nil {
 		return a, false, err
 	}
-	a.SemanticPlanning = runtimecontract.RuntimeSemanticPlanningLedger{SchemaVersion: ledger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningRequired, DefinitionSeed: ledger.DefinitionSeed.Clone(), CatalogRefreshAttempts: ledger.CatalogRefreshAttempts, FeasibilityGaps: ledger.FeasibilityGaps, History: ledger.History, HistoryArchive: ledger.HistoryArchive}
+	a.SemanticPlanning = runtimecontract.RuntimeSemanticPlanningLedger{SchemaVersion: ledger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningRequired, DefinitionSeedHash: ledger.DefinitionSeedHash, CatalogRefreshAttempts: ledger.CatalogRefreshAttempts, FeasibilityGaps: ledger.FeasibilityGaps, History: ledger.History, HistoryArchive: ledger.HistoryArchive}
 	if appended, err := a.SemanticPlanning.AppendHistory(g); err != nil {
 		return a, false, err
 	} else {

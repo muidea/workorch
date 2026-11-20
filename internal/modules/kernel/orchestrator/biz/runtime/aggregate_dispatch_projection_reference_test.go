@@ -160,7 +160,7 @@ func referenceDispatchReuseValidateRuntimeAggregateSM2Authority(a RuntimeAggrega
 	if err := validateRuntimeSemanticBindingPurposeInvariant(a); err != nil {
 		return err
 	}
-	if a.SemanticPlanning.DefinitionSeed.Hash != a.Facts.DefinitionSeed.Hash {
+	if a.SemanticPlanning.DefinitionSeedHash != a.Facts.DefinitionSeed.Hash {
 		return fmt.Errorf("runtime aggregate semantic planning seed does not match facts")
 	}
 	if err := a.Reconciliation.Validate(); err != nil {

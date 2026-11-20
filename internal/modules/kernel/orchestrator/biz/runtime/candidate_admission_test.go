@@ -764,8 +764,8 @@ func TestAdmitCandidateProposalAtomicallyExhaustsSingleShapeFrontier(t *testing.
 		first.Aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || first.Aggregate.Decision.Terminal == nil || first.Aggregate.Decision.Terminal.Code != "candidate_authority_exhausted" {
 		t.Fatalf("first rejected proposal = %+v", first)
 	}
-	if got, want := first.Aggregate.StateRevision, aggregate.StateRevision+5; got != want {
-		t.Fatalf("complete session + attempt + rejection revision = %d, want %d", got, want)
+	if got, want := first.Aggregate.StateRevision, aggregate.StateRevision+4; got != want {
+		t.Fatalf("complete session + admission-rejection revision = %d, want %d", got, want)
 	}
 	savesAfterFirst := repository.saves
 	duplicate, err := controller.AdmitCandidateProposalForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, candidate)

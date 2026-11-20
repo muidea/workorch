@@ -34,12 +34,17 @@ func TestRuntimeCWIBindingFenceRejectsCandidateStagesWithoutMutation(t *testing.
 	t.Run("request", func(t *testing.T) {
 		controller, repository := newController(t)
 		manifest := runtimeCWIManifestForBindingFenceTest(t, *repository.aggregate)
+		candidate := runtimeTestBindCandidateToCurrentFocus(t, *repository.aggregate, stateChangeCandidate())
+		candidate, err := runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+		if err != nil {
+			t.Fatal(err)
+		}
 		runtimeTestRemoveCurrentCWIBinding(t, repository.aggregate)
 		before := *repository.aggregate
 		saves := repository.saves
 
-		_, err := controller.beginCandidateAttempt(ctx, before.Facts.WorkspaceID, before.Facts.RunID, 0, "cwi-binding-request", manifest, "cwi-binding-request")
-		if err == nil || !(strings.Contains(err.Error(), "unbound/planning CWI cannot retain a current binding") || (errors.Is(err, common.ErrConflict) && strings.Contains(err.Error(), "candidate request binding fence"))) {
+		_, err = controller.admitCandidateProposal(ctx, before.Facts.WorkspaceID, before.Facts.RunID, 0, "cwi-binding-request", manifest, "cwi-binding-request", candidate)
+		if err == nil || !(strings.Contains(err.Error(), "unbound/planning CWI cannot retain a current binding") || (errors.Is(err, common.ErrConflict) && (strings.Contains(err.Error(), "candidate request binding fence") || strings.Contains(err.Error(), "candidate proposal binding fence")))) {
 			t.Fatalf("candidate request stale binding error = %v", err)
 		}
 		assertUnchanged(t, repository, before, saves)
@@ -61,8 +66,8 @@ func TestRuntimeCWIBindingFenceRejectsCandidateStagesWithoutMutation(t *testing.
 		before := *repository.aggregate
 		saves := repository.saves
 
-		_, err = controller.admitCandidateProposal(ctx, before.Facts.WorkspaceID, before.Facts.RunID, 0, manifest, logicalRequestID, candidate)
-		if err == nil || !(strings.Contains(err.Error(), "unbound/planning CWI cannot retain a current binding") || (errors.Is(err, common.ErrConflict) && strings.Contains(err.Error(), "candidate proposal binding fence"))) {
+		_, err = controller.admitCandidateProposal(ctx, before.Facts.WorkspaceID, before.Facts.RunID, 0, "cwi-binding-proposal", manifest, logicalRequestID, candidate)
+		if err == nil || !(strings.Contains(err.Error(), "unbound/planning CWI cannot retain a current binding") || (errors.Is(err, common.ErrConflict) && (strings.Contains(err.Error(), "candidate request binding fence") || strings.Contains(err.Error(), "candidate proposal binding fence")))) {
 			t.Fatalf("candidate proposal stale binding error = %v", err)
 		}
 		assertUnchanged(t, repository, before, saves)
@@ -80,7 +85,7 @@ func TestRuntimeCWIBindingFenceRejectsCandidateStagesWithoutMutation(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := controller.admitCandidateProposal(ctx, pending.Facts.WorkspaceID, pending.Facts.RunID, 0, manifest, logicalRequestID, candidate); err != nil {
+		if _, err := controller.admitCandidateProposal(ctx, pending.Facts.WorkspaceID, pending.Facts.RunID, 0, "cwi-binding-seal", manifest, logicalRequestID, candidate); err != nil {
 			t.Fatal(err)
 		}
 		if err := RecordFixtureCandidateFeasibilities(ctx, controller, pending.Facts.WorkspaceID, pending.Facts.RunID, 0, candidate); err != nil {
@@ -110,12 +115,17 @@ func TestRuntimeCWIBindingFenceRejectsStaleBindingSetBeforeCandidateRequest(t *t
 		t.Fatal(err)
 	}
 	manifest := runtimeCWIManifestForBindingFenceTest(t, aggregate)
+	candidate := runtimeTestBindCandidateToCurrentFocus(t, aggregate, stateChangeCandidate())
+	candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
 	repository.aggregate.Facts.ReconciliationContract.BindingSetHash = strings.Repeat("0", 64)
 	before := *repository.aggregate
 	saves := repository.saves
 
-	_, err = controller.beginCandidateAttempt(ctx, before.Facts.WorkspaceID, before.Facts.RunID, 0, "stale-binding-set", manifest, "stale-binding-set")
-	if err == nil || !(strings.Contains(err.Error(), "reconciliation contract binding set hash does not match contents") || (errors.Is(err, common.ErrConflict) && strings.Contains(err.Error(), "candidate request binding fence"))) {
+	_, err = controller.admitCandidateProposal(ctx, before.Facts.WorkspaceID, before.Facts.RunID, 0, "stale-binding-set", manifest, "stale-binding-set", candidate)
+	if err == nil || !(strings.Contains(err.Error(), "reconciliation contract binding set hash does not match contents") || (errors.Is(err, common.ErrConflict) && (strings.Contains(err.Error(), "candidate request binding fence") || strings.Contains(err.Error(), "candidate proposal binding fence")))) {
 		t.Fatalf("candidate request stale binding-set error = %v", err)
 	}
 	if repository.saves != saves || !reflect.DeepEqual(*repository.aggregate, before) {
@@ -225,6 +235,14 @@ func runtimeCWIPendingCandidateBindingForFenceTest(t *testing.T, controller *Run
 	for _, attempt := range aggregate.CandidateAttempts {
 		if attempt.Attempt == 0 && attempt.Transaction == aggregate.Decision.AuthorityTransaction() {
 			return manifest, attempt.LogicalRequestID
+		}
+	}
+	for i := len(aggregate.CandidateRequestSessions) - 1; i >= 0; i-- {
+		session := aggregate.CandidateRequestSessions[i]
+		if session.DocumentKind == runtimecontract.RuntimeProviderDocumentOperations &&
+			session.Transaction == aggregate.Decision.AuthorityTransaction() &&
+			session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
+			return manifest, session.LogicalRequestID
 		}
 	}
 	t.Fatal("binding-fence fixture has no pending candidate attempt")

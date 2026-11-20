@@ -9,67 +9,87 @@ import (
 // original results before consuming them; a proposal with a matching self hash
 // is never a committed result. Storage packing may change, append order may not.
 func ValidateRuntimeCommittedHistoryTransition(before, after RuntimeStateRecord) (err error) {
+	return ValidateRuntimeCommittedHistoryTransitionWithDiff(before, after, ComputeRuntimeStateTransitionDiff(before, after))
+}
+
+func ValidateRuntimeCommittedHistoryTransitionWithDiff(before, after RuntimeStateRecord, diff RuntimeStateTransitionDiff) (err error) {
 	defer func() {
 		if err != nil {
 			err = fmt.Errorf("%w: %v", common.ErrConflict, err)
 		}
 	}()
-	if !runtimeRawEqual(before.Definition, after.Definition) ||
-		before.ResultFeedbackVersion != after.ResultFeedbackVersion ||
-		before.Facts.WorkspaceID != after.Facts.WorkspaceID || before.Facts.RunID != after.Facts.RunID ||
-		!runtimeRawEqual(before.Facts.DefinitionSeed, after.Facts.DefinitionSeed) ||
-		!runtimeRawEqual(before.Facts.DefinitionFocuses, after.Facts.DefinitionFocuses) {
-		return fmt.Errorf("runtime transition rewrites sealed definition or scope")
-	}
-	if err := validateCommittedSemanticSources(before.SemanticPlanning, after.SemanticPlanning); err != nil {
-		return err
-	}
-	historyUnchangedPrefix := runtimeRawEqual(before.SemanticPlanning.HistoryArchive, after.SemanticPlanning.HistoryArchive) &&
-		len(after.SemanticPlanning.History) >= len(before.SemanticPlanning.History) &&
-		(len(before.SemanticPlanning.History) == 0 || runtimeRawEqual(before.SemanticPlanning.History, after.SemanticPlanning.History[:len(before.SemanticPlanning.History)]))
-	if !historyUnchangedPrefix {
-		prior := make([]RuntimeSemanticPlanningGeneration, 0, before.SemanticPlanning.HistoryCount())
-		for _, generation := range before.SemanticPlanning.AllHistory() {
-			prior = append(prior, generation)
+	if !diff.PreviousAvailable || diff.Definition || diff.ResultFeedbackVersion || diff.FactsScope || diff.FactsDefinitionSeed || diff.FactsDefinitionFocuses {
+		if !runtimeRawEqual(before.Definition, after.Definition) ||
+			before.ResultFeedbackVersion != after.ResultFeedbackVersion ||
+			before.Facts.WorkspaceID != after.Facts.WorkspaceID || before.Facts.RunID != after.Facts.RunID ||
+			!runtimeRawEqual(before.Facts.DefinitionSeed, after.Facts.DefinitionSeed) ||
+			!runtimeRawEqual(before.Facts.DefinitionFocuses, after.Facts.DefinitionFocuses) {
+			return fmt.Errorf("runtime transition rewrites sealed definition or scope")
 		}
-		if after.SemanticPlanning.HistoryCount() < len(prior) {
-			return fmt.Errorf("runtime transition removes committed semantic history")
+	}
+	if !diff.PreviousAvailable || diff.SemanticPlanning {
+		if err := validateCommittedSemanticSources(before.SemanticPlanning, after.SemanticPlanning); err != nil {
+			return err
 		}
-		for i, generation := range after.SemanticPlanning.AllHistory() {
-			if i >= len(prior) {
-				break
+		historyUnchangedPrefix := runtimeRawEqual(before.SemanticPlanning.HistoryArchive, after.SemanticPlanning.HistoryArchive) &&
+			len(after.SemanticPlanning.History) >= len(before.SemanticPlanning.History) &&
+			(len(before.SemanticPlanning.History) == 0 || runtimeRawEqual(before.SemanticPlanning.History, after.SemanticPlanning.History[:len(before.SemanticPlanning.History)]))
+		if !historyUnchangedPrefix {
+			prior := make([]RuntimeSemanticPlanningGeneration, 0, before.SemanticPlanning.HistoryCount())
+			for _, generation := range before.SemanticPlanning.AllHistory() {
+				prior = append(prior, generation)
 			}
-			if !runtimeRawEqual(prior[i], generation) {
-				return fmt.Errorf("runtime transition rewrites committed semantic generation %d", i)
+			if after.SemanticPlanning.HistoryCount() < len(prior) {
+				return fmt.Errorf("runtime transition removes committed semantic history")
+			}
+			for i, generation := range after.SemanticPlanning.AllHistory() {
+				if i >= len(prior) {
+					break
+				}
+				if !runtimeRawEqual(prior[i], generation) {
+					return fmt.Errorf("runtime transition rewrites committed semantic generation %d", i)
+				}
 			}
 		}
 	}
-	if len(after.ImplementationWork.PurposeChoices) < len(before.ImplementationWork.PurposeChoices) {
-		return fmt.Errorf("runtime transition removes committed work purpose")
-	}
-	for i, choice := range before.ImplementationWork.PurposeChoices {
-		if !runtimeRawEqual(choice, after.ImplementationWork.PurposeChoices[i]) {
-			return fmt.Errorf("runtime transition rewrites committed work purpose")
+	if !diff.PreviousAvailable || diff.ImplementationWork {
+		if len(after.ImplementationWork.PurposeChoices) < len(before.ImplementationWork.PurposeChoices) {
+			return fmt.Errorf("runtime transition removes committed work purpose")
+		}
+		for i, choice := range before.ImplementationWork.PurposeChoices {
+			if !runtimeRawEqual(choice, after.ImplementationWork.PurposeChoices[i]) {
+				return fmt.Errorf("runtime transition rewrites committed work purpose")
+			}
+		}
+		if len(after.ImplementationWork.Rounds) < len(before.ImplementationWork.Rounds) {
+			return fmt.Errorf("runtime transition removes work round")
+		}
+		for i, round := range before.ImplementationWork.Rounds {
+			// Suspended, unknown and open rounds still have original transactions to
+			// settle. Only successful collective completion is a closed work result.
+			if round.CompletedReceiptSetHash != "" && !runtimeRawEqual(round, after.ImplementationWork.Rounds[i]) {
+				return fmt.Errorf("runtime transition rewrites completed work round")
+			}
 		}
 	}
-	if len(after.ImplementationWork.Rounds) < len(before.ImplementationWork.Rounds) {
-		return fmt.Errorf("runtime transition removes work round")
-	}
-	for i, round := range before.ImplementationWork.Rounds {
-		// Suspended, unknown and open rounds still have original transactions to
-		// settle. Only successful collective completion is a closed work result.
-		if round.CompletedReceiptSetHash != "" && !runtimeRawEqual(round, after.ImplementationWork.Rounds[i]) {
-			return fmt.Errorf("runtime transition rewrites completed work round")
+	for _, entry := range []struct {
+		changed bool
+		before  []EvidenceFact
+		after   []EvidenceFact
+	}{
+		{!diff.PreviousAvailable || diff.FactsEvidenceAccepted, before.Facts.Evidence.Accepted, after.Facts.Evidence.Accepted},
+		{!diff.PreviousAvailable || diff.FactsEvidenceRejected, before.Facts.Evidence.Rejected, after.Facts.Evidence.Rejected},
+	} {
+		if !entry.changed {
+			continue
 		}
-	}
-	for _, pair := range [][2][]EvidenceFact{{before.Facts.Evidence.Accepted, after.Facts.Evidence.Accepted}, {before.Facts.Evidence.Rejected, after.Facts.Evidence.Rejected}} {
-		if len(pair[1]) >= len(pair[0]) && (len(pair[0]) == 0 || runtimeRawEqual(pair[0], pair[1][:len(pair[0])])) {
+		if len(entry.after) >= len(entry.before) && (len(entry.before) == 0 || runtimeRawEqual(entry.before, entry.after[:len(entry.before)])) {
 			continue
 		}
 		// Evidence has canonical identity order, not append position.
-		for _, fact := range pair[0] {
+		for _, fact := range entry.before {
 			matches := 0
-			for _, next := range pair[1] {
+			for _, next := range entry.after {
 				if next.ID == fact.ID && runtimeRawEqual(fact, next) {
 					matches++
 				}
@@ -81,36 +101,38 @@ func ValidateRuntimeCommittedHistoryTransition(before, after RuntimeStateRecord)
 	}
 	// Accepted request/attempt sources are original authority, not replaceable
 	// copies of the dispatch's current self hash. Pending requests still evolve.
-	attemptsAndSessionsUnchangedPrefix := len(after.CandidateAttempts) >= len(before.CandidateAttempts) &&
-		(len(before.CandidateAttempts) == 0 || runtimeRawEqual(before.CandidateAttempts, after.CandidateAttempts[:len(before.CandidateAttempts)])) &&
-		len(after.CandidateRequestSessions) >= len(before.CandidateRequestSessions) &&
-		(len(before.CandidateRequestSessions) == 0 || runtimeRawEqual(before.CandidateRequestSessions, after.CandidateRequestSessions[:len(before.CandidateRequestSessions)]))
-	if !attemptsAndSessionsUnchangedPrefix {
-		for _, attempt := range before.CandidateAttempts {
-			if attempt.State != RuntimeCandidateAttemptStateAccepted {
-				continue
-			}
-			matches := 0
-			for _, next := range after.CandidateAttempts {
-				if next.LogicalRequestID == attempt.LogicalRequestID && next.Attempt == attempt.Attempt && next.State == attempt.State && runtimeRawEqual(attempt, next) {
-					matches++
-				}
-			}
-			if matches != 1 {
-				return fmt.Errorf("runtime transition rewrites accepted candidate source")
-			}
-			for _, session := range before.CandidateRequestSessions {
-				if session.LogicalRequestID != attempt.LogicalRequestID {
+	if !diff.PreviousAvailable || diff.CandidateAttempts || diff.CandidateRequestSessions {
+		attemptsAndSessionsUnchangedPrefix := len(after.CandidateAttempts) >= len(before.CandidateAttempts) &&
+			(len(before.CandidateAttempts) == 0 || runtimeRawEqual(before.CandidateAttempts, after.CandidateAttempts[:len(before.CandidateAttempts)])) &&
+			len(after.CandidateRequestSessions) >= len(before.CandidateRequestSessions) &&
+			(len(before.CandidateRequestSessions) == 0 || runtimeRawEqual(before.CandidateRequestSessions, after.CandidateRequestSessions[:len(before.CandidateRequestSessions)]))
+		if !attemptsAndSessionsUnchangedPrefix {
+			for _, attempt := range before.CandidateAttempts {
+				if attempt.State != RuntimeCandidateAttemptStateAccepted {
 					continue
 				}
-				matches = 0
-				for _, next := range after.CandidateRequestSessions {
-					if next.LogicalRequestID == session.LogicalRequestID && runtimeRawEqual(session, next) {
+				matches := 0
+				for _, next := range after.CandidateAttempts {
+					if next.LogicalRequestID == attempt.LogicalRequestID && next.Attempt == attempt.Attempt && next.State == attempt.State && runtimeRawEqual(attempt, next) {
 						matches++
 					}
 				}
 				if matches != 1 {
-					return fmt.Errorf("runtime transition rewrites accepted request source")
+					return fmt.Errorf("runtime transition rewrites accepted candidate source")
+				}
+				for _, session := range before.CandidateRequestSessions {
+					if session.LogicalRequestID != attempt.LogicalRequestID {
+						continue
+					}
+					matches = 0
+					for _, next := range after.CandidateRequestSessions {
+						if next.LogicalRequestID == session.LogicalRequestID && runtimeRawEqual(session, next) {
+							matches++
+						}
+					}
+					if matches != 1 {
+						return fmt.Errorf("runtime transition rewrites accepted request source")
+					}
 				}
 			}
 		}
@@ -119,8 +141,8 @@ func ValidateRuntimeCommittedHistoryTransition(before, after RuntimeStateRecord)
 		executionKey string
 		fence        uint64
 	}
-	if len(after.OperationReceipts) < len(before.OperationReceipts) ||
-		(len(before.OperationReceipts) > 0 && !runtimeRawEqual(before.OperationReceipts, after.OperationReceipts[:len(before.OperationReceipts)])) {
+	if (!diff.PreviousAvailable || diff.OperationReceipts) && (len(after.OperationReceipts) < len(before.OperationReceipts) ||
+		(len(before.OperationReceipts) > 0 && !runtimeRawEqual(before.OperationReceipts, after.OperationReceipts[:len(before.OperationReceipts)]))) {
 		receipts := make(map[receiptIdentityKey]RuntimeOperationReceipt, len(after.OperationReceipts))
 		for _, receipt := range after.OperationReceipts {
 			receipts[receiptIdentityKey{executionKey: receipt.ExecutionKey, fence: receipt.Fence}] = receipt
@@ -131,8 +153,8 @@ func ValidateRuntimeCommittedHistoryTransition(before, after RuntimeStateRecord)
 			}
 		}
 	}
-	if len(after.CompletedDispatches) < len(before.CompletedDispatches) ||
-		(len(before.CompletedDispatches) > 0 && !runtimeRawEqual(before.CompletedDispatches, after.CompletedDispatches[:len(before.CompletedDispatches)])) {
+	if (!diff.PreviousAvailable || diff.CompletedDispatches) && (len(after.CompletedDispatches) < len(before.CompletedDispatches) ||
+		(len(before.CompletedDispatches) > 0 && !runtimeRawEqual(before.CompletedDispatches, after.CompletedDispatches[:len(before.CompletedDispatches)]))) {
 		dispatches := make(map[string]RuntimeDispatchRecord, len(after.CompletedDispatches))
 		for _, dispatch := range after.CompletedDispatches {
 			dispatches[dispatch.ID] = dispatch

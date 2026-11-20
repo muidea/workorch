@@ -72,13 +72,20 @@ func prospectiveProjectionFixtureForTest(t *testing.T) prospectiveProjectionFixt
 	if !found {
 		t.Fatal("缺少 File catalog")
 	}
+	catalog, found := manifest.OwnerFactDependencyCatalogForOwner(RuntimeModuleShell)
+	if !found {
+		t.Fatal("缺少 Shell dependency catalog")
+	}
+	// Make Shell an external dependency catalog (not duplicated in OwnerCatalogs)
+	// so OwnerFactDependencyCatalogs is authentically populated per current contract.
+	manifest.AllowedOwnerModuleIDs = []string{RuntimeModuleFile}
+	manifest.AllowedOperationKinds = []string{StepKindFileWrite}
+	manifest.OwnerCatalogs = []RuntimeOperationAdmissibility{fileCatalog}
+	manifest.OwnerFactDependencyCatalogs = []RuntimeOperationAdmissibility{catalog}
+	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
 	delta, err := NewRuntimeProspectiveWorkspaceManifestDelta(manifest, proposal, runtimeProspectiveSatisfactionContractRefForTest, fileCatalog, WorkspaceManifest{Revision: fileCatalog.ObservedRevision, TargetRefs: append([]string(nil), fileCatalog.TargetRefs...)})
 	if err != nil {
 		t.Fatal(err)
-	}
-	catalog, found := runtimeSemanticOwnerFactDependencyCatalogFor(manifest, RuntimeModuleShell)
-	if !found {
-		t.Fatal("缺少 Shell dependency catalog")
 	}
 	observed, recipes := runtimeProspectiveSatisfactionOwnerFactsForTest(t, catalog, delta.BaseWorkspaceManifestRevision)
 	acquisition := *manifest.ProofObligations[0].OwnerFactAcquisition

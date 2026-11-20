@@ -67,7 +67,6 @@ func runtimeInternalTransitionContract(kind RuntimeInternalEventKind) (runtimeIn
 		RuntimeInternalEventFeasibilityObserved,
 		RuntimeInternalEventAssessmentObserved,
 		RuntimeInternalEventGovernanceRequestObserved,
-		RuntimeInternalEventValidationFailureObserved,
 		RuntimeInternalEventRepairSurfaceConfirmationObserved,
 		RuntimeInternalEventDefinitionGapObserved:
 		return sm2, true
@@ -99,22 +98,21 @@ func runtimeInternalTransitionContract(kind RuntimeInternalEventKind) (runtimeIn
 
 	case RuntimeInternalEventSemanticPlanRequestStarted,
 		RuntimeInternalEventSemanticPlanBatchCompiled,
-		RuntimeInternalEventSemanticPlanBatchAdvanced,
-		RuntimeInternalEventSemanticPlanBatchFeasibilityObserved,
 		RuntimeInternalEventSemanticPlanBatchDocumentObserved,
-		RuntimeInternalEventSemanticPlanBatchDocumentsMerged,
-		RuntimeInternalEventSemanticPlanEvaluated,
 		RuntimeInternalEventSemanticSingletonOrderCompiled,
+		RuntimeInternalEventSemanticSingletonProofBatchCompiled,
 		RuntimeInternalEventSemanticPlanCorrectionRequired,
 		RuntimeInternalEventCandidateRequestEnsured,
 		RuntimeInternalEventCandidateRequestSubmitted,
 		RuntimeInternalEventCandidateDocumentObserved,
-		RuntimeInternalEventCandidateAttemptBegun,
 		RuntimeInternalEventGovernanceDispatchSealed,
 		RuntimeInternalEventDispatchExecutionRequested,
 		RuntimeInternalEventDefinitionClarificationDispatchSealed,
 		RuntimeInternalEventDefinitionClarificationRequestObserved:
 		return sm3, true
+
+	case RuntimeInternalEventSemanticPlanEvaluated:
+		return runtimeInternalTransitionDescriptor{Primary: eventcontract.StateMachineSM3, WriteSet: runtimeInternalWriteSM2 | runtimeInternalWriteSM3}, true
 
 	case RuntimeInternalEventOperationReceiptObserved:
 		// 工作 receipt 在同一 CAS 内结算 SM-3 receipt/预算、SM-2 不授终验

@@ -62,7 +62,7 @@ func refreshImplementationHistoryTestOwners(t *testing.T, owner *implementationW
 			t.Fatalf("unsupported test owner prerequisite: %s", pending.Kind)
 		}
 		result, err := owner.controller.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{Kind: RuntimeInternalEventPrerequisiteObserved,
-			Scope: RuntimeInternalEventScope{WorkspaceID: a.Facts.WorkspaceID, RunID: a.Facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{PrerequisiteResult: &observed}})
+			Scope: RuntimeInternalEventScope{WorkspaceID: a.Facts.WorkspaceID, RunID: a.Facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{PrerequisiteResults: []PrerequisiteResult{observed}}})
 		if err != nil {
 			t.Fatal(err)
 		}

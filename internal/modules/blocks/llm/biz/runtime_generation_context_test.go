@@ -16,7 +16,7 @@ func TestRuntimePreparationContextIsOwnerNeutralScopedAndShared(t *testing.T) {
 	for _, owner := range []string{runtimecontract.RuntimeModuleShell, "blocks/document-validator"} {
 		t.Run(owner, func(t *testing.T) {
 			constraint := runtimecontract.RuntimeProspectiveTargetSatisfactionConstraint{SchemaVersion: runtimecontract.RuntimeProspectiveTargetSatisfactionConstraintSchemaCurrent, OwnerModuleID: owner, ProspectiveSatisfactionContractRef: "owner/prepare/v1", ValidationSurfaceID: "recipe", ValidationRecipeID: "recipe", InputSchemaHash: "schema", CatalogObservedRevision: "r1", AllOf: []runtimecontract.RuntimeProspectiveTargetClause{{ID: "input", AllOf: []runtimecontract.RuntimeProspectiveTargetPredicate{{Kind: runtimecontract.RuntimeProspectiveTargetPredicatePathExact, Value: "checks/input.spec"}}}}}
-			p := runtimecontract.RuntimeValidationProofPreparation{RequirementHash: "requirement", DefinitionRevision: "definition", CoverageWorkItemID: "cwi-1", DeclarationRef: "definition/dodItem/original", ValidationRecipeID: "recipe", TargetRef: "checks/input.spec", ProspectiveTargetSatisfactionConstraint: constraint, ContentContractRef: "owner/assertions/v1", ContentRequirements: "Retain both exact original obligations.", CheckAttestations: []runtimecontract.RuntimeValidationCheckAttestationBinding{{RequiredCheckRef: "check-1", ObservationProtocolRef: "owner/behavior/v1", NativeCheckRef: "native-1"}, {RequiredCheckRef: "check-2", ObservationProtocolRef: "owner/behavior/v1", NativeCheckRef: "native-2"}}}
+			p := runtimecontract.RuntimeValidationProofPreparation{RequirementHash: "requirement", DefinitionRevision: "definition", CoverageWorkItemID: "cwi-1", DeclarationRef: "definition/dodItem/original", ValidationRecipeID: "recipe", TargetRef: "checks/input.spec", ProspectiveTargetSatisfactionConstraint: constraint, ContentContractRef: "owner/assertions/v1", CheckAttestations: []runtimecontract.RuntimeValidationCheckAttestationBinding{{RequiredCheckRef: "check-1", ObservationProtocolRef: "owner/behavior/v1", NativeCheckRef: "native-1"}, {RequiredCheckRef: "check-2", ObservationProtocolRef: "owner/behavior/v1", NativeCheckRef: "native-2"}}}
 			raw := "完整项目上下文\r\n"
 			source := runtimecontract.RuntimeSourceObligationCheck{InventoryHash: "inventory", ObligationID: "original", RequirementID: "requirement", VerificationID: "verification", Criterion: "原判据\r\n包括全部限定条件", Declaration: "通过实际项目行为验证"}
 			source.CheckRef = runtimecontract.StableRuntimeSourceObligationCheckRef(p.DefinitionRevision, p.CoverageWorkItemID, source)
@@ -25,8 +25,9 @@ func TestRuntimePreparationContextIsOwnerNeutralScopedAndShared(t *testing.T) {
 			if err := p.Validate(); err != nil {
 				t.Fatal(err)
 			}
+			contentContract := runtimecontract.RuntimeValidationContentContract{Ref: "owner/assertions/v1", Requirements: "Retain both exact original obligations."}
 			c := &runtimecontract.RuntimeValidationGenerationContext{Version: runtimecontract.RuntimeValidationGenerationContextVersion, ContractRef: "owner/project-context/v1", ObservedRevision: "r1", Outcome: "complete", Files: []runtimecontract.RuntimeValidationInputReviewFile{{TargetRef: "project/source", Content: raw, ContentHash: runtimecontract.RuntimeValidationInputContentHash(raw)}}}
-			catalogs := []runtimecontract.RuntimeOperationAdmissibility{{PrerequisiteID: "catalog", OwnerModuleID: owner, ObservedRevision: "r1", SnapshotID: "snapshot", ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{ID: "recipe", GenerationContext: c, ProofRequirementPreparations: []runtimecontract.RuntimeValidationProofPreparation{p}}}}}
+			catalogs := []runtimecontract.RuntimeOperationAdmissibility{{PrerequisiteID: "catalog", OwnerModuleID: owner, ObservedRevision: "r1", SnapshotID: "snapshot", ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{ID: "recipe", GenerationContext: c, ProofRequirementPreparations: []runtimecontract.RuntimeValidationProofPreparation{p}, PreparationContentContracts: []runtimecontract.RuntimeValidationContentContract{contentContract}}}}}
 			focus := runtimecontract.CoverageFocus{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, ProspectiveTargetRefs: []string{p.TargetRef}}
 			preparations := runtimeCandidateValidationProofPreparations(focus, catalogs)
 			contexts := runtimeValidationGenerationContexts(focus.CoverageWorkItemIDs, focus.ProspectiveTargetRefs, catalogs)
@@ -37,7 +38,7 @@ func TestRuntimePreparationContextIsOwnerNeutralScopedAndShared(t *testing.T) {
 				t.Fatal("generation lacks complete exact coverage inventory")
 			}
 			for _, entry := range preparations {
-				if entry.OwnerModuleID != owner || entry.CoverageWorkItemID != p.CoverageWorkItemID || entry.RequirementHash != p.RequirementHash || entry.ContentRequirements != p.ContentRequirements {
+				if entry.OwnerModuleID != owner || entry.CoverageWorkItemID != p.CoverageWorkItemID || entry.RequirementHash != p.RequirementHash || entry.ContentRequirements != contentContract.Requirements {
 					t.Fatal("preparation lost exact ownership/source")
 				}
 				if entry.RequiredCheckRef == source.CheckRef && (entry.SourceObligation == nil || entry.SourceObligation.Criterion != source.Criterion || entry.SourceObligation.Declaration != source.Declaration) {

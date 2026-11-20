@@ -1178,14 +1178,8 @@ func runtimeTestAttachProspectiveOwnerFactSatisfaction(t *testing.T, manifest ru
 	if err != nil {
 		t.Fatalf("build test prospective workspace delta: %v proposal=%+v catalog=%+v", err, proposal, catalog)
 	}
-	var dependencyCatalog runtimecontract.RuntimeOperationAdmissibility
-	for _, candidate := range manifest.OwnerFactDependencyCatalogs {
-		if candidate.OwnerModuleID == acquisition.Requirement.OwnerModuleID {
-			dependencyCatalog = candidate
-			break
-		}
-	}
-	if dependencyCatalog.SnapshotID == "" {
+	dependencyCatalog, depFound := manifest.OwnerFactDependencyCatalogForOwner(acquisition.Requirement.OwnerModuleID)
+	if !depFound || dependencyCatalog.SnapshotID == "" {
 		t.Fatalf("build test prospective satisfaction: missing dependency catalog %q", acquisition.Requirement.OwnerModuleID)
 	}
 	satisfaction := runtimecontract.RuntimeOwnerFactProspectiveSatisfaction{

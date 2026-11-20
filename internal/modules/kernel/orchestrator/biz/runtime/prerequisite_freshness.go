@@ -178,13 +178,7 @@ func runtimeSemanticManifestCatalogForOwner(manifest runtimecontract.RuntimeSema
 }
 
 func runtimeSemanticManifestDependencyCatalogForOwner(manifest runtimecontract.RuntimeSemanticPlanManifest, ownerModuleID string) (runtimecontract.RuntimeOperationAdmissibility, bool) {
-	ownerModuleID = strings.TrimSpace(ownerModuleID)
-	for _, catalog := range manifest.OwnerFactDependencyCatalogs {
-		if catalog.OwnerModuleID == ownerModuleID {
-			return catalog.Normalized(), true
-		}
-	}
-	return runtimecontract.RuntimeOperationAdmissibility{}, false
+	return manifest.OwnerFactDependencyCatalogForOwner(ownerModuleID)
 }
 
 func currentOperationAdmissibility(facts runtimecontract.RuntimeFacts, wanted runtimecontract.RuntimeOperationAdmissibility) (runtimecontract.RuntimeOperationAdmissibility, bool) {

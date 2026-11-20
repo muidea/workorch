@@ -209,9 +209,24 @@ func applyFailureFactToAggregate(aggregate RuntimeAggregate, fact runtimecontrac
 // requestTermination CAS-persists an administrative termination record on an active V2
 // aggregate (INV-08). SM-1 may project cancelled/superseded only after this record exists.
 
-func (c *authorityComponent) commitPrerequisite(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, result PrerequisiteResult, recoverableWaitProbe ...*runtimecontract.RuntimeRecoverableWaitProbeObservation) (RuntimeAggregate, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
+func (c *authorityComponent) commitPrerequisites(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, results []PrerequisiteResult, recoverableWaitProbe ...*runtimecontract.RuntimeRecoverableWaitProbeObservation) (RuntimeAggregate, error) {
+	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || len(results) == 0 {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	probeObservation := firstRuntimeRecoverableWaitProbeObservation(recoverableWaitProbe)
+	if probeObservation != nil && len(results) != 1 {
+		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	seenIDs := make(map[string]struct{}, len(results))
+	for _, result := range results {
+		id := strings.TrimSpace(result.PrerequisiteID)
+		if id == "" {
+			return RuntimeAggregate{}, common.ErrInvalidArgument
+		}
+		if _, dup := seenIDs[id]; dup {
+			return RuntimeAggregate{}, fmt.Errorf("%w: duplicate prerequisite result %q in batch", common.ErrInvalidArgument, id)
+		}
+		seenIDs[id] = struct{}{}
 	}
 	aggregate, err := c.load(ctx, workspaceID, runID)
 	if err != nil {
@@ -221,23 +236,31 @@ func (c *authorityComponent) commitPrerequisite(ctx context.Context, workspaceID
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not accept prerequisite results", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision
-	probeObservation := firstRuntimeRecoverableWaitProbeObservation(recoverableWaitProbe)
 	if _, _, waiting := currentRuntimeRecoverableWait(aggregate.RecoverableWaits); waiting && probeObservation == nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: active recoverable wait requires a matching probe observation", common.ErrConflict)
 	}
 	previousFocusID := aggregate.Facts.Focus.ID
-	semanticCatalogRefreshPending := semanticCatalogPrerequisitePending(aggregate, result.PrerequisiteID)
-	// Validate the concrete owner fact before consuming a recovery probe. A
-	// stale/mismatched result cannot spend the current wait allocation, even if
-	// its observation timestamp is already beyond the deadline.
-	if err := validatePrerequisiteResultFreshness(result, aggregate.PrerequisiteInvalidations, aggregate.OperationReceipts); err != nil {
-		return RuntimeAggregate{}, err
+	semanticCatalogRefreshPending := false
+	for _, result := range results {
+		if semanticCatalogPrerequisitePending(aggregate, result.PrerequisiteID) {
+			semanticCatalogRefreshPending = true
+		}
 	}
-	facts, err := CommitPrerequisiteResult(aggregate.Facts, result)
-	if err != nil {
-		return RuntimeAggregate{}, err
+	// Validate freshness and apply all results in this wave on a working copy
+	// before consuming any wait probe or committing. A stale or invalid item in
+	// a wave must fail atomically with zero partial persistence.
+	facts := aggregate.Facts
+	for _, result := range results {
+		if err := validatePrerequisiteResultFreshness(result, aggregate.PrerequisiteInvalidations, aggregate.OperationReceipts); err != nil {
+			return RuntimeAggregate{}, err
+		}
+		facts, err = CommitPrerequisiteResult(facts, result)
+		if err != nil {
+			return RuntimeAggregate{}, err
+		}
 	}
 	if probeObservation != nil {
+		result := results[0]
 		if result.Observation == nil || result.Observation.ObservationID != probeObservation.OwnerResultHash {
 			return RuntimeAggregate{}, fmt.Errorf("%w: recoverable wait probe observation does not bind the prerequisite result", common.ErrConflict)
 		}

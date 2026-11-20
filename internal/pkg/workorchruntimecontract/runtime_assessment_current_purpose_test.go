@@ -8,21 +8,21 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func currentAssessmentPurposeFixture(t testing.TB, ledger RuntimeSemanticPlanningLedger, bindings []CoverageEvidenceBinding) RuntimeFacts {
+func currentAssessmentPurposeFixture(t testing.TB, ledger RuntimeSemanticPlanningLedger, seed RuntimeDefinitionSeed, bindings []CoverageEvidenceBinding) RuntimeFacts {
 	t.Helper()
 	binding := bindings[0]
 	ref := RuntimeCWIBindingRefForCoverageBinding(binding, ledger.Manifest.Hash)
 	return RuntimeFacts{
 		WorkspaceID: ledger.Manifest.WorkspaceID, RunID: ledger.Manifest.RunID,
-		DefinitionRevision: ledger.Manifest.DefinitionRevision, DefinitionSeed: ledger.DefinitionSeed,
+		DefinitionRevision: ledger.Manifest.DefinitionRevision, DefinitionSeed: seed,
 		Focus:    CoverageFocus{ID: binding.FocusID, CoverageWorkItemIDs: []common.CoverageWorkItemID{binding.CoverageWorkItemID}, CoverageEvidenceBindings: bindings},
 		Coverage: []RuntimeCoverageItemFact{{ID: binding.CoverageWorkItemID, FocusID: binding.FocusID, CurrentBindingRef: &ref}},
 	}
 }
 
 func TestCurrentAssessmentPurposeConsumesExactOwnerSourceAcrossReload(t *testing.T) {
-	active, bindings := assessmentPurposeGenerationForTest(t, "cwi-source", "current-request", false)
-	facts := currentAssessmentPurposeFixture(t, active, bindings)
+	active, bindings, seed := assessmentPurposeGenerationWithSeedForTest(t, "cwi-source", "current-request", false)
+	facts := currentAssessmentPurposeFixture(t, active, seed, bindings)
 	// All three generations have the same manifest hash. Only the original
 	// accepted request/proposal identity selects the current source.
 	active = assessmentPreimageSessionFixture(t)
@@ -55,8 +55,8 @@ func TestCurrentAssessmentPurposeConsumesExactOwnerSourceAcrossReload(t *testing
 }
 
 func TestCurrentAssessmentPurposeReadsRetiredSourceWithoutReadmittingUnrelatedHistory(t *testing.T) {
-	definition, bindings := assessmentPurposeGenerationForTest(t, "cwi-source", "source-request", false)
-	facts := currentAssessmentPurposeFixture(t, definition, bindings)
+	definition, bindings, seed := assessmentPurposeGenerationWithSeedForTest(t, "cwi-source", "source-request", false)
+	facts := currentAssessmentPurposeFixture(t, definition, seed, bindings)
 	repair, _ := assessmentPurposeGenerationForTest(t, "cwi-repair", "repair-request", true)
 	repair.History = []RuntimeSemanticPlanningGeneration{{
 		RetiredAtStateRevision: 2, Reason: RuntimeSemanticPlanningRetirementResourceInvalidated,
@@ -80,11 +80,11 @@ func TestCurrentAssessmentPurposeReadsRetiredSourceWithoutReadmittingUnrelatedHi
 
 func TestCurrentAssessmentPurposeSelectsRetiredRequestWithSameManifest(t *testing.T) {
 	ledger := assessmentPreimageSessionFixture(t)
-	source, bindings := assessmentPurposeGenerationForTest(t, "cwi-source", "history-request-a", false)
+	source, bindings, seed := assessmentPurposeGenerationWithSeedForTest(t, "cwi-source", "history-request-a", false)
 	if source.Manifest.Hash != ledger.Manifest.Hash || source.Manifest.Hash != ledger.History[1].Snapshot.Manifest.Hash {
 		t.Fatal("fixture does not exercise equal manifest identities")
 	}
-	facts := currentAssessmentPurposeFixture(t, source, bindings)
+	facts := currentAssessmentPurposeFixture(t, source, seed, bindings)
 	want, err := ResolveRuntimeAssessmentPurposePreimage(ledger, bindings)
 	if err != nil {
 		t.Fatal(err)
@@ -100,11 +100,11 @@ func TestCurrentAssessmentPurposeSelectsRetiredRequestWithSameManifest(t *testin
 }
 
 func TestCurrentAssessmentPurposeRejectsMissingAmbiguousAndForeignSources(t *testing.T) {
-	base, bindings := assessmentPurposeGenerationForTest(t, "cwi-source", "source-request", false)
+	base, bindings, seed := assessmentPurposeGenerationWithSeedForTest(t, "cwi-source", "source-request", false)
 	for _, scenario := range []string{"no_row", "duplicate_row", "no_ref", "row_focus", "binding", "no_source", "unaccepted", "no_document", "document", "request", "sequence", "duplicate_document", "duplicate_generation", "workspace", "run", "definition", "seed", "manifest_scope", "no_obligation", "duplicate_obligation"} {
 		t.Run(scenario, func(t *testing.T) {
 			ledger := base.Clone()
-			facts := currentAssessmentPurposeFixture(t, ledger, CloneCoverageEvidenceBindings(bindings))
+			facts := currentAssessmentPurposeFixture(t, ledger, seed, CloneCoverageEvidenceBindings(bindings))
 			switch scenario {
 			case "no_row":
 				facts.Coverage = nil
@@ -152,8 +152,8 @@ func TestCurrentAssessmentPurposeRejectsMissingAmbiguousAndForeignSources(t *tes
 			}
 		})
 	}
-	repair, repairBindings := assessmentPurposeGenerationForTest(t, "cwi-repair", "repair-request", true)
-	facts := currentAssessmentPurposeFixture(t, repair, repairBindings)
+	repair, repairBindings, repairSeed := assessmentPurposeGenerationWithSeedForTest(t, "cwi-repair", "repair-request", true)
+	facts := currentAssessmentPurposeFixture(t, repair, repairSeed, repairBindings)
 	if _, err := RuntimeAssessmentPurposeForCurrentFocus(facts, repair, facts.Focus); err == nil {
 		t.Fatal("repair-purpose binding authorized a terminal assessment")
 	}
@@ -164,8 +164,8 @@ func TestCurrentAssessmentPurposeRejectsMissingAmbiguousAndForeignSources(t *tes
 // This is not an end-to-end throughput or acceptance benchmark.
 func BenchmarkCurrentAssessmentPurpose(b *testing.B) {
 	ledger := assessmentPreimageSessionFixture(b)
-	source, bindings := assessmentPurposeGenerationForTest(b, "cwi-source", "current-request", false)
-	facts := currentAssessmentPurposeFixture(b, source, bindings)
+	source, bindings, seed := assessmentPurposeGenerationWithSeedForTest(b, "cwi-source", "current-request", false)
+	facts := currentAssessmentPurposeFixture(b, source, seed, bindings)
 	for _, current := range []bool{false, true} {
 		name := "full_source_audit"
 		if current {

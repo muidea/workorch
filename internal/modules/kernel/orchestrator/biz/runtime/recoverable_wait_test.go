@@ -91,7 +91,7 @@ func TestRuntimeRecoverableWaitClaimDeferRestartConfirmAndRetire(t *testing.T) {
 	}
 
 	result, probe := runtimeProviderCeilingProbeResult(t, reclaimed, prerequisite, wait)
-	satisfied, err := controller.authority.commitPrerequisite(ctx, opened.Facts.WorkspaceID, opened.Facts.RunID, result, &probe)
+	satisfied, err := controller.authority.commitPrerequisites(ctx, opened.Facts.WorkspaceID, opened.Facts.RunID, []PrerequisiteResult{result}, &probe)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestRuntimeRecoverableWaitClaimDeferRestartConfirmAndRetire(t *testing.T) {
 		t.Fatalf("confirmed probe reconciliation=%+v", satisfied.ExecutionBudget.Reconciliations)
 	}
 	saves = repository.saves
-	if _, err := controller.authority.commitPrerequisite(ctx, opened.Facts.WorkspaceID, opened.Facts.RunID, result, &probe); err == nil || repository.saves != saves {
+	if _, err := controller.authority.commitPrerequisites(ctx, opened.Facts.WorkspaceID, opened.Facts.RunID, []PrerequisiteResult{result}, &probe); err == nil || repository.saves != saves {
 		t.Fatalf("duplicate probe result err=%v saves=%d/%d", err, repository.saves, saves)
 	}
 	retired, err := controller.driveDelivery.retireRecoverableWait(ctx, opened.Facts.WorkspaceID, opened.Facts.RunID, wait.WaitID)
@@ -260,10 +260,10 @@ func TestRuntimeRecoverableWaitResultAtDeadlineConfirmsProbeButCannotSatisfyCond
 	badProbe := probe
 	badProbe.OwnerResultHash = "mismatched-owner-result"
 	saves := repository.saves
-	if _, err := controller.authority.commitPrerequisite(ctx, opened.Facts.WorkspaceID, opened.Facts.RunID, result, &badProbe); err == nil || repository.saves != saves {
+	if _, err := controller.authority.commitPrerequisites(ctx, opened.Facts.WorkspaceID, opened.Facts.RunID, []PrerequisiteResult{result}, &badProbe); err == nil || repository.saves != saves {
 		t.Fatalf("mismatched late result err=%v saves=%d/%d", err, repository.saves, saves)
 	}
-	terminal, err := controller.authority.commitPrerequisite(ctx, opened.Facts.WorkspaceID, opened.Facts.RunID, result, &probe)
+	terminal, err := controller.authority.commitPrerequisites(ctx, opened.Facts.WorkspaceID, opened.Facts.RunID, []PrerequisiteResult{result}, &probe)
 	if err != nil {
 		t.Fatal(err)
 	}

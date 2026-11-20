@@ -306,9 +306,6 @@ func testObservedShellRepair(t *testing.T, validationEntry string, failsAgain, s
 		!slices.Equal(failureObservation.ValidationScopeTargetRefs, sealedValidationScope) {
 		t.Fatalf("Shell observation lost exact sealed scope: %+v", failureObservation)
 	}
-	if _, err := controller.recordValidationFailureObservation(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, failureObservation); err != nil {
-		t.Fatalf("validation observation identity fence: %v", err)
-	}
 	// The semantic helper snapshots only the pre-validation target set. The
 	// later owner confirmation is a new owner revision and must not inherit those
 	// fixture snapshots as repair authority.
@@ -599,7 +596,7 @@ func testObservedShellRepair(t *testing.T, validationEntry string, failsAgain, s
 			Observation: &fact, ReplayProof: owner.ReplayProof}
 	}
 	firstOwnerFact := probe(proposal.Aggregate, 0)
-	closed, err := controller.candidateDispatch.recordCandidateFeasibility(ctx, loaded.Facts.WorkspaceID, loaded.Facts.RunID, 0, firstOwnerFact)
+	closed, err := controller.candidateDispatch.recordCandidateFeasibilities(ctx, loaded.Facts.WorkspaceID, loaded.Facts.RunID, 0, []runtimecontract.RuntimeCandidateFeasibilityRecord{firstOwnerFact})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -622,7 +619,7 @@ func testObservedShellRepair(t *testing.T, validationEntry string, failsAgain, s
 		t.Fatalf("corrected edit proposal: %+v err=%v", corrected.Admission, err)
 	}
 	secondOwnerFact := probe(corrected.Aggregate, 1)
-	if _, err := controller.candidateDispatch.recordCandidateFeasibility(ctx, loaded.Facts.WorkspaceID, loaded.Facts.RunID, 1, secondOwnerFact); err != nil {
+	if _, err := controller.candidateDispatch.recordCandidateFeasibilities(ctx, loaded.Facts.WorkspaceID, loaded.Facts.RunID, 1, []runtimecontract.RuntimeCandidateFeasibilityRecord{secondOwnerFact}); err != nil {
 		t.Fatal(err)
 	}
 	sealedRepair, err := controller.AcceptCandidateAttempt(ctx, loaded.Facts.WorkspaceID, loaded.Facts.RunID, 1, repairCandidate)

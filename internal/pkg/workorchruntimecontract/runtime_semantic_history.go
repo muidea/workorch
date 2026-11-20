@@ -3,6 +3,7 @@ package workorchruntimecontract
 import (
 	"fmt"
 	"iter"
+	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -99,6 +100,44 @@ func ValidateRuntimeSemanticHistoryScope(l RuntimeSemanticPlanningLedger, worksp
 		manifest := generation.Snapshot.Manifest
 		if manifest == nil || manifest.WorkspaceID != workspace || manifest.RunID != run {
 			return fmt.Errorf("runtime semantic history %d scope mismatch", i)
+		}
+	}
+	return nil
+}
+
+// ValidateRuntimeSemanticHistoryCoverage joins the lightweight semantic planning
+// ledger (active and retired history) against the single canonical DefinitionSeed
+// retained on RuntimeFacts.
+func ValidateRuntimeSemanticHistoryCoverage(ledger RuntimeSemanticPlanningLedger, seed RuntimeDefinitionSeed) error {
+	seedHash := strings.TrimSpace(seed.Hash)
+	if seedHash == "" || strings.TrimSpace(ledger.DefinitionSeedHash) != seedHash {
+		return fmt.Errorf("runtime semantic planning seed does not match facts")
+	}
+	if ledger.HistoryCount() == 0 {
+		return nil
+	}
+	seedCoverage := make(map[common.CoverageWorkItemID]struct{}, len(seed.CoverageItems))
+	for _, item := range seed.CoverageItems {
+		seedCoverage[item.ID] = struct{}{}
+	}
+	for idx, history := range ledger.AllHistory() {
+		if strings.TrimSpace(history.Snapshot.DefinitionSeedHash) != seedHash {
+			return fmt.Errorf("runtime semantic planning history %d definition seed mismatch", idx)
+		}
+		if history.Reason == RuntimeSemanticPlanningRetirementCWIReopened ||
+			history.Reason == RuntimeSemanticPlanningRetirementBindingContradiction ||
+			history.Reason == RuntimeSemanticPlanningRetirementEligibleClosureChanged ||
+			history.Reason == RuntimeSemanticPlanningRetirementFrontierCompleted {
+			for _, coverageID := range history.ReopenedCoverageIDs {
+				if _, found := seedCoverage[coverageID]; !found {
+					return fmt.Errorf("runtime semantic CWI reopen %q is outside snapshot definition seed", coverageID)
+				}
+			}
+			for _, coverageID := range history.ChangedCoverageIDs {
+				if _, found := seedCoverage[coverageID]; !found {
+					return fmt.Errorf("runtime semantic closure change %q is outside snapshot definition seed", coverageID)
+				}
+			}
 		}
 	}
 	return nil

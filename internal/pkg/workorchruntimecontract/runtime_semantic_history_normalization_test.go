@@ -56,7 +56,7 @@ func TestSemanticHistoryNormalizationMatchesColdRawAndCurrentGates(t *testing.T)
 			case "nil_empty":
 				changed.History[0].ReopenedCoverageIDs = []common.CoverageWorkItemID{}
 			case "seed":
-				changed.DefinitionSeed.PolicyHash = "current source drift"
+				changed.DefinitionSeedHash = "current source drift"
 			case "current":
 				changed.SchemaVersion = "invalid"
 			case "supplied_normalized":

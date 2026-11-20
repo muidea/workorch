@@ -35,7 +35,7 @@ func runtimeSemanticPlanningProjection(state runtimecontract.RuntimeStateRecord)
 		observation = observation.Clone()
 		observationsByCoverage[string(observation.CoverageWorkItemID)] = append(observationsByCoverage[string(observation.CoverageWorkItemID)], observation)
 	}
-	for _, coverage := range ledger.DefinitionSeed.CoverageItems {
+	for _, coverage := range state.Facts.DefinitionSeed.CoverageItems {
 		key := string(coverage.ID)
 		ret.Items = append(ret.Items, semanticPlanningItem(key, ledger.Phase, proposalsByCoverage[key], observationsByCoverage[key]))
 	}

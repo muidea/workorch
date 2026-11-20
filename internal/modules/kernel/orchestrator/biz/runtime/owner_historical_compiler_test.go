@@ -35,7 +35,7 @@ func TestOfflineOwnerAuditCompleteEventImagesMatchIndependentGates(t *testing.T)
 							case "converted header":
 								image.ResultFeedbackVersion = 0
 							case "seed":
-								image.SemanticPlanning.DefinitionSeed.PolicyHash = "same hash raw drift"
+								image.SemanticPlanning.DefinitionSeedHash = "same hash raw drift"
 							case "evidence":
 								image.EvidenceSequence++
 							case "budget":
@@ -94,7 +94,7 @@ func FuzzOfflineOwnerAuditCompleteEventImages(f *testing.F) {
 					case 1:
 						record.Facts.DefinitionRevision = raw
 					case 2:
-						image.SemanticPlanning.DefinitionSeed.PolicyHash = raw
+						image.SemanticPlanning.DefinitionSeedHash = raw
 					case 3:
 						image.ExecutionBudget.Policy.PolicyRevision = raw
 					case 4:

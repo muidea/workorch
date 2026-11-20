@@ -1280,6 +1280,14 @@ func TestRuntimeStateRepositoryRestartPersistsMCPOwnerCatalogStaleCandidateInval
 	if initialized, err = beginRuntimeCandidateAttemptForTest(ctx, controller, "ws-v2", "run-v2", 0, "mcp-owner-catalog-prefix"); err != nil {
 		t.Fatal(err)
 	}
+	proposalCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+		ID: "mcp-stale-edit", Kind: runtimecontract.StepKindFileEdit,
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"},
+		Parameters: runtimeFileEditParameters("target.txt"),
+	}}}}}
+	if proposal, proposalErr := admitRuntimeCandidateProposalForTest(ctx, controller, "ws-v2", "run-v2", 0, proposalCandidate); proposalErr != nil || !proposal.Admission.Accepted() {
+		t.Fatalf("admit proposal before stale test = %+v err=%v", proposal, proposalErr)
+	}
 	stale := runtimecontract.RuntimePrerequisiteStale{
 		PrerequisiteID: prerequisite.ID, ObservationID: observation.ObservationID,
 		Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleMCP,
@@ -2071,8 +2079,7 @@ func TestRuntimeStateRepositoryCandidateProposalAndDispatchSealCrashRestartAreAt
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(loaded.CandidateAttempts) != 1 || loaded.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStatePending ||
-			loaded.CandidateAttempts[0].Proposal != nil || loaded.ActiveDispatch != nil {
+		if len(loaded.CandidateAttempts) != 0 || loaded.ActiveDispatch != nil {
 			t.Fatalf("failed proposal CAS partially persisted candidate authority: %+v", loaded)
 		}
 
@@ -3445,8 +3452,10 @@ func TestRuntimeFileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundaries
 			t.Fatal(err)
 		}
 		loaded, err := restarted.Load(ctx, "ws-v2", "run-v2")
-		if err != nil || len(loaded.CandidateAttempts) != 2 || loaded.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStatePending || loaded.Decision.State == runtimecontract.ConvergenceStateFailed {
-			t.Fatalf("pre-CAS restart did not retain only pending correction: aggregate=%+v err=%v", loaded, err)
+		if err != nil || len(loaded.CandidateAttempts) != 1 || loaded.CandidateAttempts[0].Correction == nil ||
+			loaded.CandidateAttempts[0].Correction.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce ||
+			loaded.Decision.State == runtimecontract.ConvergenceStateFailed {
+			t.Fatalf("pre-CAS restart did not retain only failed correctable attempt 0: aggregate=%+v err=%v", loaded, err)
 		}
 		committed, err := admitRuntimeCandidateProposalForTest(ctx, restarted, "ws-v2", "run-v2", 1, equivalent)
 		if err != nil || committed.Admission.Failure == nil || committed.Admission.Failure.Code != "candidate_replays_rejected_candidate_shape" ||
@@ -3491,7 +3500,7 @@ func TestRuntimeFileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundaries
 		if persisted == nil {
 			t.Fatal("terminal response-loss fixture lost its durable rejected proposal")
 		}
-		duplicate, err := runtimeTestControllerAdmitCandidateProposal(restarted, ctx, "ws-v2", "run-v2", 1, manifest, logicalRequestID, *persisted)
+		duplicate, err := runtimeTestControllerAdmitCandidateProposal(restarted, ctx, "ws-v2", "run-v2", 1, "semantic-replay-prefix", manifest, logicalRequestID, *persisted)
 		if err != nil || duplicate.Admission.Failure == nil || duplicate.Admission.Failure.Code != loaded.CandidateAttempts[1].Failure.Code || duplicate.Aggregate.StateRevision != revision {
 			t.Fatalf("post-CAS duplicate changed terminal authority: result=%+v err=%v", duplicate, err)
 		}
@@ -3510,7 +3519,7 @@ func TestRuntimeFileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundaries
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := runtimeTestControllerAdmitCandidateProposal(restarted, ctx, "ws-v2", "run-v2", 1, manifest, logicalRequestID, different); !errors.Is(err, common.ErrConflict) {
+		if _, err := runtimeTestControllerAdmitCandidateProposal(restarted, ctx, "ws-v2", "run-v2", 1, "semantic-replay-prefix", manifest, logicalRequestID, different); !errors.Is(err, common.ErrConflict) {
 			t.Fatalf("post-terminal non-duplicate err=%v, want conflict", err)
 		}
 		afterDifferent, err := restarted.Load(ctx, "ws-v2", "run-v2")
@@ -3971,7 +3980,7 @@ func TestRuntimeMainlineSchemaCorrectionDocumentCASRestartMatrix(t *testing.T) {
 			}
 
 			candidateAttemptBegin := func(aggregate runtime.RuntimeAggregate) bool {
-				if len(aggregate.CandidateAttempts) != 2 || aggregate.CandidateAttempts[1].Attempt != 1 || aggregate.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStatePending || aggregate.CandidateAttempts[1].Proposal != nil {
+				if len(aggregate.CandidateAttempts) != 2 || aggregate.CandidateAttempts[1].Attempt != 1 || aggregate.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStatePending || aggregate.CandidateAttempts[1].Proposal == nil {
 					return false
 				}
 				for _, session := range aggregate.CandidateRequestSessions {
@@ -4078,7 +4087,7 @@ func TestRuntimeMainlineSchemaCorrectionDocumentCASRestartMatrix(t *testing.T) {
 				t.Fatalf("schema-correction cut did not retain one document and one budget charge: preflights=%v providerAtPreflight=%v providers=%v probe=%d execute=%d budget=%d aggregate=%+v err=%v", preflightAttempts, providerCallsAtPreflight, providerAttempts, probeCalls, fileExecuteCalls, durableCorrectionBudget, durable, err)
 			}
 			if testCase.responseLoss {
-				if len(durable.CandidateAttempts) != 2 || durable.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStatePending || durable.CandidateAttempts[1].Proposal != nil {
+				if len(durable.CandidateAttempts) != 2 || durable.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStatePending || durable.CandidateAttempts[1].Proposal == nil {
 					t.Fatalf("post-CAS restart lost or advanced the durable pending attempt: %+v", durable.CandidateAttempts)
 				}
 			} else if len(durable.CandidateAttempts) != 1 {
@@ -5229,12 +5238,12 @@ func TestRuntimeStateRecordPreservesSemanticPlanningLedgerAcrossOpaqueReload(t *
 		t.Fatal(err)
 	}
 	if reloaded.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired ||
-		reloaded.SemanticPlanning.DefinitionSeed.Hash != aggregate.SemanticPlanning.DefinitionSeed.Hash {
+		reloaded.SemanticPlanning.DefinitionSeedHash != aggregate.SemanticPlanning.DefinitionSeedHash {
 		t.Fatalf("semantic planning ledger drifted across opaque reload: before=%+v after=%+v", aggregate.SemanticPlanning, reloaded.SemanticPlanning)
 	}
-	reloaded.SemanticPlanning.DefinitionSeed.CoverageItems[0].SourceID = "mutated"
-	if record.SemanticPlanning.DefinitionSeed.CoverageItems[0].SourceID == "mutated" {
-		t.Fatal("runtime state record shared semantic planning backing storage")
+	reloaded.Facts.DefinitionSeed.CoverageItems[0].SourceID = "mutated"
+	if record.Facts.DefinitionSeed.CoverageItems[0].SourceID == "mutated" {
+		t.Fatal("runtime state record shared definition seed backing storage")
 	}
 }
 
@@ -5836,4 +5845,200 @@ func runtimeRunForTestBootstrap(state common.RunState, bootstrap runtimecontract
 		Lineage:             runmodel.RunLineage{LineageState: "active"},
 		State:               state,
 	}
+}
+
+type countingMainlineTestRepository struct {
+	delegate runtime.RuntimeStateRepository
+	saves    int
+}
+
+func (r *countingMainlineTestRepository) Load(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runtime.RuntimeAggregate, error) {
+	return r.delegate.Load(ctx, workspaceID, runID)
+}
+
+func (r *countingMainlineTestRepository) Save(ctx context.Context, aggregate runtime.RuntimeAggregate, expectedRevision uint64) error {
+	if err := r.delegate.Save(ctx, aggregate, expectedRevision); err != nil {
+		return err
+	}
+	r.saves++
+	return nil
+}
+
+func TestRuntimeMainlineBatchesMultiOperationConformanceAndFeasibilityInOneCASEach(t *testing.T) {
+	setupTwoOpMainline := func(t *testing.T, prefix string, conformanceNonconformantFirst bool) (*Biz, *countingMainlineTestRepository, runtime.RuntimeAggregate, runtimecontract.RuntimeCandidate, runtimecontract.RuntimeCandidateContractManifest, string, *int, *int) {
+		t.Helper()
+		ctx := context.Background()
+		hub := magicevent.NewHub(16)
+		t.Cleanup(func() { hub.Terminate(ctx) })
+
+		bootstrap := runtimeBootstrap()
+		bootstrap.Definition.CapabilityContract = []string{runtimecontract.RuntimeBlockKindPatchApply}
+		bootstrap.DefinitionFocuses[0].AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
+		bootstrap.Requirements = nil
+		bootstrap = runtimeTestBootstrapWithBindings(bootstrap)
+
+		runs := memory.NewRunRepository()
+		if err := runs.Create(ctx, runtimeRunForTestBootstrap(common.RunStateActive, bootstrap)); err != nil {
+			t.Fatal(err)
+		}
+		runOwner := runmodule.New()
+		if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
+			t.Fatal(err)
+		}
+		if err := runOwner.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+
+		workspaceDir := t.TempDir()
+		conformanceProbes := 0
+		feasibilityProbes := 0
+
+		fileObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
+		fileObserver.Subscribe(fileevents.TopicValidateRuntimeOperationCandidateConformance, func(event magicevent.Event, result magicevent.Result) {
+			conformanceProbes++
+			command := event.Data().(fileevents.ValidateRuntimeOperationCandidateConformanceCommand)
+			outcome := runtimecontract.RuntimeOperationCandidateConformant
+			var violation *runtimecontract.RuntimeOperationCandidateConstraintViolation
+			if conformanceNonconformantFirst && conformanceProbes == 1 {
+				outcome = runtimecontract.RuntimeOperationCandidateNonconformant
+				_, constraints, cErr := runtimecontract.RuntimeOperationCandidateConstraintsForOperation(command.Operation, command.OperationAuthorization)
+				if cErr != nil || len(constraints) == 0 {
+					t.Errorf("constraints err=%v len=%d", cErr, len(constraints))
+					return
+				}
+				c := constraints[0]
+				for _, item := range constraints {
+					if item.RequiredShape == runtimecontract.RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile {
+						c = item
+						break
+					}
+				}
+				violation = &runtimecontract.RuntimeOperationCandidateConstraintViolation{
+					ConstraintRef: c.Ref, ParameterName: c.ParameterName, RequiredShape: c.RequiredShape,
+					ActualShape: runtimecontract.RuntimeOperationCandidateActualShapeInvalidSyntax,
+				}
+			}
+			obs, obsErr := fileevents.NewValidateRuntimeOperationCandidateConformanceResult(command, outcome, violation)
+			if obsErr != nil {
+				t.Errorf("conformance result: %v", obsErr)
+				return
+			}
+			result.Set(obs, nil)
+		})
+		fileObserver.Subscribe(fileevents.TopicProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
+			feasibilityProbes++
+			command := event.Data().(fileevents.ProbeRuntimeOperationFeasibilityCommand)
+			response, respErr := fileevents.NewProbeRuntimeOperationFeasibilityResult(command, "", nil, nil, nil, nil)
+			if respErr != nil {
+				t.Errorf("feasibility result: %v", respErr)
+				return
+			}
+			result.Set(response, nil)
+		})
+		t.Cleanup(func() {
+			fileObserver.Unsubscribe(fileevents.TopicValidateRuntimeOperationCandidateConformance)
+			fileObserver.Unsubscribe(fileevents.TopicProbeRuntimeOperationFeasibility)
+		})
+
+		facts, err := bootstrap.InitialFacts("ws-v2", "run-v2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		facts.Capabilities.StateChangeKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
+		facts.Focus.AcceptedOperationVariants = []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "unified_diff"}}
+		facts.Focus.TargetRefs = []string{"target.txt", "other.txt"}
+		inventory := runtimecontract.RuntimeOperationAdmissibility{
+			PrerequisiteID: "operation_admissibility:blocks/file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			OperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}, TargetRefs: []string{"target.txt", "other.txt"},
+			OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+				Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "unified_diff",
+				AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
+			}},
+			ObservedRevision: "test-revision",
+		}
+		inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+		facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{inventory}
+		facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{runtimeOperationAdmissibilityPrerequisite(inventory)}
+		facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{runtimeFileAdmissibilityObservation(inventory)}
+		facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{
+			{TargetRef: "target.txt", ContentHash: "test-semantic-snapshot/target.txt", ContentState: runtimecontract.SnapshotContentStateComplete},
+			{TargetRef: "other.txt", ContentHash: "test-semantic-snapshot/other.txt", ContentState: runtimecontract.SnapshotContentStateComplete},
+		}
+
+		biz := newRuntimeTestOwner()
+		countingRepo := &countingMainlineTestRepository{delegate: runtimeStateRepository{hub: hub}}
+		if err := biz.ConfigureRuntimeRepository(countingRepo); err != nil {
+			t.Fatal(err)
+		}
+		runtimeTestInitializeOperationFixture(t, ctx, biz, countingRepo, facts, bootstrap.Definition, bootstrap.Requirements)
+		if _, err := biz.BeginRuntimeCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, prefix); err != nil {
+			t.Fatal(err)
+		}
+		patchType := "unified_diff"
+		diff1 := "--- a/target.txt\n+++ b/target.txt\n@@ -1 +1 @@\n-old1\n+new1\n"
+		diff2 := "--- a/other.txt\n+++ b/other.txt\n@@ -1 +1 @@\n-old2\n+new2\n"
+		baseHash1 := "test-semantic-snapshot/target.txt"
+		baseHash2 := "test-semantic-snapshot/other.txt"
+		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{
+			{Operation: runtimecontract.RuntimeOperation{
+				ID: "patch-1", Kind: runtimecontract.RuntimeBlockKindPatchApply, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"},
+				Parameters: []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "diff", String: &diff1}, {Name: "baseHash", String: &baseHash1}},
+			}},
+			{Operation: runtimecontract.RuntimeOperation{
+				ID: "patch-2", Kind: runtimecontract.RuntimeBlockKindPatchApply, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"other.txt"},
+				Parameters: []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "diff", String: &diff2}, {Name: "baseHash", String: &baseHash2}},
+			}},
+		}}}
+		manifest, _, err := runtimeCandidateAttemptTestBinding(ctx, biz, "ws-v2", "run-v2", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		canonicalCandidate := bindRuntimeTestCandidateToManifest(manifest, candidate)
+		canonicalCandidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, canonicalCandidate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		proposed, err := biz.RecordRuntimeCandidateProposal(ctx, "ws-v2", "run-v2", 0, canonicalCandidate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		module := newTestBiz(biz, hub, nil)
+		return module, countingRepo, proposed, canonicalCandidate, manifest, workspaceDir, &conformanceProbes, &feasibilityProbes
+	}
+
+	t.Run("all_conformant_and_feasible_waves_commit_one_cas_each", func(t *testing.T) {
+		ctx := context.Background()
+		module, repo, proposed, candidate, manifest, workspaceDir, confProbes, feasProbes := setupTwoOpMainline(t, "mainline-wave-ok", false)
+		savesBeforeConf := repo.saves
+		afterConf, closedConf, err := module.validateRuntimeCandidateConformance(ctx, proposed, candidate, manifest, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if closedConf || *confProbes != 2 || repo.saves != savesBeforeConf+1 || len(afterConf.CandidateAttempts[0].Conformances) != 2 {
+			t.Fatalf("conformance wave closed=%t probes=%d saves=%d->%d conformances=%d", closedConf, *confProbes, savesBeforeConf, repo.saves, len(afterConf.CandidateAttempts[0].Conformances))
+		}
+		savesBeforeFeas := repo.saves
+		afterFeas, closedFeas, err := module.probeRuntimeCandidateFeasibility(ctx, afterConf, workspaceDir, candidate, manifest, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if closedFeas || *feasProbes != 2 || repo.saves != savesBeforeFeas+1 || len(afterFeas.CandidateAttempts[0].Feasibilities) != 2 {
+			t.Fatalf("feasibility wave closed=%t probes=%d saves=%d->%d feasibilities=%d", closedFeas, *feasProbes, savesBeforeFeas, repo.saves, len(afterFeas.CandidateAttempts[0].Feasibilities))
+		}
+	})
+
+	t.Run("first_nonconformant_stops_early_before_second_probe", func(t *testing.T) {
+		ctx := context.Background()
+		module, repo, proposed, candidate, manifest, _, confProbes, _ := setupTwoOpMainline(t, "mainline-wave-stop", true)
+		savesBefore := repo.saves
+		afterConf, closedConf, err := module.validateRuntimeCandidateConformance(ctx, proposed, candidate, manifest, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !closedConf || *confProbes != 1 || repo.saves != savesBefore+1 || len(afterConf.CandidateAttempts[0].Conformances) != 1 ||
+			afterConf.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed {
+			t.Fatalf("conformance early-stop closed=%t probes=%d saves=%d->%d attempt=%+v", closedConf, *confProbes, savesBefore, repo.saves, afterConf.CandidateAttempts[0])
+		}
+	})
 }

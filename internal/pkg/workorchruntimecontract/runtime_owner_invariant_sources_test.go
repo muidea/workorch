@@ -227,7 +227,7 @@ func TestOwnerInvariantAssessmentSourcesCompleteLedgerAndJoins(t *testing.T) {
 				if pass == 1 {
 					switch arm {
 					case "ledger":
-						ledger.DefinitionSeed.Hash = "same hash drift"
+						ledger.DefinitionSeedHash = "same hash drift"
 					case "binding":
 						manifest.Bindings[0].CoverageWorkItemID = "other"
 					case "purpose":

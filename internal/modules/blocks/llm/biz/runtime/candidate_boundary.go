@@ -1,10 +1,13 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
@@ -353,17 +356,81 @@ func validateCandidateRequest(request llmmodels.RuntimeCandidateRequest) error {
 			return fmt.Errorf("candidate expected document max output tokens do not match sealed provider ceiling")
 		}
 	}
+	frozenVerified, err := validateFrozenInputEnvelopeForRequest(request)
+	if err != nil {
+		return err
+	}
 	switch request.DocumentKind {
 	case runtimecontract.RuntimeProviderDocumentOperations:
-		return validateOperationsDocumentRequest(request)
+		return validateOperationsDocumentRequest(request, frozenVerified)
 	case runtimecontract.RuntimeProviderDocumentSemanticPlan:
-		return validateSemanticPlanDocumentRequest(request)
+		return validateSemanticPlanDocumentRequest(request, frozenVerified)
 	default:
 		return fmt.Errorf("candidate request requires explicit document kind")
 	}
 }
 
-func validateOperationsDocumentRequest(request llmmodels.RuntimeCandidateRequest) error {
+type frozenCandidateInputEnvelope struct {
+	Expected         runtimecontract.RuntimeExpectedDocumentContract
+	Messages         json.RawMessage
+	CacheKey         string
+	LogicalRequestID string
+	ExpectedHash     string
+	DocumentKind     runtimecontract.RuntimeProviderDocumentKind
+	ManifestHash     string
+	StablePrefixHash string
+	Ceiling          runtimecontract.ProviderCeiling
+	Request          llmmodels.ProviderRequest
+}
+
+// validateFrozenInputEnvelopeForRequest verifies hash integrity, strict JSON
+// structure, and full field binding when a frozen input ref/payload is present.
+func validateFrozenInputEnvelopeForRequest(request llmmodels.RuntimeCandidateRequest) (bool, error) {
+	if request.FrozenInputRef == nil && len(request.FrozenInput) == 0 {
+		return false, nil
+	}
+	if err := request.FrozenInputRef.ValidateContent(request.FrozenInput); err != nil {
+		return false, err
+	}
+	var f frozenCandidateInputEnvelope
+	decoder := json.NewDecoder(bytes.NewReader(request.FrozenInput))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&f); err != nil {
+		return false, err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return false, fmt.Errorf("frozen provider input contains trailing data")
+	}
+	ws := string(request.CandidateContext.WorkspaceID)
+	run := string(request.CandidateContext.RunID)
+	ceiling := request.CandidateContext.Resources.ProviderCeiling
+	if request.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+		ws = string(request.SemanticContext.WorkspaceID)
+		run = string(request.SemanticContext.RunID)
+		ceiling = request.SemanticContext.ProviderCeiling
+	}
+	ws = strings.TrimSpace(ws)
+	run = strings.TrimSpace(run)
+	if request.ExpectedDocument == nil || ceiling == nil ||
+		!reflect.DeepEqual(f.Expected, request.ExpectedDocument.Clone()) ||
+		f.LogicalRequestID != request.RequestIdentity.LogicalRequestID ||
+		f.ExpectedHash != request.ExpectedDocument.Hash ||
+		f.DocumentKind != request.DocumentKind ||
+		f.ManifestHash != request.ExpectedDocument.ManifestHash ||
+		f.StablePrefixHash != request.StablePrefixHash ||
+		f.Request.WorkspaceID != ws ||
+		f.Request.RunID != run {
+		return false, fmt.Errorf("frozen provider input has different request/manifest/scope")
+	}
+	a, _ := json.Marshal(f.Ceiling)
+	b, _ := json.Marshal(ceiling.Normalized())
+	if !bytes.Equal(a, b) || !reflect.DeepEqual(f.Request.Config, llmmodels.RedactedProviderConfig{}) {
+		return false, fmt.Errorf("frozen provider input differs from sealed ceiling")
+	}
+	return true, nil
+}
+
+func validateOperationsDocumentRequest(request llmmodels.RuntimeCandidateRequest, frozenVerified bool) error {
 	if request.SemanticManifest.Hash != "" || request.SemanticContext.WorkspaceID != "" || request.SemanticContext.RunID != "" || request.SemanticCorrectionObservation != nil || request.SemanticCorrectionDirective != nil {
 		return fmt.Errorf("operations document request must not carry semantic plan fields")
 	}
@@ -381,18 +448,22 @@ func validateOperationsDocumentRequest(request llmmodels.RuntimeCandidateRequest
 	if request.ExpectedDocument == nil || request.ExpectedDocument.Normalized().CorrectionAttempt != request.CandidateAttempt {
 		return fmt.Errorf("operations request requires a matching sealed expected document")
 	}
-	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(request.CandidateManifest)
-	if err != nil || request.ExpectedDocument.Normalized().WireContractHash != wire.Hash {
-		return fmt.Errorf("operations expected document does not match manifest-derived wire contract")
-	}
-	if err := request.DefinitionContext.Validate(); err != nil {
-		return err
+	if !frozenVerified {
+		wire, err := runtimecontract.BuildRuntimeCandidateWireContract(request.CandidateManifest)
+		if err != nil || request.ExpectedDocument.Normalized().WireContractHash != wire.Hash {
+			return fmt.Errorf("operations expected document does not match manifest-derived wire contract")
+		}
+		if err := request.DefinitionContext.Validate(); err != nil {
+			return err
+		}
 	}
 	if request.DefinitionContext.Normalized().Revision != request.Transaction.DefinitionRevision {
 		return fmt.Errorf("candidate request definition revision does not match authority transaction")
 	}
-	if err := request.CandidateContext.Validate(request.Decision); err != nil {
-		return err
+	if !frozenVerified {
+		if err := request.CandidateContext.Validate(request.Decision); err != nil {
+			return err
+		}
 	}
 	if err := runtimecontract.ValidateAuthorityTransaction(request.Decision, request.Transaction); err != nil {
 		return err
@@ -420,7 +491,7 @@ func validateOperationsDocumentRequest(request llmmodels.RuntimeCandidateRequest
 	}
 }
 
-func validateSemanticPlanDocumentRequest(request llmmodels.RuntimeCandidateRequest) error {
+func validateSemanticPlanDocumentRequest(request llmmodels.RuntimeCandidateRequest, frozenVerified bool) error {
 	if request.CandidateManifest.Hash != "" || request.CandidateContext.WorkspaceID != "" || request.CandidateContext.RunID != "" || request.DefinitionContext.Revision != "" || request.CandidateCorrectionObservation != nil || request.CandidateCorrection != nil {
 		return fmt.Errorf("semantic plan document request must not carry operations fields")
 	}
@@ -438,8 +509,10 @@ func validateSemanticPlanDocumentRequest(request llmmodels.RuntimeCandidateReque
 			return err
 		}
 	}
-	if err := request.SemanticContext.Validate(request.SemanticManifest); err != nil {
-		return err
+	if !frozenVerified {
+		if err := request.SemanticContext.Validate(request.SemanticManifest); err != nil {
+			return err
+		}
 	}
 	if request.ExpectedDocument == nil {
 		return fmt.Errorf("semantic plan request requires a sealed expected document")

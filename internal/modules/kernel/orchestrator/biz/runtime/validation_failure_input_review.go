@@ -191,7 +191,7 @@ func openRuntimeFailureInputReview(a *RuntimeAggregate, fact runtimecontract.Evi
 
 func runtimeFailureInputReviewRequiredLedger(l runtimecontract.RuntimeSemanticPlanningLedger, source *runtimecontract.RuntimeValidationFailureInputReview) runtimecontract.RuntimeSemanticPlanningLedger {
 	return runtimecontract.RuntimeSemanticPlanningLedger{SchemaVersion: l.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningRequired,
-		DefinitionSeed: l.DefinitionSeed.Clone(), CatalogRefreshAttempts: l.CatalogRefreshAttempts, FeasibilityGaps: l.FeasibilityGaps,
+		DefinitionSeedHash: l.DefinitionSeedHash, CatalogRefreshAttempts: l.CatalogRefreshAttempts, FeasibilityGaps: l.FeasibilityGaps,
 		FailureInputReview: source.Clone(), History: l.History, HistoryArchive: l.HistoryArchive}
 }
 

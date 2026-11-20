@@ -38,9 +38,6 @@ func TestRepairSurfaceConfirmationCreatesFreshStateChangeAuthority(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.recordValidationFailureObservation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, observation); err != nil {
-		t.Fatalf("validation fact identity: %v", err)
-	}
 	confirmation := bindRuntimeRepairSurfaceConfirmationRequestForTest(t, aggregate, runtimecontract.RuntimeRepairSurfaceConfirmation{Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: []string{"main.go"}, ObservedRevision: "tree-v1"})
 	confirmed, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, confirmation)
 	if err != nil {

@@ -442,11 +442,11 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	if !ok || probeResponse.Outcome != runtimecontract.RuntimeOwnerFeasibilityFeasible || probeResponse.Stale != nil || probeResponse.Feedback != nil {
 		t.Fatalf("File candidate feasibility response = %#v", probeData)
 	}
-	persisted, err = controller.recordCandidateFeasibility(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+	persisted, err = controller.recordCandidateFeasibilities(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, 0, []runtimecontract.RuntimeCandidateFeasibilityRecord{{
 		OperationID: decodedCandidate.StateChange.Operations[0].Operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID,
 		AcquisitionBinding: inventory.AcquisitionBinding, CandidateManifestHash: probeResponse.CandidateManifestHash,
 		Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}, ReplayProof: probeResponse.ReplayProof,
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1702,7 +1702,7 @@ func requestAndSealObservedCandidate(t *testing.T, ctx context.Context, hub magi
 		if probeResult.Outcome != runtimecontract.RuntimeOwnerFeasibilityFeasible || probeResult.Feedback != nil || probeResult.Stale != nil {
 			t.Fatalf("candidate feasibility state=%s operation=%+v inventory=%+v result=%#v", aggregate.Decision.State, operation, inventory, probeResult)
 		}
-		aggregate, err = controller.recordCandidateFeasibility(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding, CandidateManifestHash: probeResult.CandidateManifestHash, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}, ReplayProof: probeResult.ReplayProof})
+		aggregate, err = controller.recordCandidateFeasibilities(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, []runtimecontract.RuntimeCandidateFeasibilityRecord{{OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding, CandidateManifestHash: probeResult.CandidateManifestHash, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible}, ReplayProof: probeResult.ReplayProof}})
 		if err != nil {
 			t.Fatal(err)
 		}

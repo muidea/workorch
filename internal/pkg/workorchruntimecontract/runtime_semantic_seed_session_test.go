@@ -88,9 +88,9 @@ func TestSemanticSeedSessionMatchesFullGateAndRawIsolation(t *testing.T) {
 		t.Fatal("invalid ledger fixture", err)
 	}
 	compareSemanticLedgerSeedSession(t, ledger)
-	for arm := uint8(0); arm < 9; arm++ {
+	for _, value := range []string{"", "changed", " " + ledger.DefinitionSeedHash} {
 		changed := cloneRuntimeSemanticPlanningLedgerRaw(ledger)
-		mutateSemanticSessionSeed(&changed.DefinitionSeed, arm, "changed")
+		changed.DefinitionSeedHash = value
 		compareSemanticLedgerSeedSession(t, changed)
 	}
 }
@@ -136,11 +136,10 @@ func TestSemanticSeedSessionExplicitPublicArchiveEquivalence(t *testing.T) {
 		}
 		compareSemanticLedgerSeedSession(t, base)
 		for _, mutate := range []func(*RuntimeSemanticPlanningLedger){
-			func(l *RuntimeSemanticPlanningLedger) { l.DefinitionSeed.Hash = "drift" },
+			func(l *RuntimeSemanticPlanningLedger) { l.DefinitionSeedHash = "drift" },
 			func(l *RuntimeSemanticPlanningLedger) {
-				l.History[0].Snapshot.DefinitionSeed.CoverageItems[0].TargetText = "same hash changed raw"
+				l.History[0].Snapshot.DefinitionSeedHash = "drift"
 			},
-			func(l *RuntimeSemanticPlanningLedger) { l.History[0].Snapshot.DefinitionSeed.Hash = "drift" },
 			func(l *RuntimeSemanticPlanningLedger) {
 				l.History[1].RetiredAtStateRevision = l.History[0].RetiredAtStateRevision
 			},

@@ -66,10 +66,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	validationRecipeID, validationProtocolRef, validationCheckRefs := runtimePositiveConvergenceValidationProof(t, facts)
 
 	// --- 1) attempt 0: schema/contract failure ---
-	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
-		t.Fatal(err)
-	}
-	failed0, err := controller.failCandidateAttempt(ctx, "ws-v2", "run-v2", 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassSchema))
+	failed0, err := controller.RejectCompletedCandidateDocumentForTest(ctx, "ws-v2", "run-v2", 0, "stable-prefix", runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassSchema))
 	if err != nil {
 		t.Fatal(err)
 	}

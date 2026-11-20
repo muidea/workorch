@@ -42,11 +42,12 @@ func TestProjectNewPreparationDeclaresActualSharedDeadline(t *testing.T) {
 			t.Fatal("missing original input preparation")
 		}
 		prep := surfaces[0].ProofRequirementPreparations[0]
+		contentRequirements, hasContract := surfaces[0].PreparationContentRequirementsFor(prep.ContentContractRef)
 		want := fmt.Sprintf("timeoutMillis=%d", ms)
 		if ms == 0 {
 			want = "未显式声明 timeoutMillis（0）"
 		}
-		if !strings.Contains(prep.ContentRequirements, want) || len(prep.CheckAttestations) == 0 || !strings.Contains(prep.ContentRequirements, "all-of") {
+		if !hasContract || !strings.Contains(contentRequirements, want) || len(prep.CheckAttestations) == 0 || !strings.Contains(contentRequirements, "all-of") {
 			t.Fatal("preparation lost declared deadline or all-of obligations", prep)
 		}
 	}

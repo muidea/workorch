@@ -469,6 +469,9 @@ func prospectiveCompositeDriveAggregateWithCandidatesAndExisting(t *testing.T, c
 	if len(manifest.ProofObligations) != 1 || manifest.ProofObligations[0].OwnerFactAcquisition == nil || len(manifest.OwnerFactDependencyCatalogs) != 1 {
 		t.Fatalf("prospective drive manifest fixture is incomplete: %+v", manifest)
 	}
+	if dep, ok := manifest.OwnerFactDependencyCatalogForOwner(runtimecontract.RuntimeModuleShell); !ok || dep.OwnerModuleID != runtimecontract.RuntimeModuleShell {
+		t.Fatalf("prospective drive manifest failed to resolve dependency catalog: %+v", manifest)
+	}
 	acquisition := manifest.ProofObligations[0].OwnerFactAcquisition.Clone()
 	proposal := runtimecontract.RuntimeSemanticProofProposal{
 		CoverageWorkItemID: manifest.CoverageItems[0].ID, OwnerModuleID: acquisition.AcquisitionOwnerModuleID,

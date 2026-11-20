@@ -66,7 +66,7 @@ func projectImplementationPurpose(a *RuntimeAggregate) (bool, error) {
 	if err := retireSemanticPlanningRequestSessions(a, ledger, "implementation_purpose_selected"); err != nil {
 		return false, err
 	}
-	a.SemanticPlanning = runtimecontract.RuntimeSemanticPlanningLedger{SchemaVersion: ledger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningRequired, DefinitionSeed: ledger.DefinitionSeed.Clone(), CatalogRefreshAttempts: ledger.CatalogRefreshAttempts, FeasibilityGaps: ledger.FeasibilityGaps, History: ledger.History, HistoryArchive: ledger.HistoryArchive}
+	a.SemanticPlanning = runtimecontract.RuntimeSemanticPlanningLedger{SchemaVersion: ledger.SchemaVersion, Phase: runtimecontract.RuntimeSemanticPlanningRequired, DefinitionSeedHash: ledger.DefinitionSeedHash, CatalogRefreshAttempts: ledger.CatalogRefreshAttempts, FeasibilityGaps: ledger.FeasibilityGaps, History: ledger.History, HistoryArchive: ledger.HistoryArchive}
 	if appended, err := a.SemanticPlanning.AppendHistory(history); err != nil {
 		return false, err
 	} else {

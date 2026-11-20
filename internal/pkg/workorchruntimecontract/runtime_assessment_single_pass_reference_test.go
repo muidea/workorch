@@ -25,8 +25,11 @@ func referenceAssessmentAuthorityBeforeSinglePass(a RuntimeAssessmentAuthorityIn
 		return fmt.Errorf("runtime assessment authority input identity mismatch")
 	}
 	if StableRuntimeAuthorityFocusHash(a.Focus) != a.AuthorityInput.FocusHash ||
-		StableRuntimeOperationAdmissibilityCatalogRevisionHash(a.OperationAdmissibilities) != a.AuthorityInput.CatalogRevisionHash {
+		StableRuntimeOperationAdmissibilityCatalogIdentityHash(a.CatalogIdentities) != a.AuthorityInput.CatalogRevisionHash {
 		return fmt.Errorf("runtime assessment authority input preimage mismatch")
+	}
+	if err := validateRuntimeAssessmentCatalogScoping(a.Focus, a.CatalogIdentities, a.OperationAdmissibilities); err != nil {
+		return err
 	}
 	if !RuntimeCoverageEvidenceBindingProjectionsEqual(a.Focus.CoverageEvidenceBindings, bindings) {
 		return fmt.Errorf("runtime assessment authority input binding preimage mismatch")

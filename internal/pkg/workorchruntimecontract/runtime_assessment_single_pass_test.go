@@ -147,6 +147,94 @@ func TestAssessmentSinglePassOriginalErrorsAndProducts(t *testing.T) {
 	compareAssessmentAuthoritySinglePass(t, authority, wrong, nil)
 }
 
+func TestAssessmentAuthorityInputScopesCatalogsToRequiredOwnerFacts(t *testing.T) {
+	shellCatalog := RuntimeOperationAdmissibility{
+		PrerequisiteID: "prereq-shell", OwnerModuleID: RuntimeModuleShell,
+		SnapshotID: "snap-shell", ObservedRevision: "rev-shell",
+		OperationKinds: []string{RuntimeBlockKindManagedValidationSession},
+	}
+	fileCatalog := RuntimeOperationAdmissibility{
+		PrerequisiteID: "prereq-file", OwnerModuleID: RuntimeModuleFile,
+		SnapshotID: "snap-file", ObservedRevision: "rev-file",
+		OperationKinds: []string{StepKindFileRead},
+	}
+	allCatalogs := []RuntimeOperationAdmissibility{shellCatalog, fileCatalog}
+	identities := RuntimeOperationAdmissibilityCatalogIdentities(allCatalogs)
+	if StableRuntimeOperationAdmissibilityCatalogIdentityHash(identities) != StableRuntimeOperationAdmissibilityCatalogRevisionHash(allCatalogs) {
+		t.Fatal("catalog identity hash diverged from catalog revision hash")
+	}
+
+	build := func(required []RuntimeOwnerFactRequirement, catalogs []RuntimeOperationAdmissibility) (RuntimeAssessmentAuthorityInput, AuthorityTransaction) {
+		focus := CoverageFocus{
+			ID:                  "focus-scoped",
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+			RequiredOwnerFacts:  required,
+		}.Normalized()
+		identity := RuntimeEquivalentAuthorityInputIdentity{
+			DefinitionRevision: "definition-1", FocusHash: StableRuntimeAuthorityFocusHash(focus),
+			EvidenceRevision: "1", CapabilityStateHash: "capability-1",
+			CatalogRevisionHash: StableRuntimeOperationAdmissibilityCatalogIdentityHash(identities),
+		}.Normalized()
+		tx := AuthorityTransaction{FocusID: focus.ID, State: ConvergenceStateNeedAssessment, AuthorityInputID: StableRuntimeEquivalentAuthorityInputID(identity)}
+		auth := RuntimeAssessmentAuthorityInput{
+			AuthorityInput: identity,
+			Purpose:        RuntimeAssessmentPurposeDefinitionProof,
+			SourceSliceID:  "slice-1", SourceScope: "dodItem", SourceID: "dod-1", SourceText: "verified",
+			Focus:                    focus,
+			CatalogIdentities:        identities,
+			OperationAdmissibilities: catalogs,
+		}.Normalized()
+		return auth, tx
+	}
+
+	// Empty RequiredOwnerFacts keeps full CatalogIdentities and nil OperationAdmissibilities.
+	emptyReqCatalogs := RuntimeAssessmentRequiredOperationAdmissibilities(allCatalogs, nil)
+	if emptyReqCatalogs != nil {
+		t.Fatalf("expected nil required catalogs when no owner facts required, got %+v", emptyReqCatalogs)
+	}
+	authNoReq, txNoReq := build(nil, emptyReqCatalogs)
+	compareAssessmentAuthoritySinglePass(t, authNoReq, txNoReq, nil)
+	if err := authNoReq.Validate(txNoReq, nil); err != nil {
+		t.Fatalf("valid scoped assessment without required owner facts failed: %v", err)
+	}
+
+	// Unrequired catalog is rejected.
+	unrequiredAuth, unrequiredTx := build(nil, []RuntimeOperationAdmissibility{fileCatalog})
+	if err := unrequiredAuth.Validate(unrequiredTx, nil); err == nil {
+		t.Fatal("unrequired owner catalog was accepted on assessment authority")
+	}
+
+	// Required Shell owner keeps only Shell catalog while validating full CatalogIdentities.
+	shellReq := []RuntimeOwnerFactRequirement{{
+		OwnerModuleID: RuntimeModuleShell,
+		FactKind:      RuntimeOwnerFactSelectableValidationSurface,
+		OperationKind: RuntimeBlockKindManagedValidationSession,
+	}}
+	reqCatalogs := RuntimeAssessmentRequiredOperationAdmissibilities(allCatalogs, shellReq)
+	if len(reqCatalogs) != 1 || reqCatalogs[0].OwnerModuleID != RuntimeModuleShell {
+		t.Fatalf("expected only Shell catalog, got %+v", reqCatalogs)
+	}
+	authWithReq, txWithReq := build(shellReq, reqCatalogs)
+	compareAssessmentAuthoritySinglePass(t, authWithReq, txWithReq, nil)
+	if err := authWithReq.Validate(txWithReq, nil); err != nil {
+		t.Fatalf("valid scoped assessment with required Shell owner fact failed: %v", err)
+	}
+
+	// Missing required catalog is rejected.
+	missingReqAuth, missingReqTx := build(shellReq, nil)
+	if err := missingReqAuth.Validate(missingReqTx, nil); err == nil {
+		t.Fatal("missing required owner catalog was accepted")
+	}
+
+	// Mismatched catalog identity vs CatalogIdentities is rejected.
+	mismatchedCatalog := shellCatalog
+	mismatchedCatalog.SnapshotID = "snap-other"
+	mismatchedAuth, mismatchedTx := build(shellReq, []RuntimeOperationAdmissibility{mismatchedCatalog})
+	if err := mismatchedAuth.Validate(mismatchedTx, nil); err == nil {
+		t.Fatal("mismatched catalog identity was accepted")
+	}
+}
+
 func TestAssessmentSinglePassCompleteArchive(t *testing.T) {
 	body, path, runs := applicabilityScanArchive(t)
 	count := 0

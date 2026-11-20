@@ -349,24 +349,26 @@ func runtimeSubmitFailureInputReportForTest(t *testing.T, repository *durableRun
 			p.ValidationInputReview = runtimeFailureReviewReportForTest(m, b, conclusion)
 		}
 	}
+	beforeReviewAttempts := a.Facts.Repair.RepairAttempts
+	beforeReviewBudget := a.ExecutionBudget.Clone()
 	a, err = controller.evaluateSemanticPlan(ctx, a.Facts.WorkspaceID, a.Facts.RunID, session.LogicalRequestID, original)
 	if err != nil {
 		t.Fatal("report", err)
+	}
+	if a.Facts.Repair.RepairAttempts != beforeReviewAttempts || !reflect.DeepEqual(beforeReviewBudget, a.ExecutionBudget) {
+		t.Fatal("input review classification reset repair attempts or charged execution budget")
 	}
 	return controller, a
 }
 
 func TestFailureInputReviewConsistentContinuesOriginalRepair(t *testing.T) {
 	repository, coordinator, e, _ := runtimeFailureInputReviewFixture(t, false)
-	if _, err := coordinator.commitEvidence(context.Background(), e); err != nil {
+	committed, err := coordinator.commitEvidence(context.Background(), e)
+	if err != nil {
 		t.Fatal(err)
 	}
-	controller, a := runtimeSubmitFailureInputReportForTest(t, repository, rc.RuntimeValidationInputConsistent)
-	attempts := a.Facts.Repair.RepairAttempts
-	updated, err := controller.requireSemanticFeasibility(context.Background(), a.Facts.WorkspaceID, a.Facts.RunID)
-	if err != nil {
-		t.Fatal("classify", err)
-	}
+	attempts := committed.Aggregate.Facts.Repair.RepairAttempts
+	_, updated := runtimeSubmitFailureInputReportForTest(t, repository, rc.RuntimeValidationInputConsistent)
 	if updated.SemanticPlanning.FailureInputReview != nil || updated.Facts.Coverage[0].CurrentBindingRef != nil || updated.Facts.Repair.RepairAttempts != attempts {
 		t.Fatal("consistent report did not preserve original bounded repair")
 	}
@@ -392,11 +394,7 @@ func TestFailureInputReviewInconclusiveUsesExistingFactualDecision(t *testing.T)
 	if _, err := coordinator.commitEvidence(context.Background(), e); err != nil {
 		t.Fatal(err)
 	}
-	controller, a := runtimeSubmitFailureInputReportForTest(t, repository, rc.RuntimeValidationInputInconclusive)
-	updated, err := controller.requireSemanticFeasibility(context.Background(), a.Facts.WorkspaceID, a.Facts.RunID)
-	if err != nil {
-		t.Fatal("classify", err)
-	}
+	_, updated := runtimeSubmitFailureInputReportForTest(t, repository, rc.RuntimeValidationInputInconclusive)
 	if updated.Facts.Failure == nil || updated.Facts.Failure.Code != "validation_input_review_inconclusive" || updated.Decision.State != rc.ConvergenceStateNeedGovernance || updated.SemanticPlanning.FailureInputReview == nil {
 		t.Fatalf("inconclusive bypassed factual decision: %+v decision=%+v", updated.Facts.Failure, updated.Decision)
 	}
@@ -404,15 +402,12 @@ func TestFailureInputReviewInconclusiveUsesExistingFactualDecision(t *testing.T)
 
 func TestFailureInputReviewConflictOpensOnlyProtectedInputMaintenance(t *testing.T) {
 	repository, coordinator, e, _ := runtimeFailureInputReviewFixture(t, false, true)
-	if _, err := coordinator.commitEvidence(context.Background(), e); err != nil {
+	committed, err := coordinator.commitEvidence(context.Background(), e)
+	if err != nil {
 		t.Fatal(err)
 	}
-	controller, a := runtimeSubmitFailureInputReportForTest(t, repository, rc.RuntimeValidationInputConflict)
-	attempts := a.Facts.Repair.RepairAttempts
-	updated, err := controller.requireSemanticFeasibility(context.Background(), a.Facts.WorkspaceID, a.Facts.RunID)
-	if err != nil {
-		t.Fatal("classify", err)
-	}
+	attempts := committed.Aggregate.Facts.Repair.RepairAttempts
+	_, updated := runtimeSubmitFailureInputReportForTest(t, repository, rc.RuntimeValidationInputConflict)
 	if updated.SemanticPlanning.FailureInputReview != nil || updated.Facts.Failure != nil || updated.Facts.Coverage[0].CurrentBindingRef != nil || updated.Facts.Repair.RepairAttempts != attempts {
 		t.Fatalf("input conflict did not enter maintenance: failure=%+v phase=%s source=%t binding=%+v attempts=%d/%d", updated.Facts.Failure, updated.SemanticPlanning.Phase, updated.SemanticPlanning.FailureInputReview != nil, updated.Facts.Coverage[0].CurrentBindingRef, updated.Facts.Repair.RepairAttempts, attempts)
 	}
@@ -494,11 +489,7 @@ func TestFailureInputReviewConflictWithoutPermissionKeepsOriginalBinding(t *test
 	if _, err := c.commitEvidence(context.Background(), e); err != nil {
 		t.Fatal(err)
 	}
-	controller, a := runtimeSubmitFailureInputReportForTest(t, repo, rc.RuntimeValidationInputConflict)
-	updated, err := controller.requireSemanticFeasibility(context.Background(), a.Facts.WorkspaceID, a.Facts.RunID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	_, updated := runtimeSubmitFailureInputReportForTest(t, repo, rc.RuntimeValidationInputConflict)
 	if updated.Facts.Failure == nil || updated.Facts.Failure.OriginalDiagnostic == nil || updated.Facts.Failure.OriginalDiagnostic.OriginalCode != "validation_input_review_conflict" || !reflect.DeepEqual(before.Facts.Coverage[0].CurrentBindingRef, updated.Facts.Coverage[0].CurrentBindingRef) {
 		t.Fatalf("unpermitted conflict changed failure/binding: failure=%+v binding=%+v want=%+v", updated.Facts.Failure, updated.Facts.Coverage[0].CurrentBindingRef, before.Facts.Coverage[0].CurrentBindingRef)
 	}
@@ -509,11 +500,7 @@ func TestFailureInputReviewConsistentStructuredRepairRetainsCurrentAuthority(t *
 	if _, err := c.commitEvidence(context.Background(), e); err != nil {
 		t.Fatal(err)
 	}
-	controller, a := runtimeSubmitFailureInputReportForTest(t, repo, rc.RuntimeValidationInputConsistent)
-	updated, err := controller.requireSemanticFeasibility(context.Background(), a.Facts.WorkspaceID, a.Facts.RunID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	_, updated := runtimeSubmitFailureInputReportForTest(t, repo, rc.RuntimeValidationInputConsistent)
 	if updated.Facts.Coverage[0].CurrentBindingRef == nil || updated.SemanticPlanning.FailureInputReview != nil || !SemanticOperationAuthorityReady(updated) || updated.Facts.Failure == nil || updated.Facts.Failure.ValidationFailureObservation == nil {
 		t.Fatal("consistent review bypassed/lost structured owner confirmation")
 	}
@@ -569,11 +556,7 @@ func TestFailureInputReviewInformationRetainsExactSourceAndExcludesWork(t *testi
 	if _, err := c.commitEvidence(context.Background(), e); err != nil {
 		t.Fatal(err)
 	}
-	controller, a := runtimeSubmitFailureInputReportForTest(t, repo, rc.RuntimeValidationInputInconclusive)
-	a, err := controller.requireSemanticFeasibility(context.Background(), a.Facts.WorkspaceID, a.Facts.RunID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	_, a := runtimeSubmitFailureInputReportForTest(t, repo, rc.RuntimeValidationInputInconclusive)
 	source := a.SemanticPlanning.FailureInputReview.Clone()
 	document, _ := runtimeInputReviewDocument(a.SemanticPlanning)
 	resolution := rc.RuntimeGovernanceResolution{ResolutionID: "facts-resolution", TicketID: "facts-ticket", DependencyKind: string(rc.GovernanceDecision), SubjectRef: runtimeInputReviewRef(a, a.SemanticPlanning, document), Outcome: rc.RuntimeGovernanceResolutionOutcomeContinue, Summary: "exact supplied facts; original criteria remain"}
@@ -609,8 +592,11 @@ func TestFailureInputReviewCannotCompileExecutionCredit(t *testing.T) {
 	if _, err := c.commitEvidence(context.Background(), e); err != nil {
 		t.Fatal(err)
 	}
-	_, a := runtimeSubmitFailureInputReportForTest(t, repo, rc.RuntimeValidationInputConsistent)
-	d, _ := runtimeInputReviewDocument(a.SemanticPlanning)
+	_, a := runtimeSubmitFailureInputReportForTest(t, repo, rc.RuntimeValidationInputInconclusive)
+	d, ok := runtimeInputReviewDocument(a.SemanticPlanning)
+	if !ok || a.SemanticPlanning.Manifest == nil {
+		t.Fatalf("missing inconclusive input review snapshot: %+v", a.SemanticPlanning)
+	}
 	if _, _, err := rc.CompileRuntimeSemanticBindings(*a.SemanticPlanning.Manifest, a.SemanticPlanning.LogicalRequestID, d, nil); err == nil {
 		t.Fatal("failure review compiled execution binding")
 	}

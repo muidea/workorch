@@ -78,8 +78,8 @@ func TestSemanticProofCatalogReusePreservesPublicConstraintGates(t *testing.T) {
 }
 
 func TestSemanticManifestProofCatalogReuseKeepsEveryImmutableCWI(t *testing.T) {
-	ledger := semanticBindingIndexedMultiBatchFixture(t, 6)
-	manifest, seed := ledger.Manifest.Clone(), ledger.DefinitionSeed.Clone()
+	ledger, seed := semanticBindingIndexedMultiBatchAndSeedFixture(t, 6)
+	manifest := ledger.Manifest.Clone()
 	sources := semanticDefinitionFocuses(seed.CoverageItems)
 	if err := ValidateRuntimeSemanticPlanManifestAgainstDefinition(manifest, seed, sources); err != nil {
 		t.Fatal(err)

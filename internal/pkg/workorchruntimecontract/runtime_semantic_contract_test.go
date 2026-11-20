@@ -431,12 +431,6 @@ func TestRuntimeSemanticPlanningLedgerRequiredShapeIsStrict(t *testing.T) {
 
 func TestRuntimeSemanticPlanningFailedValidatesActiveBatchFeasibilityLineage(t *testing.T) {
 	manifest := semanticContractTestManifest(t)
-	seed := RuntimeDefinitionSeed{
-		SchemaVersion: RuntimeDefinitionSeedSchemaCurrent, DefinitionRevision: manifest.DefinitionRevision,
-		PolicyHash: "policy-1", CoverageItems: manifest.CoverageItems,
-		Slices: []RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}}},
-	}
-	seed.Hash = StableRuntimeDefinitionSeedHash(seed)
 	order := RuntimeSemanticPlanDocument{
 		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,
 		DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepCoverageOrder,
@@ -476,7 +470,7 @@ func TestRuntimeSemanticPlanningFailedValidatesActiveBatchFeasibilityLineage(t *
 	}
 	ledger := RuntimeSemanticPlanningLedger{
 		SchemaVersion: RuntimeSemanticPlanningLedgerSchemaCurrent, Phase: RuntimeSemanticPlanningFailed,
-		DefinitionSeed: seed, Manifest: &manifest, Attempt: 0, StablePrefixHash: "prefix-1", LogicalRequestID: "request-1",
+		DefinitionSeedHash: manifest.DefinitionSeedHash, Manifest: &manifest, Attempt: 0, StablePrefixHash: "prefix-1", LogicalRequestID: "request-1",
 		CoverageOrderDocument: &order, Document: &order, DocumentHash: StableRuntimeSemanticPlanDocumentHash(order), ActiveBatchID: batch.BatchID,
 		NextBatchSequence: 1,
 		BatchDocuments:    []RuntimeSemanticPlanDocument{document}, Batches: []RuntimeSemanticPlanBatch{batch},
@@ -601,12 +595,6 @@ func TestRuntimeSemanticPlanningSealedRequiresCompleteFeasibleOwnerBatch(t *test
 		ProposalHash: StableRuntimeSemanticProofProposalHash(proposal), OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: manifest.OwnerCatalogs[0].SnapshotID,
 		Status: RuntimeSemanticFeasibilityFeasible, ObservedRevision: "workspace-1", TargetRefs: RuntimeSemanticProposalTargetRefs(proposal),
 	}
-	seed := RuntimeDefinitionSeed{
-		SchemaVersion: RuntimeDefinitionSeedSchemaCurrent, DefinitionRevision: manifest.DefinitionRevision,
-		PolicyHash: "policy-1", CoverageItems: manifest.CoverageItems,
-		Slices: []RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}}},
-	}
-	seed.Hash = StableRuntimeDefinitionSeedHash(seed)
 	documentHash := StableRuntimeSemanticPlanDocumentHash(document)
 	batchID := StableRuntimeSemanticFeasibilityBatchID(manifest, document)
 	feasibilityHash := StableRuntimeSemanticFeasibilitySetHash([]RuntimeSemanticProofFeasibility{feasibility})
@@ -614,7 +602,7 @@ func TestRuntimeSemanticPlanningSealedRequiresCompleteFeasibleOwnerBatch(t *test
 	merged := document.Clone()
 	ledger := RuntimeSemanticPlanningLedger{
 		SchemaVersion: RuntimeSemanticPlanningLedgerSchemaCurrent, Phase: RuntimeSemanticPlanningSealed,
-		DefinitionSeed: seed, Manifest: &manifest, Attempt: 0, StablePrefixHash: "prefix-1", LogicalRequestID: "request-1",
+		DefinitionSeedHash: manifest.DefinitionSeedHash, Manifest: &manifest, Attempt: 0, StablePrefixHash: "prefix-1", LogicalRequestID: "request-1",
 		CoverageOrderDocument: &order, Document: &document, DocumentHash: documentHash, FeasibilityBatchID: batchID,
 		Batches: []RuntimeSemanticPlanBatch{batch}, BatchDocuments: []RuntimeSemanticPlanDocument{document},
 		CompletedBatchIDs: []string{batch.BatchID}, NextBatchSequence: 1, MergedDocument: &merged, MergedDocumentHash: documentHash,
@@ -730,12 +718,19 @@ func sealSemanticTestManifest(t *testing.T, manifest RuntimeSemanticPlanManifest
 		manifest.ProofObligations = append(manifest.ProofObligations, obligation)
 	}
 	manifest.OwnerFactDependencyCatalogs = nil
+	sealedOwners := make(map[string]struct{}, len(manifest.OwnerCatalogs))
+	for _, catalog := range manifest.OwnerCatalogs {
+		sealedOwners[catalog.OwnerModuleID] = struct{}{}
+	}
 	dependencyOwners := make(map[string]struct{})
 	for _, obligation := range manifest.ProofObligations {
 		if obligation.OwnerFactAcquisition == nil || obligation.OwnerFactAcquisition.ProspectiveSatisfactionContractRef == "" {
 			continue
 		}
 		owner := obligation.OwnerFactAcquisition.Requirement.OwnerModuleID
+		if _, selectable := sealedOwners[owner]; selectable {
+			continue
+		}
 		if _, duplicate := dependencyOwners[owner]; duplicate {
 			continue
 		}
@@ -868,6 +863,11 @@ func TestRuntimeSemanticManifestHashBindsOwnerFactValidationRequirement(t *testi
 // exercise the real sealed-generation shape instead of a permissive partial
 // DTO that could hide a missing lineage invariant.
 func semanticSealedLedgerFixture(t *testing.T) RuntimeSemanticPlanningLedger {
+	ledger, _ := semanticSealedLedgerAndSeedFixture(t)
+	return ledger
+}
+
+func semanticSealedLedgerAndSeedFixture(t *testing.T) (RuntimeSemanticPlanningLedger, RuntimeDefinitionSeed) {
 	t.Helper()
 	definition := RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 		Revision: "definition-history", GoalID: "goal-history", GoalDefinition: "deliver",
@@ -939,7 +939,7 @@ func semanticSealedLedgerFixture(t *testing.T) RuntimeSemanticPlanningLedger {
 	orderHash := StableRuntimeSemanticPlanCoverageOrderHash(order)
 	merged := document.Clone()
 	ledger := RuntimeSemanticPlanningLedger{
-		SchemaVersion: RuntimeSemanticPlanningLedgerSchemaCurrent, Phase: RuntimeSemanticPlanningSealed, DefinitionSeed: seed,
+		SchemaVersion: RuntimeSemanticPlanningLedgerSchemaCurrent, Phase: RuntimeSemanticPlanningSealed, DefinitionSeedHash: seed.Hash,
 		Manifest: &manifest, StablePrefixHash: "semantic-history-prefix", LogicalRequestID: "semantic-history-request",
 		CoverageOrderDocument: &order, Document: &document, DocumentHash: documentHash,
 		Batches: []RuntimeSemanticPlanBatch{batch}, ActiveBatchID: "", NextBatchSequence: 1,
@@ -951,7 +951,7 @@ func semanticSealedLedgerFixture(t *testing.T) RuntimeSemanticPlanningLedger {
 	if err := ledger.Validate(); err != nil {
 		t.Fatalf("sealed semantic fixture invalid: %v", err)
 	}
-	return ledger
+	return ledger, seed
 }
 
 // semanticContractTestPendingBatch builds persisted-shape fixture data only.
@@ -1089,7 +1089,7 @@ func TestRuntimeSemanticPlanningHistoryRetainsBoundedDetachedGenerations(t *test
 }
 
 func TestRuntimeSemanticPlanningHistoryRejectsSeedAndReasonDrift(t *testing.T) {
-	ledger := semanticSealedLedgerFixture(t)
+	ledger, seed := semanticSealedLedgerAndSeedFixture(t)
 	history := RuntimeSemanticPlanningGeneration{
 		RetiredAtStateRevision: 2, Reason: RuntimeSemanticPlanningRetirementCatalogRefresh,
 		InvalidationSignatures: []string{"catalog-refresh-history"}, PrerequisiteIDs: []string{"semantic-history-catalog"}, Snapshot: ledger,
@@ -1099,22 +1099,39 @@ func TestRuntimeSemanticPlanningHistoryRejectsSeedAndReasonDrift(t *testing.T) {
 	if err := withHistory.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	if err := ValidateRuntimeSemanticHistoryCoverage(withHistory, seed); err != nil {
+		t.Fatal(err)
+	}
 	badReason := withHistory.Clone()
 	badReason.History[0].Reason = RuntimeSemanticPlanningRetirementReason("not-a-retirement")
 	if err := badReason.Validate(); err == nil {
 		t.Fatal("unsupported semantic retirement reason was accepted")
 	}
 	badSeed := withHistory.Clone()
-	badSeed.DefinitionSeed.PolicyHash = "different-policy"
-	badSeed.DefinitionSeed.Hash = StableRuntimeDefinitionSeedHash(badSeed.DefinitionSeed)
+	badSeed.DefinitionSeedHash = "different-seed-hash"
 	if err := badSeed.Validate(); err == nil {
-		t.Fatal("semantic history with a mismatched definition seed was accepted")
+		t.Fatal("semantic history with a mismatched definition seed hash was accepted")
+	}
+	if err := ValidateRuntimeSemanticHistoryCoverage(badSeed, seed); err == nil {
+		t.Fatal("semantic history coverage check accepted mismatched definition seed hash")
+	}
+	reopened := ledger.Clone()
+	reopened.History = []RuntimeSemanticPlanningGeneration{{
+		RetiredAtStateRevision: 2, Reason: RuntimeSemanticPlanningRetirementCWIReopened,
+		ReopenedCoverageIDs: []common.CoverageWorkItemID{"unknown-cwi"}, ReopenTriggerRefs: []string{"trigger-1"},
+		Snapshot: ledger,
+	}}
+	if err := reopened.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateRuntimeSemanticHistoryCoverage(reopened, seed); err == nil {
+		t.Fatal("out-of-seed history CWI reopen was accepted")
 	}
 }
 
 func TestRuntimeSemanticPlanningEligibleClosureHistoryIsTypedAndDetached(t *testing.T) {
-	ledger := semanticSealedLedgerFixture(t)
-	coverageID := ledger.DefinitionSeed.CoverageItems[0].ID
+	ledger, seed := semanticSealedLedgerAndSeedFixture(t)
+	coverageID := seed.CoverageItems[0].ID
 	history := RuntimeSemanticPlanningGeneration{
 		RetiredAtStateRevision: 2,
 		Reason:                 RuntimeSemanticPlanningRetirementEligibleClosureChanged,
@@ -1139,5 +1156,26 @@ func TestRuntimeSemanticPlanningEligibleClosureHistoryIsTypedAndDetached(t *test
 	invalid.ClosureChangeTriggerRefs = nil
 	if err := invalid.Validate(); err == nil {
 		t.Fatal("eligible closure history without prerequisite binding refs was accepted")
+	}
+}
+
+func TestRuntimeSemanticManifestDeduplicatesSelectableDependencyCatalog(t *testing.T) {
+	manifest, _, _ := semanticMissingOwnerFactAcquisitionFixture(t)
+	if len(manifest.OwnerFactDependencyCatalogs) != 0 {
+		t.Fatalf("selectable owner catalog was duplicated in OwnerFactDependencyCatalogs: %d", len(manifest.OwnerFactDependencyCatalogs))
+	}
+	depCatalog, found := manifest.OwnerFactDependencyCatalogForOwner(RuntimeModuleShell)
+	if !found || depCatalog.OwnerModuleID != RuntimeModuleShell {
+		t.Fatalf("OwnerFactDependencyCatalogForOwner failed to resolve selectable owner catalog: found=%v", found)
+	}
+	if _, found := runtimeSemanticOwnerCatalogFor(manifest, RuntimeModuleShell); !found {
+		t.Fatal("expected shell catalog in OwnerCatalogs")
+	}
+
+	duplicated := manifest.Clone()
+	duplicated.OwnerFactDependencyCatalogs = []RuntimeOperationAdmissibility{depCatalog}
+	duplicated.Hash = StableRuntimeSemanticPlanManifestHash(duplicated)
+	if err := duplicated.Validate(); err == nil || !strings.Contains(err.Error(), "duplicates selectable owner catalog") {
+		t.Fatalf("manifest duplicating selectable owner catalog in OwnerFactDependencyCatalogs was accepted: %v", err)
 	}
 }

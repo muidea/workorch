@@ -954,24 +954,7 @@ func runtimeTestSealPendingStateChangeFocus(t *testing.T, controller *RuntimeCon
 		Status: runtimecontract.RuntimeSemanticFeasibilityFeasible, ObservedRevision: catalog.ObservedRevision,
 		TargetRefs: append([]string(nil), aggregate.Facts.Focus.TargetRefs...),
 	}
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, Authority: &RuntimeInternalAuthorityPayload{SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibility}})
-	accepted := aggregate.SemanticPlanning.Batches[len(aggregate.SemanticPlanning.Batches)-1]
-	acceptedDocument, found := runtimeSemanticBatchDocument(aggregate.SemanticPlanning.BatchDocuments, accepted.BatchID)
-	if !found {
-		t.Fatalf("accepted pending semantic batch %q has no exact document", accepted.BatchID)
-	}
-	batchResult := runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult{
-		BatchID: accepted.BatchID, BatchHash: accepted.Hash,
-		DocumentHash: runtimecontract.StableRuntimeSemanticPlanDocumentHash(acceptedDocument), Feasibilities: append([]runtimecontract.RuntimeSemanticProofFeasibility(nil), aggregate.SemanticPlanning.Feasibilities...),
-	}
-	batchResult.Hash = runtimecontract.StableRuntimeSemanticPlanBatchFeasibilityResultHash(batchResult)
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchFeasibilityObserved, Transaction: &RuntimeInternalTransactionPayload{SemanticPlanBatchFeasibilityResult: &batchResult}})
-	accepted = aggregate.SemanticPlanning.Batches[len(aggregate.SemanticPlanning.Batches)-1]
-	merged, err := runtimecontract.MergeRuntimeSemanticPlanFocusBatchDocument(manifest, accepted, document)
-	if err != nil {
-		t.Fatal(err)
-	}
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchDocumentsMerged, Transaction: &RuntimeInternalTransactionPayload{SemanticPlanMergedDocument: &merged}})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, Authority: &RuntimeInternalAuthorityPayload{SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibilities: []runtimecontract.RuntimeSemanticProofFeasibility{feasibility}}})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed, Authority: &RuntimeInternalAuthorityPayload{}})
 	if len(aggregate.Facts.Focus.CoverageEvidenceBindings) != 1 || aggregate.Facts.Focus.CoverageEvidenceBindings[0].CoverageWorkItemID != coverageID {
 		t.Fatalf("pending semantic batch did not seal exact current binding: %+v", aggregate.Facts.Focus)

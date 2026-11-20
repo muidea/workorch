@@ -16,97 +16,48 @@ func (a RuntimeAggregate) validateOwnerAggregateJoins(gate *rc.RuntimeOwnerInvar
 // Each unchanged rule consumes its formal preimage result. Dependencies below
 // are typed inputs of that rule, not a runtime registry or a retained PASS.
 func (a RuntimeAggregate) validateOwnerAggregateTransition(previous *RuntimeAggregate, gate *rc.RuntimeOwnerInvariantSourceGate) error {
-	changedActiveDispatch := previous == nil || !rc.RuntimeRawEqual(a.ActiveDispatch, previous.ActiveDispatch)
-	changedCandidateAttempts := previous == nil || !rc.RuntimeRawEqual(a.CandidateAttempts, previous.CandidateAttempts)
-	changedCandidateRequestSessions := previous == nil || !rc.RuntimeRawEqual(a.CandidateRequestSessions, previous.CandidateRequestSessions)
-	changedCompletedDispatches := previous == nil || !rc.RuntimeRawEqual(a.CompletedDispatches, previous.CompletedDispatches)
-	changedCoverageProofLineage := previous == nil || !rc.RuntimeRawEqual(a.CoverageProofLineage, previous.CoverageProofLineage)
-	changedDecision := previous == nil || !rc.RuntimeRawEqual(a.Decision, previous.Decision)
-	changedDefinition := previous == nil || !rc.RuntimeRawEqual(a.Definition, previous.Definition)
-	changedExecutionBudget := previous == nil || !rc.RuntimeRawEqual(a.ExecutionBudget, previous.ExecutionBudget)
-	changedGovernanceResolutions := previous == nil || !rc.RuntimeRawEqual(a.GovernanceResolutions, previous.GovernanceResolutions)
-	changedOperationReceipts := previous == nil || !rc.RuntimeRawEqual(a.OperationReceipts, previous.OperationReceipts)
-	changedProcessedEventIDs := previous == nil || !rc.RuntimeRawEqual(a.ProcessedEventIDs, previous.ProcessedEventIDs)
-	changedReconciliation := previous == nil || !rc.RuntimeRawEqual(a.Reconciliation, previous.Reconciliation)
-	changedRecoverableWaits := previous == nil || !rc.RuntimeRawEqual(a.RecoverableWaits, previous.RecoverableWaits)
-	changedRepairSurfaceConfirmations := previous == nil || !rc.RuntimeRawEqual(a.RepairSurfaceConfirmations, previous.RepairSurfaceConfirmations)
-	changedSemanticPlanning := previous == nil || !rc.RuntimeRawEqual(a.SemanticPlanning, previous.SemanticPlanning)
-	changedTermination := previous == nil || !rc.RuntimeRawEqual(a.Termination, previous.Termination)
-	changedFactsScope := previous == nil
-	changedDefinitionRevision := previous == nil
-	changedDefinitionSeed := previous == nil
-	changedDefinitionFocuses := previous == nil
-	changedFocusQueues := previous == nil
-	changedCoverageFacts := previous == nil
-	changedAdmissibilityFacts := previous == nil
-	changedAcceptedEvidence := previous == nil
-	changedRejectedEvidence := previous == nil
-	changedProfileContracts := previous == nil
-	changedEvidencePolicies := previous == nil
-	changedCWISuspensions := previous == nil
-	changedReconciliationContract := previous == nil
-	changedRepairDirective := previous == nil
-	changedPrerequisites := previous == nil
-	changedFailure := previous == nil
-	changedResourcesOther := previous == nil
-	changedActivationOther := previous == nil
-	changedFactsOther := previous == nil
+	diff := rc.FullRuntimeStateTransitionDiff()
 	if previous != nil {
-		changedFactsScope = a.Facts.WorkspaceID != previous.Facts.WorkspaceID || a.Facts.RunID != previous.Facts.RunID
-		changedDefinitionRevision = a.Facts.DefinitionRevision != previous.Facts.DefinitionRevision
-		changedDefinitionSeed = !rc.RuntimeRawEqual(a.Facts.DefinitionSeed, previous.Facts.DefinitionSeed)
-		changedDefinitionFocuses = !rc.RuntimeRawEqual(a.Facts.DefinitionFocuses, previous.Facts.DefinitionFocuses)
-		changedFocusQueues = !rc.RuntimeRawEqual(a.Facts.Focus, previous.Facts.Focus) ||
-			!rc.RuntimeRawEqual(a.Facts.RemainingFocuses, previous.Facts.RemainingFocuses) ||
-			!rc.RuntimeRawEqual(a.Facts.CompletedFocuses, previous.Facts.CompletedFocuses)
-		changedCoverageFacts = !rc.RuntimeRawEqual(a.Facts.Coverage, previous.Facts.Coverage)
-		changedAdmissibilityFacts = !rc.RuntimeRawEqual(a.Facts.Resources.OperationAdmissibilities, previous.Facts.Resources.OperationAdmissibilities)
-		changedAcceptedEvidence = !rc.RuntimeRawEqual(a.Facts.Evidence.Accepted, previous.Facts.Evidence.Accepted)
-		changedRejectedEvidence = !rc.RuntimeRawEqual(a.Facts.Evidence.Rejected, previous.Facts.Evidence.Rejected)
-		changedProfileContracts = !rc.RuntimeRawEqual(a.Facts.Activation.ExecutionContract.ProfileContracts, previous.Facts.Activation.ExecutionContract.ProfileContracts)
-		changedEvidencePolicies = !rc.RuntimeRawEqual(a.Facts.Activation.EvidencePolicies, previous.Facts.Activation.EvidencePolicies)
-		changedCWISuspensions = !rc.RuntimeRawEqual(a.Facts.CWISuspensions, previous.Facts.CWISuspensions)
-		changedReconciliationContract = !rc.RuntimeRawEqual(a.Facts.ReconciliationContract, previous.Facts.ReconciliationContract)
-		changedRepairDirective = !rc.RuntimeRawEqual(a.Facts.RepairDirective, previous.Facts.RepairDirective)
-		changedPrerequisites = !rc.RuntimeRawEqual(a.Facts.Prerequisites, previous.Facts.Prerequisites)
-		changedFailure = !rc.RuntimeRawEqual(a.Facts.Failure, previous.Facts.Failure)
-		if changedAdmissibilityFacts {
-			changedResourcesOther = true
-		} else {
-			prevRes := previous.Facts.Resources
-			prevRes.OperationAdmissibilities = a.Facts.Resources.OperationAdmissibilities
-			changedResourcesOther = !rc.RuntimeRawEqual(a.Facts.Resources, prevRes)
-		}
-		if changedProfileContracts || changedEvidencePolicies {
-			changedActivationOther = true
-		} else {
-			prevAct := previous.Facts.Activation
-			prevAct.ExecutionContract.ProfileContracts = a.Facts.Activation.ExecutionContract.ProfileContracts
-			prevAct.EvidencePolicies = a.Facts.Activation.EvidencePolicies
-			changedActivationOther = !rc.RuntimeRawEqual(a.Facts.Activation, prevAct)
-		}
-		if changedFactsScope || changedDefinitionRevision || changedDefinitionSeed || changedDefinitionFocuses ||
-			changedFocusQueues || changedCoverageFacts || changedAcceptedEvidence || changedRejectedEvidence ||
-			changedCWISuspensions || changedReconciliationContract || changedRepairDirective ||
-			changedPrerequisites || changedFailure || changedResourcesOther || changedActivationOther {
-			changedFactsOther = true
-		} else {
-			changedFactsOther = a.Facts.CWILedgerSchemaVersion != previous.Facts.CWILedgerSchemaVersion ||
-				a.Facts.EvidenceRevision != previous.Facts.EvidenceRevision ||
-				!rc.RuntimeRawEqual(a.Facts.Capabilities, previous.Facts.Capabilities) ||
-				!rc.RuntimeRawEqual(a.Facts.ConvergencePolicy, previous.Facts.ConvergencePolicy) ||
-				!rc.RuntimeRawEqual(a.Facts.RecoveryPolicy, previous.Facts.RecoveryPolicy) ||
-				!rc.RuntimeRawEqual(a.Facts.ExecutionBudgetPolicy, previous.Facts.ExecutionBudgetPolicy) ||
-				!rc.RuntimeRawEqual(a.Facts.Assessments, previous.Facts.Assessments) ||
-				!rc.RuntimeRawEqual(a.Facts.EvidenceApplicabilityObservations, previous.Facts.EvidenceApplicabilityObservations) ||
-				!rc.RuntimeRawEqual(a.Facts.StateChange, previous.Facts.StateChange) ||
-				!rc.RuntimeRawEqual(a.Facts.Recovery, previous.Facts.Recovery) ||
-				!rc.RuntimeRawEqual(a.Facts.Repair, previous.Facts.Repair) ||
-				!rc.RuntimeRawEqual(a.Facts.Feasibility, previous.Facts.Feasibility) ||
-				!rc.RuntimeRawEqual(a.Facts.Slices, previous.Facts.Slices)
-		}
+		diff = rc.ComputeRuntimeStateTransitionDiff(ownerStateRecord(*previous), ownerStateRecord(a))
 	}
-	changedFacts := changedFactsOther
+	return a.validateOwnerAggregateTransitionWithDiff(previous, diff, gate)
+}
+
+func (a RuntimeAggregate) validateOwnerAggregateTransitionWithDiff(previous *RuntimeAggregate, diff rc.RuntimeStateTransitionDiff, gate *rc.RuntimeOwnerInvariantSourceGate) error {
+	changedActiveDispatch := diff.ActiveDispatch
+	changedCandidateAttempts := diff.CandidateAttempts
+	changedCandidateRequestSessions := diff.CandidateRequestSessions
+	changedCompletedDispatches := diff.CompletedDispatches
+	changedCoverageProofLineage := diff.CoverageProofLineage
+	changedDecision := diff.Decision
+	changedDefinition := diff.Definition
+	changedExecutionBudget := diff.ExecutionBudget
+	changedGovernanceResolutions := diff.GovernanceResolutions
+	changedOperationReceipts := diff.OperationReceipts
+	changedProcessedEventIDs := diff.ProcessedEventIDs
+	changedReconciliation := diff.Reconciliation
+	changedRecoverableWaits := diff.RecoverableWaits
+	changedRepairSurfaceConfirmations := diff.RepairSurfaceConfirmations
+	changedSemanticPlanning := diff.SemanticPlanning
+	changedTermination := diff.Termination
+	changedFactsScope := diff.FactsScope
+	changedDefinitionRevision := diff.FactsDefinitionRevision
+	changedDefinitionSeed := diff.FactsDefinitionSeed
+	changedDefinitionFocuses := diff.FactsDefinitionFocuses
+	changedFocusQueues := diff.FactsFocusQueues
+	changedCoverageFacts := diff.FactsCoverage
+	changedAdmissibilityFacts := diff.FactsResourcesOperationAdmissibilities
+	changedAcceptedEvidence := diff.FactsEvidenceAccepted
+	changedRejectedEvidence := diff.FactsEvidenceRejected
+	changedProfileContracts := diff.FactsActivationProfileContracts
+	changedEvidencePolicies := diff.FactsActivationEvidencePolicies
+	changedCWISuspensions := diff.FactsCWISuspensions
+	changedReconciliationContract := diff.FactsReconciliationContract
+	changedRepairDirective := diff.FactsRepairDirective
+	changedPrerequisites := diff.FactsPrerequisites
+	changedFailure := diff.FactsFailure
+	changedResourcesOther := diff.FactsResources()
+	changedFacts := diff.FactsAny()
 
 	if changedDefinitionFocuses || changedProfileContracts {
 		if err := rc.ValidateRuntimeDefinitionLineageAssertions(a.Facts.DefinitionFocuses, a.Facts.Activation.ExecutionContract.ProfileContracts); err != nil {
@@ -187,7 +138,7 @@ func (a RuntimeAggregate) validateOwnerAggregateTransition(previous *RuntimeAggr
 			return err
 		}
 	}
-	changedDecisionTerminal := previous == nil || !rc.RuntimeRawEqual(a.Decision.Terminal, previous.Decision.Terminal)
+	changedDecisionTerminal := diff.DecisionTerminal
 	changedInputReviewFacts := changedFactsScope || changedCoverageFacts || changedRejectedEvidence || changedDefinitionSeed || changedDefinitionFocuses || changedFocusQueues || changedAdmissibilityFacts ||
 		changedFailure
 	if changedInputReviewFacts || changedSemanticPlanning || changedGovernanceResolutions || changedDecisionTerminal ||

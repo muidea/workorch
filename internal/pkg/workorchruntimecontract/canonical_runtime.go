@@ -1340,10 +1340,14 @@ func stableRuntimeOperationAdmissibilitySnapshotIDCanonical(value RuntimeOperati
 				writeHashString(h, "proof-preparation-original-diagnostic/v1")
 				writeHashString(h, StableRuntimeFeedbackHash(RuntimeFeedback{OriginalDiagnostic: preparation.OriginalDiagnostic}))
 			}
-			if preparation.ContentContractRef != "" || preparation.ContentRequirements != "" {
-				writeHashString(h, "proof-preparation-content-contract/v1")
-				writeHashStrings(h, []string{preparation.ContentContractRef, preparation.ContentRequirements})
+			if preparation.ContentContractRef != "" {
+				writeHashString(h, "proof-preparation-content-contract-ref/v1")
+				writeHashString(h, preparation.ContentContractRef)
 			}
+		}
+		for _, contract := range surface.PreparationContentContracts {
+			writeHashString(h, "surface-preparation-content-contract/v1")
+			writeHashStrings(h, []string{contract.Ref, contract.Requirements})
 		}
 		writeRuntimeValidationProofUnavailabilitiesHash(h, surface.ProofRequirementUnavailabilities)
 		writeHashString(h, string(surface.EffectScope))
@@ -3019,39 +3023,101 @@ func StableRuntimeAuthorityFocusHash(focus CoverageFocus) string {
 	return "focus-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
 
-// StableRuntimeOperationAdmissibilityCatalogRevisionHash is the catalog
-// identity embedded in the authority input. Keeping the preimage algorithm
-// public lets historical assessment adjudication prove owner-fact state
-// without consulting mutable current resources.
-func StableRuntimeOperationAdmissibilityCatalogRevisionHash(values []RuntimeOperationAdmissibility) string {
-	// This identity consumes four fields only. Catalog admission independently
-	// checks the complete raw body and SnapshotID; hashing a revision must not
-	// normalize/copy all proof inputs and diagnostics for each consumer.
-	type identity struct {
-		prerequisite, owner, snapshot, revision string
+// RuntimeOperationAdmissibilityCatalogIdentity captures the four canonical
+// identity fields of an owner catalog needed for assessment catalog-revision
+// verification without duplicating full catalog surfaces on assessment authority.
+type RuntimeOperationAdmissibilityCatalogIdentity struct {
+	PrerequisiteID   string
+	OwnerModuleID    string
+	SnapshotID       string
+	ObservedRevision string
+}
+
+func (i RuntimeOperationAdmissibilityCatalogIdentity) Normalized() RuntimeOperationAdmissibilityCatalogIdentity {
+	i.PrerequisiteID = strings.TrimSpace(i.PrerequisiteID)
+	i.OwnerModuleID = strings.TrimSpace(i.OwnerModuleID)
+	i.SnapshotID = strings.TrimSpace(i.SnapshotID)
+	i.ObservedRevision = strings.TrimSpace(i.ObservedRevision)
+	return i
+}
+
+func (i RuntimeOperationAdmissibilityCatalogIdentity) Validate() error {
+	i = i.Normalized()
+	if i.PrerequisiteID == "" || i.OwnerModuleID == "" || i.SnapshotID == "" || i.ObservedRevision == "" {
+		return fmt.Errorf("runtime operation admissibility catalog identity requires prerequisite, owner, snapshot and revision")
 	}
-	identities := make([]identity, 0, len(values))
+	return nil
+}
+
+func RuntimeOperationAdmissibilityCatalogIdentityFrom(admissibility RuntimeOperationAdmissibility) RuntimeOperationAdmissibilityCatalogIdentity {
+	return RuntimeOperationAdmissibilityCatalogIdentity{
+		PrerequisiteID:   strings.TrimSpace(admissibility.PrerequisiteID),
+		OwnerModuleID:    strings.TrimSpace(admissibility.OwnerModuleID),
+		SnapshotID:       strings.TrimSpace(admissibility.SnapshotID),
+		ObservedRevision: strings.TrimSpace(admissibility.ObservedRevision),
+	}
+}
+
+func NormalizeRuntimeOperationAdmissibilityCatalogIdentities(values []RuntimeOperationAdmissibilityCatalogIdentity) []RuntimeOperationAdmissibilityCatalogIdentity {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]RuntimeOperationAdmissibilityCatalogIdentity, 0, len(values))
 	for _, value := range values {
-		prerequisite := strings.TrimSpace(value.PrerequisiteID)
-		if prerequisite != "" {
-			identities = append(identities, identity{prerequisite, strings.TrimSpace(value.OwnerModuleID), strings.TrimSpace(value.SnapshotID), strings.TrimSpace(value.ObservedRevision)})
+		ret = append(ret, value.Normalized())
+	}
+	sort.SliceStable(ret, func(i, j int) bool {
+		if ret[i].PrerequisiteID != ret[j].PrerequisiteID {
+			return ret[i].PrerequisiteID < ret[j].PrerequisiteID
+		}
+		return ret[i].OwnerModuleID < ret[j].OwnerModuleID
+	})
+	return nilIfEmpty(ret)
+}
+
+func RuntimeOperationAdmissibilityCatalogIdentities(values []RuntimeOperationAdmissibility) []RuntimeOperationAdmissibilityCatalogIdentity {
+	identities := make([]RuntimeOperationAdmissibilityCatalogIdentity, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value.PrerequisiteID) != "" {
+			identities = append(identities, RuntimeOperationAdmissibilityCatalogIdentityFrom(value))
+		}
+	}
+	return NormalizeRuntimeOperationAdmissibilityCatalogIdentities(identities)
+}
+
+// StableRuntimeOperationAdmissibilityCatalogIdentityHash preserves the exact
+// canonical catalog revision hash over lightweight catalog identities.
+func StableRuntimeOperationAdmissibilityCatalogIdentityHash(values []RuntimeOperationAdmissibilityCatalogIdentity) string {
+	identities := make([]RuntimeOperationAdmissibilityCatalogIdentity, 0, len(values))
+	for _, value := range values {
+		value = value.Normalized()
+		if value.PrerequisiteID != "" {
+			identities = append(identities, value)
 		}
 	}
 	// Preserve the original stable ordering, including duplicate sort keys.
 	// The public hash does not admit or silently deduplicate those inputs.
 	sort.SliceStable(identities, func(i, j int) bool {
-		if identities[i].prerequisite != identities[j].prerequisite {
-			return identities[i].prerequisite < identities[j].prerequisite
+		if identities[i].PrerequisiteID != identities[j].PrerequisiteID {
+			return identities[i].PrerequisiteID < identities[j].PrerequisiteID
 		}
-		return identities[i].owner < identities[j].owner
+		return identities[i].OwnerModuleID < identities[j].OwnerModuleID
 	})
 	h := newRuntimeHashWriter()
 	for _, value := range identities {
-		writeHashString(h, value.owner)
-		writeHashString(h, value.snapshot)
-		writeHashString(h, value.revision)
+		writeHashString(h, value.OwnerModuleID)
+		writeHashString(h, value.SnapshotID)
+		writeHashString(h, value.ObservedRevision)
 	}
 	return "catalog-" + hex.EncodeToString(h.Sum(nil))[:20]
+}
+
+// StableRuntimeOperationAdmissibilityCatalogRevisionHash is the catalog
+// identity embedded in the authority input. Keeping the preimage algorithm
+// public lets historical assessment adjudication prove owner-fact state
+// without consulting mutable current resources.
+func StableRuntimeOperationAdmissibilityCatalogRevisionHash(values []RuntimeOperationAdmissibility) string {
+	return StableRuntimeOperationAdmissibilityCatalogIdentityHash(RuntimeOperationAdmissibilityCatalogIdentities(values))
 }
 
 type hashStringWriter interface {

@@ -16,8 +16,8 @@ type RuntimeInternalAuthorityPayload struct {
 	ImplementationWorkScopeObservation *runtimecontract.RuntimeImplementationWorkScopeObservation
 	DefinitionGap                      *runtimecontract.RuntimeDefinitionGapObservation
 
-	SemanticFeasibility *runtimecontract.RuntimeSemanticProofFeasibility
-	SemanticDiagnostic  *runtimecontract.RuntimeOriginalDiagnostic
+	SemanticFeasibilities []runtimecontract.RuntimeSemanticProofFeasibility
+	SemanticDiagnostic    *runtimecontract.RuntimeOriginalDiagnostic
 	// SemanticFailureCode is an Orchestrator-selected bounded terminal code.
 	// It remains separate from SemanticDiagnostic so the producer-authored
 	// diagnostic can be persisted byte-for-byte.
@@ -31,7 +31,7 @@ type RuntimeInternalAuthorityPayload struct {
 	SemanticCoverageOrder     []common.CoverageWorkItemID
 	SemanticOrderManifestHash string
 
-	PrerequisiteResult              *PrerequisiteResult
+	PrerequisiteResults             []PrerequisiteResult
 	RecoverableWaitProbeObservation *runtimecontract.RuntimeRecoverableWaitProbeObservation
 	Stale                           *runtimecontract.RuntimePrerequisiteStale
 	FeasibilityFact                 *runtimecontract.RuntimeFeasibilityFact
@@ -72,7 +72,6 @@ const (
 	RuntimeInternalEventSemanticBindingContradictionObserved RuntimeInternalEventKind = "semantic_binding_contradiction_observed"
 	RuntimeInternalEventAssessmentObserved                   RuntimeInternalEventKind = "assessment_observed"
 	RuntimeInternalEventGovernanceRequestObserved            RuntimeInternalEventKind = "governance_request_observed"
-	RuntimeInternalEventValidationFailureObserved            RuntimeInternalEventKind = "validation_failure_observed"
 	RuntimeInternalEventRepairSurfaceConfirmationObserved    RuntimeInternalEventKind = "repair_surface_confirmation_observed"
 	RuntimeInternalEventDefinitionGapObserved                RuntimeInternalEventKind = "runtime_definition_gap_observed"
 )

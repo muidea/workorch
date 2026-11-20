@@ -10,8 +10,8 @@ func executionProofSourceFixture(t *testing.T) (RuntimeLineageAssertionSources, 
 	t.Helper()
 	rule := RuntimeLineageAssertionRule{Ref: "original-work", Kind: RuntimeLineageCompletedWorkRounds, ConsumptionPoint: RuntimeProofPhaseExecution, MinCompletedRounds: 2, ExecutionSourceContractRef: RuntimeDoDSourceExecutionProof}
 	sources, consumer := lineageSourceFixture(t, rule)
-	ledger, bindings := assessmentPurposeGenerationForTest(t, "cwi-source", "source-request", false, "dodItem")
-	original := ledger.DefinitionSeed.CoverageItems[0]
+	ledger, bindings, ledgerSeed := assessmentPurposeGenerationWithSeedForTest(t, "cwi-source", "source-request", false, "dodItem")
+	original := ledgerSeed.CoverageItems[0]
 	inventory := sourceObligationInventoryFixture()
 	inventory.DefinitionRevision, inventory.StartupInputHash = "definition-purpose", "startup-purpose"
 	for index := range inventory.Sources {

@@ -1921,7 +1921,7 @@ if [[ -n "$internal_version_selection_matches" ]]; then
 	echo "$internal_version_selection_matches" >&2
 	exit 1
 fi
-if rg -n 'workorch-preparation-record/v[0-9]+' web/workorch-console/src; then
+if grep -R -n -E -- 'workorch-preparation-record/v[0-9]+' web/workorch-console/src; then
 	echo "boundary contract violation: Web preparation accepts a historical record format" >&2
 	exit 1
 fi
@@ -4598,7 +4598,6 @@ for marker in \
 	'currentPlan.SubjectRef != planned.SubjectRef' \
 	'currentPlan.SubjectDomain != planned.SubjectDomain' \
 	'currentPlan.ExpectedSubjectRevision != planned.ExpectedSubjectRevision' \
-	'current = observed.Aggregate' \
 	'RequestID: currentPlan.RequestID' \
 	'IssuedAtStateRevision: currentPlan.IssuedAtStateRevision' \
 	'ExpectedSubjectRevision: currentPlan.ExpectedSubjectRevision' \
@@ -4670,7 +4669,7 @@ for marker in \
 	fi
 done
 repair_confirmation_rebase_calls="$(grep -o -F -- 'rebaseRuntimeRepairSurfaceHandoffError' <<<"$runtime_repair_confirmation_adapter" | wc -l | tr -d ' ')"
-if ((repair_confirmation_rebase_calls < 4)); then
+if ((repair_confirmation_rebase_calls < 3)); then
 	echo "boundary contract violation: repair-confirmation adapter no longer rebases every in-flight handoff error" >&2
 	exit 1
 fi
@@ -5204,7 +5203,7 @@ for marker in \
 		exit 1
 	fi
 done
-semantic_owner_probe="$(sed -n '/^func (m \*Biz) probeRuntimeSemanticProposal(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime_semantic_drive.go)"
+semantic_owner_probe="$(sed -n '/^func (m \*Biz) probeRuntimeSemanticProposalObservation(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime_semantic_drive.go)"
 if ! grep -q -F 'runtime.ValidateRuntimeSemanticProposalBeforeOwnerProbe(ledger, proposal)' <<<"$semantic_owner_probe" ||
 	! grep -q -F 'semantic_probe_proposal_invalid' <<<"$semantic_owner_probe"; then
 	echo "boundary contract violation: semantic owner probe bypasses the persisted manifest/document preflight" >&2

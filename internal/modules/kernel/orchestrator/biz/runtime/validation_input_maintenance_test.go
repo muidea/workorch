@@ -35,7 +35,7 @@ func ownerInputMaintenanceGuardFixture(t *testing.T) RuntimeAggregate {
 	f.Focus = rc.CoverageFocus{CoverageWorkItemIDs: []common.CoverageWorkItemID{r.CoverageWorkItemID}}
 	f.Coverage = []rc.RuntimeCoverageItemFact{{ID: r.CoverageWorkItemID, CWIConvergenceState: rc.RuntimeCWIConvergenceStateUnbound}}
 	f.DefinitionFocuses = []rc.RuntimeDefinitionFocus{{CoverageWorkItemIDs: f.Focus.CoverageWorkItemIDs, RequiredOwnerFacts: []rc.RuntimeOwnerFactRequirement{{OwnerModuleID: c.OwnerModuleID, FactKind: rc.RuntimeOwnerFactSelectableValidationSurface, OperationKind: rc.RuntimeBlockKindManagedValidationSession, ValidationProofRequirementHash: r.Hash}}, ImplementationWorkPolicy: &rc.RuntimeImplementationWorkPolicy{InputRevisionProtocolRef: rc.RuntimeValidationInputRevisionProtocolV1, OwnerModuleID: rc.RuntimeModuleFile}}}
-	return RuntimeAggregate{StateRevision: 9, Facts: f, SemanticPlanning: rc.RuntimeSemanticPlanningLedger{SchemaVersion: rc.RuntimeSemanticPlanningLedgerSchemaCurrent, Phase: rc.RuntimeSemanticPlanningRequired, DefinitionSeed: f.DefinitionSeed}}
+	return RuntimeAggregate{StateRevision: 9, Facts: f, SemanticPlanning: rc.RuntimeSemanticPlanningLedger{SchemaVersion: rc.RuntimeSemanticPlanningLedgerSchemaCurrent, Phase: rc.RuntimeSemanticPlanningRequired, DefinitionSeedHash: f.DefinitionSeed.Hash}}
 }
 
 func TestOwnerInputMaintenanceRequiresPermissionAndQuiescentOriginalSource(t *testing.T) {

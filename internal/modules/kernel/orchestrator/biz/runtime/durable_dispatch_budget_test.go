@@ -30,7 +30,7 @@ func TestDurableDispatchBudgetSealCASRestartDuplicateAndStale(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := controller.admitCandidateProposal(ctx, a.Facts.WorkspaceID, a.Facts.RunID, 0, manifest, logical, candidate); err != nil {
+			if _, err := controller.admitCandidateProposal(ctx, a.Facts.WorkspaceID, a.Facts.RunID, 0, "durable-budget-seal", manifest, logical, candidate); err != nil {
 				t.Fatal(err)
 			}
 			if err := RecordFixtureCandidateFeasibilities(ctx, controller, a.Facts.WorkspaceID, a.Facts.RunID, 0, candidate); err != nil {
@@ -98,7 +98,7 @@ func TestTerminalFailureRetainsPendingFeasibilityCatalogInSameCAS(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := controller.admitCandidateProposal(ctx, a.Facts.WorkspaceID, a.Facts.RunID, 0, manifest, logical, candidate); err != nil {
+			if _, err := controller.admitCandidateProposal(ctx, a.Facts.WorkspaceID, a.Facts.RunID, 0, "terminal-catalog", manifest, logical, candidate); err != nil {
 				t.Fatal(err)
 			}
 			if err := RecordFixtureCandidateFeasibilities(ctx, controller, a.Facts.WorkspaceID, a.Facts.RunID, 0, candidate); err != nil {

@@ -347,17 +347,7 @@ func lineageReceiptSealedAggregateWithRule(t *testing.T, rule runtimecontract.Ru
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanEvaluated, Transaction: &RuntimeInternalTransactionPayload{SemanticDocument: &document, LogicalRequestID: batch.RequestLogicalID}})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityRequired, Authority: &RuntimeInternalAuthorityPayload{}})
 	feasibility.CatalogObservationID = observation.ObservationID
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, Authority: &RuntimeInternalAuthorityPayload{SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibility: &feasibility}})
-	accepted := aggregate.SemanticPlanning.Batches[0]
-	batchResult := runtimecontract.RuntimeSemanticPlanBatchFeasibilityResult{BatchID: accepted.BatchID, BatchHash: accepted.Hash,
-		DocumentHash: accepted.DocumentHash, Feasibilities: []runtimecontract.RuntimeSemanticProofFeasibility{feasibility}}
-	batchResult.Hash = runtimecontract.StableRuntimeSemanticPlanBatchFeasibilityResultHash(batchResult)
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchFeasibilityObserved, Transaction: &RuntimeInternalTransactionPayload{SemanticPlanBatchFeasibilityResult: &batchResult}})
-	merged, err := runtimecontract.MergeRuntimeSemanticPlanFocusBatchDocument(manifest, accepted, document)
-	if err != nil {
-		t.Fatal(err)
-	}
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchDocumentsMerged, Transaction: &RuntimeInternalTransactionPayload{SemanticPlanMergedDocument: &merged}})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticFeasibilityObserved, Authority: &RuntimeInternalAuthorityPayload{SemanticBatchID: aggregate.SemanticPlanning.FeasibilityBatchID, SemanticFeasibilities: []runtimecontract.RuntimeSemanticProofFeasibility{feasibility}}})
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticContractSealed, Authority: &RuntimeInternalAuthorityPayload{}})
 	if len(aggregate.Facts.Focus.CoverageEvidenceBindings) != 1 {
 		t.Fatal("exact semantic seal 未生成唯一 binding")
@@ -399,7 +389,7 @@ func lineageReceiptSealedAggregateWithRule(t *testing.T, rule runtimecontract.Ru
 		observed := runtimecontract.RuntimePrerequisiteObservation{PrerequisiteID: pending.ID, Kind: pending.Kind, OwnerModuleID: pending.OwnerModuleID, ContentHash: snapshot.ContentHash, Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: snapshot.TargetRef, Revision: snapshot.ContentHash}}}
 		observed.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observed)
 		fact := PrerequisiteResult{PrerequisiteID: pending.ID, TargetSnapshot: &snapshot, Observation: &observed}
-		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventPrerequisiteObserved, Authority: &RuntimeInternalAuthorityPayload{PrerequisiteResult: &fact}})
+		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventPrerequisiteObserved, Authority: &RuntimeInternalAuthorityPayload{PrerequisiteResults: []PrerequisiteResult{fact}}})
 	}
 	candidateManifest, err := BuildRuntimeCandidateContractManifestForAggregate(aggregate)
 	if err != nil {
@@ -415,16 +405,15 @@ func lineageReceiptSealedAggregateWithRule(t *testing.T, rule runtimecontract.Ru
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventCandidateRequestSubmitted, Transaction: &RuntimeInternalTransactionPayload{LogicalRequestID: session.LogicalRequestID, Sequence: session.NextSequence, PhysicalCallID: physicalID}})
 	settlement := runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, physicalID, nil)
 	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventCandidateDocumentObserved, Transaction: &RuntimeInternalTransactionPayload{LogicalRequestID: session.LogicalRequestID, PhysicalCallID: physicalID, ProviderBudgetSettlement: settlement}})
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventCandidateAttemptBegun, Transaction: &RuntimeInternalTransactionPayload{StablePrefixHash: session.StablePrefixHash, LogicalRequestID: session.LogicalRequestID, Manifest: &candidateManifest}})
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{Kind: runtimecontract.StepKindFileWrite, BindingRefs: []string{binding.ID}, TargetRefs: []string{"target.txt"}, Parameters: runtimeFileWriteParameters("完成后的文件内容\n")}}}}}
 	candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(candidateManifest, candidate)
 	if err != nil {
 		t.Fatal(err)
 	}
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventCandidateProposalObserved, Transaction: &RuntimeInternalTransactionPayload{Manifest: &candidateManifest, LogicalRequestID: session.LogicalRequestID, Candidate: &candidate}})
+	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventCandidateProposalObserved, Transaction: &RuntimeInternalTransactionPayload{StablePrefixHash: session.StablePrefixHash, Manifest: &candidateManifest, LogicalRequestID: session.LogicalRequestID, Candidate: &candidate}})
 	for _, fact := range runtimeTestCurrentCandidateFeasibilities(t, aggregate, candidateManifest, candidate) {
 		fact := fact
-		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventCandidateFeasibilityObserved, Transaction: &RuntimeInternalTransactionPayload{CandidateFeasibility: &fact}})
+		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventCandidateFeasibilityObserved, Transaction: &RuntimeInternalTransactionPayload{CandidateFeasibilities: []runtimecontract.RuntimeCandidateFeasibilityRecord{fact}}})
 	}
 	sealEvent := RuntimeInternalEvent{Kind: RuntimeInternalEventCandidateSealed, Scope: lineageReceiptScope(aggregate), Transaction: &RuntimeInternalTransactionPayload{Manifest: &candidateManifest, LogicalRequestID: session.LogicalRequestID, Candidate: &candidate}}
 	for _, inspect := range beforeSeal {

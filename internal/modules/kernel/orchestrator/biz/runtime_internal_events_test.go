@@ -17,7 +17,7 @@ func TestRuntimeMainlineHasNoSecondStageCandidateFeasibilityTransition(t *testin
 			t.Fatalf("runtime mainline retains split candidate feasibility transition %q", forbidden)
 		}
 	}
-	if !strings.Contains(source, "runtimeRecordCandidateFeasibility(") {
-		t.Fatal("runtime mainline no longer submits the single candidate feasibility fact")
+	if !strings.Contains(source, "runtimeRecordCandidateFeasibilities(") {
+		t.Fatal("runtime mainline no longer submits the wave candidate feasibility facts")
 	}
 }

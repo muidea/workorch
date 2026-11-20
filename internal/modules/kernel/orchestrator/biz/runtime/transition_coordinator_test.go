@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type transitionCoordinatorRepository struct {
@@ -224,5 +225,115 @@ func TestRuntimeTransitionCoordinatorUsesValidatedRepositoryOnlyAfterInvariantCh
 	}
 	if repository.validatedSaves != 1 || repository.saves != 0 {
 		t.Fatalf("save paths: validated=%d ordinary=%d", repository.validatedSaves, repository.saves)
+	}
+}
+
+func TestRuntimeTransitionCoordinatorDiffGatesRejectTamperedValidatorsAndAllowValidMoves(t *testing.T) {
+	base := stateChangeAggregate(t)
+	base.PrerequisiteInvalidations = []runtimecontract.RuntimePrerequisiteInvalidationRecord{{
+		Signature: "sig-1", PrerequisiteIDs: []string{"p-1"}, ObservationIDs: []string{"obs-1"},
+		Stale: &runtimecontract.RuntimePrerequisiteStale{
+			PrerequisiteID: "p-1", ObservationID: "obs-1",
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: "workspace_deliverable", ExpectedRevision: "v1", ObservedRevision: "v2", Reason: "changed",
+		},
+	}}
+
+	t.Run("valid unrelated state revision advance commits", func(t *testing.T) {
+		previous := base.CloneRaw()
+		next := base.CloneRaw()
+		next.StateRevision++
+		next.ProcessedEventIDs = append(next.ProcessedEventIDs, "ev-diff-noop")
+		repo := &transitionCoordinatorRepository{previous: &previous}
+		coordinator, err := NewRuntimeTransitionCoordinator(repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := coordinator.Commit(context.Background(), next, previous.StateRevision); err != nil {
+			t.Fatalf("unrelated commit failed: %v", err)
+		}
+		if repo.saves != 1 {
+			t.Fatalf("saves=%d, want 1", repo.saves)
+		}
+	})
+
+	cases := []struct {
+		name   string
+		mutate func(previous, next *RuntimeAggregate)
+	}{
+		{
+			name: "prerequisite invalidations rewritten",
+			mutate: func(previous, next *RuntimeAggregate) {
+				next.PrerequisiteInvalidations[0].Signature = "sig-rewritten"
+			},
+		},
+		{
+			name: "historical acceptance proof without assessment dispatch",
+			mutate: func(previous, next *RuntimeAggregate) {
+				next.Facts.Coverage[0].HistoricalAcceptanceProofs = []runtimecontract.RuntimeHistoricalAcceptanceProof{{
+					AssessmentDispatchID: "forged-dispatch",
+				}}
+			},
+		},
+		{
+			name: "committed assessment appended without active assessment dispatch",
+			mutate: func(previous, next *RuntimeAggregate) {
+				next.Facts.Assessments = append(next.Facts.Assessments, runtimecontract.RuntimeAssessmentFact{
+					ID: "forged-assessment", Revision: "runtime-evidence-1",
+				})
+			},
+		},
+		{
+			name: "evidence applicability observation appended with invalid window",
+			mutate: func(previous, next *RuntimeAggregate) {
+				next.Facts.EvidenceApplicabilityObservations = []runtimecontract.RuntimeEvidenceApplicabilityObservation{{
+					RecordedAtStateRevision: previous.StateRevision,
+				}}
+			},
+		},
+		{
+			name: "cwi suspension cannot be rewritten once appended",
+			mutate: func(previous, next *RuntimeAggregate) {
+				next.Facts.CWISuspensions = []runtimecontract.RuntimeCWISuspension{{
+					ProtocolRef: "forged-suspension",
+				}}
+			},
+		},
+		{
+			name: "terminal material seal cannot attach without terminal closeout",
+			mutate: func(previous, next *RuntimeAggregate) {
+				next.TerminalMaterialSeal = &runtimecontract.RuntimeTerminalMaterialSeal{}
+			},
+		},
+		{
+			name: "assessment dispatch without applicability authority fails seal",
+			mutate: func(previous, next *RuntimeAggregate) {
+				next.ActiveDispatch = &runtimecontract.RuntimeDispatchRecord{
+					ID:          "forged-assess-dispatch",
+					Transaction: next.Decision.AuthorityTransaction(),
+					Candidate: runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
+						FocusID: next.Facts.Focus.ID, CoverageWorkItemIDs: next.Facts.Focus.CoverageWorkItemIDs,
+						Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "forged",
+					}},
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			previous := base.CloneRaw()
+			next := base.CloneRaw()
+			next.StateRevision++
+			tc.mutate(&previous, &next)
+			repo := &transitionCoordinatorRepository{previous: &previous}
+			coordinator, err := NewRuntimeTransitionCoordinator(repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := coordinator.Commit(context.Background(), next, previous.StateRevision); err == nil || repo.saves != 0 {
+				t.Fatalf("tampered %s escaped Commit or persisted: err=%v saves=%d", tc.name, err, repo.saves)
+			}
+		})
 	}
 }

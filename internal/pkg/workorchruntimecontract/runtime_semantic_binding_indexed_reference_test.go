@@ -532,6 +532,11 @@ func semanticBindingIndexedReferenceFocus(manifest RuntimeSemanticPlanManifest, 
 }
 
 func semanticBindingIndexedMultiBatchFixture(t testing.TB, count int) RuntimeSemanticPlanningLedger {
+	ledger, _ := semanticBindingIndexedMultiBatchAndSeedFixture(t, count)
+	return ledger
+}
+
+func semanticBindingIndexedMultiBatchAndSeedFixture(t testing.TB, count int) (RuntimeSemanticPlanningLedger, RuntimeDefinitionSeed) {
 	t.Helper()
 	definition := RuntimeDefinitionContext{StartupInputHash: "startup-preimage", Revision: "definition-preimage", GoalID: "goal-preimage", GoalDefinition: "deliver", DoDID: "dod-preimage", DoDDefinition: "works", CapabilityContract: []string{StepKindFileWrite}}
 	execution := RuntimeExecutionContract{OperationContractRevision: RuntimeOperationContractRevision(), StateChangePolicy: RuntimeStateChangeAllowedButNotRequired}
@@ -557,7 +562,7 @@ func semanticBindingIndexedMultiBatchFixture(t testing.TB, count int) RuntimeSem
 		t.Fatal(err)
 	}
 	order := RuntimeSemanticPlanDocument{SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: seed.Hash, PlanStep: RuntimeSemanticPlanStepCoverageOrder, CoverageOrder: ids}
-	ledger := RuntimeSemanticPlanningLedger{SchemaVersion: RuntimeSemanticPlanningLedgerSchemaCurrent, Phase: RuntimeSemanticPlanningSealed, DefinitionSeed: seed, Manifest: &manifest, StablePrefixHash: "stable-preimage", CoverageOrderDocument: &order, NextBatchSequence: count, SealedBindingSetHash: "sealed-preimage"}
+	ledger := RuntimeSemanticPlanningLedger{SchemaVersion: RuntimeSemanticPlanningLedgerSchemaCurrent, Phase: RuntimeSemanticPlanningSealed, DefinitionSeedHash: seed.Hash, Manifest: &manifest, StablePrefixHash: "stable-preimage", CoverageOrderDocument: &order, NextBatchSequence: count, SealedBindingSetHash: "sealed-preimage"}
 	for i, id := range ids {
 		request := fmt.Sprintf("request-%02d", i)
 		batch := semanticContractTestPendingBatch(t, manifest, order, i, request, ids[i:i+1], ids[i:])
@@ -588,5 +593,5 @@ func semanticBindingIndexedMultiBatchFixture(t testing.TB, count int) RuntimeSem
 	if err := ledger.Validate(); err != nil {
 		t.Fatalf("同代多批 fixture 非法: %v", err)
 	}
-	return ledger
+	return ledger, seed
 }

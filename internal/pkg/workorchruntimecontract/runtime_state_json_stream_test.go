@@ -117,12 +117,13 @@ func TestWriteRuntimeStateRecordJSONSchemaFieldGuards(t *testing.T) {
 		tag  string
 	}{
 		{"SchemaVersion", ""},
-		{"DefinitionSeed", ""},
+		{"DefinitionSeedHash", ""},
 		{"HistoryArchive", ",omitempty"},
 		{"History", ""},
 		{"Manifest", ""},
 		{"StablePrefixHash", ""},
 		{"CompiledOrder", ",omitempty"},
+		{"CompiledProofBatches", ",omitempty"},
 		{"CoverageOrderDocument", ""},
 		{"FailureInputReview", ",omitempty"},
 		{"BatchDocuments", ""},
@@ -224,9 +225,10 @@ func TestWriteRuntimeStateRecordJSONExactByteIdentity(t *testing.T) {
 	assertWriteRuntimeStateRecordJSONMatchesMarshal(t, RuntimeStateRecord{
 		ProcessedEventIDs: []string{},
 		SemanticPlanning: RuntimeSemanticPlanningLedger{
-			FailureInputReview: &RuntimeValidationFailureInputReview{},
-			CompiledOrder:      &RuntimeSemanticCompiledOrder{},
-			History:            []RuntimeSemanticPlanningGeneration{},
+			FailureInputReview:   &RuntimeValidationFailureInputReview{},
+			CompiledOrder:        &RuntimeSemanticCompiledOrder{},
+			CompiledProofBatches: []RuntimeSemanticCompiledProofBatch{{}},
+			History:              []RuntimeSemanticPlanningGeneration{},
 			HistoryArchive: &RuntimeSemanticHistoryArchive{
 				Segments: [][]RuntimeSemanticPlanningGeneration{{}, nil},
 			},
@@ -243,6 +245,7 @@ func TestWriteRuntimeStateRecordJSONExactByteIdentity(t *testing.T) {
 	filled.ProcessedEventIDs = nil
 	filled.SemanticPlanning.FailureInputReview = nil
 	filled.SemanticPlanning.CompiledOrder = nil
+	filled.SemanticPlanning.CompiledProofBatches = nil
 	filled.SemanticPlanning.HistoryArchive = nil
 	assertWriteRuntimeStateRecordJSONMatchesMarshal(t, filled)
 

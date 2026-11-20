@@ -62,7 +62,6 @@ type RuntimeStateJSONSpans struct {
 	ReconciliationBatch                    RuntimeStateJSONByteSpan
 	ReconciliationResults                  RuntimeStateJSONByteSpan
 	ReconciliationReopened                 RuntimeStateJSONByteSpan
-	SemanticDefinitionSeed                 RuntimeStateJSONByteSpan
 	SemanticManifest                       RuntimeStateJSONByteSpan
 	SemanticCoverageOrderDocument          RuntimeStateJSONByteSpan
 	SemanticDocument                       RuntimeStateJSONByteSpan
@@ -477,7 +476,6 @@ func (s *runtimeStateStreamEncoder) writeRuntimeStateRecord(state *RuntimeStateR
 		prevSpan := s.prevSpans.Fields[8]
 		s.writePreimageSpan(prevSpan.Start, prevSpan.End)
 		delta := semStart - prevSpan.Start
-		s.spans.SemanticDefinitionSeed = shiftSpan(s.prevSpans.SemanticDefinitionSeed, delta)
 		s.spans.SemanticManifest = shiftSpan(s.prevSpans.SemanticManifest, delta)
 		s.spans.SemanticCoverageOrderDocument = shiftSpan(s.prevSpans.SemanticCoverageOrderDocument, delta)
 		s.spans.SemanticDocument = shiftSpan(s.prevSpans.SemanticDocument, delta)
@@ -751,11 +749,7 @@ func (s *runtimeStateStreamEncoder) writeSemanticPlanningLedger(ledger *RuntimeS
 		prevSpans = s.prevSpans
 	}
 	s.writeField(&first, "SchemaVersion", &ledger.SchemaVersion)
-	if prevLedger != nil {
-		s.spans.SemanticDefinitionSeed = writeSubfieldWithPreimage(s, &first, "DefinitionSeed", &ledger.DefinitionSeed, &prevLedger.DefinitionSeed, prevSpans.SemanticDefinitionSeed)
-	} else {
-		s.spans.SemanticDefinitionSeed = s.writeField(&first, "DefinitionSeed", &ledger.DefinitionSeed)
-	}
+	s.writeField(&first, "DefinitionSeedHash", &ledger.DefinitionSeedHash)
 	if ledger.HistoryArchive != nil {
 		s.writeFieldPrefix(&first, "HistoryArchive")
 		archStart := s.written
@@ -784,6 +778,10 @@ func (s *runtimeStateStreamEncoder) writeSemanticPlanningLedger(ledger *RuntimeS
 	s.writeField(&first, "StablePrefixHash", &ledger.StablePrefixHash)
 	if ledger.CompiledOrder != nil {
 		s.writeField(&first, "CompiledOrder", ledger.CompiledOrder)
+	}
+	if len(ledger.CompiledProofBatches) != 0 {
+		s.writeFieldPrefix(&first, "CompiledProofBatches")
+		writeStreamSlice(s, ledger.CompiledProofBatches)
 	}
 	if prevLedger != nil {
 		s.spans.SemanticCoverageOrderDocument = writePtrSubfieldWithPreimage(s, &first, "CoverageOrderDocument", ledger.CoverageOrderDocument, prevLedger.CoverageOrderDocument, true, prevSpans.SemanticCoverageOrderDocument)

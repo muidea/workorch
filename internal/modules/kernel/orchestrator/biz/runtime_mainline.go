@@ -179,6 +179,8 @@ func (m *Biz) validateRuntimeCandidateConformance(ctx context.Context, aggregate
 	if !bound || strings.TrimSpace(attemptRecord.LogicalRequestID) == "" {
 		return aggregate, false, fmt.Errorf("candidate conformance has no persisted request-session binding")
 	}
+	wave := make([]runtimecontract.RuntimeCandidateConformanceRecord, 0, len(operations))
+	closed := false
 	for _, operation := range operations {
 		authorization, found := runtimeOperationAuthorizationForKind(manifest, operation.Kind)
 		if !found {
@@ -198,7 +200,8 @@ func (m *Biz) validateRuntimeCandidateConformance(ctx context.Context, aggregate
 			if persisted.Observation.Outcome == runtimecontract.RuntimeOperationCandidateConformant {
 				continue
 			}
-			return aggregate, true, nil
+			closed = true
+			break
 		}
 		observation, observeErr := ValidateRuntimeOperationCandidateConformance(ctx, m.EventHub(), runtimecontract.RuntimeOperationCandidateConformanceRequest{
 			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
@@ -208,24 +211,27 @@ func (m *Biz) validateRuntimeCandidateConformance(ctx context.Context, aggregate
 		if observeErr != nil {
 			return aggregate, false, observeErr
 		}
-		record := runtimecontract.RuntimeCandidateConformanceRecord{
+		wave = append(wave, runtimecontract.RuntimeCandidateConformanceRecord{
 			OperationID: operation.ID, LogicalRequestID: attemptRecord.LogicalRequestID,
 			CandidateManifestHash: manifest.Hash, Observation: observation,
+		})
+		if observation.Outcome != runtimecontract.RuntimeOperationCandidateConformant {
+			closed = true
+			break
 		}
+	}
+	if len(wave) != 0 {
 		result, recordErr := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 			Kind:        runtime.RuntimeInternalEventCandidateConformanceObserved,
 			Scope:       runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
-			Transaction: &runtime.RuntimeInternalTransactionPayload{Attempt: candidateAttempt, CandidateConformance: &record},
+			Transaction: &runtime.RuntimeInternalTransactionPayload{Attempt: candidateAttempt, CandidateConformances: wave},
 		})
 		if recordErr != nil {
 			return aggregate, false, recordErr
 		}
 		aggregate = result.Aggregate
-		if observation.Outcome != runtimecontract.RuntimeOperationCandidateConformant {
-			return aggregate, true, nil
-		}
 	}
-	return aggregate, false, nil
+	return aggregate, closed, nil
 }
 
 func runtimeCandidateConformanceForOperation(aggregate runtime.RuntimeAggregate, attempt int, operationID string) (runtimecontract.RuntimeCandidateConformanceRecord, bool) {
@@ -263,6 +269,7 @@ func (m *Biz) requestRuntimeCandidateDocument(
 	if err := runtime.ValidateRuntimeCandidateContractManifestForAggregate(aggregate, manifest); err != nil {
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
+	manifestValidatedAtRevision := aggregate.StateRevision
 	correctionDirective, err := runtimePreviousCandidateCorrection(aggregate, candidateAttempt)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
@@ -287,7 +294,7 @@ func (m *Biz) requestRuntimeCandidateDocument(
 			return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 		}
 		aggregate = ensured
-		if progress, err := m.resumeRuntimeCandidateDocumentSession(ctx, aggregate, manifest, session, candidateAttempt); progress.handled {
+		if progress, err := m.resumeRuntimeCandidateDocumentSessionWithValidatedRevision(ctx, aggregate, manifest, session, candidateAttempt, manifestValidatedAtRevision); progress.handled {
 			return progress.aggregate, progress.candidate, progress.ready, err
 		}
 	}
@@ -314,7 +321,7 @@ func (m *Biz) requestRuntimeCandidateDocument(
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
 	aggregate = ensured
-	progress, progressErr := m.resumeRuntimeCandidateDocumentSession(ctx, aggregate, manifest, session, candidateAttempt)
+	progress, progressErr := m.resumeRuntimeCandidateDocumentSessionWithValidatedRevision(ctx, aggregate, manifest, session, candidateAttempt, manifestValidatedAtRevision)
 	if progress.handled {
 		return progress.aggregate, progress.candidate, progress.ready, progressErr
 	}
@@ -348,7 +355,7 @@ func (m *Biz) requestRuntimeCandidateDocument(
 		}
 		return m.terminateRuntimeCandidateRequestSubmissionUnknown(ctx, aggregate, session.LogicalRequestID, settlement)
 	}
-	return m.handleRuntimeCandidateProviderResponse(ctx, aggregate, manifest, session, response, candidateAttempt, sequence, physicalCallID)
+	return m.handleRuntimeCandidateProviderResponseWithValidatedRevision(ctx, aggregate, manifest, session, response, candidateAttempt, sequence, physicalCallID, manifestValidatedAtRevision)
 }
 
 type runtimeCandidateDocumentProgress struct {
@@ -359,11 +366,15 @@ type runtimeCandidateDocumentProgress struct {
 }
 
 func (m *Biz) resumeRuntimeCandidateDocumentSession(ctx context.Context, aggregate runtime.RuntimeAggregate, manifest runtimecontract.RuntimeCandidateContractManifest, session runtimecontract.RuntimeCandidateRequestSession, candidateAttempt int) (runtimeCandidateDocumentProgress, error) {
+	return m.resumeRuntimeCandidateDocumentSessionWithValidatedRevision(ctx, aggregate, manifest, session, candidateAttempt, 0)
+}
+
+func (m *Biz) resumeRuntimeCandidateDocumentSessionWithValidatedRevision(ctx context.Context, aggregate runtime.RuntimeAggregate, manifest runtimecontract.RuntimeCandidateContractManifest, session runtimecontract.RuntimeCandidateRequestSession, candidateAttempt int, manifestValidatedAtRevision uint64) (runtimeCandidateDocumentProgress, error) {
 	if aggregate.Decision.State == runtimecontract.ConvergenceStateFailed || aggregate.Decision.State == runtimecontract.ConvergenceStateComplete {
 		return runtimeCandidateDocumentProgress{aggregate: aggregate, handled: true}, nil
 	}
 	if session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
-		updated, candidate, ready, err := m.admitRuntimeCompletedCandidateDocument(ctx, aggregate, manifest, session.LogicalRequestID, candidateAttempt)
+		updated, candidate, ready, err := m.admitRuntimeCompletedCandidateDocumentAtRevision(ctx, aggregate, manifest, session.LogicalRequestID, candidateAttempt, manifestValidatedAtRevision)
 		return runtimeCandidateDocumentProgress{aggregate: updated, candidate: candidate, ready: ready, handled: true}, err
 	}
 	if session.State == runtimecontract.RuntimeCandidateRequestSessionTerminal {
@@ -389,6 +400,10 @@ func (m *Biz) resumeRuntimeCandidateDocumentSession(ctx context.Context, aggrega
 }
 
 func (m *Biz) handleRuntimeCandidateProviderResponse(ctx context.Context, aggregate runtime.RuntimeAggregate, manifest runtimecontract.RuntimeCandidateContractManifest, session runtimecontract.RuntimeCandidateRequestSession, response llmevents.RequestRuntimeCandidateResult, candidateAttempt, sequence int, physicalCallID string) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidate, bool, error) {
+	return m.handleRuntimeCandidateProviderResponseWithValidatedRevision(ctx, aggregate, manifest, session, response, candidateAttempt, sequence, physicalCallID, 0)
+}
+
+func (m *Biz) handleRuntimeCandidateProviderResponseWithValidatedRevision(ctx context.Context, aggregate runtime.RuntimeAggregate, manifest runtimecontract.RuntimeCandidateContractManifest, session runtimecontract.RuntimeCandidateRequestSession, response llmevents.RequestRuntimeCandidateResult, candidateAttempt, sequence int, physicalCallID string, manifestValidatedAtRevision uint64) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidate, bool, error) {
 	settlement, settlementErr := runtimeProviderBudgetSettlement(string(aggregate.Facts.WorkspaceID), string(aggregate.Facts.RunID), session.LogicalRequestID, physicalCallID, response.Audit, response.Usage)
 	if settlementErr != nil || settlement.Status == runtime.RuntimeProviderBudgetSettlementUnknown {
 		unknown, unknownErr := runtimeProviderBudgetSettlement(string(aggregate.Facts.WorkspaceID), string(aggregate.Facts.RunID), session.LogicalRequestID, physicalCallID, nil, nil)
@@ -416,7 +431,7 @@ func (m *Biz) handleRuntimeCandidateProviderResponse(ctx context.Context, aggreg
 	if settlement.Status != runtime.RuntimeProviderBudgetSettlementConfirmed {
 		return m.terminateRuntimeCandidateRequestProtocol(ctx, aggregate, session.LogicalRequestID, "provider_submission_fact_invalid", "unsubmitted provider result cannot carry a provider document", nil, settlement)
 	}
-	return m.handleRuntimeCandidateDocumentOutcome(ctx, aggregate, manifest, session, response, candidateAttempt, sequence, physicalCallID, settlement)
+	return m.handleRuntimeCandidateDocumentOutcomeWithValidatedRevision(ctx, aggregate, manifest, session, response, candidateAttempt, sequence, physicalCallID, settlement, manifestValidatedAtRevision)
 }
 
 func (m *Biz) handleRuntimeCandidateProviderFeedback(ctx context.Context, aggregate runtime.RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession, feedback runtimecontract.RuntimeFeedback, physicalCallID string, settlement *runtime.RuntimeProviderBudgetSettlement) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidate, bool, error) {
@@ -453,6 +468,10 @@ func (m *Biz) handleRuntimeCandidateTransientFeedback(ctx context.Context, aggre
 }
 
 func (m *Biz) handleRuntimeCandidateDocumentOutcome(ctx context.Context, aggregate runtime.RuntimeAggregate, manifest runtimecontract.RuntimeCandidateContractManifest, session runtimecontract.RuntimeCandidateRequestSession, response llmevents.RequestRuntimeCandidateResult, candidateAttempt, sequence int, physicalCallID string, settlement *runtime.RuntimeProviderBudgetSettlement) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidate, bool, error) {
+	return m.handleRuntimeCandidateDocumentOutcomeWithValidatedRevision(ctx, aggregate, manifest, session, response, candidateAttempt, sequence, physicalCallID, settlement, 0)
+}
+
+func (m *Biz) handleRuntimeCandidateDocumentOutcomeWithValidatedRevision(ctx context.Context, aggregate runtime.RuntimeAggregate, manifest runtimecontract.RuntimeCandidateContractManifest, session runtimecontract.RuntimeCandidateRequestSession, response llmevents.RequestRuntimeCandidateResult, candidateAttempt, sequence int, physicalCallID string, settlement *runtime.RuntimeProviderBudgetSettlement, manifestValidatedAtRevision uint64) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidate, bool, error) {
 	framing := response.DocumentOutcome.Framing
 	switch framing.Disposition {
 	case runtimecontract.RuntimeProviderDocumentIncomplete, runtimecontract.RuntimeProviderDocumentInvalid, runtimecontract.RuntimeProviderDocumentEmpty:
@@ -483,7 +502,7 @@ func (m *Biz) handleRuntimeCandidateDocumentOutcome(ctx context.Context, aggrega
 	if completeErr != nil {
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, completeErr
 	}
-	return m.admitRuntimeCompletedCandidateDocument(ctx, completed, manifest, session.LogicalRequestID, candidateAttempt)
+	return m.admitRuntimeCompletedCandidateDocumentAtRevision(ctx, completed, manifest, session.LogicalRequestID, candidateAttempt, manifestValidatedAtRevision)
 }
 
 func runtimeOperationsExpectedDocument(aggregate runtime.RuntimeAggregate, manifest runtimecontract.RuntimeCandidateContractManifest, correctionAttempt int) (runtimecontract.RuntimeExpectedDocumentContract, error) {
@@ -515,6 +534,10 @@ func runtimeOperationsExpectedDocument(aggregate runtime.RuntimeAggregate, manif
 // through the Orchestrator-private restart carrier and the session must already
 // be document_complete before attempt 0/1 is allocated.
 func (m *Biz) admitRuntimeCompletedCandidateDocument(ctx context.Context, aggregate runtime.RuntimeAggregate, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, candidateAttempt int) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidate, bool, error) {
+	return m.admitRuntimeCompletedCandidateDocumentAtRevision(ctx, aggregate, manifest, logicalRequestID, candidateAttempt, 0)
+}
+
+func (m *Biz) admitRuntimeCompletedCandidateDocumentAtRevision(ctx context.Context, aggregate runtime.RuntimeAggregate, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, candidateAttempt int, manifestValidatedAtRevision uint64) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidate, bool, error) {
 	session, found := runtimeCandidateRequestSession(aggregate, logicalRequestID)
 	if !found {
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, fmt.Errorf("runtime candidate request session %q is missing", logicalRequestID)
@@ -530,8 +553,10 @@ func (m *Biz) admitRuntimeCompletedCandidateDocument(ctx context.Context, aggreg
 		})
 		return failed, runtimecontract.RuntimeCandidate{}, false, failureErr
 	}
-	if err := runtime.ValidateRuntimeCandidateContractManifestForAggregate(aggregate, manifest); err != nil {
-		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
+	if manifestValidatedAtRevision == 0 || aggregate.StateRevision != manifestValidatedAtRevision {
+		if err := runtime.ValidateRuntimeCandidateContractManifestForAggregate(aggregate, manifest); err != nil {
+			return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
+		}
 	}
 	// Complete provider bytes remain only in an Orchestrator-private restart
 	// carrier. They do not enter audit, EventHub JSON, eventstream/projection, or
@@ -551,12 +576,7 @@ func (m *Biz) admitRuntimeCompletedCandidateDocument(ctx context.Context, aggreg
 		failed, failureErr := m.runtimeCandidateDocument(ctx, aggregate, runtime.RuntimeInternalEventCandidateDocumentRejected, candidateAttempt, session.StablePrefixHash, manifest, session.LogicalRequestID, rejectedCandidate, &failure)
 		return failed.Aggregate, runtimecontract.RuntimeCandidate{}, false, failureErr
 	}
-	pendingEvent, err := m.runtimeCandidateDocument(ctx, aggregate, runtime.RuntimeInternalEventCandidateAttemptBegun, candidateAttempt, session.StablePrefixHash, manifest, session.LogicalRequestID, nil, nil)
-	if err != nil {
-		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
-	}
-	pending := pendingEvent.Aggregate
-	proposal, proposalErr := m.runtimeCandidateDocument(ctx, pending, runtime.RuntimeInternalEventCandidateProposalObserved, candidateAttempt, "", manifest, session.LogicalRequestID, &candidate, nil)
+	proposal, proposalErr := m.runtimeCandidateDocument(ctx, aggregate, runtime.RuntimeInternalEventCandidateProposalObserved, candidateAttempt, session.StablePrefixHash, manifest, session.LogicalRequestID, &candidate, nil)
 	if proposalErr != nil {
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, proposalErr
 	}
@@ -706,6 +726,8 @@ func (m *Biz) probeRuntimeCandidateFeasibility(ctx context.Context, aggregate ru
 	if err != nil {
 		return aggregate, false, err
 	}
+	wave := make([]runtimecontract.RuntimeCandidateFeasibilityRecord, 0, len(operations))
+	closed := false
 	for _, operation := range operations {
 		descriptor, ok := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
 		if !ok || descriptor.OwnerModuleID == "" {
@@ -722,7 +744,8 @@ func (m *Biz) probeRuntimeCandidateFeasibility(ctx context.Context, aggregate ru
 			if persisted.Observation != nil && persisted.Observation.Outcome == runtimecontract.RuntimeOwnerFeasibilityFeasible {
 				continue
 			}
-			return aggregate, true, nil
+			closed = true
+			break
 		}
 		observation, observed := runtimecontract.RuntimePrerequisiteObservationForID(aggregate.Facts.Resources.PrerequisiteObservations, inventory.PrerequisiteID)
 		if !observed {
@@ -746,22 +769,24 @@ func (m *Biz) probeRuntimeCandidateFeasibility(ctx context.Context, aggregate ru
 		if observationErr != nil {
 			return aggregate, false, observationErr
 		}
-		record := runtimecontract.RuntimeCandidateFeasibilityRecord{
+		wave = append(wave, runtimecontract.RuntimeCandidateFeasibilityRecord{
 			OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding,
 			CandidateManifestHash: response.CandidateManifestHash,
 			Observation:           &ownerObservation, ReplayProof: response.ReplayProof, InputStructure: response.InputStructure.Clone(),
+		})
+		if response.Outcome != runtimecontract.RuntimeOwnerFeasibilityFeasible {
+			closed = true
+			break
 		}
-		recorded, recordErr := m.runtimeRecordCandidateFeasibility(ctx, aggregate, candidateAttempt, record)
+	}
+	if len(wave) != 0 {
+		recorded, recordErr := m.runtimeRecordCandidateFeasibilities(ctx, aggregate, candidateAttempt, wave)
 		if recordErr != nil {
 			return aggregate, false, recordErr
 		}
 		aggregate = recorded
-		if response.Outcome == runtimecontract.RuntimeOwnerFeasibilityFeasible {
-			continue
-		}
-		return aggregate, true, nil
 	}
-	return aggregate, false, nil
+	return aggregate, closed, nil
 }
 
 func runtimeCurrentTargetSnapshot(facts runtimecontract.RuntimeFacts, operation runtimecontract.RuntimeOperation) *runtimecontract.TargetSnapshot {

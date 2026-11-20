@@ -51,8 +51,8 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 			t.Fatalf("request session allocated candidate attempts: %+v", ensured.CandidateAttempts)
 		}
 		// Incomplete session identity must not open attempt 0.
-		if _, err := controller.beginCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix", manifest, session.LogicalRequestID); err == nil {
-			t.Fatal("beginCandidateAttempt accepted incomplete request session document")
+		if _, err := controller.rejectCompletedCandidateDocument(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix", manifest, session.LogicalRequestID, nil, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassSchema)); err == nil {
+			t.Fatal("rejectCompletedCandidateDocument accepted incomplete request session document")
 		}
 		reloaded, err := controller.Load(context.Background(), "ws-v2", "run-v2")
 		if err != nil {
@@ -72,10 +72,7 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 		if _, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
-			t.Fatal(err)
-		}
-		failed, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassSchema))
+		failed, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix", runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassSchema))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -87,10 +84,14 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 		if _, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassSchema)); !errors.Is(err, common.ErrConflict) {
 			t.Fatalf("duplicate fail err=%v, want conflict", err)
 		}
-		retried, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix")
-		if err != nil {
+		if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); err != nil {
 			t.Fatal(err)
 		}
+		retriedResult, err := controller.AdmitCandidateProposalForTest(context.Background(), "ws-v2", "run-v2", 1, runtimeTestBindCandidateToCurrentFocus(t, failed, controllerFileWriteCandidate()))
+		if err != nil || !retriedResult.Admission.Accepted() {
+			t.Fatalf("admit retry proposal = %+v err=%v", retriedResult.Admission, err)
+		}
+		retried := retriedResult.Aggregate
 		if len(retried.CandidateAttempts) != 2 || retried.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStatePending {
 			t.Fatalf("correctable attempt 1 not pending: %+v", retried.CandidateAttempts)
 		}
@@ -115,7 +116,7 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 			terminal.Decision.Terminal.Code != "candidate_retry_exhausted" {
 			t.Fatalf("attempt 1 exhaustion = %+v", terminal.Decision)
 		}
-		if _, err := restarted.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); !errors.Is(err, common.ErrConflict) {
+		if _, err := restarted.RejectCompletedCandidateDocumentForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix", runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassSchema)); !errors.Is(err, common.ErrConflict) {
 			t.Fatalf("third attempt err=%v, want conflict", err)
 		}
 	})
@@ -129,10 +130,7 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 		if _, err := controller.initialize(context.Background(), controllerFacts(), controllerDefinition(), nil); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
-			t.Fatal(err)
-		}
-		terminal, err := controller.failCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidateFailure{
+		terminal, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix", runtimecontract.RuntimeCandidateFailure{
 			Class: runtimecontract.RuntimeCandidateFailureClassProvider, Code: "provider", Signature: "provider", Reason: "provider unavailable",
 		})
 		if err != nil {
@@ -153,7 +151,7 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 		if err != nil || loaded.Decision.State != runtimecontract.ConvergenceStateFailed || loaded.Decision.Terminal == nil {
 			t.Fatalf("reload lost rejected_final terminal: %+v err=%v", loaded, err)
 		}
-		if _, err := restarted.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix"); !errors.Is(err, common.ErrConflict) {
+		if _, err := restarted.RejectCompletedCandidateDocumentForTest(context.Background(), "ws-v2", "run-v2", 1, "stable-prefix", runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassSchema)); !errors.Is(err, common.ErrConflict) {
 			t.Fatalf("attempt 1 after rejected_final err=%v, want conflict", err)
 		}
 	})
@@ -181,10 +179,15 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		reopened, err := controller.BeginCandidateAttemptForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix")
+		if _, err := controller.BeginCandidateAttemptForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix"); err != nil {
+			t.Fatal(err)
+		}
+		candidate := runtimeTestBindCandidateToCurrentFocus(t, aggregate, stateChangeCandidate())
+		reopenedResult, err := controller.AdmitCandidateProposalForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, candidate)
 		if err != nil {
 			t.Fatal(err)
 		}
+		reopened := reopenedResult.Aggregate
 		if len(reopened.CandidateAttempts) != 1 || reopened.CandidateAttempts[0].Attempt != 0 ||
 			reopened.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStatePending ||
 			reopened.CandidateAttempts[0].Stale != nil || reopened.CandidateAttempts[0].Failure != nil {
@@ -194,14 +197,15 @@ func TestR5FiveResultPersistenceMatrix(t *testing.T) {
 			t.Fatalf("stale audit lost: %+v", reopened.PrerequisiteInvalidations)
 		}
 		// Duplicate reopen is idempotent and still does not allocate attempt 1.
-		duplicate, err := controller.BeginCandidateAttemptForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "stable-prefix")
+		duplicateResult, err := controller.AdmitCandidateProposalForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, candidate)
 		if err != nil {
 			t.Fatal(err)
 		}
+		duplicate := duplicateResult.Aggregate
 		if duplicate.StateRevision != reopened.StateRevision || len(duplicate.CandidateAttempts) != 1 {
 			t.Fatalf("duplicate stale reopen not idempotent: %+v", duplicate)
 		}
-		if _, err := controller.BeginCandidateAttemptForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 1, "stable-prefix"); !errors.Is(err, common.ErrConflict) {
+		if _, err := controller.RejectCompletedCandidateDocumentForTest(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 1, "stable-prefix", runtimeCorrectableMissingOperationsFailure(runtimecontract.RuntimeCandidateFailureClassSchema)); !errors.Is(err, common.ErrConflict) {
 			t.Fatalf("stale path opened attempt 1: %v", err)
 		}
 	})

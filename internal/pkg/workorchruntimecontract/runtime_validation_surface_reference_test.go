@@ -22,6 +22,9 @@ func referenceRuntimeValidationSurfaceValidate(s RuntimeValidationSurface) error
 	if err := referenceRuntimeValidationProofPreparations(raw.ProofRequirementPreparations); err != nil {
 		return fmt.Errorf("runtime validation surface %q: %w", strings.TrimSpace(raw.ID), err)
 	}
+	if _, err := validateAndNormalizeRuntimeValidationContentContracts(raw.PreparationContentContracts); err != nil {
+		return fmt.Errorf("runtime validation surface %q: %w", strings.TrimSpace(raw.ID), err)
+	}
 	seenRequirementHashes := make(map[string]struct{}, len(raw.ProofRequirementBindings))
 	seenRequirementCoverage := make(map[common.CoverageWorkItemID]struct{}, len(raw.ProofRequirementBindings))
 	for _, binding := range raw.ProofRequirementBindings {
@@ -126,6 +129,11 @@ func referenceRuntimeValidationSurfaceValidate(s RuntimeValidationSurface) error
 	if len(s.ProofRequirementBindings) != 0 && !sameStrings(normalizeStrings(boundChecks), s.CheckRefs) {
 		return fmt.Errorf("runtime validation surface %q checks do not match exact proof requirement bindings", s.ID)
 	}
+	declaredContentContracts := make(map[string]struct{}, len(s.PreparationContentContracts))
+	for _, contract := range s.PreparationContentContracts {
+		declaredContentContracts[contract.Ref] = struct{}{}
+	}
+	usedContentContracts := make(map[string]struct{}, len(s.PreparationContentContracts))
 	for _, preparation := range s.ProofRequirementPreparations {
 		if err := referenceRuntimeValidationProofPreparationValidate(preparation); err != nil {
 			return err
@@ -145,6 +153,17 @@ func referenceRuntimeValidationSurfaceValidate(s RuntimeValidationSurface) error
 			constraint.ValidationSurfaceID != s.ID || constraint.ValidationRecipeID != s.ID ||
 			constraint.InputSchemaHash != s.InputSchemaHash {
 			return fmt.Errorf("runtime validation surface %q proof preparation identity mismatch", s.ID)
+		}
+		if preparation.ContentContractRef != "" {
+			if _, declared := declaredContentContracts[preparation.ContentContractRef]; !declared {
+				return fmt.Errorf("runtime validation surface %q proof preparation %q references missing content contract %q", s.ID, preparation.CoverageWorkItemID, preparation.ContentContractRef)
+			}
+			usedContentContracts[preparation.ContentContractRef] = struct{}{}
+		}
+	}
+	for _, contract := range s.PreparationContentContracts {
+		if _, used := usedContentContracts[contract.Ref]; !used {
+			return fmt.Errorf("runtime validation surface %q declares unreferenced content contract %q", s.ID, contract.Ref)
 		}
 	}
 	if len(s.ProofRequirementPreparations) != 0 && s.Readiness == RuntimeValidationSurfaceUnavailable {

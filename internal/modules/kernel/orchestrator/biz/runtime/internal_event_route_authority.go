@@ -47,7 +47,6 @@ func (c *RuntimeController) applyAuthorityInternalEvent(ctx context.Context, eve
 		RuntimeInternalEventFailureObserved,
 		RuntimeInternalEventAssessmentObserved,
 		RuntimeInternalEventGovernanceRequestObserved,
-		RuntimeInternalEventValidationFailureObserved,
 		RuntimeInternalEventRepairSurfaceConfirmationObserved,
 
 		RuntimeInternalEventDefinitionGapObserved:
@@ -76,10 +75,10 @@ func (c *RuntimeController) applyAuthorityPlanningInternalEvent(ctx context.Cont
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventSemanticFeasibilityObserved:
-		if event.Authority.SemanticFeasibility == nil {
+		if len(event.Authority.SemanticFeasibilities) == 0 {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.planning.observeSemanticFeasibility(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Authority.SemanticBatchID, *event.Authority.SemanticFeasibility)
+		aggregate, err := c.planning.observeSemanticFeasibilities(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Authority.SemanticBatchID, event.Authority.SemanticFeasibilities)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventSemanticContractSealed:
@@ -153,10 +152,10 @@ func (c *RuntimeController) applyAuthorityConvergenceInternalEvent(ctx context.C
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventPrerequisiteObserved:
-		if event.Authority.PrerequisiteResult == nil {
+		if len(event.Authority.PrerequisiteResults) == 0 {
 			return result, common.ErrInvalidArgument
 		}
-		aggregate, err := c.authority.commitPrerequisite(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Authority.PrerequisiteResult, event.Authority.RecoverableWaitProbeObservation)
+		aggregate, err := c.authority.commitPrerequisites(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Authority.PrerequisiteResults, event.Authority.RecoverableWaitProbeObservation)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventPrerequisitesReadOnlyStaleObserved:
@@ -195,16 +194,6 @@ func (c *RuntimeController) applyAuthorityConvergenceInternalEvent(ctx context.C
 			return result, common.ErrInvalidArgument
 		}
 		aggregate, err := c.authority.bindGovernanceRequest(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Authority.GovernanceRequest)
-		result.Aggregate = aggregate
-		return result, err
-	case RuntimeInternalEventValidationFailureObserved:
-		// The rejected operation receipt already persisted the capability fact.
-		// This explicit owner-local handoff is the first event permitted to turn
-		// that observation into repair authority.
-		if event.Authority.FailureFact == nil || event.Authority.FailureFact.ValidationFailureObservation == nil {
-			return result, common.ErrInvalidArgument
-		}
-		aggregate, err := c.authority.recordValidationFailureObservation(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Authority.FailureFact.ValidationFailureObservation)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventRepairSurfaceConfirmationObserved:

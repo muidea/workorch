@@ -406,7 +406,7 @@ ComparisonHash 只沿用 owner 已声明的 scratch noise 规则，不清洗耗�
 生成与 source review 共用 proof topology 声明，沿已有 typed check/source/consumer binding：每个当前 native check 保留全部适用义务，
 除原义务明确需要，不在每个检查重复根项目 suite 或完整历史证明图；独立 root all-of、当前行为、assessment 与末端 receipt 继续分别履责。
 隔离并行仅解决诊断串行成本，不能证明任何具体项目在原300秒内可行，也不授 credit。
-`TestNative*`、`TestInapplicableLargeObservationIsExcludedBeforeAssertionCapacity` 覆盖原生观察/真失败、动态值、用户格式化、
+`TestNativeObservationsUseExactSourceNotMessageVocabulary`、`TestNativeFailureCapacityPreserves39AndRejectsRealOverflow`、`TestNativeSourceChannelConcurrentProcesses`、`TestInapplicableLargeObservationIsExcludedBeforeAssertionCapacity` 覆盖原生观察/真失败、动态值、用户格式化、
 31/32/33/39/64/65条及单条/总量边界；`TestProjectMultiFailureDiagnosticActualSourcesAndBehavior` 覆盖动态日志、互斥文件/并行屏障、
 运行中取消、partial/unobserved/changed-assertion/source drift。取消后原文未发布时按已有边界撤销诊断，保留真实阶段及 omission。
 

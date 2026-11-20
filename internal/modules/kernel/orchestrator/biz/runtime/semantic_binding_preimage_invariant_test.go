@@ -109,6 +109,10 @@ func TestRuntimeSemanticBindingPreimageRequiresArchivedHistoryOwnerFacts(t *test
 	aggregate.SemanticPlanning.DocumentHash = ""
 	aggregate.SemanticPlanning.Feasibilities = nil
 	aggregate.SemanticPlanning.FeasibilitySetHash = ""
+	if err := validateRuntimeSemanticBindingPreimages(aggregate); err != nil {
+		t.Fatalf("archived batch feasibility result did not preserve sealed preimage: %v", err)
+	}
+	aggregate.SemanticPlanning.BatchFeasibilityResults = nil
 	runtimeTestRequireSemanticBindingPreimageViolation(t, validateRuntimeSemanticBindingPreimages(aggregate), "archived owner-fact removal")
 }
 

@@ -58,7 +58,7 @@ func TestOwnerQueryReloadMatchesIndependentOrderedGates(t *testing.T) {
 					case "converted header":
 						r.aggregate.ResultFeedbackVersion = 0
 					case "seed":
-						r.aggregate.SemanticPlanning.DefinitionSeed.PolicyHash = "same hash drift"
+						r.aggregate.SemanticPlanning.DefinitionSeedHash = "same hash drift"
 					case "coverage":
 						r.aggregate.EvidenceSequence++
 					case "budget":
@@ -219,7 +219,7 @@ func FuzzOwnerQueryReloadIndependentOracle(f *testing.F) {
 		case 1:
 			r.raw.Facts.DefinitionRevision = text
 		case 2:
-			r.aggregate.SemanticPlanning.DefinitionSeed.PolicyHash = text
+			r.aggregate.SemanticPlanning.DefinitionSeedHash = text
 		case 3:
 			r.aggregate.ExecutionBudget.Policy.PolicyRevision = text
 		case 4:

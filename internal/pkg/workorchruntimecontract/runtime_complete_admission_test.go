@@ -246,7 +246,7 @@ func runtimeCompleteAdmissionOwnerFeedback(t *testing.T, input RuntimeCompleteAd
 
 func runtimeCompleteAdmissionFixture(t *testing.T) RuntimeCompleteAdmissionInput {
 	t.Helper()
-	semantic := semanticSealedLedgerFixture(t)
+	semantic, seed := semanticSealedLedgerAndSeedFixture(t)
 	batch, found := runtimeSemanticPlanningBatch(semantic.Batches, semantic.Document.BatchID)
 	if !found {
 		t.Fatal("compile semantic fixture: accepted document batch is missing")
@@ -264,15 +264,15 @@ func runtimeCompleteAdmissionFixture(t *testing.T) RuntimeCompleteAdmissionInput
 	binding := focus.CoverageEvidenceBindings[0]
 	ref := RuntimeCWIBindingRefForCoverageBinding(binding, semantic.Manifest.Hash)
 	facts := RuntimeFacts{
-		WorkspaceID: "ws-history", RunID: "run-history", DefinitionRevision: semantic.DefinitionSeed.DefinitionRevision,
-		CWILedgerSchemaVersion: RuntimeCWILedgerSchemaCurrent, DefinitionSeed: semantic.DefinitionSeed.Clone(), EvidenceRevision: "evidence-1",
+		WorkspaceID: "ws-history", RunID: "run-history", DefinitionRevision: seed.DefinitionRevision,
+		CWILedgerSchemaVersion: RuntimeCWILedgerSchemaCurrent, DefinitionSeed: seed.Clone(), EvidenceRevision: "evidence-1",
 		Focus: focus, ReconciliationContract: reconciliation,
 		Coverage: []RuntimeCoverageItemFact{{
 			ID: binding.CoverageWorkItemID, SliceID: focus.SliceID, SourceScope: focus.AssessmentScope, SourceID: focus.AssessmentID,
 			TargetText: focus.AssessmentText, State: RuntimeCoverageItemStateOpen, CWIConvergenceState: RuntimeCWIConvergenceStateBound,
 			CurrentBindingRef: &ref, BindingLineage: []RuntimeCWIBindingRef{ref}, FocusID: focus.ID,
 		}},
-		Slices: semantic.DefinitionSeed.Slices,
+		Slices: seed.Slices,
 		Activation: RuntimeActivationContext{
 			ProviderSelection: ProviderInferenceSelection{Target: ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "model-test"}},
 			ExecutionContract: RuntimeExecutionContract{

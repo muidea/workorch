@@ -365,9 +365,11 @@ func (m *Biz) handleRuntimeCandidatePreflight(event magicevent.Event, result mag
 			audit.Operation = "runtime_semantic_plan_preflight"
 		}
 	}
-	if err := m.publishLLMUsageRecorded(event.Context(), audit, nil, status, failureClass); err != nil {
-		setPrerequisiteMagicError(result, err)
-		return
+	if preflightErr != nil {
+		if err := m.publishLLMUsageRecorded(event.Context(), audit, nil, status, failureClass); err != nil {
+			setPrerequisiteMagicError(result, err)
+			return
+		}
 	}
 	feedback, feedbackErr := runtimeProviderPreflightFeedback(command, preflightErr)
 	if feedbackErr != nil {
