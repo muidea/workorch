@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -46,6 +47,7 @@ type Biz struct {
 	admissions                *executionAdmissionLifecycle
 	projection                *projectioncomponent.Component
 	authoringTasks            *authoringTaskLifecycle
+	authoringRetryDelay       func(retryOrdinal int) time.Duration
 	subscriptions             []func() error
 	shutdownErr               error
 	preparationSkillHubRunner contextregistryports.SkillHubPreparationRunner

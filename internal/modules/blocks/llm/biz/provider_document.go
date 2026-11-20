@@ -10,6 +10,7 @@ import (
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func (m *Biz) handleProviderDocument(ev magicevent.Event, result magicevent.Result) {
@@ -74,6 +75,7 @@ func (m *Biz) handleProviderDocument(ev magicevent.Event, result magicevent.Resu
 				response.TransportCause = &observed
 			}
 		}
+		response.FailureClass = runtimecontract.RuntimeCandidateFailureClass(failureClass)
 		if incomplete {
 			response.Incomplete = &llmevents.ProviderIncompleteDocument{Code: code, Cause: []byte(callErr.Error())}
 		} else {

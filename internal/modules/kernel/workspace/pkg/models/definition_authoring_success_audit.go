@@ -104,8 +104,11 @@ func (d DefinitionAuthoringDiagnostic) ValidateMetadata() error {
 	} else if d.NotSavedReason != definitionAuthoringDiagnosticNotSavedReason {
 		return fmt.Errorf("diagnostic metadata unsaved reason invalid")
 	}
-	if d.ProviderCode != "" || d.ProviderDocument != nil || d.ProviderWire != nil || d.ProviderCause != nil {
+	if d.ProviderCode != "" || d.ProviderFailureClass != "" || d.ProviderDocument != nil || d.ProviderWire != nil || d.ProviderCause != nil {
 		if len(d.ProviderCode) > 128 || d.ProviderDocument == nil || d.ProviderWire == nil || d.ProviderDocument.ValidateMetadata() != nil || d.ProviderWire.ValidateMetadata() != nil || d.ProviderCause != nil && (d.ProviderCode == "" || d.ProviderCause.ValidateMetadata() != nil || !d.ProviderCause.Observed || !d.ProviderCause.Complete) {
+			return fmt.Errorf("provider diagnostic metadata invalid")
+		}
+		if d.ProviderFailureClass != "" && (d.ProviderCode == "" || !validAuthoringProviderFailureClass(d.ProviderFailureClass)) {
 			return fmt.Errorf("provider diagnostic metadata invalid")
 		}
 		if d.ProviderCode == "" && (!d.ProviderDocument.Observed || !d.ProviderDocument.Complete || !d.ProviderDocument.Saved || d.ProviderDocument.ObservedBytes != d.PayloadBytes || d.ProviderDocument.SHA256 != d.PayloadSHA256) {

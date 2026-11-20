@@ -31,140 +31,172 @@ func (b *Biz) deriveDefinitionAcceptanceBound(ctx context.Context, id common.Wor
 		return workspace.DefinitionDerivedAcceptance{}, err
 	}
 	defer release()
-	view, err := b.currentDefinitionAuthoring(ctx, id, inputHash)
-	if err != nil {
-		return workspace.DefinitionDerivedAcceptance{}, err
-	}
-	if view.Record == nil {
-		return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
-	}
-	if expected != nil && (view.Record.InputHash != expected.ExpectedInputHash || !view.CurrentTemplateAvailable) {
-		return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
-	}
-	if err := view.Record.Validate(); err != nil {
-		return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
-	}
-	recordModel, err := view.Record.Model()
-	if err != nil {
-		return workspace.DefinitionDerivedAcceptance{}, err
-	}
-	record := &recordModel
-	requestID := workspace.DefinitionDerivationRequestID(record.InputHash, record.TemplateSnapshotHash)
-	for n := len(record.DerivationRequests) - 1; n >= 0; n-- {
-		previous := record.DerivationRequests[n]
-		if previous.Input.InputHash() == record.InputHash && workspace.WorkspaceTemplateSnapshotHash(&previous.Template) == record.TemplateSnapshotHash {
-			return derivationOutcome(previous)
-		}
-	}
-	// 历史请求只按封存身份重放，不依赖已变化或删除的现行模板。
-	for _, previous := range record.DerivationRequests {
-		if previous.RequestID == requestID {
-			return derivationOutcome(previous)
-		}
-	}
-	if !view.CurrentTemplateAvailable || inputHash == "" && record.TemplateSnapshotHash != view.CurrentTemplateSnapshotHash {
-		return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
-	}
-	identity := authoringPreparationIdentity(view, workspace.DefinitionAuthoringPreparationDerivation, requestID)
-	resources := []workspace.DefinitionAuthoringResourceSnapshot(nil)
-	if len(record.Input.ResourceRefs) != 0 {
-		facts, err := b.acquireDefinitionAuthoringResources(ctx, id, inputHash)
+	for {
+		view, err := b.currentDefinitionAuthoring(ctx, id, inputHash)
 		if err != nil {
-			var resourceFailure *authoringResourcePreparationError
-			if errors.As(err, &resourceFailure) {
-				identity.ResourceRef = resourceFailure.ref
+			return workspace.DefinitionDerivedAcceptance{}, err
+		}
+		if view.Record == nil {
+			return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
+		}
+		if expected != nil && (view.Record.InputHash != expected.ExpectedInputHash || !view.CurrentTemplateAvailable) {
+			return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
+		}
+		if err := view.Record.Validate(); err != nil {
+			return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
+		}
+		recordModel, err := view.Record.Model()
+		if err != nil {
+			return workspace.DefinitionDerivedAcceptance{}, err
+		}
+		record := &recordModel
+		baseRequestID := workspace.DefinitionDerivationRequestID(record.InputHash, record.TemplateSnapshotHash)
+		current := record.CurrentDerivationRequests()
+		var completedReq *workspace.DefinitionDerivationRequest
+		var unresolvedReq *workspace.DefinitionDerivationRequest
+		for i := range current {
+			req := &current[i]
+			if req.FailureCode == "" && req.Proposal == nil {
+				unresolvedReq = req
+				break
 			}
-			return workspace.DefinitionDerivedAcceptance{}, b.captureAuthoringPreparationFailure(ctx, identity, "resources", err)
+			if req.Proposal != nil {
+				completedReq = req
+			}
 		}
-		resources, err = authoringResourceSnapshotsFor(record.Input, facts)
+		if unresolvedReq != nil {
+			return derivationOutcome(*unresolvedReq)
+		}
+		if completedReq != nil {
+			return derivationOutcome(*completedReq)
+		}
+		retryOrdinal := 0
+		if len(current) > 0 {
+			var retryable bool
+			retryOrdinal, retryable = record.DerivationRetryOrdinalForCurrent()
+			if !retryable {
+				return derivationOutcome(current[len(current)-1])
+			}
+		}
+		requestID := workspace.AuthoringRetryRequestID(baseRequestID, retryOrdinal)
+		// 历史请求只按封存身份重放，不依赖已变化或删除的现行模板。
+		for _, previous := range record.DerivationRequests {
+			if previous.RequestID == requestID {
+				return derivationOutcome(previous)
+			}
+		}
+		if !view.CurrentTemplateAvailable || inputHash == "" && record.TemplateSnapshotHash != view.CurrentTemplateSnapshotHash {
+			return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
+		}
+		identity := authoringPreparationIdentity(view, workspace.DefinitionAuthoringPreparationDerivation, requestID)
+		resources := []workspace.DefinitionAuthoringResourceSnapshot(nil)
+		if len(record.Input.ResourceRefs) != 0 {
+			facts, err := b.acquireDefinitionAuthoringResources(ctx, id, inputHash)
+			if err != nil {
+				var resourceFailure *authoringResourcePreparationError
+				if errors.As(err, &resourceFailure) {
+					identity.ResourceRef = resourceFailure.ref
+				}
+				return workspace.DefinitionDerivedAcceptance{}, b.captureAuthoringPreparationFailure(ctx, identity, "resources", err)
+			}
+			resources, err = authoringResourceSnapshotsFor(record.Input, facts)
+			if err != nil {
+				return workspace.DefinitionDerivedAcceptance{}, b.captureAuthoringPreparationFailure(ctx, identity, "resources", err)
+			}
+			if len(facts) == 0 || !sameAuthoringResourceRevisions(facts, view.WorkspaceRevision) {
+				return workspace.DefinitionDerivedAcceptance{}, b.captureAuthoringPreparationFailure(ctx, identity, "resources", common.ErrConflict)
+			}
+		}
+		configuration, err := b.activeDefinitionProviderConfiguration(ctx)
 		if err != nil {
-			return workspace.DefinitionDerivedAcceptance{}, b.captureAuthoringPreparationFailure(ctx, identity, "resources", err)
+			return workspace.DefinitionDerivedAcceptance{}, b.captureAuthoringPreparationFailure(ctx, identity, "config", err)
 		}
-		if len(facts) == 0 || !sameAuthoringResourceRevisions(facts, view.WorkspaceRevision) {
-			return workspace.DefinitionDerivedAcceptance{}, b.captureAuthoringPreparationFailure(ctx, identity, "resources", common.ErrConflict)
+		providerBindingHash := definitionProviderBindingHash(configuration)
+		identity.ProviderBindingHash = providerBindingHash
+		pending := workspace.DefinitionDerivationRequest{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "derive"), RequestID: requestID, Input: record.Input.Clone(), Template: record.TemplateSnapshot.Clone(), Resources: resources, ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(resources), ProviderBindingHash: providerBindingHash}
+		pending.PermitID = pending.ExpectedPermitID()
+		command, err := specifications.DerivationCommand(pending, configuration.DefaultChat)
+		if err != nil {
+			return workspace.DefinitionDerivedAcceptance{}, b.captureAuthoringPreparationFailure(ctx, identity, "render", err)
 		}
-	}
-	configuration, err := b.activeDefinitionProviderConfiguration(ctx)
-	if err != nil {
-		return workspace.DefinitionDerivedAcceptance{}, b.captureAuthoringPreparationFailure(ctx, identity, "config", err)
-	}
-	providerBindingHash := definitionProviderBindingHash(configuration)
-	identity.ProviderBindingHash = providerBindingHash
-	pending := workspace.DefinitionDerivationRequest{WireContractRef: workspace.DefinitionAuthoringOwnerBound, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBound, "derive"), RequestID: requestID, Input: record.Input.Clone(), Template: record.TemplateSnapshot.Clone(), Resources: resources, ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(resources), ProviderBindingHash: providerBindingHash}
-	pending.PermitID = pending.ExpectedPermitID()
-	command, err := specifications.DerivationCommand(pending, configuration.DefaultChat)
-	if err != nil {
-		return workspace.DefinitionDerivedAcceptance{}, b.captureAuthoringPreparationFailure(ctx, identity, "render", err)
-	}
-	command.ExpectedConfigurationRevision = configuration.ConfigurationRevision
-	if err := ctx.Err(); err != nil {
-		return workspace.DefinitionDerivedAcceptance{}, err
-	}
-	reserve := workspaceevents.ReserveDefinitionDerivationCommand{WireContractRef: pending.WireContractRef, WireContractHash: pending.WireContractHash, WorkspaceID: id, WorkspaceRevision: view.WorkspaceRevision, InputHash: record.InputHash, RequestID: requestID, Resources: resources, ResourceSnapshotHash: pending.ResourceSnapshotHash, ProviderBindingHash: providerBindingHash}
-	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceDerivationReserve, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, reserve)
-	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspaceDerivationReserve, eventcontract.LaneScope{WorkspaceID: string(id)}))
-	result := b.SendEvent(ev)
-	if result == nil {
-		return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
-	}
-	if err := result.Error(); err != nil {
-		return workspace.DefinitionDerivedAcceptance{}, b.captureAuthoringBudgetRefusal(ctx, identity, err)
-	}
-	value, getErr := result.Get()
-	if getErr != nil {
-		return workspace.DefinitionDerivedAcceptance{}, getErr
-	}
-	reserved, ok := value.(workspaceevents.DefinitionDerivationRequestResult)
-	if !ok {
-		return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
-	}
-	if err := reserved.ValidateReserve(reserve); err != nil {
-		return workspace.DefinitionDerivedAcceptance{}, err
-	}
-	reservedRequest, err := reserved.Request.Model()
-	if err != nil {
-		return workspace.DefinitionDerivedAcceptance{}, err
-	}
-	if reserved.FreshPermitID == "" {
-		return derivationOutcome(reservedRequest)
-	}
-	response, deliveryErr := b.completeAuthoringDocument(ctx, reserved.FreshPermitID, command)
-	if deliveryErr != nil {
-		return workspace.DefinitionDerivedAcceptance{}, deliveryErr
-	}
-	settlement, cancelSettlement := authoringSettlementContext(ctx)
-	defer cancelSettlement()
-	ctx = context.WithValue(settlement, authoringSettlementKey{}, settlement)
-	completion := workspaceevents.CompleteDefinitionDerivationCommand{WorkspaceID: id, PermitID: reserved.FreshPermitID}
-	completion.Diagnostic = authoringProviderDiagnostic(response)
-	if completion.Diagnostic != nil {
-		completion.FailureCode = "provider_failed"
-	} else {
-		payload, payloadErr := authoringCompletePayload(response)
-		if payloadErr != nil {
-			return workspace.DefinitionDerivedAcceptance{}, payloadErr
+		command.ExpectedConfigurationRevision = configuration.ConfigurationRevision
+		if err := ctx.Err(); err != nil {
+			return workspace.DefinitionDerivedAcceptance{}, err
 		}
-		proposal, parseErr := specifications.ParseDerivedAcceptanceFor(payload, reservedRequest)
-		if parseErr != nil {
-			completion.FailureCode = "invalid_proposal"
-			diagnostic := authoringParserDiagnostic(parseErr, payload, response)
-			completion.Diagnostic = &diagnostic
+		reserve := workspaceevents.ReserveDefinitionDerivationCommand{WireContractRef: pending.WireContractRef, WireContractHash: pending.WireContractHash, WorkspaceID: id, WorkspaceRevision: view.WorkspaceRevision, InputHash: record.InputHash, RequestID: requestID, Resources: resources, ResourceSnapshotHash: pending.ResourceSnapshotHash, ProviderBindingHash: providerBindingHash}
+		ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceDerivationReserve, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, reserve)
+		ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspaceDerivationReserve, eventcontract.LaneScope{WorkspaceID: string(id)}))
+		result := b.SendEvent(ev)
+		if result == nil {
+			return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
+		}
+		if err := result.Error(); err != nil {
+			return workspace.DefinitionDerivedAcceptance{}, b.captureAuthoringBudgetRefusal(ctx, identity, err)
+		}
+		value, getErr := result.Get()
+		if getErr != nil {
+			return workspace.DefinitionDerivedAcceptance{}, getErr
+		}
+		reserved, ok := value.(workspaceevents.DefinitionDerivationRequestResult)
+		if !ok {
+			return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
+		}
+		if err := reserved.ValidateReserve(reserve); err != nil {
+			return workspace.DefinitionDerivedAcceptance{}, err
+		}
+		reservedRequest, err := reserved.Request.Model()
+		if err != nil {
+			return workspace.DefinitionDerivedAcceptance{}, err
+		}
+		if reserved.FreshPermitID == "" {
+			return derivationOutcome(reservedRequest)
+		}
+		response, deliveryErr := b.completeAuthoringDocument(ctx, reserved.FreshPermitID, command)
+		if deliveryErr != nil {
+			return workspace.DefinitionDerivedAcceptance{}, deliveryErr
+		}
+		settlement, cancelSettlement := authoringSettlementContext(ctx)
+		settlementCtx := context.WithValue(settlement, authoringSettlementKey{}, settlement)
+		completion := workspaceevents.CompleteDefinitionDerivationCommand{WorkspaceID: id, PermitID: reserved.FreshPermitID}
+		completion.Diagnostic = authoringProviderDiagnostic(response)
+		if completion.Diagnostic != nil {
+			completion.FailureCode = "provider_failed"
 		} else {
-			completion.Proposal = &proposal
-
-			completion.SuccessAudit = &workspace.DefinitionAuthoringSuccessByteAudit{Document: authoringProviderObservation(response.ObservedDocument), Wire: authoringProviderObservation(response.Wire)}
-
+			payload, payloadErr := authoringCompletePayload(response)
+			if payloadErr != nil {
+				cancelSettlement()
+				return workspace.DefinitionDerivedAcceptance{}, payloadErr
+			}
+			proposal, parseErr := specifications.ParseDerivedAcceptanceFor(payload, reservedRequest)
+			if parseErr != nil {
+				completion.FailureCode = "invalid_proposal"
+				diagnostic := authoringParserDiagnostic(parseErr, payload, response)
+				completion.Diagnostic = &diagnostic
+			} else {
+				completion.Proposal = &proposal
+				completion.SuccessAudit = &workspace.DefinitionAuthoringSuccessByteAudit{Document: authoringProviderObservation(response.ObservedDocument), Wire: authoringProviderObservation(response.Wire)}
+			}
 		}
+		completed, settlementErr := b.settleDerivation(settlementCtx, completion)
+		cancelSettlement()
+		if settlementErr != nil {
+			return workspace.DefinitionDerivedAcceptance{}, settlementErr
+		}
+		completedRequest, err := completed.Request.Model()
+		if err != nil {
+			return workspace.DefinitionDerivedAcceptance{}, err
+		}
+		if completedRequest.Proposal != nil {
+			return *completedRequest.Clone().Proposal, nil
+		}
+		if completedRequest.IsRetryableProviderTransientFailure() && retryOrdinal < workspace.AuthoringProviderTransientRetryLimit && ctx.Err() == nil {
+			if waitErr := b.waitAuthoringTransientRetry(ctx, retryOrdinal+1); waitErr != nil {
+				return workspace.DefinitionDerivedAcceptance{}, waitErr
+			}
+			continue
+		}
+		return derivationOutcome(completedRequest)
 	}
-	completed, settlementErr := b.settleDerivation(ctx, completion)
-	if settlementErr != nil {
-		return workspace.DefinitionDerivedAcceptance{}, settlementErr
-	}
-	completedRequest, err := completed.Request.Model()
-	if err != nil {
-		return workspace.DefinitionDerivedAcceptance{}, err
-	}
-	return derivationOutcome(completedRequest)
 }
 
 func sameAuthoringResourceRevisions(facts []fileevents.AcquireAuthoringResourceResult, revision uint64) bool {

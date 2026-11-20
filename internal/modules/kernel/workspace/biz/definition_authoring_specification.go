@@ -138,7 +138,7 @@ func reduceAuthoringSpecification(o definitionSpecificationObservation, e defini
 // original source once. Semantic failures must enter as the typed mapping so
 // the owner computes their reason; consumers never re-adjudicate this outcome.
 func admitAuthoringParserFailure(record workspace.DefinitionAuthoringRecord, permit string, diagnostic *workspace.DefinitionAuthoringDiagnostic) error {
-	if diagnostic == nil || diagnostic.ProviderCode != "" || diagnostic.ProviderCause != nil || diagnostic.ProviderDocument == nil || diagnostic.ProviderWire == nil || !diagnostic.ProviderDocument.Observed || !diagnostic.ProviderDocument.Complete || !diagnostic.ProviderDocument.Saved || !reflect.DeepEqual(diagnostic.Payload, diagnostic.ProviderDocument.Content) {
+	if diagnostic == nil || diagnostic.ProviderCode != "" || diagnostic.ProviderFailureClass != "" || diagnostic.ProviderCause != nil || diagnostic.ProviderDocument == nil || diagnostic.ProviderWire == nil || !diagnostic.ProviderDocument.Observed || !diagnostic.ProviderDocument.Complete || !diagnostic.ProviderDocument.Saved || !reflect.DeepEqual(diagnostic.Payload, diagnostic.ProviderDocument.Content) {
 		return common.ErrConflict
 	}
 	for _, request := range record.SpecificationRequests {

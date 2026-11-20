@@ -23,18 +23,19 @@ type DefinitionAuthoringSuccessAuditView struct {
 }
 
 type DefinitionAuthoringDiagnosticMetadata struct {
-	ParseError       string                                 `json:"parseError,omitempty"`
-	ParseErrorSHA256 string                                 `json:"parseErrorSHA256,omitempty"`
-	ParseErrorBytes  uint64                                 `json:"parseErrorBytes"`
-	ParseErrorSaved  bool                                   `json:"parseErrorSaved"`
-	PayloadSHA256    string                                 `json:"payloadSHA256"`
-	PayloadBytes     uint64                                 `json:"payloadBytes"`
-	PayloadSaved     bool                                   `json:"payloadSaved"`
-	NotSavedReason   string                                 `json:"notSavedReason,omitempty"`
-	ProviderCode     string                                 `json:"providerCode,omitempty"`
-	ProviderDocument *DefinitionProviderObservationMetadata `json:"providerDocument,omitempty"`
-	ProviderWire     *DefinitionProviderObservationMetadata `json:"providerWire,omitempty"`
-	ProviderCause    *DefinitionProviderObservationMetadata `json:"providerCause,omitempty"`
+	ParseError           string                                 `json:"parseError,omitempty"`
+	ParseErrorSHA256     string                                 `json:"parseErrorSHA256,omitempty"`
+	ParseErrorBytes      uint64                                 `json:"parseErrorBytes"`
+	ParseErrorSaved      bool                                   `json:"parseErrorSaved"`
+	PayloadSHA256        string                                 `json:"payloadSHA256"`
+	PayloadBytes         uint64                                 `json:"payloadBytes"`
+	PayloadSaved         bool                                   `json:"payloadSaved"`
+	NotSavedReason       string                                 `json:"notSavedReason,omitempty"`
+	ProviderCode         string                                 `json:"providerCode,omitempty"`
+	ProviderFailureClass string                                 `json:"providerFailureClass,omitempty"`
+	ProviderDocument     *DefinitionProviderObservationMetadata `json:"providerDocument,omitempty"`
+	ProviderWire         *DefinitionProviderObservationMetadata `json:"providerWire,omitempty"`
+	ProviderCause        *DefinitionProviderObservationMetadata `json:"providerCause,omitempty"`
 }
 
 type DefinitionAuthoringPreparationDiagnosticMetadata struct {
@@ -64,23 +65,24 @@ type DefinitionAuthoringPreparationDiagnosticView struct {
 }
 
 type DefinitionAuthoringDiagnosticView struct {
-	WorkspaceID      string                             `json:"workspaceId"`
-	PermitID         string                             `json:"permitId"`
-	Phase            string                             `json:"phase"`
-	FailureCode      string                             `json:"failureCode"`
-	ParseError       string                             `json:"parseError,omitempty"`
-	ParseErrorSHA256 string                             `json:"parseErrorSHA256,omitempty"`
-	ParseErrorBytes  uint64                             `json:"parseErrorBytes"`
-	ParseErrorSaved  bool                               `json:"parseErrorSaved"`
-	PayloadBase64    string                             `json:"payloadBase64"`
-	PayloadSHA256    string                             `json:"payloadSHA256"`
-	PayloadBytes     uint64                             `json:"payloadBytes"`
-	PayloadSaved     bool                               `json:"payloadSaved"`
-	NotSavedReason   string                             `json:"notSavedReason,omitempty"`
-	ProviderCode     string                             `json:"providerCode,omitempty"`
-	ProviderDocument *DefinitionProviderObservationView `json:"providerDocument,omitempty"`
-	ProviderWire     *DefinitionProviderObservationView `json:"providerWire,omitempty"`
-	ProviderCause    *DefinitionProviderObservationView `json:"providerCause,omitempty"`
+	WorkspaceID          string                             `json:"workspaceId"`
+	PermitID             string                             `json:"permitId"`
+	Phase                string                             `json:"phase"`
+	FailureCode          string                             `json:"failureCode"`
+	ParseError           string                             `json:"parseError,omitempty"`
+	ParseErrorSHA256     string                             `json:"parseErrorSHA256,omitempty"`
+	ParseErrorBytes      uint64                             `json:"parseErrorBytes"`
+	ParseErrorSaved      bool                               `json:"parseErrorSaved"`
+	PayloadBase64        string                             `json:"payloadBase64"`
+	PayloadSHA256        string                             `json:"payloadSHA256"`
+	PayloadBytes         uint64                             `json:"payloadBytes"`
+	PayloadSaved         bool                               `json:"payloadSaved"`
+	NotSavedReason       string                             `json:"notSavedReason,omitempty"`
+	ProviderCode         string                             `json:"providerCode,omitempty"`
+	ProviderFailureClass string                             `json:"providerFailureClass,omitempty"`
+	ProviderDocument     *DefinitionProviderObservationView `json:"providerDocument,omitempty"`
+	ProviderWire         *DefinitionProviderObservationView `json:"providerWire,omitempty"`
+	ProviderCause        *DefinitionProviderObservationView `json:"providerCause,omitempty"`
 }
 
 // DefinitionAuthoringInput contains user-controlled Goal-only creation input.

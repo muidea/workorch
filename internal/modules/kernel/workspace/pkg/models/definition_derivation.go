@@ -109,7 +109,6 @@ func validateDerivationRequestsMode(records []DefinitionDerivationRequest, input
 		return fmt.Errorf("derivation request budget exceeded")
 	}
 	seen := map[string]bool{}
-	attempts := map[string]int{}
 	for _, record := range records {
 		if err := record.validate(view); err != nil {
 			return err
@@ -117,14 +116,86 @@ func validateDerivationRequestsMode(records []DefinitionDerivationRequest, input
 		if record.Input.WorkspaceID != input.WorkspaceID || record.Input.Revision > input.Revision || seen[record.RequestID] {
 			return fmt.Errorf("derivation history scope or identity invalid")
 		}
-		key := record.Input.InputHash() + "\x00" + WorkspaceTemplateSnapshotHash(&record.Template)
-		attempts[key]++
-		if attempts[key] > DefinitionDerivationAttemptLimit {
-			return fmt.Errorf("derivation input attempt budget exceeded")
-		}
 		seen[record.RequestID] = true
 	}
+	return validateDerivationSlotHistory(records)
+}
+
+func validateDerivationSlotHistory(records []DefinitionDerivationRequest) error {
+	type slotState struct {
+		logicalAttempts int
+		transientChain  int
+		prev            *DefinitionDerivationRequest
+	}
+	states := map[string]*slotState{}
+	for i := range records {
+		record := &records[i]
+		key := record.Input.InputHash() + "\x00" + WorkspaceTemplateSnapshotHash(&record.Template)
+		st := states[key]
+		if st == nil {
+			st = &slotState{}
+			states[key] = st
+		}
+		if st.prev != nil && st.prev.IsRetryableProviderTransientFailure() {
+			if st.transientChain >= AuthoringProviderTransientRetryLimit {
+				return fmt.Errorf("derivation input attempt budget exceeded")
+			}
+			st.transientChain++
+		} else {
+			st.logicalAttempts++
+			st.transientChain = 0
+			if st.logicalAttempts > DefinitionDerivationAttemptLimit {
+				return fmt.Errorf("derivation input attempt budget exceeded")
+			}
+		}
+		st.prev = record
+	}
 	return nil
+}
+
+func (r DefinitionAuthoringRecord) CurrentDerivationRequests() []DefinitionDerivationRequest {
+	var current []DefinitionDerivationRequest
+	for _, req := range r.DerivationRequests {
+		if req.Input.InputHash() == r.InputHash && WorkspaceTemplateSnapshotHash(&req.Template) == r.TemplateSnapshotHash {
+			current = append(current, req.Clone())
+		}
+	}
+	return current
+}
+
+func (r DefinitionAuthoringRecord) DerivationRetryOrdinalForCurrent() (int, bool) {
+	current := r.CurrentDerivationRequests()
+	if len(current) == 0 || len(r.DerivationRequests) >= DefinitionDerivationRequestLimit {
+		return 0, false
+	}
+	for _, req := range current {
+		if req.Proposal != nil || (req.FailureCode == "" && req.Proposal == nil) {
+			return 0, false
+		}
+	}
+	last := current[len(current)-1]
+	if !last.IsRetryableProviderTransientFailure() {
+		return 0, false
+	}
+	chain := 0
+	for i := len(current) - 1; i >= 0; i-- {
+		if !current[i].IsRetryableProviderTransientFailure() {
+			break
+		}
+		chain++
+	}
+	if chain > AuthoringProviderTransientRetryLimit {
+		return 0, false
+	}
+	return chain, true
+}
+
+func (r DefinitionAuthoringRecord) NextDerivationRequestID() string {
+	base := DefinitionDerivationRequestID(r.InputHash, r.TemplateSnapshotHash)
+	if ordinal, retryable := r.DerivationRetryOrdinalForCurrent(); retryable {
+		return AuthoringRetryRequestID(base, ordinal)
+	}
+	return base
 }
 
 // ReserveDerivation 仅计算下一份记录；调用方必须 CAS 成功后才能使用 fresh=true。
@@ -156,15 +227,16 @@ func (r DefinitionAuthoringRecord) ReserveDerivation(requestID, providerBindingH
 		err = &DefinitionAuthoringBudgetRefusalError{Stage: DefinitionAuthoringPreparationDerivation, RequestID: requestID, Budget: "request", Limit: DefinitionDerivationRequestLimit, Cause: fmt.Errorf("derivation request budget exhausted")}
 		return
 	}
-	attempts := 0
-	for _, previous := range r.DerivationRequests {
-		if previous.Input.InputHash() == r.InputHash && WorkspaceTemplateSnapshotHash(&previous.Template) == r.TemplateSnapshotHash {
-			attempts++
+	candidate := make([]DefinitionDerivationRequest, 0, len(r.DerivationRequests)+1)
+	candidate = append(candidate, r.DerivationRequests...)
+	candidate = append(candidate, request)
+	if validateDerivationSlotHistory(candidate) != nil {
+		limit := uint32(DefinitionDerivationAttemptLimit)
+		if current := r.CurrentDerivationRequests(); len(current) > 0 && current[len(current)-1].IsRetryableProviderTransientFailure() {
+			limit = uint32(1 + AuthoringProviderTransientRetryLimit)
 		}
-	}
-	if attempts >= DefinitionDerivationAttemptLimit {
 		request = DefinitionDerivationRequest{}
-		err = &DefinitionAuthoringBudgetRefusalError{Stage: DefinitionAuthoringPreparationDerivation, RequestID: requestID, Budget: "attempt", Limit: DefinitionDerivationAttemptLimit, Cause: fmt.Errorf("derivation input attempt budget exhausted")}
+		err = &DefinitionAuthoringBudgetRefusalError{Stage: DefinitionAuthoringPreparationDerivation, RequestID: requestID, Budget: "attempt", Limit: limit, Cause: fmt.Errorf("derivation input attempt budget exhausted")}
 		return
 	}
 	next = r.Clone()

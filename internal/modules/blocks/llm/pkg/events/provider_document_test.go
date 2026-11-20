@@ -29,6 +29,10 @@ func TestCompleteProviderDocumentContractRejectsIdentityAndOutcomeTampering(t *t
 		"configuration": func(r *CompleteProviderDocumentResult) { r.ConfigurationRevision = "other" },
 		"multiple arms": func(r *CompleteProviderDocumentResult) {
 			r.Failure = &ProviderDocumentFailure{Code: "http_400", Cause: []byte("classified failure")}
+			r.FailureClass = runtimecontract.RuntimeCandidateFailureClassProviderConfiguration
+		},
+		"document with failure class": func(r *CompleteProviderDocumentResult) {
+			r.FailureClass = runtimecontract.RuntimeCandidateFailureClassProviderTransient
 		},
 		"no arm":                func(r *CompleteProviderDocumentResult) { r.Document = nil },
 		"mode":                  func(r *CompleteProviderDocumentResult) { r.PhysicalResponseMode = " streaming " },
@@ -37,15 +41,32 @@ func TestCompleteProviderDocumentContractRejectsIdentityAndOutcomeTampering(t *t
 			r.Document = nil
 			r.ProviderSubmitted = false
 			r.Failure = &ProviderDocumentFailure{Code: "http_400", Cause: []byte("classified failure")}
+			r.FailureClass = runtimecontract.RuntimeCandidateFailureClassProviderConfiguration
+		},
+		"failure missing class": func(r *CompleteProviderDocumentResult) {
+			r.Document = nil
+			r.Failure = &ProviderDocumentFailure{Code: "http_400", Cause: []byte("classified failure")}
+		},
+		"failure invalid class": func(r *CompleteProviderDocumentResult) {
+			r.Document = nil
+			r.Failure = &ProviderDocumentFailure{Code: "http_400", Cause: []byte("classified failure")}
+			r.FailureClass = runtimecontract.RuntimeCandidateFailureClassSchema
 		},
 		"noncanonical code": func(r *CompleteProviderDocumentResult) {
 			r.Document = nil
 			r.Failure = &ProviderDocumentFailure{Code: " http_400 ", Cause: []byte("classified failure")}
+			r.FailureClass = runtimecontract.RuntimeCandidateFailureClassProviderConfiguration
 		},
 		"invalid incomplete": func(r *CompleteProviderDocumentResult) {
 			r.Document = nil
 			r.ObservedDocument = models.ProviderObservedContent{Reason: "not_observed"}
 			r.Incomplete = &ProviderIncompleteDocument{Code: "completed", Cause: []byte("classified failure")}
+			r.FailureClass = runtimecontract.RuntimeCandidateFailureClassProviderProtocol
+		},
+		"incomplete missing class": func(r *CompleteProviderDocumentResult) {
+			r.Document = nil
+			r.ObservedDocument = models.ProviderObservedContent{Reason: "not_observed"}
+			r.Incomplete = &ProviderIncompleteDocument{Code: "stream_ended_before_completion", Cause: []byte("classified failure")}
 		},
 	}
 	for name, mutate := range mutations {
@@ -54,6 +75,37 @@ func TestCompleteProviderDocumentContractRejectsIdentityAndOutcomeTampering(t *t
 			mutate(&altered)
 			if altered.ValidateFor(command) == nil {
 				t.Fatal("tampered result accepted")
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name string
+		edit func(*CompleteProviderDocumentResult)
+	}{
+		{
+			name: "request_failed transient",
+			edit: func(r *CompleteProviderDocumentResult) {
+				r.Document = nil
+				r.ObservedDocument = models.ProviderObservedContent{Reason: "not_observed"}
+				r.Failure = &ProviderDocumentFailure{Code: "request_failed", Cause: []byte("unexpected EOF")}
+				r.FailureClass = runtimecontract.RuntimeCandidateFailureClassProviderTransient
+			},
+		},
+		{
+			name: "stream_ended_before_completion transient",
+			edit: func(r *CompleteProviderDocumentResult) {
+				r.Document = nil
+				r.ObservedDocument = models.ProviderObservedContent{Reason: "not_observed"}
+				r.Incomplete = &ProviderIncompleteDocument{Code: "stream_ended_before_completion", Cause: []byte("stream ended")}
+				r.FailureClass = runtimecontract.RuntimeCandidateFailureClassProviderTransient
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := valid.Clone()
+			tc.edit(&candidate)
+			if err := candidate.ValidateFor(command); err != nil {
+				t.Fatalf("valid transient result rejected: %v", err)
 			}
 		})
 	}

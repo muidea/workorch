@@ -89,7 +89,9 @@ func (b *Biz) compileAuthoringSpecificationBound(ctx context.Context, id common.
 			request.PreviousProposalHash, request.FeedbackHash = feedback.PreviousProposalHash, feedback.ContentHash()
 			request.RequestID = workspace.SpecificationRequestID(derivation.PermitID, "", "", request.FeedbackHash)
 		} else if latest != nil {
-			request = *latest
+			request.PreviousProposalHash = latest.PreviousProposalHash
+			request.FeedbackHash = latest.FeedbackHash
+			request.RequestID = workspace.SpecificationRequestID(derivation.PermitID, "", "", latest.FeedbackHash)
 		}
 		outcome, err := b.prepareAuthoringSpecification(ctx, id, record, request, *derivation, nil)
 		if err != nil {
@@ -120,22 +122,18 @@ func compiledAuthoringSpecification(record workspace.DefinitionAuthoringRecord, 
 			return workspace.GoalSpecification{}, true, fmt.Errorf("%w: authoring specification outcome unresolved", common.ErrConflict)
 		}
 	}
-	var proposal *workspace.GoalSpecification
-	for _, request := range record.SpecificationRequests {
-		if request.DerivationPermitID != derivation.PermitID {
-			continue
+	proposal, propFailed, propUnresolved, propRetryable, propErr := record.SettledProposalState(derivation.PermitID)
+	if propErr != nil {
+		return workspace.GoalSpecification{}, true, fmt.Errorf("%w: %v", common.ErrConflict, propErr)
+	}
+	if propUnresolved {
+		return workspace.GoalSpecification{}, true, fmt.Errorf("%w: authoring specification outcome unresolved", common.ErrConflict)
+	}
+	if propFailed != nil {
+		if propRetryable {
+			return workspace.GoalSpecification{}, false, nil
 		}
-		if request.FailureCode != "" {
-			return workspace.GoalSpecification{}, true, fmt.Errorf("%w: authoring specification %s failed (%s)", common.ErrConflict, request.Phase, request.FailureCode)
-		}
-		if request.Proposal == nil && request.Review == nil {
-			return workspace.GoalSpecification{}, true, fmt.Errorf("%w: authoring specification outcome unresolved", common.ErrConflict)
-		}
-		if request.Phase != workspace.DefinitionSpecificationProposal {
-			continue
-		}
-		copy := request.Proposal.Clone()
-		proposal = &copy
+		return workspace.GoalSpecification{}, true, fmt.Errorf("%w: authoring specification %s failed (%s)", common.ErrConflict, propFailed.Phase, propFailed.FailureCode)
 	}
 	if proposal == nil {
 		return workspace.GoalSpecification{}, false, nil
@@ -143,16 +141,15 @@ func compiledAuthoringSpecification(record workspace.DefinitionAuthoringRecord, 
 	// Incomplete generations resume only against the same proposal hash.
 	proposalHash := proposal.ContentHash()
 	for _, kind := range specifications.ReviewKinds() {
-		var matched *workspace.GoalSpecificationCompletenessReview
-		for _, request := range record.SpecificationRequests {
-			if request.DerivationPermitID != derivation.PermitID || request.Phase != workspace.DefinitionSpecificationCritic || request.ReviewKind != kind || request.ProposalHash != proposalHash {
-				continue
+		matched, failed, unresolved, retryable, reviewErr := record.SettledCriticReview(derivation.PermitID, proposalHash, kind)
+		if reviewErr != nil || unresolved {
+			return workspace.GoalSpecification{}, true, fmt.Errorf("%w: authoring critic %s is unresolved or inconsistent", common.ErrConflict, kind)
+		}
+		if failed != nil {
+			if retryable {
+				return workspace.GoalSpecification{}, false, nil
 			}
-			if request.ProposalHash != proposalHash || request.FailureCode != "" || request.Review == nil || matched != nil {
-				return workspace.GoalSpecification{}, true, fmt.Errorf("%w: authoring critic %s is unresolved or inconsistent", common.ErrConflict, kind)
-			}
-			copy := *request.Clone().Review
-			matched = &copy
+			return workspace.GoalSpecification{}, true, fmt.Errorf("%w: authoring specification %s failed (%s)", common.ErrConflict, failed.Phase, failed.FailureCode)
 		}
 		if matched == nil {
 			return workspace.GoalSpecification{}, false, nil
@@ -202,79 +199,107 @@ func definitionProviderBindingHash(configuration llmevents.GetActiveConfiguratio
 // prepareAuthoringSpecification 先重放 current ledger，再读取可变配置或渲染。
 // 每个新 review 都重新观察 owner revision，包括前序 permit/completion 推进。
 func (b *Biz) prepareAuthoringSpecification(ctx context.Context, id common.WorkspaceID, expected workspace.DefinitionAuthoringRecord, request workspace.DefinitionAuthoringSpecificationRequest, derivation workspace.DefinitionDerivationRequest, proposal *workspace.GoalSpecification) (workspace.DefinitionAuthoringSpecificationRequest, error) {
-	view, err := b.QueryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: id, InputHash: expected.InputHash})
-	if err != nil {
-		return request, err
-	}
-	if view.Record == nil || view.Record.InputHash != expected.InputHash || view.Record.TemplateSnapshotHash != expected.TemplateSnapshotHash {
-		return request, common.ErrConflict
-	}
-	record, err := view.Record.Model()
-	if err != nil {
-		return request, err
-	}
-	if _, _, replayErr := compiledAuthoringSpecification(record, derivation); replayErr != nil {
-		return request, replayErr
-	}
-	for _, previous := range record.SpecificationRequests {
-		if previous.DerivationPermitID == request.DerivationPermitID && previous.Phase == request.Phase && previous.ReviewKind == request.ReviewKind && previous.ProposalHash == request.ProposalHash && previous.PreviousProposalHash == request.PreviousProposalHash && previous.FeedbackHash == request.FeedbackHash {
-			return authoringSpecificationOutcome(previous)
+	baseRequestID := request.RequestID
+	for {
+		view, err := b.QueryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: id, InputHash: expected.InputHash})
+		if err != nil {
+			return request, err
 		}
-	}
-	if !view.CurrentTemplateAvailable {
-		return request, common.ErrConflict
-	}
-	stage := workspace.DefinitionAuthoringPreparationProposal
-	if request.Phase == workspace.DefinitionSpecificationCritic {
-		stage = workspace.DefinitionAuthoringPreparationReview
-	}
-	identity := authoringPreparationIdentity(view, stage, request.RequestID)
-	identity.DerivationPermitID, identity.ReviewKind, identity.ProposalHash = request.DerivationPermitID, request.ReviewKind, request.ProposalHash
-	configuration, err := b.activeDefinitionProviderConfiguration(ctx)
-	if err != nil {
-		return request, b.captureAuthoringPreparationFailure(ctx, identity, "config", err)
-	}
-	bindingHash := definitionProviderBindingHash(configuration)
-	identity.ProviderBindingHash = bindingHash
-	if derivation.ProviderBindingHash != bindingHash {
-		err := fmt.Errorf("%w: specification provider configuration changed after derivation", common.ErrConflict)
-		return request, b.captureAuthoringPreparationFailure(ctx, identity, "config", err)
-	}
-	for _, previous := range record.SpecificationRequests {
-		if previous.DerivationPermitID == derivation.PermitID && previous.ProviderBindingHash != bindingHash {
-			err := fmt.Errorf("%w: specification provider configuration changed between persisted stages", common.ErrConflict)
-			return request, b.captureAuthoringPreparationFailure(ctx, identity, "config", err)
+		if view.Record == nil || view.Record.InputHash != expected.InputHash || view.Record.TemplateSnapshotHash != expected.TemplateSnapshotHash {
+			return request, common.ErrConflict
 		}
-	}
-	request.ProviderBindingHash = bindingHash
-	request.WireContractRef = derivation.WireContractRef
-	phase := "proposal"
-	if request.ReviewKind != "" {
-		phase = request.ReviewKind
-	}
-	request.WireContractHash = workspace.AuthoringWireHash(request.WireContractRef, phase)
-	var command llmevents.CompleteProviderCommand
-	if proposal == nil {
-		if request.PreviousProposalHash == "" {
-			command, err = specifications.AuthoringProposalCommand(derivation, configuration.DefaultChat)
-		} else {
-			feedback, feedbackErr := record.SpecificationFeedback(derivation.PermitID, request.PreviousProposalHash)
-			previous := record.LatestSpecificationRequest(derivation.PermitID)
-			if feedbackErr != nil || feedback.ContentHash() != request.FeedbackHash || previous == nil || previous.Proposal == nil {
-				return request, common.ErrConflict
+		record, err := view.Record.Model()
+		if err != nil {
+			return request, err
+		}
+		if _, _, replayErr := compiledAuthoringSpecification(record, derivation); replayErr != nil {
+			return request, replayErr
+		}
+		slot := record.SpecificationSlotRequests(request.DerivationPermitID, request.Phase, request.ReviewKind, request.ProposalHash, request.PreviousProposalHash, request.FeedbackHash)
+		retryOrdinal := 0
+		if len(slot) > 0 {
+			last := slot[len(slot)-1]
+			if last.Proposal != nil || last.Review != nil || (last.FailureCode == "" && last.Proposal == nil && last.Review == nil) {
+				return authoringSpecificationOutcome(last)
 			}
-			command, err = specifications.AuthoringRevisionCommand(derivation, *previous.Proposal, feedback, configuration.DefaultChat)
+			var retryable bool
+			retryOrdinal, retryable = record.CanRetrySpecificationSlot(slot)
+			if !retryable {
+				return authoringSpecificationOutcome(last)
+			}
 		}
-	} else {
-		unreviewed := proposal.Clone()
-		unreviewed.Reviews = nil
-		command, err = specifications.AuthoringReviewCommand(derivation, unreviewed, request.ReviewKind, configuration.DefaultChat)
+		attemptReq := request.Clone()
+		attemptReq.RequestID = workspace.AuthoringRetryRequestID(baseRequestID, retryOrdinal)
+		for _, entry := range slot {
+			if entry.RequestID == attemptReq.RequestID {
+				return authoringSpecificationOutcome(entry)
+			}
+		}
+		if !view.CurrentTemplateAvailable {
+			return attemptReq, common.ErrConflict
+		}
+		stage := workspace.DefinitionAuthoringPreparationProposal
+		if attemptReq.Phase == workspace.DefinitionSpecificationCritic {
+			stage = workspace.DefinitionAuthoringPreparationReview
+		}
+		identity := authoringPreparationIdentity(view, stage, attemptReq.RequestID)
+		identity.DerivationPermitID, identity.ReviewKind, identity.ProposalHash = attemptReq.DerivationPermitID, attemptReq.ReviewKind, attemptReq.ProposalHash
+		configuration, err := b.activeDefinitionProviderConfiguration(ctx)
+		if err != nil {
+			return attemptReq, b.captureAuthoringPreparationFailure(ctx, identity, "config", err)
+		}
+		bindingHash := definitionProviderBindingHash(configuration)
+		identity.ProviderBindingHash = bindingHash
+		if derivation.ProviderBindingHash != bindingHash {
+			err := fmt.Errorf("%w: specification provider configuration changed after derivation", common.ErrConflict)
+			return attemptReq, b.captureAuthoringPreparationFailure(ctx, identity, "config", err)
+		}
+		for _, previous := range record.SpecificationRequests {
+			if previous.DerivationPermitID == derivation.PermitID && previous.ProviderBindingHash != bindingHash {
+				err := fmt.Errorf("%w: specification provider configuration changed between persisted stages", common.ErrConflict)
+				return attemptReq, b.captureAuthoringPreparationFailure(ctx, identity, "config", err)
+			}
+		}
+		attemptReq.ProviderBindingHash = bindingHash
+		attemptReq.WireContractRef = derivation.WireContractRef
+		phase := "proposal"
+		if attemptReq.ReviewKind != "" {
+			phase = attemptReq.ReviewKind
+		}
+		attemptReq.WireContractHash = workspace.AuthoringWireHash(attemptReq.WireContractRef, phase)
+		var command llmevents.CompleteProviderCommand
+		if proposal == nil {
+			if attemptReq.PreviousProposalHash == "" {
+				command, err = specifications.AuthoringProposalCommand(derivation, configuration.DefaultChat)
+			} else {
+				feedback, feedbackErr := record.SpecificationFeedback(derivation.PermitID, attemptReq.PreviousProposalHash)
+				prevProposal := record.CompletedSpecificationProposal(derivation.PermitID, attemptReq.PreviousProposalHash)
+				if feedbackErr != nil || feedback.ContentHash() != attemptReq.FeedbackHash || prevProposal == nil {
+					return attemptReq, common.ErrConflict
+				}
+				command, err = specifications.AuthoringRevisionCommand(derivation, *prevProposal, feedback, configuration.DefaultChat)
+			}
+		} else {
+			unreviewed := proposal.Clone()
+			unreviewed.Reviews = nil
+			command, err = specifications.AuthoringReviewCommand(derivation, unreviewed, attemptReq.ReviewKind, configuration.DefaultChat)
+		}
+		if err != nil {
+			return attemptReq, b.captureAuthoringPreparationFailure(ctx, identity, "render", err)
+		}
+		command.ExpectedConfigurationRevision = configuration.ConfigurationRevision
+		settled, callErr := b.completeAuthoringSpecification(ctx, id, expected.InputHash, attemptReq, command, derivation, proposal, identity)
+		if callErr == nil {
+			return settled, nil
+		}
+		if settled.IsRetryableProviderTransientFailure() && retryOrdinal < workspace.AuthoringProviderTransientRetryLimit && ctx.Err() == nil {
+			if waitErr := b.waitAuthoringTransientRetry(ctx, retryOrdinal+1); waitErr != nil {
+				return settled, waitErr
+			}
+			continue
+		}
+		return settled, callErr
 	}
-	if err != nil {
-		return request, b.captureAuthoringPreparationFailure(ctx, identity, "render", err)
-	}
-	command.ExpectedConfigurationRevision = configuration.ConfigurationRevision
-	return b.completeAuthoringSpecification(ctx, id, expected.InputHash, request, command, derivation, proposal, identity)
 }
 
 func (b *Biz) completeAuthoringSpecification(ctx context.Context, id common.WorkspaceID, inputHash string, request workspace.DefinitionAuthoringSpecificationRequest, command llmevents.CompleteProviderCommand, derivation workspace.DefinitionDerivationRequest, proposal *workspace.GoalSpecification, identity workspace.DefinitionAuthoringPreparationDiagnostic) (workspace.DefinitionAuthoringSpecificationRequest, error) {
@@ -316,6 +341,7 @@ func (b *Biz) completeAuthoringSpecification(ctx context.Context, id common.Work
 		var payloadErr error
 		payload, payloadErr = authoringCompletePayload(response)
 		if payloadErr != nil {
+			cancelSettlement()
 			return request, payloadErr
 		}
 	}

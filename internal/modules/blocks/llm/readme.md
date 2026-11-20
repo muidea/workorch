@@ -35,10 +35,12 @@ vector 与真实 non-streaming physical response fact。owner 发布前和 Appli
 `RequestRuntimeCandidateResult` 则是受校验的封闭事实联合，`Stale | Feedback | DocumentOutcome` 必须恰好一个，并绑定 exact
 workspace/run、logical/physical request identity、document hash、audit 与 usage。
 
-创建期独立文档调用保留 generic completion 的既有成功合同，复用同一 adapter 且不执行 fallback call。
+创建期独立文档调用保留 generic completion 的既有成功合同，复用同一 adapter 且不执行重试或 fallback call。
 `CompleteProviderDocumentResult` 的 `Document | Failure | Incomplete` 恰好一个，完整空文档仍由调用方严格解析；
+`Failure` 或 `Incomplete` 必须附带与本次 physical request 审计一致的 factual `FailureClass`（例如 `provider_transient` /
+`provider_protocol` / `provider_configuration` / `provider_authentication`），`Document` 不携带 `FailureClass`。
 exact opaque RequestIdentity、完整 accepted command hash、target、configuration revision、submitted 与 physical mode
-由 `ValidateFor` 共同反证。LLM 不解释 Workspace phase 或 permit，不从审计重建调用结果。
+由 `ValidateFor` 共同反证。LLM 不解释 Workspace phase 或 permit，不决定重试策略，也不从审计重建调用结果。
 文档、wire 与实际 transport leaf 分开记录 actual observed bytes／SHA256、complete、saved 和 reason；超过 256 KiB
 不保存任何截断前缀，未读取不发明 bytes／hash。原始 leaf 只进入受限诊断，普通错误及 audit 保留安全分类，
 不混入 request URL、配置或凭据。审计发布错误单独记录，不覆盖已经确定的 typed outcome；发布不等于持久投递。

@@ -42,6 +42,15 @@ func (c DefinitionChangeCandidate) reviewedIdentity(id common.WorkspaceID, view 
 		if request.Input.InputHash() != c.Record.InputHash {
 			continue
 		}
+		if request.Proposal == nil && request.FailureCode == "" {
+			return DefinitionChangeReviewedIdentity{}, common.ErrConflict
+		}
+		if request.IsRetryableProviderTransientFailure() {
+			if derivation != nil {
+				return DefinitionChangeReviewedIdentity{}, common.ErrConflict
+			}
+			continue
+		}
 		if request.Proposal == nil || request.FailureCode != "" || derivation != nil {
 			return DefinitionChangeReviewedIdentity{}, common.ErrConflict
 		}
@@ -50,21 +59,11 @@ func (c DefinitionChangeCandidate) reviewedIdentity(id common.WorkspaceID, view 
 	if derivation == nil {
 		return DefinitionChangeReviewedIdentity{}, common.ErrConflict
 	}
-	proposalHash := ""
-	for _, request := range c.Record.SpecificationRequests {
-		if request.DerivationPermitID != derivation.PermitID {
-			continue
-		}
-		if request.FailureCode != "" || request.Proposal == nil && request.Review == nil {
-			return DefinitionChangeReviewedIdentity{}, common.ErrConflict
-		}
-		if request.Proposal != nil {
-			if proposalHash != "" {
-				return DefinitionChangeReviewedIdentity{}, common.ErrConflict
-			}
-			proposalHash = request.Proposal.ContentHash()
-		}
+	latestProposal, propFailed, propUnresolved, _, propErr := c.Record.SettledProposalState(derivation.PermitID)
+	if propErr != nil || propUnresolved || propFailed != nil || latestProposal == nil {
+		return DefinitionChangeReviewedIdentity{}, common.ErrConflict
 	}
+	proposalHash := latestProposal.ContentHash()
 	var specification GoalSpecification
 	var err error
 	if view {

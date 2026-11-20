@@ -29,55 +29,62 @@ func (r DefinitionAuthoringRecord) CurrentAuthoringSummary() (state, failurePhas
 		state = "deriving"
 		switch {
 		case derivation.FailureCode != "":
-			state, failurePhase, failureCode = "failed", "derivation", derivation.FailureCode
+			if _, retryable := r.DerivationRetryOrdinalForCurrent(); !retryable {
+				state, failurePhase, failureCode = "failed", "derivation", derivation.FailureCode
+			}
 		case derivation.Proposal == nil:
 			state = "outcome_unresolved"
 		default:
 			state = "derived"
-			var proposal *GoalSpecification
-			for _, request := range r.SpecificationRequests {
-				if request.DerivationPermitID != derivation.PermitID || request.Phase != DefinitionSpecificationProposal {
-					continue
-				}
-				if request.FailureCode != "" {
-					state, failurePhase, failureCode = "failed", "proposal", request.FailureCode
-					proposal = nil
-					break
-				}
-				if request.Proposal != nil {
-					copy := request.Proposal.Clone()
-					proposal = &copy
-				}
+			proposal, propFailed, propUnresolved, propRetryable, propErr := r.SettledProposalState(derivation.PermitID)
+			if propErr != nil {
+				return "", "", "", 0
 			}
-			if failureCode == "" && proposal != nil {
+			switch {
+			case propUnresolved:
+				state = "outcome_unresolved"
+			case propFailed != nil:
+				if propRetryable {
+					if proposal != nil {
+						state = "reviewing"
+					}
+				} else {
+					state, failurePhase, failureCode = "failed", "proposal", propFailed.FailureCode
+				}
+			case proposal != nil:
 				proposalHash := proposal.ContentHash()
 				state = "reviewing"
 				reviewFailed, reviewUnresolved, reviewBlocked := false, false, false
-				for _, request := range r.SpecificationRequests {
-					if request.DerivationPermitID != derivation.PermitID || request.Phase != DefinitionSpecificationCritic || request.ProposalHash != proposalHash {
-						continue
+				for _, kind := range goalReviewKinds {
+					review, cFailed, cUnresolved, cRetryable, cErr := r.SettledCriticReview(derivation.PermitID, proposalHash, kind)
+					if cErr != nil {
+						return "", "", "", 0
 					}
-					if request.FailureCode != "" {
-						reviewFailed = true
-						if failureCode == "" {
-							failurePhase, failureCode = "review", request.FailureCode
-						}
-						continue
-					}
-					if request.Review == nil {
+					if cUnresolved {
 						reviewUnresolved = true
 						continue
 					}
-					reviewCount++
-					if request.Review.Status != GoalReviewPass {
-						reviewBlocked = true
+					if cFailed != nil {
+						if !cRetryable {
+							reviewFailed = true
+							if failureCode == "" {
+								failurePhase, failureCode = "review", cFailed.FailureCode
+							}
+						}
+						continue
+					}
+					if review != nil {
+						reviewCount++
+						if review.Status != GoalReviewPass {
+							reviewBlocked = true
+						}
 					}
 				}
 				switch {
-				case reviewFailed:
-					state = "failed"
 				case reviewUnresolved:
 					state = "outcome_unresolved"
+				case reviewFailed:
+					state = "failed"
 				case reviewBlocked:
 					if reviewCount == len(goalReviewKinds) {
 						state = "review_blocked"
@@ -120,7 +127,7 @@ func (r DefinitionAuthoringRecord) CurrentAuthoringSummary() (state, failurePhas
 		if !preparationDiagnosticCurrentForSummary(r, derivation, diagnostic) {
 			continue
 		}
-		if state == "draft" || state == "derived" || state == "reviewing" || state == "review_blocked" {
+		if state == "draft" || state == "deriving" || state == "derived" || state == "reviewing" || state == "review_blocked" {
 			state, failurePhase, failureCode = "preparation_failed", string(diagnostic.Stage), diagnostic.PhaseCode
 		}
 	}
@@ -152,34 +159,50 @@ func preparationDiagnosticCurrentForSummary(record DefinitionAuthoringRecord, de
 	if derivation == nil {
 		return diagnostic.Stage == DefinitionAuthoringPreparationDerivation
 	}
-	if derivation.Proposal == nil || derivation.FailureCode != "" || diagnostic.DerivationPermitID != derivation.PermitID {
+	if derivation.FailureCode != "" {
+		if _, retryable := record.DerivationRetryOrdinalForCurrent(); retryable {
+			return diagnostic.Stage == DefinitionAuthoringPreparationDerivation && diagnostic.TargetRequestID == record.NextDerivationRequestID()
+		}
 		return false
 	}
-	var proposal *GoalSpecification
+	if derivation.Proposal == nil || diagnostic.DerivationPermitID != derivation.PermitID {
+		return false
+	}
 	for _, request := range record.SpecificationRequests {
-		if request.DerivationPermitID != derivation.PermitID {
-			continue
-		}
-		if request.FailureCode != "" || request.Proposal == nil && request.Review == nil {
+		if request.DerivationPermitID == derivation.PermitID && request.Proposal == nil && request.Review == nil && request.FailureCode == "" {
 			return false
 		}
-		if request.Proposal != nil {
-			proposal = request.Proposal
+	}
+	proposal, propFailed, propUnresolved, propRetryable, propErr := record.SettledProposalState(derivation.PermitID)
+	if propErr != nil || propUnresolved {
+		return false
+	}
+	if propFailed != nil {
+		if !propRetryable {
+			return false
 		}
+		slot := record.SpecificationSlotRequests(derivation.PermitID, DefinitionSpecificationProposal, "", "", propFailed.PreviousProposalHash, propFailed.FeedbackHash)
+		baseID := SpecificationRequestID(derivation.PermitID, "", "", propFailed.FeedbackHash)
+		return diagnostic.Stage == DefinitionAuthoringPreparationProposal && diagnostic.TargetRequestID == AuthoringRetryRequestID(baseID, len(slot))
 	}
 	if proposal == nil {
 		return diagnostic.Stage == DefinitionAuthoringPreparationProposal && diagnostic.TargetRequestID == SpecificationRequestID(derivation.PermitID, "", "", "")
 	}
 	proposalHash := proposal.ContentHash()
 	for _, kind := range goalReviewKinds {
-		completed := false
-		for _, request := range record.SpecificationRequests {
-			if request.DerivationPermitID == derivation.PermitID && request.Phase == DefinitionSpecificationCritic && request.ReviewKind == kind && request.ProposalHash == proposalHash && request.Review != nil {
-				completed = true
-				break
-			}
+		review, cFailed, cUnresolved, cRetryable, cErr := record.SettledCriticReview(derivation.PermitID, proposalHash, kind)
+		if cErr != nil || cUnresolved {
+			return false
 		}
-		if !completed {
+		if cFailed != nil {
+			if !cRetryable {
+				return false
+			}
+			slot := record.SpecificationSlotRequests(derivation.PermitID, DefinitionSpecificationCritic, kind, proposalHash, "", "")
+			baseID := SpecificationRequestID(derivation.PermitID, kind, proposalHash, "")
+			return diagnostic.Stage == DefinitionAuthoringPreparationReview && diagnostic.ReviewKind == kind && diagnostic.ProposalHash == proposalHash && diagnostic.TargetRequestID == AuthoringRetryRequestID(baseID, len(slot))
+		}
+		if review == nil {
 			return diagnostic.Stage == DefinitionAuthoringPreparationReview && diagnostic.ReviewKind == kind && diagnostic.ProposalHash == proposalHash && diagnostic.TargetRequestID == SpecificationRequestID(derivation.PermitID, kind, proposalHash, "")
 		}
 	}

@@ -70,6 +70,7 @@ Web 只在页面内存保留原 payload 和恢复提示；未收到完整创建�
 派生、proposal 与六类 review 使用 `CompleteProviderDocumentCommand/Result`，绑定已 reserve 的 opaque permit
 及完整 command hash；完整输出才进入 strict parser。provider 确定失败／不完整与 parser 失败分别保存，
 文档、wire 和 transport leaf 由 Workspace 受限诊断查询保留原 bytes／SHA256／观察完整性；原文不进入通用日志或 Runtime。
+若 Workspace 结算为可重试的 `provider_transient`（排除 `request_canceled` 与 `tls_verification_failed`），Application 在有界退避并重新核对 owner 后，可在不超过 `AuthoringProviderTransientRetryLimit`（3 次重试）的限额内申请确定性 `/retry/<n>` permit 续跑；`outcome_unresolved`、parser/semantic 失败与非瞬态 provider 失败绝不自动重试。[`biz/definition_authoring_transient_retry_test.go`](biz/definition_authoring_transient_retry_test.go) 验证端到端重试、原始诊断保留与中断恢复。
 三类 closed schema 全部计入请求预算，稳定合同放 C0，动态输入放 C3；native／prompt 共用严格本地校验且零 fallback。
 
 派生只提取 Goal／资源中未被具体承接的原验收主项，禁止在 AdditionalItems 增加新的设计流程或验收义务。proposal／review 共享由封存 Profile

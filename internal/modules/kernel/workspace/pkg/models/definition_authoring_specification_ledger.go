@@ -7,10 +7,13 @@ import (
 	"reflect"
 	"strings"
 	"unicode/utf8"
+
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const DefinitionAuthoringSpecificationRequestLimit = 112
 const DefinitionAuthoringSpecificationAttemptLimit = 2
+const AuthoringProviderTransientRetryLimit = 3
 
 // Provider diagnostics are bounded independently from the existing request
 // budget. Oversized values are represented by exact byte metadata, never a
@@ -22,19 +25,20 @@ const definitionAuthoringDiagnosticNotSavedReason = "diagnostic exceeds supporte
 // DefinitionAuthoringDiagnostic preserves provider/parser failure data without
 // making it an authoring or admission authority.
 type DefinitionAuthoringDiagnostic struct {
-	ParseError       string
-	ParseErrorSHA256 string
-	ParseErrorBytes  uint64
-	ParseErrorSaved  bool
-	Payload          []byte
-	PayloadSHA256    string
-	PayloadBytes     uint64
-	PayloadSaved     bool
-	NotSavedReason   string
-	ProviderCode     string                         `json:",omitempty"`
-	ProviderDocument *DefinitionProviderObservation `json:",omitempty"`
-	ProviderWire     *DefinitionProviderObservation `json:",omitempty"`
-	ProviderCause    *DefinitionProviderObservation `json:",omitempty"`
+	ParseError           string
+	ParseErrorSHA256     string
+	ParseErrorBytes      uint64
+	ParseErrorSaved      bool
+	Payload              []byte
+	PayloadSHA256        string
+	PayloadBytes         uint64
+	PayloadSaved         bool
+	NotSavedReason       string
+	ProviderCode         string                         `json:",omitempty"`
+	ProviderFailureClass string                         `json:",omitempty"`
+	ProviderDocument     *DefinitionProviderObservation `json:",omitempty"`
+	ProviderWire         *DefinitionProviderObservation `json:",omitempty"`
+	ProviderCause        *DefinitionProviderObservation `json:",omitempty"`
 }
 
 func NewDefinitionAuthoringDiagnostic(parseError string, payload []byte) DefinitionAuthoringDiagnostic {
@@ -79,8 +83,11 @@ func (d DefinitionAuthoringDiagnostic) Clone() DefinitionAuthoringDiagnostic {
 }
 
 func (d DefinitionAuthoringDiagnostic) Validate() error {
-	if d.ProviderCode != "" || d.ProviderDocument != nil || d.ProviderWire != nil || d.ProviderCause != nil {
+	if d.ProviderCode != "" || d.ProviderFailureClass != "" || d.ProviderDocument != nil || d.ProviderWire != nil || d.ProviderCause != nil {
 		if len(d.ProviderCode) > 128 || d.ProviderDocument == nil || d.ProviderWire == nil || d.ProviderDocument.Validate() != nil || d.ProviderWire.Validate() != nil || d.ProviderCause != nil && (d.ProviderCode == "" || d.ProviderCause.Validate() != nil || !d.ProviderCause.Observed || !d.ProviderCause.Complete) {
+			return fmt.Errorf("authoring provider diagnostic invalid")
+		}
+		if d.ProviderFailureClass != "" && (d.ProviderCode == "" || !validAuthoringProviderFailureClass(d.ProviderFailureClass)) {
 			return fmt.Errorf("authoring provider diagnostic invalid")
 		}
 		if d.ProviderCode == "" && (!d.ProviderDocument.Observed || !d.ProviderDocument.Complete || !d.ProviderDocument.Saved) {
@@ -314,6 +321,8 @@ func validateAuthoringSpecificationRequestsMode(record DefinitionAuthoringRecord
 	}
 	seen := make(map[string]bool, len(record.SpecificationRequests))
 	attempts := map[string]int{}
+	lastInSlot := map[string]DefinitionAuthoringSpecificationRequest{}
+	distinctProposals := map[string]int{}
 	type completedProposal struct {
 		reviews goalSpecificationReviewContext
 	}
@@ -349,18 +358,22 @@ func validateAuthoringSpecificationRequestsMode(record DefinitionAuthoringRecord
 				return err
 			}
 		}
-		key := request.DerivationPermitID + "\x00" + string(request.Phase) + "\x00" + request.ReviewKind
-		if request.Phase == DefinitionSpecificationCritic {
-			key += "\x00" + request.ProposalHash
+		slotKey := request.DerivationPermitID + "\x00" + string(request.Phase) + "\x00" + request.ReviewKind + "\x00" + request.ProposalHash + "\x00" + request.PreviousProposalHash + "\x00" + request.FeedbackHash
+		if prev, exists := lastInSlot[slotKey]; exists {
+			if !prev.IsRetryableProviderTransientFailure() {
+				return fmt.Errorf("authoring specification phase attempt budget exceeded")
+			}
+		} else if request.Phase == DefinitionSpecificationProposal {
+			distinctProposals[request.DerivationPermitID]++
+			if distinctProposals[request.DerivationPermitID] > DefinitionAuthoringSpecificationAttemptLimit {
+				return fmt.Errorf("authoring specification phase attempt budget exceeded")
+			}
 		}
-		attempts[key]++
-		limit := DefinitionAuthoringSpecificationAttemptLimit
-		if request.Phase == DefinitionSpecificationCritic {
-			limit = 1
-		}
-		if attempts[key] > limit {
+		attempts[slotKey]++
+		if attempts[slotKey] > 1+AuthoringProviderTransientRetryLimit {
 			return fmt.Errorf("authoring specification phase attempt budget exceeded")
 		}
+		lastInSlot[slotKey] = request
 		if request.Phase == DefinitionSpecificationProposal {
 			if request.Proposal != nil {
 				if !view {
@@ -400,6 +413,175 @@ func validateAuthoringSpecificationRequestsMode(record DefinitionAuthoringRecord
 		}
 	}
 	return nil
+}
+
+func validAuthoringProviderFailureClass(class string) bool {
+	switch runtimecontract.RuntimeCandidateFailureClass(class) {
+	case runtimecontract.RuntimeCandidateFailureClassProviderTransient,
+		runtimecontract.RuntimeCandidateFailureClassProviderProtocol,
+		runtimecontract.RuntimeCandidateFailureClassProviderAuthentication,
+		runtimecontract.RuntimeCandidateFailureClassProviderConfiguration,
+		runtimecontract.RuntimeCandidateFailureClassProvider:
+		return true
+	default:
+		return false
+	}
+}
+
+// AuthoringRetryRequestID derives the deterministic request identity for a bounded
+// retry attempt without changing the base transaction identity.
+func AuthoringRetryRequestID(base string, retryOrdinal int) string {
+	if retryOrdinal <= 0 {
+		return base
+	}
+	return fmt.Sprintf("%s/retry/%d", base, retryOrdinal)
+}
+
+func (d *DefinitionAuthoringDiagnostic) IsRetryableProviderTransient() bool {
+	return d != nil &&
+		d.ProviderFailureClass == string(runtimecontract.RuntimeCandidateFailureClassProviderTransient) &&
+		d.ProviderCode != "" &&
+		d.ProviderCode != "request_canceled" &&
+		d.ProviderCode != "tls_verification_failed"
+}
+
+func (r DefinitionDerivationRequest) IsRetryableProviderTransientFailure() bool {
+	return r.FailureCode == "provider_failed" && r.Proposal == nil && r.Diagnostic.IsRetryableProviderTransient()
+}
+
+func (r DefinitionAuthoringSpecificationRequest) IsRetryableProviderTransientFailure() bool {
+	return r.FailureCode == "provider_failed" && r.Proposal == nil && r.Review == nil && r.Diagnostic.IsRetryableProviderTransient()
+}
+
+func (r DefinitionAuthoringRecord) CompletedSpecificationProposal(derivationPermitID, hash string) *GoalSpecification {
+	return r.completedSpecificationProposal(derivationPermitID, hash)
+}
+
+func (r DefinitionAuthoringRecord) SpecificationSlotRequests(derivationPermitID string, phase DefinitionSpecificationPhase, reviewKind, proposalHash, previousProposalHash, feedbackHash string) []DefinitionAuthoringSpecificationRequest {
+	var slot []DefinitionAuthoringSpecificationRequest
+	for _, request := range r.SpecificationRequests {
+		if request.DerivationPermitID != derivationPermitID || request.Phase != phase {
+			continue
+		}
+		if phase == DefinitionSpecificationProposal {
+			if request.PreviousProposalHash != previousProposalHash || request.FeedbackHash != feedbackHash {
+				continue
+			}
+		} else {
+			if request.ReviewKind != reviewKind || request.ProposalHash != proposalHash {
+				continue
+			}
+		}
+		slot = append(slot, request.Clone())
+	}
+	return slot
+}
+
+func (r DefinitionAuthoringRecord) CanRetrySpecificationSlot(slot []DefinitionAuthoringSpecificationRequest) (int, bool) {
+	if len(slot) == 0 || len(slot) > AuthoringProviderTransientRetryLimit || len(r.SpecificationRequests) >= DefinitionAuthoringSpecificationRequestLimit {
+		return 0, false
+	}
+	for _, entry := range slot {
+		if !entry.IsRetryableProviderTransientFailure() {
+			return 0, false
+		}
+	}
+	return len(slot), true
+}
+
+func (r DefinitionAuthoringRecord) SettledCriticReview(derivationPermitID, proposalHash, kind string) (*GoalSpecificationCompletenessReview, *DefinitionAuthoringSpecificationRequest, bool, bool, error) {
+	slot := r.SpecificationSlotRequests(derivationPermitID, DefinitionSpecificationCritic, kind, proposalHash, "", "")
+	if len(slot) == 0 {
+		return nil, nil, false, false, nil
+	}
+	if len(slot) > 1+AuthoringProviderTransientRetryLimit {
+		return nil, nil, false, false, fmt.Errorf("authoring critic %s retry budget exceeded", kind)
+	}
+	for i, entry := range slot {
+		isLast := i == len(slot)-1
+		if !isLast {
+			if !entry.IsRetryableProviderTransientFailure() {
+				return nil, nil, false, false, fmt.Errorf("authoring critic %s has superseded non-transient entry", kind)
+			}
+			continue
+		}
+		if entry.Review != nil && entry.FailureCode == "" {
+			review := *entry.Clone().Review
+			return &review, nil, false, false, nil
+		}
+		if entry.FailureCode != "" {
+			failed := entry.Clone()
+			_, retryable := r.CanRetrySpecificationSlot(slot)
+			return nil, &failed, false, retryable, nil
+		}
+		return nil, nil, true, false, nil
+	}
+	return nil, nil, false, false, nil
+}
+
+func (r DefinitionAuthoringRecord) SettledProposalState(derivationPermitID string) (*GoalSpecification, *DefinitionAuthoringSpecificationRequest, bool, bool, error) {
+	type proposalSlotGroup struct {
+		previousHash string
+		feedbackHash string
+		requests     []DefinitionAuthoringSpecificationRequest
+	}
+	var groups []proposalSlotGroup
+	seenSlot := map[string]bool{}
+	for _, request := range r.SpecificationRequests {
+		if request.DerivationPermitID != derivationPermitID || request.Phase != DefinitionSpecificationProposal {
+			continue
+		}
+		slotKey := request.PreviousProposalHash + "\x00" + request.FeedbackHash
+		if len(groups) == 0 || groups[len(groups)-1].previousHash != request.PreviousProposalHash || groups[len(groups)-1].feedbackHash != request.FeedbackHash {
+			if seenSlot[slotKey] {
+				return nil, nil, false, false, fmt.Errorf("authoring proposal slot interleaved")
+			}
+			seenSlot[slotKey] = true
+			if len(groups) >= DefinitionAuthoringSpecificationAttemptLimit {
+				return nil, nil, false, false, fmt.Errorf("authoring proposal generation budget exceeded")
+			}
+			groups = append(groups, proposalSlotGroup{previousHash: request.PreviousProposalHash, feedbackHash: request.FeedbackHash})
+		}
+		idx := len(groups) - 1
+		if len(groups[idx].requests) >= 1+AuthoringProviderTransientRetryLimit {
+			return nil, nil, false, false, fmt.Errorf("authoring proposal transient retry budget exceeded")
+		}
+		groups[idx].requests = append(groups[idx].requests, request.Clone())
+	}
+	if len(groups) == 0 {
+		return nil, nil, false, false, nil
+	}
+	var latestProposal *GoalSpecification
+	for gIdx, group := range groups {
+		isLastGroup := gIdx == len(groups)-1
+		for i, entry := range group.requests {
+			isLast := i == len(group.requests)-1
+			if !isLast {
+				if !entry.IsRetryableProviderTransientFailure() {
+					return nil, nil, false, false, fmt.Errorf("authoring proposal has superseded non-transient entry")
+				}
+				continue
+			}
+			if entry.Proposal != nil && entry.FailureCode == "" {
+				p := entry.Proposal.Clone()
+				latestProposal = &p
+				if !isLastGroup {
+					continue
+				}
+				return latestProposal, nil, false, false, nil
+			}
+			if !isLastGroup {
+				return nil, nil, false, false, fmt.Errorf("authoring proposal revision lacks completed predecessor")
+			}
+			if entry.FailureCode != "" {
+				failed := entry.Clone()
+				_, retryable := r.CanRetrySpecificationSlot(group.requests)
+				return latestProposal, &failed, false, retryable, nil
+			}
+			return latestProposal, nil, true, false, nil
+		}
+	}
+	return latestProposal, nil, false, false, nil
 }
 
 // 仅由本次 ledger 中已通过 context.validate 的提案构建，不能替代 body 校验。
@@ -483,18 +665,15 @@ func (r DefinitionAuthoringRecord) ReserveSpecification(request DefinitionAuthor
 	if len(r.SpecificationRequests) >= DefinitionAuthoringSpecificationRequestLimit {
 		return DefinitionAuthoringRecord{}, DefinitionAuthoringSpecificationRequest{}, false, &DefinitionAuthoringBudgetRefusalError{Stage: preparationStageForSpecification(request.Phase), RequestID: request.RequestID, Budget: "request", Limit: DefinitionAuthoringSpecificationRequestLimit, Cause: fmt.Errorf("authoring specification request budget exhausted")}
 	}
-	attempts := 0
-	for _, previous := range r.SpecificationRequests {
-		if previous.DerivationPermitID == request.DerivationPermitID && previous.Phase == request.Phase && previous.ReviewKind == request.ReviewKind && (request.Phase == DefinitionSpecificationProposal || previous.ProposalHash == request.ProposalHash) {
-			attempts++
+	slot := r.SpecificationSlotRequests(request.DerivationPermitID, request.Phase, request.ReviewKind, request.ProposalHash, request.PreviousProposalHash, request.FeedbackHash)
+	if len(slot) > 0 {
+		if _, retryable := r.CanRetrySpecificationSlot(slot); !retryable {
+			limit := uint32(1)
+			if request.Phase == DefinitionSpecificationProposal || slot[0].IsRetryableProviderTransientFailure() {
+				limit = uint32(1 + AuthoringProviderTransientRetryLimit)
+			}
+			return DefinitionAuthoringRecord{}, DefinitionAuthoringSpecificationRequest{}, false, &DefinitionAuthoringBudgetRefusalError{Stage: preparationStageForSpecification(request.Phase), RequestID: request.RequestID, Budget: "attempt", Limit: limit, Cause: fmt.Errorf("authoring specification phase attempt budget exhausted")}
 		}
-	}
-	limit := DefinitionAuthoringSpecificationAttemptLimit
-	if request.Phase == DefinitionSpecificationCritic {
-		limit = 1
-	}
-	if attempts >= limit {
-		return DefinitionAuthoringRecord{}, DefinitionAuthoringSpecificationRequest{}, false, &DefinitionAuthoringBudgetRefusalError{Stage: preparationStageForSpecification(request.Phase), RequestID: request.RequestID, Budget: "attempt", Limit: uint32(limit), Cause: fmt.Errorf("authoring specification phase attempt budget exhausted")}
 	}
 	if request.Phase == DefinitionSpecificationProposal {
 		if err := r.validateSpecificationSuccessor(request); err != nil {

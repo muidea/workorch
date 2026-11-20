@@ -38,19 +38,12 @@ func (r DefinitionAuthoringRecord) confirmableSpecification(derivationPermitID, 
 	value := latest.Proposal.Clone()
 	proposal := &value
 	for _, kind := range goalReviewKinds {
-		var review *GoalSpecificationCompletenessReview
-		for _, request := range r.SpecificationRequests {
-			if request.DerivationPermitID != derivationPermitID || request.Phase != DefinitionSpecificationCritic || request.ReviewKind != kind || request.ProposalHash != proposalHash {
-				continue
-			}
-			if review != nil || request.Review == nil || request.FailureCode != "" || request.Review.Status != GoalReviewPass {
-				return DefinitionDerivationRequest{}, GoalSpecification{}, fmt.Errorf("authoring confirmation review %q is not uniquely PASS", kind)
-			}
-			value := *request.Clone().Review
-			review = &value
+		review, failed, unresolved, _, reviewErr := r.SettledCriticReview(derivationPermitID, proposalHash, kind)
+		if reviewErr != nil || unresolved || failed != nil || review == nil {
+			return DefinitionDerivationRequest{}, GoalSpecification{}, fmt.Errorf("authoring confirmation lacks uniquely PASS review %q", kind)
 		}
-		if review == nil {
-			return DefinitionDerivationRequest{}, GoalSpecification{}, fmt.Errorf("authoring confirmation lacks review %q", kind)
+		if review.Status != GoalReviewPass {
+			return DefinitionDerivationRequest{}, GoalSpecification{}, fmt.Errorf("authoring confirmation review %q is not uniquely PASS", kind)
 		}
 		proposal.Reviews = append(proposal.Reviews, *review)
 	}

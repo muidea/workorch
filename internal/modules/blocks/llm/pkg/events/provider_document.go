@@ -123,6 +123,7 @@ type CompleteProviderDocumentResult struct {
 	Document                     *ProviderCompleteDocument
 	Failure                      *ProviderDocumentFailure
 	Incomplete                   *ProviderIncompleteDocument
+	FailureClass                 runtimecontract.RuntimeCandidateFailureClass
 	ObservedDocument             models.ProviderObservedContent
 	Wire                         models.ProviderObservedContent
 	TransportCause               *models.ProviderObservedContent
@@ -149,19 +150,19 @@ func (r CompleteProviderDocumentResult) ValidateFor(c CompleteProviderDocumentCo
 	arms := 0
 	if r.Document != nil {
 		arms++
-		if !r.ProviderSubmitted || !r.Document.Content.Observed || !r.Document.Content.Complete || r.Document.Content.Validate() != nil || !r.ObservedDocument.Complete || !reflect.DeepEqual(r.Document.Content, r.ObservedDocument) {
+		if !r.ProviderSubmitted || r.FailureClass != "" || !r.Document.Content.Observed || !r.Document.Content.Complete || r.Document.Content.Validate() != nil || !r.ObservedDocument.Complete || !reflect.DeepEqual(r.Document.Content, r.ObservedDocument) {
 			return fmt.Errorf("document result complete content invalid")
 		}
 	}
 	if r.Failure != nil {
 		arms++
-		if !r.ProviderSubmitted || !providerDocumentCodeCanonical(r.Failure.Code) || len(r.Failure.Cause) == 0 {
+		if !r.ProviderSubmitted || !providerDocumentCodeCanonical(r.Failure.Code) || len(r.Failure.Cause) == 0 || !providerDocumentFailureClassValid(r.FailureClass) {
 			return fmt.Errorf("document result failure invalid")
 		}
 	}
 	if r.Incomplete != nil {
 		arms++
-		if !r.ProviderSubmitted || (r.Incomplete.Code != "output_limit" && r.Incomplete.Code != "stream_ended_before_completion") || len(r.Incomplete.Cause) == 0 || r.ObservedDocument.Complete {
+		if !r.ProviderSubmitted || (r.Incomplete.Code != "output_limit" && r.Incomplete.Code != "stream_ended_before_completion") || len(r.Incomplete.Cause) == 0 || r.ObservedDocument.Complete || !providerDocumentFailureClassValid(r.FailureClass) {
 			return fmt.Errorf("document result incomplete content invalid")
 		}
 	}
@@ -169,6 +170,19 @@ func (r CompleteProviderDocumentResult) ValidateFor(c CompleteProviderDocumentCo
 		return fmt.Errorf("document result requires exactly one outcome")
 	}
 	return nil
+}
+
+func providerDocumentFailureClassValid(class runtimecontract.RuntimeCandidateFailureClass) bool {
+	switch class {
+	case runtimecontract.RuntimeCandidateFailureClassProviderTransient,
+		runtimecontract.RuntimeCandidateFailureClassProviderProtocol,
+		runtimecontract.RuntimeCandidateFailureClassProviderAuthentication,
+		runtimecontract.RuntimeCandidateFailureClassProviderConfiguration,
+		runtimecontract.RuntimeCandidateFailureClassProvider:
+		return true
+	default:
+		return false
+	}
 }
 
 func providerDocumentCodeCanonical(code string) bool {

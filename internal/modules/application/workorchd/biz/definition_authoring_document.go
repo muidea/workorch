@@ -3,6 +3,7 @@ package biz
 import (
 	"context"
 	"fmt"
+	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
@@ -42,17 +43,48 @@ func (b *Biz) completeAuthoringDocument(ctx context.Context, permit string, requ
 	return response.Clone(), nil
 }
 
+func (b *Biz) waitAuthoringTransientRetry(ctx context.Context, retryOrdinal int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	delay := time.Duration(0)
+	if b != nil && b.authoringRetryDelay != nil {
+		delay = b.authoringRetryDelay(retryOrdinal)
+	} else {
+		switch retryOrdinal {
+		case 1:
+			delay = 500 * time.Millisecond
+		case 2:
+			delay = time.Second
+		default:
+			delay = 2 * time.Second
+		}
+	}
+	if delay <= 0 {
+		return ctx.Err()
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 func authoringProviderDiagnostic(response llmevents.CompleteProviderDocumentResult) *workspace.DefinitionAuthoringDiagnostic {
 	var cause []byte
 	code := ""
+	failureClass := ""
 	if response.Failure != nil {
-		cause, code = response.Failure.Cause, response.Failure.Code
+		cause, code, failureClass = response.Failure.Cause, response.Failure.Code, string(response.FailureClass)
 	}
 	if response.Incomplete != nil {
-		cause, code = response.Incomplete.Cause, response.Incomplete.Code
+		cause, code, failureClass = response.Incomplete.Cause, response.Incomplete.Code, string(response.FailureClass)
 	}
 	if response.Document != nil && !response.Document.Content.Saved {
-		cause, code = []byte("complete provider document exceeds supported diagnostic transport storage boundary"), "document_not_saved"
+		cause, code, failureClass = []byte("complete provider document exceeds supported diagnostic transport storage boundary"), "document_not_saved", ""
 	}
 	if code == "" {
 		return nil
@@ -60,7 +92,7 @@ func authoringProviderDiagnostic(response llmevents.CompleteProviderDocumentResu
 	diagnostic := workspace.NewDefinitionAuthoringDiagnostic(string(cause), nil)
 	document := authoringProviderObservation(response.ObservedDocument)
 	wire := authoringProviderObservation(response.Wire)
-	diagnostic.ProviderCode, diagnostic.ProviderDocument, diagnostic.ProviderWire = code, &document, &wire
+	diagnostic.ProviderCode, diagnostic.ProviderFailureClass, diagnostic.ProviderDocument, diagnostic.ProviderWire = code, failureClass, &document, &wire
 	if response.TransportCause != nil {
 		cause := authoringProviderObservation(*response.TransportCause)
 		diagnostic.ProviderCause = &cause

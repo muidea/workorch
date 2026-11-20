@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governanceports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/specifications"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/definitionadmission"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
@@ -62,7 +63,7 @@ func authoringDiagnosticMetadata(d *workspace.DefinitionAuthoringDiagnostic) *wo
 	if d == nil {
 		return nil
 	}
-	return &workorchmanagementcontract.DefinitionAuthoringDiagnosticMetadata{ParseError: d.ParseError, ParseErrorSHA256: d.ParseErrorSHA256, ParseErrorBytes: d.ParseErrorBytes, ParseErrorSaved: d.ParseErrorSaved, PayloadSHA256: d.PayloadSHA256, PayloadBytes: d.PayloadBytes, PayloadSaved: d.PayloadSaved, NotSavedReason: d.NotSavedReason, ProviderCode: d.ProviderCode, ProviderDocument: authoringProviderObservationMetadata(d.ProviderDocument), ProviderWire: authoringProviderObservationMetadata(d.ProviderWire), ProviderCause: authoringProviderObservationMetadata(d.ProviderCause)}
+	return &workorchmanagementcontract.DefinitionAuthoringDiagnosticMetadata{ParseError: d.ParseError, ParseErrorSHA256: d.ParseErrorSHA256, ParseErrorBytes: d.ParseErrorBytes, ParseErrorSaved: d.ParseErrorSaved, PayloadSHA256: d.PayloadSHA256, PayloadBytes: d.PayloadBytes, PayloadSaved: d.PayloadSaved, NotSavedReason: d.NotSavedReason, ProviderCode: d.ProviderCode, ProviderFailureClass: d.ProviderFailureClass, ProviderDocument: authoringProviderObservationMetadata(d.ProviderDocument), ProviderWire: authoringProviderObservationMetadata(d.ProviderWire), ProviderCause: authoringProviderObservationMetadata(d.ProviderCause)}
 }
 
 func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult) (workorchmanagementcontract.DefinitionAuthoringView, error) {
@@ -94,23 +95,23 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 	result.TemplateCurrent = view.CurrentTemplateAvailable
 	result.State = "draft"
 	var derivation *workspace.DefinitionDerivationRequest
+	var matchingDerivations []*workspace.DefinitionDerivationRequest
 	selectedPermit := ""
 	if view.Confirmation != nil {
 		selectedPermit = view.Confirmation.DerivationPermitID
 	}
-	for n := len(record.DerivationRequests) - 1; n >= 0; n-- {
+	for n := range record.DerivationRequests {
 		request := &record.DerivationRequests[n]
 		if request.Input.InputHash() != record.InputHash || workspace.WorkspaceTemplateSnapshotHash(&request.Template) != record.TemplateSnapshotHash {
 			continue
 		}
+		matchingDerivations = append(matchingDerivations, request)
 		if selectedPermit != "" {
 			if request.PermitID == selectedPermit {
 				derivation = request
-				break
 			}
 		} else {
 			derivation = request
-			break
 		}
 	}
 	if derivation != nil {
@@ -120,14 +121,40 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 		for _, resource := range derivation.Resources {
 			result.Resources = append(result.Resources, workorchmanagementcontract.DefinitionAuthoringResource{Ref: resource.Ref, SnapshotHash: resource.ContentHash})
 		}
+		appendDerivationRequests := func() {
+			for _, dReq := range matchingDerivations {
+				state := "outcome_unresolved"
+				if dReq.FailureCode != "" {
+					state = "failed"
+				} else if dReq.Proposal != nil {
+					state = "completed"
+				}
+				result.Requests = append(result.Requests, workorchmanagementcontract.DefinitionAuthoringRequestState{
+					PermitID: dReq.PermitID, Phase: "derivation", State: state,
+					FailureCode: dReq.FailureCode, Diagnostic: authoringDiagnosticMetadata(dReq.Diagnostic),
+				})
+			}
+		}
 		switch {
 		case derivation.FailureCode != "":
-			result.Requests = append(result.Requests, workorchmanagementcontract.DefinitionAuthoringRequestState{PermitID: derivation.PermitID, Phase: "derivation", State: "failed", FailureCode: derivation.FailureCode, Diagnostic: authoringDiagnosticMetadata(derivation.Diagnostic)})
-			result.State = "failed"
+			appendDerivationRequests()
+			if _, retryable := record.DerivationRetryOrdinalForCurrent(); retryable {
+				result.State = "deriving"
+			} else {
+				result.State = "failed"
+			}
 		case derivation.Proposal == nil:
-			result.Requests = append(result.Requests, workorchmanagementcontract.DefinitionAuthoringRequestState{PermitID: derivation.PermitID, Phase: "derivation", State: "outcome_unresolved"})
+			appendDerivationRequests()
 			result.State = "outcome_unresolved"
 		default:
+			for _, dReq := range matchingDerivations {
+				if dReq.FailureCode != "" {
+					result.Requests = append(result.Requests, workorchmanagementcontract.DefinitionAuthoringRequestState{
+						PermitID: dReq.PermitID, Phase: "derivation", State: "failed",
+						FailureCode: dReq.FailureCode, Diagnostic: authoringDiagnosticMetadata(dReq.Diagnostic),
+					})
+				}
+			}
 			result.State = "derived"
 			items, err := derivation.Proposal.CandidateItems(derivation.Input, &derivation.Template)
 			if err != nil {
@@ -169,12 +196,18 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 					spec = &copy
 				}
 			}
-			if spec == nil && len(result.Requests) > 0 {
-				result.State = "outcome_unresolved"
-				for _, request := range result.Requests {
-					if request.State == "failed" {
+			_, propFailed, propUnresolved, propRetryable, propErr := record.SettledProposalState(derivation.PermitID)
+			if propErr != nil {
+				return workorchmanagementcontract.DefinitionAuthoringView{}, common.ErrConflict
+			}
+			if spec == nil {
+				if propUnresolved {
+					result.State = "outcome_unresolved"
+				} else if propFailed != nil {
+					if propRetryable {
+						result.State = "derived"
+					} else {
 						result.State = "failed"
-						break
 					}
 				}
 			}
@@ -223,50 +256,71 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 				reviewFailed := false
 				reviewUnresolved := false
 				for _, request := range record.SpecificationRequests {
-					if request.DerivationPermitID != derivation.PermitID || request.ProposalHash != proposal.ProposalHash {
-						continue
-					}
-					if request.FailureCode != "" {
-						reviewFailed = true
-						continue
-					}
-					if request.Review == nil {
-						reviewUnresolved = true
+					if request.DerivationPermitID != derivation.PermitID || request.ProposalHash != proposal.ProposalHash || request.Review == nil {
 						continue
 					}
 					review := request.Review
-					if review.Status != workspace.GoalReviewPass {
-						reviewBlocked = true
-					}
 					reviewView := workorchmanagementcontract.DefinitionAuthoringReview{Kind: review.Kind, Status: review.Status, Reason: review.Reason, EvidenceRefs: slices.Clone(review.EvidenceRefs), RequirementIDs: slices.Clone(review.RequirementIDs), SpecificationHash: review.SpecificationHash}
 					for _, issue := range review.Issues {
 						reviewView.Issues = append(reviewView.Issues, workorchmanagementcontract.DefinitionAuthoringReviewIssue{Class: issue.Class, Detail: issue.Detail, RequirementIDs: slices.Clone(issue.RequirementIDs), EvidenceRefs: slices.Clone(issue.EvidenceRefs)})
 					}
 					proposal.Reviews = append(proposal.Reviews, reviewView)
 				}
-				if reviewed, complete, reviewErr := compiledAuthoringSpecification(*record, *derivation); reviewErr == nil && complete {
-					proposal.ReviewsSettled = true
-					proposal.SpecificationHash = reviewed.AdmissionHash()
-					if _, _, confirmErr := record.ConfirmableSpecificationView(derivation.PermitID, proposal.ProposalHash); confirmErr == nil && authoringViewVerificationApplicable(*derivation, reviewed, items) {
-						result.State = "ready_to_confirm"
-					} else {
-						result.State = "review_blocked"
-						proposal.RevisionDisposition = "blocked"
-						if latest != nil && latest.PreviousProposalHash != "" {
-							proposal.RevisionDisposition = "exhausted"
-						} else if _, feedbackErr := record.SpecificationFeedback(derivation.PermitID, proposal.ProposalHash); feedbackErr == nil {
-							result.State = "reviewing"
-							proposal.RevisionDisposition = "correction_pending"
+				completeReviews := 0
+				for _, kind := range specifications.ReviewKinds() {
+					review, cFailed, cUnresolved, cRetryable, cErr := record.SettledCriticReview(derivation.PermitID, proposal.ProposalHash, kind)
+					if cErr != nil {
+						return workorchmanagementcontract.DefinitionAuthoringView{}, common.ErrConflict
+					}
+					if cUnresolved {
+						reviewUnresolved = true
+						continue
+					}
+					if cFailed != nil {
+						if !cRetryable {
+							reviewFailed = true
+						}
+						continue
+					}
+					if review != nil {
+						completeReviews++
+						if review.Status != workspace.GoalReviewPass {
+							reviewBlocked = true
 						}
 					}
-				} else if reviewFailed {
+				}
+				switch {
+				case propUnresolved || reviewUnresolved:
+					result.State = "outcome_unresolved"
+				case propFailed != nil:
+					if propRetryable {
+						result.State = "reviewing"
+					} else {
+						result.State = "failed"
+					}
+				case reviewFailed:
 					result.State = "failed"
-				} else if reviewUnresolved {
-					result.State = "outcome_unresolved"
-				} else if reviewBlocked {
+				case completeReviews == len(specifications.ReviewKinds()):
+					if reviewed, complete, reviewErr := compiledAuthoringSpecification(*record, *derivation); reviewErr == nil && complete {
+						proposal.ReviewsSettled = true
+						proposal.SpecificationHash = reviewed.AdmissionHash()
+						if _, _, confirmErr := record.ConfirmableSpecificationView(derivation.PermitID, proposal.ProposalHash); confirmErr == nil && authoringViewVerificationApplicable(*derivation, reviewed, items) {
+							result.State = "ready_to_confirm"
+						} else {
+							result.State = "review_blocked"
+							proposal.RevisionDisposition = "blocked"
+							if latest != nil && latest.PreviousProposalHash != "" {
+								proposal.RevisionDisposition = "exhausted"
+							} else if _, feedbackErr := record.SpecificationFeedback(derivation.PermitID, proposal.ProposalHash); feedbackErr == nil {
+								result.State = "reviewing"
+								proposal.RevisionDisposition = "correction_pending"
+							}
+						}
+					} else if reviewErr != nil {
+						result.State = "outcome_unresolved"
+					}
+				case reviewBlocked:
 					result.State = "reviewing"
-				} else if reviewErr != nil {
-					result.State = "outcome_unresolved"
 				}
 			}
 			result.Proposal = &proposal
@@ -281,9 +335,6 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 		}
 	}
 	if derivation != nil && derivation.Proposal != nil {
-		if latest := record.LatestSpecificationRequest(derivation.PermitID); latest != nil && latest.FailureCode != "" {
-			result.State = "failed"
-		}
 		for _, request := range record.SpecificationRequests {
 			if request.DerivationPermitID == derivation.PermitID && request.FailureCode == "" && request.Proposal == nil && request.Review == nil {
 				result.State = "outcome_unresolved"
@@ -294,7 +345,7 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 	for _, diagnostic := range record.PreparationDiagnostics {
 		current := view.Confirmation == nil && view.AdmissionCandidate == nil && view.ActivationAdmission == nil && authoringPreparationDiagnosticCurrent(*record, derivation, diagnostic)
 		result.PreparationDiagnostics = append(result.PreparationDiagnostics, authoringPreparationDiagnosticMetadata(diagnostic, current))
-		if current && (result.State == "draft" || result.State == "derived" || result.State == "reviewing" || result.State == "review_blocked") {
+		if current && (result.State == "draft" || result.State == "deriving" || result.State == "derived" || result.State == "reviewing" || result.State == "review_blocked") {
 			result.State = "preparation_failed"
 		}
 	}

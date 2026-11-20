@@ -61,17 +61,8 @@ func (c DefinitionAuthoringConfirmation) readCommitted(record *DefinitionAuthori
 		return common.ErrConflict
 	}
 	for _, kind := range goalReviewKinds {
-		var review *GoalSpecificationCompletenessReview
-		for i := range record.SpecificationRequests {
-			r := &record.SpecificationRequests[i]
-			if r.DerivationPermitID == c.DerivationPermitID && r.Phase == DefinitionSpecificationCritic && r.ReviewKind == kind && r.ProposalHash == c.ProposalHash {
-				if review != nil || r.Review == nil || r.FailureCode != "" {
-					return common.ErrConflict
-				}
-				review = r.Review
-			}
-		}
-		if review == nil {
+		review, failed, unresolved, _, reviewErr := record.SettledCriticReview(c.DerivationPermitID, c.ProposalHash, kind)
+		if reviewErr != nil || unresolved || failed != nil || review == nil {
 			return common.ErrConflict
 		}
 		proposal.Reviews = append(proposal.Reviews, *review)

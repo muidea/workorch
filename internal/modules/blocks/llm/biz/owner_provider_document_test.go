@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"sync/atomic"
 	"testing"
 
@@ -18,7 +19,7 @@ import (
 
 func TestCompleteProviderDocumentOwnerPreservesFactsAndAcceptedCommand(t *testing.T) {
 	for _, streaming := range []bool{true} {
-		for _, outcome := range []string{"complete", "empty", "http_failure", "output_limit", "no_output"} {
+		for _, outcome := range []string{"complete", "empty", "http_failure", "http_503", "unexpected_eof", "output_limit", "no_output"} {
 			t.Run(outcome+map[bool]string{false: "/json", true: "/stream"}[streaming], func(t *testing.T) {
 				ctx := context.Background()
 				var calls atomic.Int32
@@ -33,6 +34,31 @@ func TestCompleteProviderDocumentOwnerPreservesFactsAndAcceptedCommand(t *testin
 							w.Header().Set("Content-Type", "application/json")
 							w.WriteHeader(http.StatusBadRequest)
 							_, _ = w.Write([]byte("\xef\xbb\xbf原始失败\r\n"))
+							return
+						}
+						if outcome == "http_503" {
+							w.Header().Set("Content-Type", "application/json")
+							w.WriteHeader(http.StatusServiceUnavailable)
+							_, _ = w.Write([]byte("upstream unavailable"))
+							return
+						}
+						if outcome == "unexpected_eof" {
+							hj, ok := w.(http.Hijacker)
+							if !ok {
+								t.Fatal("response writer does not support hijacking")
+							}
+							conn, rw, err := hj.Hijack()
+							if err != nil {
+								t.Fatalf("hijack failed: %v", err)
+							}
+							_, _ = rw.WriteString("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n")
+							delta, _ := json.Marshal(map[string]any{"type": "response.output_text.delta", "delta": `{"review":`})
+							chunk := append(append([]byte("data: "), delta...), '\n', '\n')
+							_, _ = rw.WriteString(strconv.FormatInt(int64(len(chunk)), 16) + "\r\n")
+							_, _ = rw.Write(chunk)
+							_, _ = rw.WriteString("\r\n")
+							_ = rw.Flush()
+							_ = conn.Close()
 							return
 						}
 						content := document
@@ -104,24 +130,32 @@ func TestCompleteProviderDocumentOwnerPreservesFactsAndAcceptedCommand(t *testin
 					t.Fatal("adapter changed accepted command or repeated call")
 				}
 				if outcome == "http_failure" {
-					if response.Failure == nil || response.Failure.Code != "http_400" || string(response.Wire.Content) != "\xef\xbb\xbf原始失败\r\n" || !response.Wire.Complete {
-						t.Fatal("HTTP failure lost original wire")
+					if response.Failure == nil || response.Failure.Code != "http_400" || response.FailureClass != runtimecontract.RuntimeCandidateFailureClassProviderConfiguration || string(response.Wire.Content) != "\xef\xbb\xbf原始失败\r\n" || !response.Wire.Complete {
+						t.Fatal("HTTP failure lost original wire or failure class")
+					}
+				} else if outcome == "http_503" {
+					if response.Failure == nil || response.Failure.Code != "http_503" || response.FailureClass != runtimecontract.RuntimeCandidateFailureClassProviderTransient || string(response.Wire.Content) != "upstream unavailable" || !response.Wire.Complete {
+						t.Fatalf("HTTP 503 lost transient failure class or wire: %+v", response)
+					}
+				} else if outcome == "unexpected_eof" {
+					if response.Failure == nil || response.Failure.Code != "request_failed" || response.FailureClass != runtimecontract.RuntimeCandidateFailureClassProviderTransient || response.TransportCause == nil || !response.TransportCause.Complete || string(response.ObservedDocument.Content) != `{"review":` || response.ObservedDocument.Complete {
+						t.Fatalf("unexpected EOF lost transport cause or transient failure class: %+v", response)
 					}
 				} else if outcome == "output_limit" {
-					if response.Incomplete == nil || response.Incomplete.Code != "output_limit" || string(response.ObservedDocument.Content) != document || response.ObservedDocument.Complete {
-						t.Fatal("output limit lost partial document")
+					if response.Incomplete == nil || response.Incomplete.Code != "output_limit" || response.FailureClass != runtimecontract.RuntimeCandidateFailureClassProviderProtocol || string(response.ObservedDocument.Content) != document || response.ObservedDocument.Complete {
+						t.Fatal("output limit lost partial document or failure class")
 					}
 				} else if outcome == "no_output" && streaming {
-					if response.Incomplete == nil || response.ObservedDocument.Observed {
-						t.Fatal("reasoning-only stream fabricated an observed document")
+					if response.Incomplete == nil || response.Incomplete.Code != "stream_ended_before_completion" || response.FailureClass != runtimecontract.RuntimeCandidateFailureClassProviderTransient || response.ObservedDocument.Observed {
+						t.Fatalf("reasoning-only stream lost transient failure class or fabricated document: %+v", response)
 					}
 				} else {
 					want := document
 					if outcome != "complete" {
 						want = ""
 					}
-					if response.Document == nil || string(response.Document.Content.Content) != want || !response.Document.Content.Complete {
-						t.Fatal("complete/empty document was rewritten")
+					if response.FailureClass != "" || response.Document == nil || string(response.Document.Content.Content) != want || !response.Document.Content.Complete {
+						t.Fatal("complete/empty document was rewritten or set failure class")
 					}
 				}
 			})

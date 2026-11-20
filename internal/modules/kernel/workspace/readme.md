@@ -692,12 +692,12 @@ Web 不以浏览器持久存储保留创作输入或事务恢复身份；已保�
 transport leaf 另存 bytes；parser 失败不补造 provider failure code，完整文档须与原 payload 的 byte count／SHA256 一致。
 原文不脱敏、不替换、不静默截断；actual observed bytes／SHA256、observed、complete、saved 与 reason 共同表达完整性，
 未读取不发明 hash，部分观察的 hash 不代表完整响应。单项文档／wire／cause 保存上限 256 KiB、parser 错误 64 KiB；
-派生沿用 16 条 request，proposal／review 沿用 112 条 request 及各阶段 2 次预算。超限不保存截断前缀并明确报告，
+派生沿用 16 条 request，proposal／review 沿用 112 条 request 及原各阶段预算（derivation 2 次、proposal 2 代、critic 1 次）；仅当上一条许可结算为可重试的 `provider_transient` 失败（含 `unexpected EOF` 对应的 `request_failed`、`stream_ended_before_completion`、`http_408`/`409`/`425`/`429`/`5xx` 等，排除 `request_canceled` 与 `tls_verification_failed`）时，Workspace owner 允许同槽位最多 `AuthoringProviderTransientRetryLimit = 3` 次新 permit 续试（总计至多 4 次物理调用），仍受总 request 上限与独立 pre-call CAS permit 约束，并完整保留历次失败 permit 与原始诊断。超限不保存截断前缀并明确报告，
 不将已知失败倒退为未决。原始诊断不进入 permit 身份、specification hash 或 startup authority。
 
 请求诊断随owner Clone深拷贝，重复completion必须精确一致，变更诊断冲突；reserve不接受预填失败诊断。查询按Workspace/permit精确scope走typed EventHub，仅只读原请求，不驱动provider。普通 view 仅返回错误分类及 hash／bytes／保存状态，原始错误、响应和 provider 观察通过受限查询按需单条读取；旧失败无诊断时不能虚构历史原文。包含诊断的Workspace运行文件必须0600，权限通过原子publish收紧；不写Git或通用日志。数据保护依靠访问边界而非改写数据，见 [Workspace 规格创作](../../../../docs/40-profiles-capabilities/workspace/setup-draft-session.md)。
 
-同输入的已失败请求保持原失败及 permit；Application 重复 compile 或进程重启不授予新的调用权。软件输出合同升级不迁移或清空历史 ledger。真实输入／模板修订继续通过原 CAS 和累计预算，不以无意义输入变化或新请求 ID 绕过失败。
+同输入的非瞬态失败、`invalid_proposal`/`invalid_review` 或耗尽重试上限的已失败请求保持原失败及 permit，未决（outcome_unresolved）或已完成 slot 也不得重发；Application 重复 compile 或进程重启对非可重试失败不授予新的调用权。软件输出合同升级不迁移或清空历史 ledger。真实输入／模板修订继续通过原 CAS 和累计预算，不以无意义输入变化或新请求 ID 绕过失败。[`pkg/models/definition_authoring_transient_retry_test.go`](pkg/models/definition_authoring_transient_retry_test.go) 固定了推导、提案与评审各阶段的受限瞬态重试、超限拒绝与非瞬态禁止重放。
 
 ### 创作只读摘要
 

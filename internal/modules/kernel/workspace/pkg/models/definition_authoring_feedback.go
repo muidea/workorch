@@ -91,18 +91,11 @@ func (r DefinitionAuthoringRecord) SpecificationFeedback(derivation, hash string
 	}
 	blocked := false
 	for _, kind := range goalReviewKinds {
-		var review *GoalSpecificationCompletenessReview
-		for _, request := range r.SpecificationRequests {
-			if request.DerivationPermitID != derivation || request.ProposalHash != hash || request.Phase != DefinitionSpecificationCritic || request.ReviewKind != kind {
-				continue
-			}
-			if review != nil || request.Review == nil || request.FailureCode != "" {
-				return f, fmt.Errorf("feedback reviews unresolved or duplicated")
-			}
-			v := request.Clone().Review
-			review = v
+		review, failed, unresolved, _, err := r.SettledCriticReview(derivation, hash, kind)
+		if err != nil {
+			return f, fmt.Errorf("feedback reviews unresolved or duplicated")
 		}
-		if review == nil {
+		if unresolved || failed != nil || review == nil {
 			return f, fmt.Errorf("feedback requires all six reviews")
 		}
 		if r.completedSpecificationProposal(derivation, hash).ValidateReviewCoverage(*review) != nil {
@@ -151,9 +144,35 @@ func (r DefinitionAuthoringRecord) validateSpecificationSuccessor(q DefinitionAu
 		}
 		return nil
 	}
+	if previous.IsRetryableProviderTransientFailure() && previous.PreviousProposalHash == q.PreviousProposalHash && previous.FeedbackHash == q.FeedbackHash {
+		slot := r.SpecificationSlotRequests(q.DerivationPermitID, DefinitionSpecificationProposal, "", "", q.PreviousProposalHash, q.FeedbackHash)
+		if len(slot) == 0 || len(slot) > AuthoringProviderTransientRetryLimit {
+			return fmt.Errorf("authoring proposal transient retry budget exceeded")
+		}
+		for _, entry := range slot {
+			if !entry.IsRetryableProviderTransientFailure() {
+				return fmt.Errorf("authoring proposal transient retry has non-transient predecessor")
+			}
+		}
+		if q.PreviousProposalHash == "" {
+			if q.Mapping != nil && len(q.Mapping.IssueResolutions) != 0 {
+				return fmt.Errorf("first proposal cannot claim issue resolutions")
+			}
+			return nil
+		}
+		baseProposal := r.completedSpecificationProposal(q.DerivationPermitID, q.PreviousProposalHash)
+		if baseProposal == nil || q.FeedbackHash == "" {
+			return fmt.Errorf("authoring revision retry requires completed predecessor proposal")
+		}
+		return r.validateRevisionProposalAgainstBase(q, *baseProposal)
+	}
 	if previous.Proposal == nil || previous.PreviousProposalHash != "" || previous.Proposal.ContentHash() != q.PreviousProposalHash || q.FeedbackHash == "" {
 		return fmt.Errorf("authoring revision requires the latest completed first proposal")
 	}
+	return r.validateRevisionProposalAgainstBase(q, *previous.Proposal)
+}
+
+func (r DefinitionAuthoringRecord) validateRevisionProposalAgainstBase(q DefinitionAuthoringSpecificationRequest, baseProposal GoalSpecification) error {
 	f, err := r.SpecificationFeedback(q.DerivationPermitID, q.PreviousProposalHash)
 	if err != nil {
 		return err
@@ -165,7 +184,7 @@ func (r DefinitionAuthoringRecord) validateSpecificationSuccessor(q DefinitionAu
 		if q.Mapping == nil {
 			return fmt.Errorf("revision lacks mapping")
 		}
-		if err := validateRevisionChanges(f, *q.Mapping, *previous.Proposal, *q.Proposal); err != nil {
+		if err := validateRevisionChanges(f, *q.Mapping, baseProposal, *q.Proposal); err != nil {
 			return err
 		}
 	}

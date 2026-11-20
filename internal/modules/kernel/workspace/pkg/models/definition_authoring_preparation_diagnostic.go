@@ -316,28 +316,48 @@ func (r DefinitionAuthoringRecord) validatePreparationTarget(d DefinitionAuthori
 		if d.ProviderBindingHash == "" {
 			return common.ErrConflict
 		}
-		count, limit, attempts := len(r.DerivationRequests), DefinitionDerivationRequestLimit, 0
-		attemptLimit := DefinitionDerivationAttemptLimit
 		if d.Stage == DefinitionAuthoringPreparationDerivation {
-			for _, request := range r.DerivationRequests {
-				if request.Input.InputHash() == r.InputHash && WorkspaceTemplateSnapshotHash(&request.Template) == r.TemplateSnapshotHash {
-					attempts++
+			count, limit := len(r.DerivationRequests), DefinitionDerivationRequestLimit
+			if d.PhaseCode == "request_budget" {
+				if count < limit {
+					return common.ErrConflict
 				}
+				return nil
 			}
+			if count >= limit {
+				return common.ErrConflict
+			}
+			candidate := make([]DefinitionDerivationRequest, 0, len(r.DerivationRequests)+1)
+			candidate = append(candidate, r.DerivationRequests...)
+			candidate = append(candidate, DefinitionDerivationRequest{Input: r.Input, Template: r.TemplateSnapshot})
+			if validateDerivationSlotHistory(candidate) == nil {
+				return common.ErrConflict
+			}
+			return nil
+		}
+		count, limit := len(r.SpecificationRequests), DefinitionAuthoringSpecificationRequestLimit
+		if d.PhaseCode == "request_budget" {
+			if count < limit {
+				return common.ErrConflict
+			}
+			return nil
+		}
+		if count >= limit {
+			return common.ErrConflict
+		}
+		var slot []DefinitionAuthoringSpecificationRequest
+		if d.Stage == DefinitionAuthoringPreparationReview {
+			slot = r.SpecificationSlotRequests(d.DerivationPermitID, DefinitionSpecificationCritic, d.ReviewKind, d.ProposalHash, "", "")
 		} else {
-			count, limit, attemptLimit = len(r.SpecificationRequests), DefinitionAuthoringSpecificationRequestLimit, DefinitionAuthoringSpecificationAttemptLimit
-			phase := DefinitionSpecificationProposal
-			if d.Stage == DefinitionAuthoringPreparationReview {
-				phase = DefinitionSpecificationCritic
-				attemptLimit = 1
-			}
-			for _, request := range r.SpecificationRequests {
-				if request.DerivationPermitID == d.DerivationPermitID && request.Phase == phase && request.ReviewKind == d.ReviewKind && (phase != DefinitionSpecificationCritic || request.ProposalHash == d.ProposalHash) {
-					attempts++
-				}
+			latest := r.LatestSpecificationRequest(d.DerivationPermitID)
+			if latest != nil {
+				slot = r.SpecificationSlotRequests(d.DerivationPermitID, DefinitionSpecificationProposal, "", "", latest.PreviousProposalHash, latest.FeedbackHash)
 			}
 		}
-		if d.PhaseCode == "request_budget" && count < limit || d.PhaseCode == "attempt_budget" && (count >= limit || attempts < attemptLimit) {
+		if len(slot) == 0 {
+			return common.ErrConflict
+		}
+		if _, retryable := r.CanRetrySpecificationSlot(slot); retryable {
 			return common.ErrConflict
 		}
 	}
