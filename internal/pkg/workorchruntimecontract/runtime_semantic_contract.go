@@ -1356,7 +1356,8 @@ func runtimeValidationSurfacesDeclareNormalizedProofRequirement(values []Runtime
 	for _, surface := range values {
 		if surface.OwnerModuleID != RuntimeModuleShell || surface.OperationKind != RuntimeBlockKindManagedValidationSession ||
 			surface.ProofApplicability != RuntimeValidationProofDirect ||
-			(requirement.ValidationRecipeID != "" && surface.ID != requirement.ValidationRecipeID) {
+			(requirement.ValidationRecipeID != "" && surface.ID != requirement.ValidationRecipeID) ||
+			(surface.RequireExactRecipeSelection && requirement.ValidationRecipeID != surface.ID) {
 			continue
 		}
 		for _, binding := range surface.ProofRequirementBindings {
@@ -1385,7 +1386,8 @@ func runtimeValidationSurfaceForIDNormalized(values []RuntimeValidationSurface, 
 func runtimeValidationSurfaceProofRequirementBindingNormalized(surface RuntimeValidationSurface, requirement RuntimeValidationProofRequirement) (RuntimeValidationProofRequirementBinding, bool) {
 	if surface.Readiness != RuntimeValidationSurfaceReady || surface.ProofApplicability != RuntimeValidationProofDirect ||
 		surface.OwnerModuleID != RuntimeModuleShell || surface.OperationKind != RuntimeBlockKindManagedValidationSession ||
-		(requirement.ValidationRecipeID != "" && surface.ID != requirement.ValidationRecipeID) {
+		(requirement.ValidationRecipeID != "" && surface.ID != requirement.ValidationRecipeID) ||
+		(surface.RequireExactRecipeSelection && requirement.ValidationRecipeID != surface.ID) {
 		return RuntimeValidationProofRequirementBinding{}, false
 	}
 	for _, binding := range surface.ProofRequirementBindings {

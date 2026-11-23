@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -50,23 +52,40 @@ func TestTemplateProofSourcesResolveExactOriginalItemsAcrossUserOffsets(t *testi
 				t.Fatal(err)
 			}
 			guardCount := 0
+			artifactRecipeBound := map[string]bool{}
 			for _, r := range got.ProfileContracts[0].EvidenceRequirements {
-				if len(r.LineageAssertions) == 0 {
-					continue
+				if len(r.LineageAssertions) > 0 {
+					guardCount++
+					if !reflect.DeepEqual(r.RequiredEvidenceKinds, []string{"validation"}) {
+						t.Fatal("guard replaced ordinary validation")
+					}
+					if r.ID != fmt.Sprintf("dod-%03d", users+1) && r.ID != fmt.Sprintf("dod-%03d", users+3) && r.ID != fmt.Sprintf("dod-%03d", users+4) && r.ID != fmt.Sprintf("dod-%03d", users+13) {
+						t.Fatal("guard attached to unrelated item", r.ID)
+					}
+					if r.LineageAssertions[0].ConsumptionPoint != runtimecontract.RuntimeProofPhasePostTerminalDelivery {
+						t.Fatal("terminal proof introduced ordinary acceptance dependency")
+					}
 				}
-				guardCount++
-				if !reflect.DeepEqual(r.RequiredEvidenceKinds, []string{"validation"}) {
-					t.Fatal("guard replaced ordinary validation")
-				}
-				if r.ID != fmt.Sprintf("dod-%03d", users+1) && r.ID != fmt.Sprintf("dod-%03d", users+3) && r.ID != fmt.Sprintf("dod-%03d", users+4) && r.ID != fmt.Sprintf("dod-%03d", users+13) {
-					t.Fatal("guard attached to unrelated item", r.ID)
-				}
-				if r.LineageAssertions[0].ConsumptionPoint != runtimecontract.RuntimeProofPhasePostTerminalDelivery {
-					t.Fatal("terminal proof introduced ordinary acceptance dependency")
+				if r.ValidationRecipeID != "" {
+					if r.ValidationRecipeID != "software-dev-artifact-validation-evidence" {
+						t.Fatalf("unexpected exact validationRecipeId on %s: %q", r.ID, r.ValidationRecipeID)
+					}
+					artifactRecipeBound[r.ID] = true
 				}
 			}
 			if guardCount != 4 {
 				t.Fatalf("guards=%d", guardCount)
+			}
+			wantArtifactIDs := map[string]bool{
+				fmt.Sprintf("dod-%03d", users+2):  true,
+				fmt.Sprintf("dod-%03d", users+3):  true,
+				fmt.Sprintf("dod-%03d", users+4):  true,
+				fmt.Sprintf("dod-%03d", users+11): true,
+				fmt.Sprintf("dod-%03d", users+12): true,
+				fmt.Sprintf("dod-%03d", users+13): true,
+			}
+			if !reflect.DeepEqual(artifactRecipeBound, wantArtifactIDs) {
+				t.Fatalf("artifact recipe bindings = %+v, want %+v", artifactRecipeBound, wantArtifactIDs)
 			}
 			current := &workspace.Workspace{DefinitionAuthoring: &workspace.DefinitionAuthoringRecord{Input: input}}
 			again, err := Compile(current, &template)
@@ -100,6 +119,28 @@ func TestTemplateProofSourcesRejectMissingAmbiguousTextScopeAndRuleDrift(t *test
 			h["templateProofBindings"].(map[string]any)["bindings"].([]any)[0].(map[string]any)["lineageAssertions"].([]any)[0].(map[string]any)["kind"] = "unknown"
 			tpl.ContextHints = payload(t, h)
 		},
+		"unknown recipe": func(tpl *workspace.WorkspaceTemplate, i *[]workspace.DefinitionCandidateItem) {
+			h := tpl.ContextHints.Map()
+			h["templateProofBindings"].(map[string]any)["bindings"].([]any)[1].(map[string]any)["validationRecipeId"] = "undeclared-recipe"
+			tpl.ContextHints = payload(t, h)
+		},
+		"empty validationRecipeId": func(tpl *workspace.WorkspaceTemplate, i *[]workspace.DefinitionCandidateItem) {
+			h := tpl.ContextHints.Map()
+			h["templateProofBindings"].(map[string]any)["bindings"].([]any)[1].(map[string]any)["validationRecipeId"] = "   "
+			tpl.ContextHints = payload(t, h)
+		},
+		"missing all consumers": func(tpl *workspace.WorkspaceTemplate, i *[]workspace.DefinitionCandidateItem) {
+			h := tpl.ContextHints.Map()
+			b := h["templateProofBindings"].(map[string]any)["bindings"].([]any)[1].(map[string]any)
+			delete(b, "validationRecipeId")
+			delete(b, "lineageAssertions")
+			tpl.ContextHints = payload(t, h)
+		},
+		"unknown field": func(tpl *workspace.WorkspaceTemplate, i *[]workspace.DefinitionCandidateItem) {
+			h := tpl.ContextHints.Map()
+			h["templateProofBindings"].(map[string]any)["bindings"].([]any)[1].(map[string]any)["extraField"] = true
+			tpl.ContextHints = payload(t, h)
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			copy := template.Clone()
@@ -129,5 +170,93 @@ func TestTemplateProofRejectsFormalRowsWithoutOriginalSourceInventory(t *testing
 	}
 	if _, err := Compile(&workspace.Workspace{StartupInput: &workspace.WorkspaceStartupInputContract{}}, &template); err == nil {
 		t.Fatal("used template preview as sealed startup provenance")
+	}
+}
+
+func TestSealedWorkspaceTemplateUpdateRefreshesArtifactRecipesWithoutChangingStartupInput(t *testing.T) {
+	currentTemplate, input, _ := templateProofFixture(t, 2)
+	oldTemplate := currentTemplate.Clone()
+	oldTemplate.EvidencePolicies = oldTemplate.EvidencePolicies[:1]
+	oldHints := oldTemplate.ContextHints.Map()
+	rawTPB := oldHints["templateProofBindings"].(map[string]any)
+	rawBindings := rawTPB["bindings"].([]any)
+	var historicalBindings []any
+	for _, rawEntry := range rawBindings {
+		entry := rawEntry.(map[string]any)
+		if _, hasLineage := entry["lineageAssertions"]; !hasLineage {
+			continue
+		}
+		delete(entry, "validationRecipeId")
+		historicalBindings = append(historicalBindings, entry)
+	}
+	rawTPB["bindings"] = historicalBindings
+	oldHints["executionLimits"] = limits(10, 5)
+	oldTemplate.ContextHints = payload(t, oldHints)
+
+	lim := executionLimits(oldTemplate.ContextHints.Map())
+	limBinding := executionLimitsBinding(*lim)
+	startup := &workspace.WorkspaceStartupInputContract{
+		StartupInputHash:   "startup-hash-v1",
+		DefinitionRevision: "def-rev-1",
+	}
+	admission := &workspace.WorkspaceActivationAdmission{
+		CandidateHash:    "cand-hash-1",
+		StartupInputHash: startup.StartupInputHash,
+		State:            workspace.WorkspaceActivationEligible,
+	}
+	sealedWS := &workspace.Workspace{
+		ID:                  input.WorkspaceID,
+		TemplateID:          currentTemplate.ID,
+		ProfileID:           currentTemplate.ID,
+		DefaultSoulID:       common.SoulID(oldTemplate.DefaultSoulID),
+		SoulBindings:        map[string]common.SoulID{"planning": common.SoulID(oldTemplate.SoulBindings["planning"])},
+		ContextHints:        oldTemplate.ContextHints.Clone(),
+		EvidencePolicies:    append([]workorcheventpayload.Payload(nil), oldTemplate.EvidencePolicies...),
+		StartupInput:        startup,
+		ActivationAdmission: admission,
+		DefinitionAdmissionCandidates: []workspace.DefinitionAdmissionCandidate{{
+			CandidateHash:           "cand-hash-1",
+			AdmissionPolicyBindings: []workspace.DefinitionAdmissionPolicyBinding{limBinding},
+		}},
+		DefinitionAuthoring: &workspace.DefinitionAuthoringRecord{
+			TemplateSnapshot: oldTemplate,
+			Input:            input,
+		},
+	}
+
+	resolvedWS, err := workspace.WorkspaceForCurrentTemplate(sealedWS, &currentTemplate)
+	if err != nil {
+		t.Fatalf("WorkspaceForCurrentTemplate() failed on sealed workspace upgrade: %v", err)
+	}
+	if len(resolvedWS.EvidencePolicies) != 2 {
+		t.Fatalf("expected inherited template EvidencePolicies upgrade to 2 policies, got %d", len(resolvedWS.EvidencePolicies))
+	}
+	if !reflect.DeepEqual(resolvedWS.StartupInput, startup) || !reflect.DeepEqual(resolvedWS.ActivationAdmission, admission) {
+		t.Fatal("template update modified StartupInput or ActivationAdmission")
+	}
+
+	compiled, err := Compile(sealedWS, &currentTemplate)
+	if err != nil {
+		t.Fatalf("Compile() failed on existing sealed workspace restart: %v", err)
+	}
+	if compiled.ExecutionLimits == nil || runtimecontract.StableRuntimeExecutionLimitsHash(*compiled.ExecutionLimits) != limBinding.SnapshotHash {
+		t.Fatalf("confirmed execution limits drifted on template upgrade: %+v", compiled.ExecutionLimits)
+	}
+	artifactCount := 0
+	for _, r := range compiled.ProfileContracts[0].EvidenceRequirements {
+		switch r.ID {
+		case "dod-004", "dod-005", "dod-006", "dod-013", "dod-014", "dod-015":
+			if r.ValidationRecipeID != "software-dev-artifact-validation-evidence" {
+				t.Fatalf("expected artifact recipe on %s after restart, got %q", r.ID, r.ValidationRecipeID)
+			}
+			artifactCount++
+		default:
+			if r.ValidationRecipeID != "" {
+				t.Fatalf("ordinary/goal item %s unexpectedly got recipe %q", r.ID, r.ValidationRecipeID)
+			}
+		}
+	}
+	if artifactCount != 6 {
+		t.Fatalf("artifactCount=%d, want 6", artifactCount)
 	}
 }

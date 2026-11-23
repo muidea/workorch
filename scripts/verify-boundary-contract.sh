@@ -5868,15 +5868,23 @@ template = next((item for item in templates if item.get("id") == "software-dev")
 if template is None:
     raise SystemExit(1)
 policies = template.get("evidencePolicies", [])
-if len(policies) != 1:
+if len(policies) != 2:
     raise SystemExit(1)
-policy = policies[0]
-if policy.get("recipeAdapterRef") != "shell/project-multi-failure-validation":
-    raise SystemExit(1)
-if policy.get("recipeInputReviewProtocolRef") != "validation/input-consistency":
-    raise SystemExit(1)
-if any(key in policy for key in ("commandName", "recipeArgs", "requiredArgs", "argsContain", "workEvidenceMarkers")):
-    raise SystemExit(1)
+expected_policies = [
+    ("software-dev-validation-evidence", "shell/project-multi-failure-validation", False),
+    ("software-dev-artifact-validation-evidence", "shell/project-multi-failure-artifact-validation", True),
+]
+for policy, (expected_id, expected_adapter, forbid_coverage) in zip(policies, expected_policies):
+    if policy.get("id") != expected_id:
+        raise SystemExit(1)
+    if policy.get("recipeAdapterRef") != expected_adapter:
+        raise SystemExit(1)
+    if policy.get("recipeInputReviewProtocolRef") != "validation/input-consistency":
+        raise SystemExit(1)
+    if forbid_coverage and "coverageRequirements" in policy:
+        raise SystemExit(1)
+    if any(key in policy for key in ("commandName", "recipeArgs", "requiredArgs", "argsContain", "workEvidenceMarkers")):
+        raise SystemExit(1)
 software_profile = template.get("contextHints", {}).get("profileContracts", {}).get("software-dev", {})
 if "validationEnvironmentPolicy" in software_profile:
     raise SystemExit(1)
@@ -5891,6 +5899,7 @@ if ! grep -q -F 'ValidationRecipeAdapterProjectNative = "shell/project-native-va
 	! grep -q -F 'ValidationRecipeAdapterIsolatedEntrypoint = "shell/isolated-package-validation"' internal/modules/blocks/shell/pkg/common/common.go ||
 	! grep -q -F 'ValidationRecipeAdapterConjunctiveEntrypoint = "shell/conjunctive-package-validation"' internal/modules/blocks/shell/pkg/common/common.go ||
 	! grep -q -F 'ValidationRecipeAdapterProjectMultiFailureDiagnostic = "shell/project-multi-failure-validation"' internal/modules/blocks/shell/pkg/common/common.go ||
+	! grep -q -F 'ValidationRecipeAdapterProjectMultiFailureArtifact = "shell/project-multi-failure-artifact-validation"' internal/modules/blocks/shell/pkg/common/common.go ||
 	! grep -q -F 'resolveRuntimeValidationRecipeDeclarations(command.ValidationRecipes, command.WorkspaceManifestBinding.Manifest)' internal/modules/blocks/shell/biz/owner.go; then
 	echo "boundary contract violation: project-native validation recipe is not resolved solely inside the Shell owner from the bound File manifest" >&2
 	exit 1

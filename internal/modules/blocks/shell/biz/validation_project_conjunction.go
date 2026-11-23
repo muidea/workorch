@@ -253,12 +253,16 @@ func shellProjectJSONCompletion(stdout []byte, complete bool) (packages, tests, 
 	return
 }
 
-func shellProjectFixedStages(exactArgs []string, pkg string) []shellProjectStageSpec {
+func shellProjectFixedStages(exactArgs []string, pkg string, requireBehavior ...bool) []shellProjectStageSpec {
+	behavior := true
+	if len(requireBehavior) != 0 {
+		behavior = requireBehavior[0]
+	}
 	return []shellProjectStageSpec{
 		{ID: "project-build", Scope: "root-module:./...", Args: []string{"build", "./..."}},
 		{ID: "project-test", Scope: "root-module:./...", Args: []string{"test", "-json", "-count=1", "./..."}, JSON: true},
 		{ID: "project-race", Scope: "root-module:./...", Args: []string{"test", "-race", "-json", "-count=1", "./..."}, JSON: true},
-		{ID: "reviewed-cwi-behavior", Scope: "reviewed-package:" + pkg, Args: append([]string(nil), exactArgs...), JSON: true},
+		{ID: shellProjectFinalStageID(behavior), Scope: "reviewed-package:" + pkg, Args: append([]string(nil), exactArgs...), JSON: true},
 	}
 }
 
@@ -363,12 +367,21 @@ func runShellProjectStageWithBudget(ctx context.Context, directory string, env [
 // 身份和 source pre/post。没有 stage 字符串/marker 的替代通过路径。
 // 此私有事实不提供 dispatch/replay 权威；恢复必须使用原 Runtime aggregate/receipt。
 func sealShellProjectConjunction(stages []shellProjectStageFact, expected []shellProjectStageSpec, behavior []string) shellProjectConjunctionFact {
-	fact := shellProjectConjunctionFact{ProtocolRef: shellProjectConjunctionProtocolRef, Stages: stages, BehaviorTargetRefs: canonicalShellBehaviorTargets(behavior)}
-	if len(stages) != 4 || len(expected) != 4 || len(fact.BehaviorTargetRefs) == 0 {
+	return sealShellProjectConjunctionWithProtocol(shellProjectConjunctionProtocolRef, stages, expected, behavior)
+}
+
+func sealShellProjectConjunctionWithProtocol(protocol string, stages []shellProjectStageFact, expected []shellProjectStageSpec, behavior []string) shellProjectConjunctionFact {
+	if !shellProjectObservationProtocol(protocol) {
+		protocol = shellProjectConjunctionProtocolRef
+	}
+	requireBehavior := shellProjectRequiresBehavior(protocol)
+	fact := shellProjectConjunctionFact{ProtocolRef: protocol, Stages: stages, BehaviorTargetRefs: canonicalShellBehaviorTargets(behavior)}
+	expectedStageIDs := []string{"project-build", "project-test", "project-race", shellProjectFinalStageID(requireBehavior)}
+	if len(stages) != 4 || len(expected) != 4 || (requireBehavior && len(fact.BehaviorTargetRefs) == 0) {
 		fact.FailureCode = "validation_project_conjunction_incomplete"
 	} else {
 		for index, stage := range stages {
-			if stage.ID != []string{"project-build", "project-test", "project-race", "reviewed-cwi-behavior"}[index] || stage.ID != expected[index].ID || stage.Scope != expected[index].Scope || strings.Join(stage.Argv, "\x00") != strings.Join(append([]string{"go"}, expected[index].Args...), "\x00") || !shellProjectRawFactValid(stage.Stdout) || !shellProjectRawFactValid(stage.Stderr) || (index > 0 && stage.SourceBefore != stages[index-1].SourceAfter) || !stage.Started || stage.ExitCode != 0 || stage.KnownFailure || stage.TimedOut || stage.CleanupFailed || !stage.Stdout.Complete || !stage.Stderr.Complete || !stage.TerminalComplete || stage.FailureCode != "" || stage.SourceBefore == "" || stage.SourceBefore != stage.SourceAfter || (index > 0 && (stage.Tests == 0 || stage.PassedTests == 0)) {
+			if stage.ID != expectedStageIDs[index] || stage.ID != expected[index].ID || stage.Scope != expected[index].Scope || strings.Join(stage.Argv, "\x00") != strings.Join(append([]string{"go"}, expected[index].Args...), "\x00") || !shellProjectRawFactValid(stage.Stdout) || !shellProjectRawFactValid(stage.Stderr) || (index > 0 && stage.SourceBefore != stages[index-1].SourceAfter) || !stage.Started || stage.ExitCode != 0 || stage.KnownFailure || stage.TimedOut || stage.CleanupFailed || !stage.Stdout.Complete || !stage.Stderr.Complete || !stage.TerminalComplete || stage.FailureCode != "" || stage.SourceBefore == "" || stage.SourceBefore != stage.SourceAfter || (index > 0 && (stage.Tests == 0 || stage.PassedTests == 0)) {
 				fact.FailureCode = "validation_project_conjunction_incomplete"
 				break
 			}

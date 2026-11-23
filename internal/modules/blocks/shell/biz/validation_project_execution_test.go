@@ -421,3 +421,147 @@ func TestProjectStageExpiredBeforeStartKeepsActualEmptyOutputIdentity(t *testing
 		t.Fatal("启动前超时补造进程或丢失实际空 bytes 身份")
 	}
 }
+
+func TestProjectMultiFailureArtifactAdapterFailClosedPassAndFail(t *testing.T) {
+	_, multiReqTemplate, _ := conjunctiveSourceRequirement(t)
+	unboundReq := multiReqTemplate
+	unboundReq.ValidationRecipeID = ""
+	unboundReq.Hash = runtimecontract.StableRuntimeValidationProofRequirementHash(unboundReq)
+
+	artifactRecipe := runtimecontract.RuntimeValidationRecipe{
+		ID: "artifact-recipe", AdapterRef: modulecommon.ValidationRecipeAdapterProjectMultiFailureArtifact,
+		InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol, Command: "go", Args: []string{"test", "-v", "./..."}, TimeoutMillis: 60000,
+	}
+	boundReq := multiReqTemplate
+	boundReq.ValidationRecipeID = artifactRecipe.ID
+	boundReq.Hash = runtimecontract.StableRuntimeValidationProofRequirementHash(boundReq)
+
+	// Fail-Closed: unbound or differently-bound requirements must NEVER bind to artifact recipe.
+	if _, ok := shellValidationCheckAttestations(artifactRecipe, unboundReq); ok {
+		t.Fatal("fail-closed violation: unbound requirement mapped to artifact recipe")
+	}
+	otherReq := boundReq
+	otherReq.ValidationRecipeID = "software-dev-validation-evidence"
+	otherReq.Hash = runtimecontract.StableRuntimeValidationProofRequirementHash(otherReq)
+	if _, ok := shellValidationCheckAttestations(artifactRecipe, otherReq); ok {
+		t.Fatal("fail-closed violation: requirement for another recipe mapped to artifact recipe")
+	}
+
+	checks, ok := shellValidationCheckAttestations(artifactRecipe, boundReq)
+	if !ok || len(checks) != 3 {
+		t.Fatalf("bound requirement did not map to artifact recipe: ok=%v len=%d", ok, len(checks))
+	}
+	for _, c := range checks {
+		if c.ObservationProtocolRef != shellProjectMultiFailureArtifactProtocolRef {
+			t.Fatalf("unexpected observation protocol: %q", c.ObservationProtocolRef)
+		}
+	}
+
+	root, internal := t.TempDir(), t.TempDir()
+	target := shellValidationNativeCheckTargetRef(boundReq, checks...)
+	var testSrc strings.Builder
+	testSrc.WriteString("package checks\nimport (\"os\"; \"strings\"; \"testing\")\n")
+	for _, c := range checks {
+		fmt.Fprintf(&testSrc, "func %s(t *testing.T){ b, err := os.ReadFile(\"../../../docs/plan.md\"); if err != nil || !strings.Contains(string(b), \"D01\") { t.Fatal(\"missing D01 traceability\") } }\n", c.NativeCheckRef)
+	}
+	files := map[string]string{
+		"go.mod":            "module fixture\ngo 1.26\n",
+		"docs/plan.md":      "D01: proxy entrypoints\n",
+		"delivery/value.go": "package delivery\nfunc Value() int { return 4 }\n",
+		target:              testSrc.String(),
+	}
+	var refs []string
+	for ref, body := range files {
+		writeNativeStructureSource(t, root, ref, body)
+		refs = append(refs, ref)
+	}
+
+	manifest := shellTestWorkspaceManifestBinding("artifact-manifest", refs)
+	surfaces := shellValidationSurfaces([]runtimecontract.RuntimeValidationRecipe{artifactRecipe}, []runtimecontract.RuntimeValidationRecipe{artifactRecipe}, []runtimecontract.RuntimeValidationRecipe{artifactRecipe}, []runtimecontract.RuntimeValidationProofRequirement{unboundReq, boundReq}, manifest, "policy", root)
+	if len(surfaces) != 1 || len(surfaces[0].ProofRequirementBindings) != 1 || surfaces[0].ProofRequirementBindings[0].RequirementHash != boundReq.Hash || len(surfaces[0].ProofRequirementPreparations) != 0 || len(surfaces[0].ProofRequirementUnavailabilities) != 0 {
+		t.Fatalf("surface failed fail-closed binding/isolation check: %+v", surfaces)
+	}
+	binding := surfaces[0].ProofRequirementBindings[0]
+	if binding.InputReview == nil || binding.InputReview.ScopeContractRef != shellProjectMultiFailureArtifactReviewScopeRef {
+		t.Fatalf("unexpected artifact InputReview scope: %+v", binding.InputReview)
+	}
+	if plan := binding.InputReview.ExecutionPlan; plan == nil || len(plan.Stages) != 4 || plan.Stages[3].Identity.ID != "reviewed-cwi-execution" || plan.Stages[3].Identity.RequireBehavior {
+		t.Fatalf("unexpected artifact execution plan: %+v", plan)
+	} else {
+		for _, inst := range plan.Stages[3].Instrumentation {
+			if inst == "coverage_behavior" || inst == "process_behavior" {
+				t.Fatalf("artifact plan should not declare coverage/process instrumentation: %+v", plan.Stages[3].Instrumentation)
+			}
+		}
+	}
+
+	request := RuntimeCommandRequest{
+		WorkspaceID: "ws", RunID: "run", StepID: "dispatch/op",
+		WorkspaceDeliverableDirectory: root, WorkspaceInternalDirectory: internal,
+		ValidationRecipeID: artifactRecipe.ID, ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{artifactRecipe},
+		Command: artifactRecipe.Command, Args: artifactRecipe.Args, TimeoutMillis: 60000,
+		TargetRefs: []string{target}, ValidationScopeTargetRefs: refs, ValidationCheckAttestations: checks,
+		validationProofBinding: binding,
+		ManagedValidation:      runtimecontract.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}
+	// Reject wrong protocol / supplement on artifact recipe.
+	badSupplement := request
+	badSupplement.ValidationCheckAttestations = runtimecontract.CloneRuntimeValidationCheckAttestationBindings(checks)
+	badSupplement.ValidationCheckAttestations[0].SupplementalNativeCheckRef = shellSupplementCheckRef(checks[0].NativeCheckRef)
+	if selected, err := shellProjectRequestSelected(badSupplement); selected || err == nil {
+		t.Fatal("artifact adapter must reject supplemental native check")
+	}
+
+	if err := resolveManagedValidationRecipe(&request); err != nil {
+		t.Fatal(err)
+	}
+	if selected, err := shellProjectRequestSelected(request); err != nil || !selected {
+		t.Fatalf("expected artifact selection, got selected=%v err=%v", selected, err)
+	}
+	execution := runtimecontract.RuntimeOperationExecutionContext{
+		WorkspaceID: "ws", RunID: "run", DispatchID: "dispatch", OperationID: "op",
+		WorkspaceDeliverableDirectory: root, WorkspaceInternalDirectory: internal,
+		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+			ExecutionKey: runtimecontract.StableRuntimeOperationExecutionKey("ws", "run", "dispatch", "op"),
+			Fence:        1, OperationHash: "artifact-op-hash", AuthorityHash: "artifact-auth-hash",
+			ExpectedEffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+		},
+	}
+
+	// PASS with zero Go production coverage -> ProofClass executed, no workspace_behavior_observed tag.
+	passed, err := NewRuntimeAdapter().executeShellProjectConjunction(context.Background(), request, execution)
+	if err != nil || passed.Conjunction == nil || !passed.Conjunction.Complete || len(passed.Conjunction.Stages) != 4 {
+		t.Fatalf("artifact conjunction did not complete: err=%v res=%+v", err, passed)
+	}
+	if passed.Conjunction.Stages[3].Identity.ID != "reviewed-cwi-execution" || passed.Conjunction.Stages[3].Identity.RequireBehavior || len(passed.Conjunction.BehaviorTargetRefs) != 0 {
+		t.Fatalf("unexpected artifact stage 4 identity/behavior: %+v", passed.Conjunction)
+	}
+	obs := passed.Result.Evidence.Validation
+	if obs == nil || obs.ProofClass != runtimecontract.RuntimeValidationProofExecuted || obs.ObservationProtocolRef != shellProjectMultiFailureArtifactProtocolRef {
+		t.Fatalf("expected executed proof class without behavioral tag: obs=%+v tags=%v", obs, passed.Result.EvidenceTags)
+	}
+	for _, tag := range passed.Result.EvidenceTags {
+		if tag == "workspace_behavior_observed" {
+			t.Fatalf("artifact proof must not claim workspace_behavior_observed: %v", passed.Result.EvidenceTags)
+		}
+	}
+	if err := obs.ValidateFailureDetails(); err != nil {
+		t.Fatalf("artifact observation validation failed: %v", err)
+	}
+	for _, check := range checks {
+		if !runtimecontract.RuntimeValidationAttestationPassed(*obs, check) {
+			t.Fatalf("artifact check failed attestation match: %+v", check)
+		}
+	}
+
+	// FAIL when doc assertion fails -> preserves FailedChecks and matching ObservationProtocolRef, no ProofClass.
+	writeNativeStructureSource(t, root, "docs/plan.md", "incomplete plan\n")
+	failed, failErr := NewRuntimeAdapter().executeShellProjectConjunction(context.Background(), request, execution)
+	if failErr == nil || failed.Conjunction == nil || failed.Conjunction.Complete || failed.Result.Evidence.Validation == nil {
+		t.Fatalf("expected artifact assertion failure to fail closed: err=%v res=%+v", failErr, failed)
+	}
+	failObs := failed.Result.Evidence.Validation
+	if failObs.ObservationProtocolRef != shellProjectMultiFailureArtifactProtocolRef || failObs.ProofClass != "" || len(failObs.FailedChecks) == 0 {
+		t.Fatalf("failed artifact observation drifted: %+v", failObs)
+	}
+}

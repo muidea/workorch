@@ -27,12 +27,18 @@ var shellInputUndefinedSymbol = regexp.MustCompile(`^undefined: ([A-Za-z_][A-Za-
 // ordinary implementation targets. The owner derives a byte-exact postimage,
 // not an instruction to edit assertions or a File operation.
 func shellValidationInputCompileFact(output RuntimeCommandResult, request RuntimeCommandRequest, command string) ([]runtimecontract.RuntimeValidationInputLocation, *runtimecontract.RuntimeValidationInputRepair) {
-	if !shellInputHasManagedValidation(request) || filepath.Base(command) != "go" || output.ExitCode == 0 || output.OutputTruncated ||
-		len(request.ValidationCheckAttestations) != 1 {
+	if !shellInputHasManagedValidation(request) || filepath.Base(command) != "go" || output.ExitCode == 0 || output.OutputTruncated {
 		return nil, nil
 	}
-	check := request.ValidationCheckAttestations[0]
-	if !shellEntrypointObservationProtocol(check.ObservationProtocolRef) || check.SupplementalNativeCheckRef != shellSupplementCheckRef(check.NativeCheckRef) {
+	var check runtimecontract.RuntimeValidationCheckAttestationBinding
+	supplementCount := 0
+	for _, candidate := range request.ValidationCheckAttestations {
+		if candidate.SupplementalNativeCheckRef != "" {
+			check = candidate
+			supplementCount++
+		}
+	}
+	if supplementCount != 1 || !shellEntrypointObservationProtocol(check.ObservationProtocolRef) || check.SupplementalNativeCheckRef != shellSupplementCheckRef(check.NativeCheckRef) {
 		return nil, nil
 	}
 	target := shellSupplementTargetRef(check.NativeCheckRef)

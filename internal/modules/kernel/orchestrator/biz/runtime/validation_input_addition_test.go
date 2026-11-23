@@ -153,3 +153,60 @@ func TestValidationInputAdditionOwnerFactIsBoundedAndRestartStable(t *testing.T)
 		})
 	}
 }
+
+func TestMultiCheckValidationInputAdditionRoutesToRepairInsteadOfRouteUnavailable(t *testing.T) {
+	convergence := runtimeValidationFailureRepairConvergenceForTest(1)
+	route := runtimeValidationFailureRepairRouteForTest("missing-behavior-to-new-validation-input", runtimecontract.ValidationDiagnosticOutputInconclusive, runtimecontract.ValidationEvidenceTargetValidationOutput)
+	route.TriggerOwnerDiagnosticCode = "validation_workspace_behavior_unobserved"
+	route.RequireInputAddition = true
+	convergence.Routes = []runtimecontract.RuntimeValidationFailureRepairRoute{route}
+	aggregate := runtimeValidationFailureRepairAggregateForTest(t, convergence, func(initial *RuntimeAggregate) {
+		initial.Facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+		initial.Facts.DefinitionFocuses[0].AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+		initial.Facts.Focus.RequiredCheckRefs = []string{"workorch-obligation-check-1"}
+		initial.Facts.DefinitionFocuses[0].RequiredCheckRefs = []string{"workorch-obligation-check-1"}
+		initial.Facts.DefinitionFocuses = runtimecontract.NormalizeRuntimeDefinitionFocuses(initial.Facts.DefinitionFocuses)
+	})
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	coordinator, err := NewDispatchCoordinator(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed := sealCandidateForTest(t, repository, validationCandidate())
+	binding := sealed.ActiveDispatch.CoverageBindings[0]
+	var check runtimecontract.RuntimeValidationCheckAttestationBinding
+	for _, proof := range binding.Proofs {
+		for _, c := range proof.ValidationCheckAttestations {
+			if strings.HasPrefix(c.RequiredCheckRef, "workorch-cwi-check-") {
+				check = c
+			}
+		}
+	}
+	if check.RequiredCheckRef == "" || len(binding.Proofs[0].ValidationCheckAttestations) != 2 {
+		t.Fatalf("expected 2 sealed check attestations, got %+v", binding.Proofs)
+	}
+	addition := runtimecontract.RuntimeValidationInputAddition{
+		RequiredCheckRef:       check.RequiredCheckRef,
+		OriginalNativeCheckRef: check.NativeCheckRef,
+		NativeCheckRef:         check.NativeCheckRef + "_Behavior",
+		TargetRef:              "checks/behavior_supplement_test.go",
+		ContentContractRef:     "owner/project-supplement/v1",
+		ContentRequirements:    "Create only supplemental nativeCheckRef; preserve all original checks all-of.",
+	}
+	evidence := runtimeRejectedValidationEvidenceForTest(t, sealed, "event-multi-check-addition", runtimecontract.ValidationDiagnosticOutputInconclusive)
+	evidence.Failure.ValidationDiagnostic.RecommendedEvidenceTargetType = runtimecontract.ValidationEvidenceTargetValidationOutput
+	evidence.Failure.ValidationDiagnostic.OwnerCode = route.TriggerOwnerDiagnosticCode
+	evidence.Failure.ValidationDiagnostic.InputAddition = addition
+	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
+	committed, err := coordinator.commitEvidence(context.Background(), evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if committed.Aggregate.Decision.Terminal != nil {
+		t.Fatalf("multi-check behavior_unobserved with InputAddition terminated prematurely: %+v", committed.Aggregate.Decision.Terminal)
+	}
+	input, required, err := CurrentRuntimeValidationFailureRepairGenerationInput(committed.Aggregate)
+	if err != nil || !required || input.InputAddition != addition || committed.Aggregate.Facts.Coverage[0].CurrentBindingRef != nil || committed.Aggregate.Facts.Repair.Exhausted {
+		t.Fatalf("multi-check InputAddition did not route to bounded repair: required=%v err=%v input=%+v facts=%+v", required, err, input, committed.Aggregate.Facts)
+	}
+}

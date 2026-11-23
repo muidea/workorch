@@ -28,13 +28,32 @@ func TestProjectSupplementCompleteDeclarationFitsOriginalEnvelope(t *testing.T) 
 				if err := addition.Validate(); err != nil {
 					t.Fatalf("complete supplement (%d bytes) exceeds original boundary: %v", len(addition.ContentRequirements), err)
 				}
-				for _, text := range []string{shellProjectContentRequirements(adapter), shellAssertionFeedbackRequirements, shellValidationDeclaredDeadlineRequirement(timeout), "supplemental nativeCheckRef", "all original checks all-of"} {
+				if addition.ContentContractRef != shellProjectSupplementContentContractRef {
+					t.Fatalf("supplement contentContractRef = %q, want %q", addition.ContentContractRef, shellProjectSupplementContentContractRef)
+				}
+				expected := []string{shellProjectSupplementContentRequirements, shellAssertionFeedbackRequirements, shellValidationDeclaredDeadlineRequirement(timeout), "NO receiver methods", "NO other Test functions", "all original checks and inputs all-of"}
+				if adapter == modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
+					expected = append(expected, shellNativeSourceExecutionRequirements)
+				}
+				for _, text := range expected {
 					if !strings.Contains(addition.ContentRequirements, text) {
-						t.Fatal("supplement omitted the original method or obligations")
+						t.Fatalf("supplement omitted required contract text %q", text)
 					}
 				}
 			})
 		}
+	}
+	for _, timeout := range []int64{0, 1000, 300000, 600000} {
+		contract := runtimecontract.RuntimeValidationContentContract{
+			Ref:          shellProjectMultiFailureArtifactContentContractRef,
+			Requirements: strings.TrimSpace(shellProjectContentRequirements(modulecommon.ValidationRecipeAdapterProjectMultiFailureArtifact) + shellValidationDeclaredDeadlineRequirement(timeout) + shellAssertionFeedbackRequirements),
+		}.Normalized()
+		if err := contract.Validate(); err != nil {
+			t.Fatalf("artifact content contract (%d bytes) exceeds envelope: %v", len(contract.Requirements), err)
+		}
+	}
+	if len(shellProjectMultiFailureArtifactReviewRequirements) > runtimecontract.RuntimeValidationInputReviewMaxScopeBytes {
+		t.Fatalf("artifact review scope (%d bytes) exceeds max %d", len(shellProjectMultiFailureArtifactReviewRequirements), runtimecontract.RuntimeValidationInputReviewMaxScopeBytes)
 	}
 }
 

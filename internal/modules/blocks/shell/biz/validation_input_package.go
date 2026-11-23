@@ -48,7 +48,7 @@ func shellIsolatedValidationPackage(checks []runtimecontract.RuntimeValidationCh
 			if pkg == "" || strings.HasSuffix(check.NativeCheckRef, "_Behavior") || len(checks) > maxShellBehaviorNativeChecks {
 				return "", fmt.Errorf("project conjunction requires exact bounded native mappings")
 			}
-			hash := runtimecontract.StableRuntimeValidationExecutionStagesHash(shellProjectExecutionStageIdentities(pkg))
+			hash := runtimecontract.StableRuntimeValidationExecutionStagesHash(shellProjectExecutionStageIdentitiesForProtocol(pkg, check.ObservationProtocolRef))
 			var required []string
 			for _, member := range checks {
 				if member.ObservationProtocolRef != check.ObservationProtocolRef || shellProjectNativePackage(member.NativeCheckRef) != pkg || member.ExecutionStagesHash != hash || strings.HasSuffix(member.NativeCheckRef, "_Behavior") {

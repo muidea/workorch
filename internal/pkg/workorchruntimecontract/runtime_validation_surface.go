@@ -64,6 +64,10 @@ type RuntimeValidationSurface struct {
 	ProspectiveTargetSatisfactionConstraint *RuntimeProspectiveTargetSatisfactionConstraint
 	CheckRefs                               []string
 	ProofApplicability                      RuntimeValidationProofApplicability
+	// RequireExactRecipeSelection declares that this surface serves only
+	// requirements whose ValidationRecipeID equals surface.ID and must never
+	// serve unpinned (ValidationRecipeID == "") requirements.
+	RequireExactRecipeSelection bool `json:",omitempty"`
 	// ProofRequirementBindings are the exact per-CWI declarations this owner
 	// says the surface can observe. CheckRefs is only the surface-wide union for
 	// audit; semantic feasibility must resolve through this binding and may not
@@ -767,7 +771,8 @@ func RuntimeValidationSurfaceDeclaringProofRequirement(values []RuntimeValidatio
 	for _, surface := range NormalizeRuntimeValidationSurfaces(values) {
 		if surface.OwnerModuleID != RuntimeModuleShell || surface.OperationKind != RuntimeBlockKindManagedValidationSession ||
 			surface.ProofApplicability != RuntimeValidationProofDirect ||
-			(requirement.ValidationRecipeID != "" && surface.ID != requirement.ValidationRecipeID) {
+			(requirement.ValidationRecipeID != "" && surface.ID != requirement.ValidationRecipeID) ||
+			(surface.RequireExactRecipeSelection && requirement.ValidationRecipeID != surface.ID) {
 			continue
 		}
 		for _, binding := range surface.ProofRequirementBindings {

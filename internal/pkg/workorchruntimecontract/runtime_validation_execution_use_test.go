@@ -138,3 +138,52 @@ func TestValidationExecutionUseCloneHashAndJSONPreserveOriginalFacts(t *testing.
 		}
 	}
 }
+
+func TestValidationExecutionUseRequiresProofClassMatchingStageBehavior(t *testing.T) {
+	request, batch := validationExecutionUseFixture()
+	// RequireBehavior == true: must reject ProofClass Executed.
+	reqBeh := request.Clone()
+	batchExecuted := batch.Clone()
+	batchExecuted.Observations[0].ValidationExecution.Validation.ProofClass = RuntimeValidationProofExecuted
+	batchExecuted.Hash = StableRuntimeCWIReconciliationBatchHash(batchExecuted)
+	if batchExecuted.ValidateForRequest(reqBeh) == nil {
+		t.Fatal("requireBehavior=true stage accepted RuntimeValidationProofExecuted")
+	}
+
+	// RequireBehavior == false: accepts ProofClass Executed, rejects empty or Static.
+	noBehReq := request.Clone()
+	noBehBatch := batch.Clone()
+	for i := range noBehBatch.Observations {
+		u := noBehBatch.Observations[i].ValidationExecution
+		stages := u.Validation.ExecutionConjunction.Stages
+		stages[len(stages)-1].Identity.RequireBehavior = false
+		var ids []RuntimeValidationExecutionStageIdentity
+		for _, s := range stages {
+			ids = append(ids, s.Identity)
+		}
+		hash := StableRuntimeValidationExecutionStagesHash(ids)
+		u.Validation.ExecutionConjunction.RequiredStagesHash = hash
+		u.Validation.ExecutionConjunction.BehaviorTargetRefs = nil
+		noBehReq.Bindings[i].ValidationCheckAttestations[0].ExecutionStagesHash = hash
+		u.Validation.ProofClass = RuntimeValidationProofExecuted
+	}
+	noBehContract := RuntimeCWIReconciliationContract{SchemaVersion: RuntimeCWIReconciliationContractSchemaCurrent, DefinitionRevision: noBehReq.DefinitionRevision, Bindings: noBehReq.Bindings}
+	noBehReq.BindingSetHash = StableRuntimeCWIReconciliationContractHash(noBehContract)
+	noBehBatch.BindingSetHash = noBehReq.BindingSetHash
+	groupID := RuntimeValidationExecutionGroupID(noBehReq.WorkspaceID, noBehReq.RunID, noBehReq.RequestID, noBehReq.Generation, noBehReq.BindingSetHash, noBehReq.Bindings)
+	for i := range noBehBatch.Observations {
+		noBehBatch.Observations[i].ValidationExecution.GroupID = groupID
+	}
+	noBehBatch.Hash = StableRuntimeCWIReconciliationBatchHash(noBehBatch)
+	if err := noBehBatch.ValidateForRequest(noBehReq); err != nil {
+		t.Fatalf("requireBehavior=false stage rejected RuntimeValidationProofExecuted: %v", err)
+	}
+	for _, badClass := range []RuntimeValidationProofClass{"", RuntimeValidationProofStatic} {
+		invalid := noBehBatch.Clone()
+		invalid.Observations[0].ValidationExecution.Validation.ProofClass = badClass
+		invalid.Hash = StableRuntimeCWIReconciliationBatchHash(invalid)
+		if invalid.ValidateForRequest(noBehReq) == nil {
+			t.Fatalf("requireBehavior=false stage accepted invalid proof class %q", badClass)
+		}
+	}
+}

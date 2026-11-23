@@ -660,7 +660,8 @@ func runtimeProspectiveConstraintForOwnerFactRequirement(surface RuntimeValidati
 	requirement = requirement.Normalized()
 	contractRef = strings.TrimSpace(contractRef)
 	if requirement.ValidationProofRequirementHash == "" {
-		if surface.Readiness != RuntimeValidationSurfacePrerequisiteRequired || surface.ProspectiveTargetSatisfactionConstraint == nil ||
+		if surface.RequireExactRecipeSelection ||
+			surface.Readiness != RuntimeValidationSurfacePrerequisiteRequired || surface.ProspectiveTargetSatisfactionConstraint == nil ||
 			surface.ProspectiveSatisfactionContractRef != contractRef {
 			return RuntimeProspectiveTargetSatisfactionConstraint{}, false
 		}

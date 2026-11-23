@@ -2,8 +2,11 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -19,6 +22,7 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
 	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -296,7 +300,7 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool, selected 
 			}
 			diagnostic := response.Receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic
 			addition := diagnostic.InputAddition
-			if addition.ContentContractRef != "shell/go-test-input/project-conjunction/v1" {
+			if addition.ContentContractRef != "shell/go-test-input/project-supplement/v1" {
 				t.Fatalf("default adapter did not publish the current entrypoint input contract: %+v", addition)
 			}
 			// This Shell/File owner calibration checks the create-only input contract,
@@ -365,6 +369,388 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool, selected 
 	if len(genericCredit) != 0 || !strings.Contains(diagnostic, "validation observation does not satisfy sealed proof") {
 		t.Fatalf("generic Go test incorrectly closed exact CWI: credit=%v diagnostic=%q", genericCredit, diagnostic)
 	}
+}
+
+func TestBuiltinSoftwareDevCompiledTemplateMixedBehaviorAndArtifactProofPipeline(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go is not available")
+	}
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	registerDefaultNativeProofReceiptOwner(t, hub)
+
+	fileOwner, err := filebiz.New(hub, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fileOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { fileOwner.Teardown(ctx) })
+	shellOwner, err := shellbiz.New(hub, nil, shellbiz.Dependencies{RuntimeAdapter: shellbiz.NewRuntimeAdapter()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := shellOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { shellOwner.Teardown(ctx) })
+
+	bootstrap := builtinSoftwareDevCompiledNativeProofBootstrap(t, "workspace-mixed-native-proof")
+	workspaceID := common.WorkspaceID("workspace-mixed-native-proof")
+	runID := common.RunID("run-mixed-native-proof")
+	facts, err := bootstrap.InitialFacts(workspaceID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate := RuntimeAggregate{
+		ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent,
+		Definition:            bootstrap.Definition,
+		Facts:                 facts,
+		Decision: runtimecontract.RuntimeDecision{AuthoritySnapshot: runtimecontract.AuthoritySnapshot{
+			ID: "authority-mixed-native-proof",
+		}},
+	}
+	allRequirements, err := runtimecontract.CompileRuntimeValidationProofRequirements(
+		bootstrap.Definition.Revision,
+		bootstrap.DefinitionSeed.CoverageItems,
+		bootstrap.DefinitionFocuses,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reqBehavior, reqArtifact *runtimecontract.RuntimeValidationProofRequirement
+	for i := range allRequirements {
+		r := &allRequirements[i]
+		switch {
+		case r.SourceScope == "dodItem" && r.SourceID == "dod-001":
+			reqBehavior = r
+		case r.SourceScope == "dodItem" && r.SourceID == "dod-002":
+			reqArtifact = r
+		}
+	}
+	if reqBehavior == nil || reqArtifact == nil {
+		t.Fatalf("missing compiled dod-001 or dod-002 requirements in %+v", allRequirements)
+	}
+	if reqBehavior.ValidationRecipeID != "" || reqArtifact.ValidationRecipeID != "software-dev-artifact-validation-evidence" {
+		t.Fatalf("unexpected compiled recipe bindings: dod-001=%q dod-002=%q", reqBehavior.ValidationRecipeID, reqArtifact.ValidationRecipeID)
+	}
+	requirements := []runtimecontract.RuntimeValidationProofRequirement{*reqBehavior, *reqArtifact}
+
+	workspaceDirectory := t.TempDir()
+	workspaceInternalDirectory := t.TempDir()
+	manifestPrerequisite := runtimecontract.RuntimePrerequisite{
+		ID: "manifest:mixed-native-proof", Kind: runtimecontract.PrerequisiteKindManifest,
+		OwnerModuleID: runtimecontract.RuntimeModuleFile,
+	}
+	shellPrerequisite := runtimecontract.RuntimePrerequisite{
+		ID: "operation_admissibility:mixed-native-proof", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID:        runtimecontract.RuntimeModuleShell,
+		RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}
+
+	initialManifest := sendObservedManifest(t, ctx, hub, aggregate, manifestPrerequisite, workspaceDirectory)
+	initial := acquireObservedShellValidationCatalog(
+		t, ctx, hub, aggregate, shellPrerequisite, workspaceDirectory, initialManifest, nil, requirements,
+	)
+	if err := runtimecontract.ValidateRuntimeValidationProofRequirementCatalogApplicability(
+		requirements, []runtimecontract.RuntimeOperationAdmissibility{initial.Acquisition.Admissibility},
+	); err != nil {
+		t.Fatalf("initial mixed proof applicability: %v", err)
+	}
+	behaviorSurface, found := runtimecontract.RuntimeValidationSurfaceForID(initial.Acquisition.Admissibility.ValidationSurfaces, "software-dev-validation-evidence")
+	if !found || behaviorSurface.RequireExactRecipeSelection || len(behaviorSurface.ProofRequirementPreparations) != 1 || behaviorSurface.ProofRequirementPreparations[0].RequirementHash != reqBehavior.Hash {
+		t.Fatalf("expected unpinned dod-001 preparation on general surface, got %+v", behaviorSurface)
+	}
+	artifactSurface, found := runtimecontract.RuntimeValidationSurfaceForID(initial.Acquisition.Admissibility.ValidationSurfaces, "software-dev-artifact-validation-evidence")
+	if !found || !artifactSurface.RequireExactRecipeSelection || len(artifactSurface.ProofRequirementPreparations) != 1 || artifactSurface.ProofRequirementPreparations[0].RequirementHash != reqArtifact.Hash {
+		t.Fatalf("expected pinned dod-002 preparation on RequireExactRecipeSelection artifact surface, got %+v", artifactSurface)
+	}
+	preparations := defaultNativeProofPreparations(t, initial.Acquisition.Admissibility, requirements)
+
+	executeFileWrite := func(operation runtimecontract.RuntimeOperation, dispatchID string) runtimecontract.RuntimeOperationReceipt {
+		sealed, err := fileevents.SealRuntimeOperation(operation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response := sendDefaultNativeProofFileWrite(t, ctx, hub, fileevents.ExecuteFileWriteOperationCommand{
+			RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+				Execution:   defaultNativeProofExecutionEnvelope(workspaceID, runID, dispatchID, operation, nil),
+				WorkspaceID: workspaceID, RunID: runID, DispatchID: dispatchID,
+				Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DefinitionRevision: aggregate.Facts.DefinitionRevision, RequiredOutputHash: "required-output-mixed-native-proof"},
+				OperationID: operation.ID, TargetRefs: append([]string(nil), operation.TargetRefs...),
+				EvidenceKind: runtimecontract.EvidenceKindStateChange, WorkspaceDeliverableDirectory: workspaceDirectory,
+			},
+			SealedOperation: sealed,
+		})
+		if response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || !response.Receipt.Changed {
+			t.Fatalf("File preparation %q receipt = %+v", operation.ID, response.Receipt)
+		}
+		return response.Receipt
+	}
+
+	executeFileWrite(defaultNativeProofModuleFileOperation(), "dispatch-mixed-file-module")
+	subject := "package fixture\nfunc DeliveredValue() int { return 4 }\n"
+	executeFileWrite(runtimecontract.RuntimeOperation{
+		ID: "mixed-fixture-subject", Kind: runtimecontract.StepKindFileWrite, TargetRefs: []string{"fixture.go"},
+		Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &subject}},
+	}, "dispatch-mixed-subject")
+	specDoc := "# Spec\nRequirement traceability mapping verified.\n"
+	executeFileWrite(runtimecontract.RuntimeOperation{
+		ID: "mixed-spec-doc", Kind: runtimecontract.StepKindFileWrite, TargetRefs: []string{"docs/spec.md"},
+		Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &specDoc}},
+	}, "dispatch-mixed-spec-doc")
+
+	prepBehavior := preparations[reqBehavior.Hash]
+	executeFileWrite(defaultNativeProofFileOperation(*reqBehavior, prepBehavior, 0), "dispatch-mixed-file-01")
+
+	prepArtifact := preparations[reqArtifact.Hash]
+	relSpec, err := filepath.Rel(path.Dir(prepArtifact.TargetRef), "docs/spec.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var artifactSrc strings.Builder
+	artifactSrc.WriteString("package workorch_validation\n\nimport (\"os\"; \"strings\"; \"testing\")\n\n")
+	for _, attestation := range prepArtifact.CheckAttestations {
+		fmt.Fprintf(&artifactSrc, "func %s(t *testing.T) {\n", attestation.NativeCheckRef)
+		fmt.Fprintf(&artifactSrc, "\tb, err := os.ReadFile(%q)\n", filepath.ToSlash(relSpec))
+		artifactSrc.WriteString("\tif err != nil || !strings.Contains(string(b), \"traceability\") { t.Fatal(\"missing spec traceability\") }\n")
+		artifactSrc.WriteString("}\n\n")
+	}
+	artifactContent := artifactSrc.String()
+	executeFileWrite(runtimecontract.RuntimeOperation{
+		ID: "prepare-mixed-artifact-proof", Kind: runtimecontract.StepKindFileWrite,
+		RequiredOperationRef: "prepare-validation-proof/" + reqArtifact.Hash,
+		TargetRefs:           []string{prepArtifact.TargetRef},
+		Parameters:           []runtimecontract.OperationParameter{{Name: "content", String: &artifactContent}},
+	}, "dispatch-mixed-file-02")
+
+	observedManifest := sendObservedManifest(t, ctx, hub, aggregate, manifestPrerequisite, workspaceDirectory)
+	reobserved := acquireObservedShellValidationCatalog(
+		t, ctx, hub, aggregate, shellPrerequisite, workspaceDirectory, observedManifest, observedManifest.Manifest.TargetRefs, requirements,
+	)
+	catalog := reobserved.Acquisition.Admissibility.Normalized()
+	if err := runtimecontract.ValidateRuntimeValidationProofRequirementCatalogApplicability(
+		requirements, []runtimecontract.RuntimeOperationAdmissibility{catalog},
+	); err != nil {
+		t.Fatalf("reobserved mixed proof applicability: %v", err)
+	}
+
+	focusByCoverage := make(map[common.CoverageWorkItemID]runtimecontract.RuntimeDefinitionFocus, len(requirements))
+	for _, focus := range bootstrap.DefinitionFocuses {
+		if len(focus.CoverageWorkItemIDs) == 1 &&
+			containsDefaultNativeProofString(focus.RequiredEvidenceKinds, runtimecontract.EvidenceKindValidation) &&
+			containsDefaultNativeProofString(focus.AcceptedStepKinds, runtimecontract.RuntimeBlockKindManagedValidationSession) {
+			focusByCoverage[focus.CoverageWorkItemIDs[0]] = focus
+		}
+	}
+
+	for index, tc := range []struct {
+		requirement      runtimecontract.RuntimeValidationProofRequirement
+		preparedTarget   string
+		wantRecipeID     string
+		wantProtocol     string
+		wantProofClass   runtimecontract.RuntimeValidationProofClass
+		wantBehavior     bool
+		wantExactSurface bool
+	}{
+		{
+			requirement:      *reqBehavior,
+			preparedTarget:   prepBehavior.TargetRef,
+			wantRecipeID:     "software-dev-validation-evidence",
+			wantProtocol:     "shell/go-test-json/project-multi-failure-behavior",
+			wantProofClass:   runtimecontract.RuntimeValidationProofBehavioral,
+			wantBehavior:     true,
+			wantExactSurface: false,
+		},
+		{
+			requirement:      *reqArtifact,
+			preparedTarget:   prepArtifact.TargetRef,
+			wantRecipeID:     "software-dev-artifact-validation-evidence",
+			wantProtocol:     "shell/go-test-json/project-multi-failure-artifact",
+			wantProofClass:   runtimecontract.RuntimeValidationProofExecuted,
+			wantBehavior:     false,
+			wantExactSurface: true,
+		},
+	} {
+		surface, ownerBinding, found := runtimecontract.RuntimeValidationSurfaceForProofRequirement(catalog.ValidationSurfaces, tc.requirement)
+		if !found {
+			t.Fatalf("reobserved mixed catalog has no exact ready binding for %q: %+v", tc.requirement.Hash, catalog.ValidationSurfaces)
+		}
+		if surface.ID != tc.wantRecipeID || surface.RequireExactRecipeSelection != tc.wantExactSurface {
+			t.Fatalf("surface %q exact=%v, want (%q, %v)", surface.ID, surface.RequireExactRecipeSelection, tc.wantRecipeID, tc.wantExactSurface)
+		}
+		if ownerBinding.CheckAttestations[0].ObservationProtocolRef != tc.wantProtocol {
+			t.Fatalf("binding %q protocol = %q, want %q", tc.requirement.SourceID, ownerBinding.CheckAttestations[0].ObservationProtocolRef, tc.wantProtocol)
+		}
+		focus, found := focusByCoverage[tc.requirement.CoverageWorkItemID]
+		if !found {
+			t.Fatalf("missing compiled focus for %q", tc.requirement.CoverageWorkItemID)
+		}
+		coverageBinding, semanticFocus := defaultNativeProofCoverageBinding(t, focus, tc.requirement, ownerBinding, tc.preparedTarget)
+		recipeID := ownerBinding.ValidationRecipeID
+		operation := runtimecontract.RuntimeOperation{
+			ID:          fmt.Sprintf("validate-mixed-proof-%02d", index+1),
+			Kind:        runtimecontract.RuntimeBlockKindManagedValidationSession,
+			BindingRefs: []string{coverageBinding.ID},
+			TargetRefs:  []string{tc.preparedTarget},
+			Parameters:  []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
+		}
+		sealed, err := shellevents.SealRuntimeOperation(operation, catalog, shellevents.RuntimeExecutionSealInput{
+			CatalogObservation:        reobserved.Acquisition.Observation,
+			TargetRole:                semanticFocus.TargetRole,
+			ValidationScopeTargetRefs: append([]string(nil), catalog.TargetRefs...),
+			EvidencePolicies:          bootstrap.Activation.EvidencePolicies,
+			ValidationProofBinding:    ownerBinding,
+		})
+		if err != nil {
+			t.Fatalf("seal mixed proof %q: %v", tc.requirement.SourceID, err)
+		}
+		response := sendObservedShellExecution(t, ctx, hub, shellevents.ExecuteOperationCommand{
+			RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+				Execution:   defaultNativeProofExecutionEnvelope(workspaceID, runID, fmt.Sprintf("dispatch-mixed-exec-%02d", index+1), operation, &catalog),
+				WorkspaceID: workspaceID, RunID: runID, DispatchID: fmt.Sprintf("dispatch-mixed-exec-%02d", index+1),
+				Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DefinitionRevision: aggregate.Facts.DefinitionRevision, RequiredOutputHash: "required-output-mixed-native-proof"},
+				OperationID: operation.ID, TargetRefs: append([]string(nil), operation.TargetRefs...), EvidenceKind: runtimecontract.EvidenceKindValidation,
+				WorkspaceDeliverableDirectory: workspaceDirectory,
+				WorkspaceInternalDirectory:    workspaceInternalDirectory,
+			},
+			SealedOperation: sealed,
+		})
+		if response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || response.Receipt.Evidence.Validation == nil {
+			t.Fatalf("mixed proof %q receipt = %+v", tc.requirement.SourceID, response.Receipt)
+		}
+		obs := response.Receipt.Evidence.Validation
+		if obs.ProofClass != tc.wantProofClass || obs.ValidateFailureDetails() != nil {
+			t.Fatalf("mixed proof %q ProofClass = %q, want %q (obs=%+v)", tc.requirement.SourceID, obs.ProofClass, tc.wantProofClass, obs)
+		}
+		conjunction := obs.ExecutionConjunction
+		if conjunction == nil || !conjunction.Complete || len(conjunction.Stages) != 4 || conjunction.Stages[3].Identity.RequireBehavior != tc.wantBehavior {
+			t.Fatalf("mixed proof %q conjunction = %+v, want complete 4 stages RequireBehavior=%v", tc.requirement.SourceID, conjunction, tc.wantBehavior)
+		}
+		if (len(conjunction.BehaviorTargetRefs) != 0) != tc.wantBehavior {
+			t.Fatalf("mixed proof %q BehaviorTargetRefs = %v, want non-empty=%v", tc.requirement.SourceID, conjunction.BehaviorTargetRefs, tc.wantBehavior)
+		}
+		bindingRefs, coverageIDs, diagnostic := coverageEvidenceCreditForReceipt(
+			[]runtimecontract.CoverageEvidenceBinding{coverageBinding}, operation,
+			runtimecontract.EvidenceKindValidation, &response.Receipt,
+		)
+		if diagnostic != "" || len(bindingRefs) != 1 || bindingRefs[0] != coverageBinding.ID ||
+			len(coverageIDs) != 1 || coverageIDs[0] != tc.requirement.CoverageWorkItemID {
+			t.Fatalf("mixed proof %q credit failed: bindings=%v coverage=%v diagnostic=%q", tc.requirement.SourceID, bindingRefs, coverageIDs, diagnostic)
+		}
+	}
+}
+
+func builtinSoftwareDevCompiledNativeProofBootstrap(t *testing.T, workspaceID common.WorkspaceID) runtimecontract.RuntimeBootstrap {
+	t.Helper()
+	templates, err := workorchdefaults.BuiltinWorkspaceTemplateDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, template := range templates {
+		if template.ID != "software-dev" {
+			continue
+		}
+		raw, err := json.Marshal(template)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var templateModel workspacemodel.WorkspaceTemplate
+		if err := json.Unmarshal(raw, &templateModel); err != nil {
+			t.Fatal(err)
+		}
+		input := workspacemodel.DefinitionAuthoringInput{
+			Version: 1, WorkspaceID: workspaceID, Revision: 1,
+			TemplateID: template.ID, GoalText: template.GoalText,
+		}
+		derived := workspacemodel.DefinitionDerivedAcceptance{
+			AuthoringInputHash:   input.InputHash(),
+			TemplateSnapshotHash: workspacemodel.WorkspaceTemplateSnapshotHash(&templateModel),
+		}
+		items, err := derived.CandidateItems(input, &templateModel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		compiled, err := definitionconfiguration.CompileForItems(&workspacemodel.Workspace{ID: workspaceID, TemplateID: template.ID}, &templateModel, items)
+		if err != nil {
+			t.Fatal(err)
+		}
+		policies, err := workorcheventpayload.FromMapSlice(template.EvidencePolicies)
+		if err != nil {
+			t.Fatal(err)
+		}
+		activation, err := activationports.RuntimeActivationContext(
+			runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "test-provider", ModelID: "test-model"}},
+			"zh-CN", nil, nil, appmodelcore.SoulRouting{}, nil, nil, nil, nil, nil,
+			policies, template.ContextHints, runtimecontract.RuntimeContinuationContext{},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		activation.ExecutionContract.ProfileContracts = compiled.ProfileContracts
+		inventory := runtimecontract.RuntimeSourceObligationInventory{
+			SchemaVersion: runtimecontract.RuntimeSourceObligationInventorySchemaCurrent,
+			CandidateHash: "mixed-native-proof-candidate", SpecificationHash: "mixed-native-proof-specification",
+			DefinitionRevision: "definition-mixed-native-proof", StartupInputHash: "startup-mixed-native-proof",
+			Sources: []runtimecontract.RuntimeDefinitionSource{{CandidateItemRef: "original-goal", ItemRef: "formal-goal", SourceScope: "goal", SourceID: "goal", Text: template.GoalText}},
+		}
+		for n, text := range template.DoDItems {
+			ref := fmt.Sprintf("original-dod-%03d", n+1)
+			sourceID := fmt.Sprintf("dod-%03d", n+1)
+			inventory.Sources = append(inventory.Sources, runtimecontract.RuntimeDefinitionSource{CandidateItemRef: ref, ItemRef: "formal-" + ref, SourceScope: "dodItem", SourceID: sourceID, Text: text})
+			requirementID, obligationID := fmt.Sprintf("requirement-%03d", n+1), fmt.Sprintf("obligation-%03d", n+1)
+			inventory.Requirements = append(inventory.Requirements, runtimecontract.RuntimeSourceRequirement{ID: requirementID, DimensionID: "native-proof", Required: true, SourceKind: "USER_EXPLICIT", SourceItemRefs: []string{ref}, Text: text})
+			inventory.Obligations = append(inventory.Obligations, runtimecontract.RuntimeSourceObligation{ID: obligationID, RequirementID: requirementID, DoDItemRefs: []string{ref}, Text: text})
+			for _, p := range activation.ExecutionContract.ProfileContracts {
+				for _, r := range p.EvidenceRequirements {
+					if runtimecontract.RuntimeEvidenceDeclarationMatchesSource(r, "dodItem", sourceID) {
+						inventory.Verifications = append(inventory.Verifications, runtimecontract.RuntimeSourceVerification{ID: fmt.Sprintf("verification-%03d-%d", n+1, len(inventory.Verifications)+1), ObligationID: obligationID, Declaration: text, ProfileID: p.ID, EvidenceRequirementID: r.ID, Scope: r.Scope})
+					}
+				}
+			}
+		}
+		purposes, err := runtimecontract.RequiredRuntimeEvidencePurposes(activation.ExecutionContract.ProfileContracts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, purpose := range purposes {
+			purpose.AcceptanceItemRef = "original-dod-001"
+			inventory.EvidencePurposeMappings = append(inventory.EvidencePurposeMappings, purpose)
+		}
+		for _, source := range inventory.Sources {
+			for _, p := range activation.ExecutionContract.ProfileContracts {
+				for _, r := range p.EvidenceRequirements {
+					if !runtimecontract.RuntimeEvidenceDeclarationMatchesSource(r, source.SourceScope, source.SourceID) {
+						continue
+					}
+					for _, rule := range r.LineageAssertions {
+						if rule.ExecutionSourceContractRef == "" {
+							continue
+						}
+						mapping := runtimecontract.RuntimeExecutionProofMapping{ContractRef: rule.ExecutionSourceContractRef, ConsumerItemRef: source.CandidateItemRef, RuleRef: rule.Ref, SourceItemRef: "original-dod-001"}
+						if source.SourceScope == "goal" {
+							mapping.ConsumerGoalText = source.Text
+						}
+						inventory.ExecutionProofMappings = append(inventory.ExecutionProofMappings, mapping)
+					}
+				}
+			}
+		}
+		inventory = inventory.WithHash()
+		bootstrap, err := activationcore.RuntimeBootstrapWithSourceObligations(
+			&workspacemodel.Goal{ID: "goal-mixed-native-proof", WorkspaceID: workspaceID, Text: template.GoalText},
+			&workspacemodel.DoD{ID: "dod-mixed-native-proof", WorkspaceID: workspaceID, Items: append([]string(nil), template.DoDItems...)},
+			"definition-mixed-native-proof", "startup-mixed-native-proof", nil, activation, &inventory,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return *bootstrap
+	}
+	t.Fatal("software-dev built-in template is missing")
+	return runtimecontract.RuntimeBootstrap{}
 }
 
 func builtinSoftwareDevNativeProofBootstrap(t *testing.T) runtimecontract.RuntimeBootstrap {

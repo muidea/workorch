@@ -619,19 +619,15 @@ recovery/delivery 合同。`TestEntrypointBehaviorObservesBuiltGoProcessWithoutR
   子进程/其它语言的交付入口若不被该 adapter 观测，必须提供对应的 typed owner proof adapter；不能用同名测试、
   source-text、dependency-only success 或模型声明补齐。验证输入/验收判据修订需要独立合同，默认实现修复不授予该权限。
 
-v2 对只有一个 native attestation 的缺失实现执行事实返回 bounded `InputAddition`：保留原 required/native check，另给
-一个 exact workspace-relative 新输入与 supplemental native identity。该事实不授权写文件，必须匹配 Profile 的独立
-create-only route，并经 File feasibility 和 SM-2 seal。多 attestation、不可验证或其它失败不推断补充合同。
-fresh v3 catalog 将原检查与补充检查绑定为 all-of，并沿用最多 32 个 native input 的执行/观测上界。补充文件只允许
-imports 和该 exact test function；不能借 top-level helper、全局变量、`init`、`TestMain` 或重定义原检查替换实现/判据。
-`InputAddition.contentContractRef + contentRequirements` 随 owner receipt/hash、repair manifest 与 provider 投影携带同一
-有界内容合同：辅助常量、变量、类型与闭包须位于 test function 内，断言须直接位于 test body 或 `t.Run` callback
-中，不能只藏在辅助闭包；真实入口必须受该协议观测。
-既有补充输入无效时，fresh catalog 只发布该 CWI 的 unavailability 和 exact 原因；pure prospective query 没有可解析的
-preparation，不能宣称另建文件会满足它。Shell policy revision 绑定这份合同，旧 snapshot 按 typed stale 重获；历史
-binding/receipt 不升级或改写。
-补充仍未观测实现时返回 `validation_workspace_behavior_supplement_unobserved`，不再提供补充合同；补充的编译错误也
-不能把测试/owner harness 文件交给普通实现修复。具体 CWI 的真实交付入口断言仍不可由“任意函数被覆盖”替代。
+v2/project 对缺失实现执行事实（`validation_workspace_behavior_unobserved`）且所有 attestation 尚无补充输入时返回有界 `InputAddition`：对单 attestation 直接选择该检查，对多 attestation 按确定性主检查顺序（优先 `workorch-cwi-check-*`，否则规范化首项）选择一个主检查生成单一 `InputAddition`，与 `EvidenceReason` 保持一致；保留全部原检查与不可变 Definition 为 all-of。该事实不授权写文件，必须匹配 Profile 的独立 create-only route，并经 File feasibility 和 SM-2 seal。
+catalog 将全部原检查与该补充检查绑定为 all-of，并沿用最多 32 个 native input 的执行/观测上界。补充文件只允许 imports、无 receiver 同包 helper、type、const、纯数据 var 与该 exact test function（`shellEntrypointSupplementDeclarations`）；禁止 receiver 方法、额外 `Test*` 函数、`init`、`TestMain`、全局初始化调用/闭包或重定义原检查，`InputAddition.contentContractRef + contentRequirements`（project 协议使用 `shell/go-test-input/project-supplement/v1`）与 AST 校验保持唯一当前口径一致。多 attestation 下的补充输入若出现可确定符号大小写编译错误，`shellValidationInputCompileFact` 同样定位唯一含 `SupplementalNativeCheckRef` 的检查产出 `InputRepair`。
+既有补充输入无效时，fresh catalog 只发布该 CWI 的 unavailability 和 exact 原因；pure prospective query 没有可解析的 preparation，不能宣称另建文件会满足它。Shell policy revision 绑定这份合同，旧 snapshot 按 typed stale 重获；历史 binding/receipt 不升级或改写。
+补充仍未观测实现时返回 `validation_workspace_behavior_supplement_unobserved`，不再提供补充合同（严格 1 轮补充上限）；补充的编译错误也不能把测试/owner harness 文件交给普通实现修复。具体 CWI 的真实交付入口断言仍不可由“任意函数被覆盖”替代。
+
+对于通过 `templateProofBindings` 精确绑定 `validationRecipeId` 的非 Go 运行时内置模板 DoD，`shell/project-multi-failure-artifact-validation` adapter（协议 `shell/go-test-json/project-multi-failure-artifact`）与通用严格行为 recipe 分工明确：
+- Fail-Closed 绑定门槛：仅当 `requirement.ValidationRecipeID == recipe.ID` 精确匹配时才绑定/准备/执行；通配或空 `ValidationRecipeID` 的普通交付 DoD 绝不进入该协议，继续强制 `workspace_behavior_observed` 与 `RuntimeValidationProofBehavioral`。同时 Shell 在该 surface 上发布 `RequireExactRecipeSelection: true`，使仅含无绑定需求或混合需求的 catalog 在 `ValidateRuntimeValidationProofRequirementCatalogApplicability` 保持严格隔离并拒绝任何非精确绑定记录。
+- 四阶段全项目执行与诚实分级：Stage 1–3 与 `shell/project-multi-failure-validation` 完全一致执行根 module `go build ./...`、`go test -json -count=1 ./...`、`go test -race -json -count=1 ./...`；Stage 4（`reviewed-cwi-execution`，`RequireBehavior=false`）在隔离同包内执行全部 reviewed exact checks，强制全部通过、零 skip、完整 JSON transcript、source 前后 hash 一致、单一 deadline、原文持久化及多失败诊断，最终诚实产出 `RuntimeValidationProofExecuted`（不发出 `workspace_behavior_observed` 标签）。
+- 审查范围沿用 64 files / 256 KiB（含 `project/` 包、共享文档/配置与根定义）与 `RuntimeValidationDiagnosticSourceReviewV1`，引导模型对真实文档/计划/配置/静态检查或 owner 证据断言，不得伪造回执、读取私有存储或塞入无关 Go 调用制造覆盖率。
 `TestValidationInputSupplementRequiresOriginalAndDeliveryBehavior` 校准原检查失败、实现错误、源码/dependency/fake bypass、
 skip、初始化/runner override、输入编译错误、精确重放与补充 all-of 正反例。
 `TestSupplementContentContractAndFreshReadinessAgreeWithoutReplacementPreparation` 覆盖 inline 正例与顶层 helper/const/var/type、

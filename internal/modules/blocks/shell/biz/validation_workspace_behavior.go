@@ -25,6 +25,12 @@ func shellNativeObservationProtocolSupported(ref string) bool {
 
 func shellRequiresWorkspaceBehavior(request RuntimeCommandRequest) bool {
 	for _, attestation := range request.ValidationCheckAttestations {
+		if shellProjectObservationProtocol(attestation.ObservationProtocolRef) {
+			if shellProjectRequiresBehavior(attestation.ObservationProtocolRef) {
+				return true
+			}
+			continue
+		}
 		if attestation.ObservationProtocolRef == shellGoBehaviorObservationProtocolRef || attestation.ObservationProtocolRef == shellGoSupplementObservationProtocolRef || shellEntrypointObservationProtocol(attestation.ObservationProtocolRef) {
 			return true
 		}
@@ -62,34 +68,31 @@ func validateShellBehaviorRecipeArgs(args []string) error {
 	return nil
 }
 
-func prepareShellBehaviorObservation(request RuntimeCommandRequest, args []string, executionDirectories ...string) ([]string, string, error) {
-	if !shellRequiresWorkspaceBehavior(request) {
-		return args, "", nil
-	}
+func validateShellExactNativeCheckArgs(request RuntimeCommandRequest, args []string, executionDirectories ...string) (string, error) {
 	if !shellInputHasManagedValidation(request) || len(request.ValidationCheckAttestations) > maxShellBehaviorNativeChecks || len(args) == 0 || args[0] != "test" {
-		return nil, "", fmt.Errorf("workspace behavior observation requires a bounded sealed managed native-check set")
+		return "", fmt.Errorf("workspace behavior observation requires a bounded sealed managed native-check set")
 	}
 	if err := validateShellBehaviorRecipeArgs(args); err != nil {
-		return nil, "", err
+		return "", err
 	}
 	exactRun, jsonOutput, uncached := false, false, false
 	var nativeChecks []string
 	for _, attestation := range request.ValidationCheckAttestations {
 		if attestation.ObservationProtocolRef != request.ValidationCheckAttestations[0].ObservationProtocolRef {
-			return nil, "", fmt.Errorf("workspace behavior observation cannot mix native protocols")
+			return "", fmt.Errorf("workspace behavior observation cannot mix native protocols")
 		}
 		for _, ref := range attestation.NativeCheckRefs() {
 			nativeChecks = append(nativeChecks, regexp.QuoteMeta(ref))
 		}
 	}
 	if len(nativeChecks) > maxShellBehaviorNativeChecks {
-		return nil, "", fmt.Errorf("native input bound exceeded")
+		return "", fmt.Errorf("native input bound exceeded")
 	}
 	expectedRun := "^(" + strings.Join(normalizeShellStrings(nativeChecks), "|") + ")$"
 	for index, arg := range args {
 		if arg == "-run" {
 			if exactRun || index+1 >= len(args) || args[index+1] != expectedRun {
-				return nil, "", fmt.Errorf("workspace behavior observation requires one exact native-check selector")
+				return "", fmt.Errorf("workspace behavior observation requires one exact native-check selector")
 			}
 			exactRun = true
 		}
@@ -97,24 +100,41 @@ func prepareShellBehaviorObservation(request RuntimeCommandRequest, args []strin
 		uncached = uncached || arg == "-count=1"
 	}
 	if !exactRun || !jsonOutput || !uncached {
-		return nil, "", fmt.Errorf("workspace behavior observation requires exact owner native-check instrumentation")
+		return "", fmt.Errorf("workspace behavior observation requires exact owner native-check instrumentation")
 	}
-	coveragePackages := "./..."
 	pkg, err := shellIsolatedValidationPackage(request.ValidationCheckAttestations)
 	if err != nil {
-		return nil, "", err
+		return "", err
 	}
 	if pkg != "" {
 		prefix := "test\x00-json\x00-count=1\x00-run\x00" + expectedRun + "\x00"
 		if joined := strings.Join(args, "\x00"); joined != prefix+"./"+pkg && joined != prefix+"-v\x00./"+pkg {
-			return nil, "", fmt.Errorf("isolated validation must execute only its exact reviewed package")
+			return "", fmt.Errorf("isolated validation must execute only its exact reviewed package")
 		}
 		directory := request.WorkspaceDeliverableDirectory
 		if len(executionDirectories) != 0 {
 			directory = executionDirectories[0]
 		}
 		if inspection := inspectShellNativeValidationChecks(directory, request.ValidationScopeTargetRefs, request.ValidationCheckAttestations); inspection.Code != "" {
-			return nil, "", fmt.Errorf("isolated validation input precondition failed: %s", inspection.Code)
+			return "", fmt.Errorf("isolated validation input precondition failed: %s", inspection.Code)
+		}
+	}
+	return pkg, nil
+}
+
+func prepareShellBehaviorObservation(request RuntimeCommandRequest, args []string, executionDirectories ...string) ([]string, string, error) {
+	if !shellRequiresWorkspaceBehavior(request) {
+		return args, "", nil
+	}
+	pkg, err := validateShellExactNativeCheckArgs(request, args, executionDirectories...)
+	if err != nil {
+		return nil, "", err
+	}
+	coveragePackages := "./..."
+	if pkg != "" {
+		directory := request.WorkspaceDeliverableDirectory
+		if len(executionDirectories) != 0 {
+			directory = executionDirectories[0]
 		}
 		coveragePackages, err = shellIsolatedCoveragePackages(directory, request.ValidationScopeTargetRefs, pkg)
 		if err != nil {
@@ -262,7 +282,7 @@ func attachShellWorkspaceBehavior(output *RuntimeCommandResult, request RuntimeC
 		code = "validation_workspace_behavior_supplement_unobserved"
 	}
 	if code == "validation_workspace_behavior_unobserved" {
-		for _, attestation := range request.ValidationCheckAttestations {
+		if attestation, ok := shellSelectValidationInputAdditionCheck(request.ValidationCheckAttestations); ok {
 			output.EvidenceReason += fmt.Sprintf("; preserve existing checks; add %s with %s exercising the actual delivery entry for the same immutable requirement", shellSupplementTargetRef(attestation.NativeCheckRef), shellSupplementCheckRef(attestation.NativeCheckRef))
 		}
 	}

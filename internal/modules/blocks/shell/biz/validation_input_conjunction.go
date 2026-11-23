@@ -43,7 +43,7 @@ func shellConjunctiveNativePackage(native string) string {
 func shellConjunctiveInputDeclarations(file *ast.File, checks []runtimecontract.RuntimeValidationCheckAttestationBinding) bool {
 	allowAdditionalTests := len(checks) != 0
 	for _, check := range checks {
-		allowAdditionalTests = allowAdditionalTests && check.ObservationProtocolRef == shellProjectMultiFailureDiagnosticProtocolRef
+		allowAdditionalTests = allowAdditionalTests && shellProjectMultiFailureProtocol(check.ObservationProtocolRef)
 	}
 	allowed := make(map[string]bool)
 	for _, check := range checks {

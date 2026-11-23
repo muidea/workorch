@@ -21,23 +21,49 @@ var shellProjectNativeIdentity = regexp.MustCompile(`^TestWorkOrchCWI_([A-F0-9]{
 
 const shellProjectFailureDiagnosticProtocolRef = "shell/go-test-json/project-failure-diagnostic-behavior"
 const shellProjectMultiFailureDiagnosticProtocolRef = "shell/go-test-json/project-multi-failure-behavior"
+const shellProjectMultiFailureArtifactProtocolRef = "shell/go-test-json/project-multi-failure-artifact"
+const shellProjectMultiFailureArtifactContentContractRef = "shell/go-test-input/project-multi-failure-artifact/v1"
 
 func shellProjectAdapter(adapter string) bool {
-	return adapter == modulecommon.ValidationRecipeAdapterProjectConjunction || adapter == modulecommon.ValidationRecipeAdapterProjectFailureDiagnostic || adapter == modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic
+	return adapter == modulecommon.ValidationRecipeAdapterProjectConjunction ||
+		adapter == modulecommon.ValidationRecipeAdapterProjectFailureDiagnostic ||
+		adapter == modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic ||
+		adapter == modulecommon.ValidationRecipeAdapterProjectMultiFailureArtifact
 }
 
 func shellProjectObservationProtocol(protocol string) bool {
-	return protocol == shellProjectConjunctionProtocolRef || protocol == shellProjectFailureDiagnosticProtocolRef || protocol == shellProjectMultiFailureDiagnosticProtocolRef
+	return protocol == shellProjectConjunctionProtocolRef ||
+		protocol == shellProjectFailureDiagnosticProtocolRef ||
+		protocol == shellProjectMultiFailureDiagnosticProtocolRef ||
+		protocol == shellProjectMultiFailureArtifactProtocolRef
+}
+
+func shellProjectMultiFailureProtocol(protocol string) bool {
+	return protocol == shellProjectMultiFailureDiagnosticProtocolRef || protocol == shellProjectMultiFailureArtifactProtocolRef
+}
+
+func shellProjectRequiresBehavior(protocol string) bool {
+	return shellProjectObservationProtocol(protocol) && protocol != shellProjectMultiFailureArtifactProtocolRef
+}
+
+func shellProjectFinalStageID(requireBehavior bool) string {
+	if requireBehavior {
+		return "reviewed-cwi-behavior"
+	}
+	return "reviewed-cwi-execution"
 }
 
 func shellProjectAdapterProtocol(adapter string) string {
-	if adapter == modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
+	switch adapter {
+	case modulecommon.ValidationRecipeAdapterProjectMultiFailureArtifact:
+		return shellProjectMultiFailureArtifactProtocolRef
+	case modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic:
 		return shellProjectMultiFailureDiagnosticProtocolRef
-	}
-	if adapter == modulecommon.ValidationRecipeAdapterProjectFailureDiagnostic {
+	case modulecommon.ValidationRecipeAdapterProjectFailureDiagnostic:
 		return shellProjectFailureDiagnosticProtocolRef
+	default:
+		return shellProjectConjunctionProtocolRef
 	}
-	return shellProjectConjunctionProtocolRef
 }
 
 func shellProjectNativePackage(native string) string {
@@ -54,17 +80,24 @@ func shellProjectRequirementIdentity(requirement runtimecontract.RuntimeValidati
 	return hex.EncodeToString(digest[:])
 }
 
-func shellProjectExecutionStageIdentities(pkg string) []runtimecontract.RuntimeValidationExecutionStageIdentity {
-	specs := shellProjectFixedStages(nil, pkg)
+func shellProjectExecutionStageIdentities(pkg string, requireBehavior ...bool) []runtimecontract.RuntimeValidationExecutionStageIdentity {
+	behavior := true
+	if len(requireBehavior) != 0 {
+		behavior = requireBehavior[0]
+	}
+	specs := shellProjectFixedStages(nil, pkg, behavior)
 	ret := make([]runtimecontract.RuntimeValidationExecutionStageIdentity, 0, len(specs))
 	for index, spec := range specs {
-		ret = append(ret, runtimecontract.RuntimeValidationExecutionStageIdentity{ID: spec.ID, Scope: spec.Scope, RequireTests: index > 0, RequireBehavior: index == 3})
+		ret = append(ret, runtimecontract.RuntimeValidationExecutionStageIdentity{ID: spec.ID, Scope: spec.Scope, RequireTests: index > 0, RequireBehavior: index == 3 && behavior})
 	}
 	return ret
 }
 
-func shellProjectRecipeDeclared(recipe runtimecontract.RuntimeValidationRecipe) bool {
+func shellProjectExecutionStageIdentitiesForProtocol(pkg, protocol string) []runtimecontract.RuntimeValidationExecutionStageIdentity {
+	return shellProjectExecutionStageIdentities(pkg, shellProjectRequiresBehavior(protocol))
+}
 
+func shellProjectRecipeDeclared(recipe runtimecontract.RuntimeValidationRecipe) bool {
 	return shellProjectAdapter(recipe.AdapterRef) &&
 		recipe.InputReviewProtocolRef == runtimecontract.RuntimeValidationInputReviewProtocol &&
 		(recipe.Command == "" && len(recipe.Args) == 0 || recipe.Command == "go" && strings.Join(recipe.Args, "\x00") == "test\x00-v\x00./...") &&
@@ -89,20 +122,36 @@ func shellProjectRequestSelected(request RuntimeCommandRequest) (bool, error) {
 	if err != nil || pkg == "" {
 		return false, fmt.Errorf("project conjunction requires one exact reviewed requirement package")
 	}
-	hash := runtimecontract.StableRuntimeValidationExecutionStagesHash(shellProjectExecutionStageIdentities(pkg))
+	expectedProtocol := shellProjectAdapterProtocol(recipe.AdapterRef)
+	requireBehavior := shellProjectRequiresBehavior(expectedProtocol)
+	hash := runtimecontract.StableRuntimeValidationExecutionStagesHash(shellProjectExecutionStageIdentities(pkg, requireBehavior))
 	for _, check := range request.ValidationCheckAttestations {
-		if check.ObservationProtocolRef != shellProjectAdapterProtocol(recipe.AdapterRef) || check.ExecutionStagesHash != hash {
+		if check.ObservationProtocolRef != expectedProtocol || check.ExecutionStagesHash != hash {
 			return false, fmt.Errorf("project conjunction execution stages do not match sealed mappings")
+		}
+		if !requireBehavior && check.SupplementalNativeCheckRef != "" {
+			return false, fmt.Errorf("exact artifact validation does not accept behavior supplements")
 		}
 	}
 	return true, nil
 }
 
+func shellProjectContentContractRef(adapter string) string {
+	if adapter == modulecommon.ValidationRecipeAdapterProjectMultiFailureArtifact {
+		return shellProjectMultiFailureArtifactContentContractRef
+	}
+	return shellProjectInputContentContractRef
+}
+
 func shellProjectContentRequirements(adapter string) string {
-	if adapter != modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
+	switch adapter {
+	case modulecommon.ValidationRecipeAdapterProjectMultiFailureArtifact:
+		return shellProjectMultiFailureArtifactInputContentRequirements
+	case modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic:
+		return shellProjectMultiFailureInputContentRequirements
+	default:
 		return shellProjectInputContentRequirements
 	}
-	return shellProjectMultiFailureInputContentRequirements
 }
 
 // Use the exact declaration at the new preparation boundary. A zero deadline
@@ -121,8 +170,12 @@ const shellProjectProofTopologyRequirements = " Map each current native check to
 
 const shellProjectMultiFailureInputContentRequirements = "Create/legally maintain targetRef in this requirement package. Declare every original nativeCheckRef once as func(t *testing.T), asserting its original criterion and all source obligations through real testing.T. definition_assessment consumes owner facts for necessity/minimality; tests cannot fabricate baselines/receipts. Added Tests require independent review/execution all-of, never replacements. Local helpers/methods, types/constants and data-only vars are allowed. No init, TestMain, global initializer calls/closures, nested modules, cgo, imports of other validation packages or instrumentation overrides. Review the complete current package/helpers/fixtures, shared data/docs and root definitions (64 files/256 KiB, 64 sources, report 64 KiB); no omission/truncation. Adjacent packages execute all-of, without repeated semantic review. Execution owner records provenance and failed-source bodies. Exercise actual delivery in-process or via fresh Go-built executables inheriting owner instrumentation. Skip, markers and test-local substitutes grant no proof. Root build/test/race and exact CWI behavior are all-of within one original deadline (owner default if omitted; allowed 1000-600000ms), including preparation/publication/cleanup. Preserve Goal/DoD/all checks; report infeasibility, never weaken criteria, shorten observations or extend time. Readiness/review/effect grant no credit; scratch is not a security sandbox." + shellProjectProofTopologyRequirements + shellNativeSourceExecutionRequirements
 
+const shellProjectMultiFailureArtifactInputContentRequirements = "Create/legally maintain targetRef in this requirement package. Declare every original nativeCheckRef once as func(t *testing.T), asserting its original criterion and all source obligations through real testing.T against actual workspace artifacts (docs, plans, configs), static/lint checks, or owner-grounded facts. definition_assessment consumes owner facts for necessity/minimality, VCS commits, and terminal result/evidence-index duties. Do NOT read private Runtime storage, fabricate receipts/summaries, or inject unrelated Go delivery calls solely to manufacture code coverage. Added Tests require independent review/execution all-of, never replacements. Local helpers/methods, types/constants and data-only vars are allowed. No init, TestMain, global initializer calls/closures, nested modules, cgo, imports of other validation packages or instrumentation overrides. Review the complete package/helpers/fixtures, shared project data/docs and root definitions (64 files/256 KiB, 64 sources, report 64 KiB); no omission/truncation. Adjacent packages execute all-of. Root go build ./..., go test ./..., go test -race ./... and reviewed-cwi-execution exact checks execute all-of within one original deadline (owner default if omitted; allowed 1000-600000ms), yielding ProofClass executed without requiring Go production code coverage. Exact CWI execution, assessment and terminal receipt consumers remain mandatory and distinct. Preserve Goal/DoD/all checks; skips and placeholders grant no proof; readiness/review/effect grant no credit; scratch is not a security sandbox." + shellNativeSourceExecutionRequirements
+
 func shellProjectAdapterForObservation(protocol string) string {
 	switch protocol {
+	case shellProjectMultiFailureArtifactProtocolRef:
+		return modulecommon.ValidationRecipeAdapterProjectMultiFailureArtifact
 	case shellProjectMultiFailureDiagnosticProtocolRef:
 		return modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic
 	case shellProjectFailureDiagnosticProtocolRef:

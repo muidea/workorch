@@ -246,16 +246,22 @@ func finishShellProjectExecution(result *shellProjectExecutionResult, executeErr
 		// owner completion boundary has now verified the entire conjunction,
 		// original output storage, cleanup and the single operation deadline.
 		observation := result.Result.ValidationObservation
+		requireBehavior := shellProjectRequiresBehavior(result.Conjunction.ProtocolRef)
+		hasBehaviorTag := shellStringIncluded(result.Result.EvidenceTags, "workspace_behavior_observed")
 		if observation == nil || observation.RecipeID == "" || observation.ObservationProtocolRef != result.Conjunction.ProtocolRef ||
 			result.Result.ExitCode != 0 || result.Result.ZeroWork || result.Result.OutputTruncated ||
-			!shellStringIncluded(result.Result.EvidenceTags, "workspace_behavior_observed") {
-			executeErr = fmt.Errorf("复合验证缺少完整行为证明观察")
+			(requireBehavior && !hasBehaviorTag) || (!requireBehavior && hasBehaviorTag) {
+			executeErr = fmt.Errorf("复合验证缺少完整证明观察")
 		} else {
 			conjunction := result.Conjunction.Clone()
 			observation.ExecutionConjunction = &conjunction
-			observation.ProofClass = runtimecontract.RuntimeValidationProofBehavioral
+			if requireBehavior {
+				observation.ProofClass = runtimecontract.RuntimeValidationProofBehavioral
+			} else {
+				observation.ProofClass = runtimecontract.RuntimeValidationProofExecuted
+			}
 			if err := observation.ValidateFailureDetails(); err != nil {
-				executeErr = fmt.Errorf("复合验证行为证明观察不完整: %w", err)
+				executeErr = fmt.Errorf("复合验证证明观察不完整: %w", err)
 			}
 		}
 	}

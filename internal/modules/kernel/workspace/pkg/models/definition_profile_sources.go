@@ -76,13 +76,29 @@ func compileTemplateProofProfiles(t *WorkspaceTemplate, workspaceHints, profiles
 	if err = json.Unmarshal(bytes, &result); err != nil {
 		return nil, err
 	}
+	declaredRecipes := map[string]bool{}
+	for _, policy := range t.EvidencePolicies {
+		if id, ok := policy.String("id"); ok {
+			id = strings.TrimSpace(id)
+			if id != "" {
+				declaredRecipes[id] = true
+			}
+		}
+	}
 	seen := map[string]bool{}
 	for _, entry := range entries {
 		b, ok := entry.(map[string]any)
-		if !ok || len(b) != 4 {
+		if !ok || len(b) < 4 || len(b) > 5 {
 			return nil, fmt.Errorf("invalid exact template proof binding")
 		}
-		for _, key := range []string{"candidateItemRef", "text", "profileId", "lineageAssertions"} {
+		for key := range b {
+			switch key {
+			case "candidateItemRef", "text", "profileId", "lineageAssertions", "validationRecipeId":
+			default:
+				return nil, fmt.Errorf("unknown template proof binding field %s", key)
+			}
+		}
+		for _, key := range []string{"candidateItemRef", "text", "profileId"} {
 			if _, ok = b[key]; !ok {
 				return nil, fmt.Errorf("missing template proof binding field %s", key)
 			}
@@ -157,11 +173,38 @@ func compileTemplateProofProfiles(t *WorkspaceTemplate, workspaceHints, profiles
 		if ordinary == nil || len(runtimeprofiledecode.Strings(ordinary["requiredEvidenceKinds"])) != 1 || runtimeprofiledecode.Strings(ordinary["requiredEvidenceKinds"])[0] != "validation" {
 			return nil, fmt.Errorf("template proof requires independent ordinary validation")
 		}
-		ruleRaw, ok := b["lineageAssertions"].([]any)
-		if !ok || len(ruleRaw) == 0 {
+		var ruleRaw []any
+		if rawRules, hasRules := b["lineageAssertions"]; hasRules {
+			typedRules, ok := rawRules.([]any)
+			if !ok || len(typedRules) == 0 {
+				return nil, fmt.Errorf("template proof lacks consumers")
+			}
+			ruleRaw = typedRules
+		}
+		recipeID := ""
+		if rawRecipe, hasRecipe := b["validationRecipeId"]; hasRecipe {
+			value, ok := rawRecipe.(string)
+			if !ok {
+				return nil, fmt.Errorf("template proof validationRecipeId must be a string")
+			}
+			recipeID = strings.TrimSpace(value)
+			if recipeID == "" || len(recipeID) > 512 || strings.IndexFunc(recipeID, func(r rune) bool { return r < 32 || r == 127 }) >= 0 {
+				return nil, fmt.Errorf("template proof validationRecipeId is invalid")
+			}
+			if !declaredRecipes[recipeID] {
+				return nil, fmt.Errorf("template proof references undeclared validationRecipeId %q", recipeID)
+			}
+		}
+		if len(ruleRaw) == 0 && recipeID == "" {
 			return nil, fmt.Errorf("template proof lacks consumers")
 		}
-		duplicate := map[string]any{"id": id, "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": ordinary["acceptedStepKinds"], "lineageAssertions": ruleRaw}
+		duplicate := map[string]any{"id": id, "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": ordinary["acceptedStepKinds"]}
+		if len(ruleRaw) > 0 {
+			duplicate["lineageAssertions"] = ruleRaw
+		}
+		if recipeID != "" {
+			duplicate["validationRecipeId"] = recipeID
+		}
 
 		profile["evidenceRequirements"] = append(requirements, duplicate)
 	}

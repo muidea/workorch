@@ -1296,6 +1296,9 @@ func stableRuntimeOperationAdmissibilitySnapshotIDCanonical(value RuntimeOperati
 		}
 		writeHashStrings(h, surface.CheckRefs)
 		writeHashString(h, string(surface.ProofApplicability))
+		if surface.RequireExactRecipeSelection {
+			writeHashString(h, "require-exact-recipe-selection/v1")
+		}
 		for _, binding := range surface.ProofRequirementBindings {
 			if binding.InputReview != nil {
 				writeHashString(h, RuntimeValidationInputReviewProtocol)

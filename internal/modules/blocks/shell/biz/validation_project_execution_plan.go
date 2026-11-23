@@ -27,17 +27,21 @@ func shellProjectReviewExecutionPlan(subject *rc.RuntimeValidationInputReviewSub
 	if err := instrumentManagedValidationNativeChecks(&request); err != nil {
 		return nil, err
 	}
-	identities := shellProjectExecutionStageIdentities(pkg)
-	for i, spec := range shellProjectFixedStages(request.Args, pkg) {
+	protocol := binding.CheckAttestations[0].ObservationProtocolRef
+	requireBehavior := shellProjectRequiresBehavior(protocol)
+	identities := shellProjectExecutionStageIdentitiesForProtocol(pkg, protocol)
+	for i, spec := range shellProjectFixedStages(request.Args, pkg, requireBehavior) {
 		stage := rc.RuntimeValidationPlannedStage{Identity: identities[i], Command: "go", Args: slices.Clone(spec.Args)}
 		if i == 2 {
 			stage.Instrumentation = []string{"race"}
 		}
 		if i == 3 {
-			stage.Instrumentation = []string{"coverage_behavior", "process_behavior"}
+			if requireBehavior {
+				stage.Instrumentation = []string{"coverage_behavior", "process_behavior"}
+			}
 			stage.RequiredCheckRefs = normalizeShellStrings(binding.RequiredCheckRefs)
 		}
-		if spec.JSON && (binding.CheckAttestations[0].ObservationProtocolRef == shellProjectMultiFailureDiagnosticProtocolRef || shellNativeChannelMethodRequired(subject.Files)) {
+		if spec.JSON && (shellProjectMultiFailureProtocol(protocol) || shellNativeChannelMethodRequired(subject.Files)) {
 			stage.Instrumentation = append(stage.Instrumentation, "native_source_channel")
 			slices.Sort(stage.Instrumentation)
 		}

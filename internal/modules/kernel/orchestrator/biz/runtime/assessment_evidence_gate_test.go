@@ -2,8 +2,11 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -273,4 +276,138 @@ func assessmentTestBinding(id string, coverageID common.CoverageWorkItemID, focu
 	}.Normalized()
 	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
 	return binding
+}
+
+func TestExactBoundExecutedProofClassPassesReceiptAndAssessmentGate(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := validationQualityFacts(t)
+	facts.Focus.RequireAssessment = true
+	facts.Focus.RequireDirectEvidence = true
+	facts.Focus.RequireClaimEvidence = true
+	facts.Focus.RequireExecutableBehaviorEvidence = true
+	facts.Coverage[0].TargetText = "traceability plan maps PRD and constraints"
+	facts.ConvergencePolicy.MaxValidationOnlyRetriesPerFocus = 2
+	recipeID := runtimeManagedValidationEvidencePolicy().ID
+	facts.Focus.ValidationRecipeID = recipeID
+	facts.Focus.RequiredCheckRefs = []string{"TestPlanTraceability"}
+	for catalogIndex := range facts.Resources.OperationAdmissibilities {
+		catalog := &facts.Resources.OperationAdmissibilities[catalogIndex]
+		if catalog.OwnerModuleID != runtimecontract.RuntimeModuleShell {
+			continue
+		}
+		for surfaceIndex := range catalog.ValidationSurfaces {
+			surface := &catalog.ValidationSurfaces[surfaceIndex]
+			if surface.ID == recipeID {
+				surface.CheckRefs = []string{"TestPlanTraceability"}
+			}
+		}
+		catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
+	}
+	aggregate := runtimeTestInitializeAndSealSemanticContract(t, context.Background(), controller, facts, controllerDefinition(), nil)
+	binding, found := coverageBindingForRuntimeCWI(aggregate.Facts.Focus, "cwi-v2")
+	if !found {
+		t.Fatalf("missing sealed CWI binding: %+v", aggregate.Facts.Focus)
+	}
+	validationProof, found := runtimecontract.CoverageEvidenceProofForKind(binding, runtimecontract.EvidenceKindValidation)
+	if !found || validationProof.ValidationRecipeID != recipeID || len(validationProof.ValidationCheckAttestations) == 0 {
+		t.Fatalf("expected exact artifact recipe binding, got %+v", validationProof)
+	}
+	protocolRef := validationProof.ValidationCheckAttestations[0].ObservationProtocolRef
+	nativeChecks := make([]string, 0, len(validationProof.ValidationCheckAttestations))
+	for _, attestation := range validationProof.ValidationCheckAttestations {
+		nativeChecks = append(nativeChecks, attestation.NativeCheckRef)
+	}
+
+	pkgDigest := sha256.Sum256([]byte("fixture"))
+	sourceHash := hex.EncodeToString(pkgDigest[:])
+	stageIdentities := []runtimecontract.RuntimeValidationExecutionStageIdentity{
+		{ID: "project-build", Scope: "root-module:./..."},
+		{ID: "project-test", Scope: "root-module:./...", RequireTests: true},
+		{ID: "project-race", Scope: "root-module:./...", RequireTests: true},
+		{ID: "reviewed-cwi-execution", Scope: "reviewed-package:pkg", RequireTests: true, RequireBehavior: false},
+	}
+	stagesHash := runtimecontract.StableRuntimeValidationExecutionStagesHash(stageIdentities)
+	start := time.Now().UTC().Add(-time.Second)
+	var stages []runtimecontract.RuntimeValidationExecutionStage
+	for idx, id := range stageIdentities {
+		t0 := start.Add(time.Duration(idx) * time.Millisecond).Format(time.RFC3339Nano)
+		t1 := start.Add(time.Duration(idx)*time.Millisecond + 500*time.Microsecond).Format(time.RFC3339Nano)
+		testsCount := 0
+		if id.RequireTests {
+			testsCount = 1
+		}
+		stages = append(stages, runtimecontract.RuntimeValidationExecutionStage{
+			Identity: id, Argv: []string{"go", "test"}, StartedAt: t0, FinishedAt: t1, Started: true, TerminalComplete: true,
+			Stdout:       runtimecontract.RuntimeValidationOutputIdentity{Bytes: 1, SavedBytes: 1, SHA256: sourceHash, Complete: true, Storage: &runtimecontract.RuntimeValidationOutputStorage{Reference: "out"}},
+			Stderr:       runtimecontract.RuntimeValidationOutputIdentity{Bytes: 1, SavedBytes: 1, SHA256: sourceHash, Complete: true, Storage: &runtimecontract.RuntimeValidationOutputStorage{Reference: "err"}},
+			SourceBefore: sourceHash, SourceAfter: sourceHash,
+			Tests: testsCount, PassedTests: testsCount,
+		})
+	}
+	conjunction := runtimecontract.RuntimeValidationExecutionConjunction{
+		ProtocolRef: protocolRef, RequiredStagesHash: stagesHash, Complete: true, Stages: stages,
+	}
+	if err := conjunction.Validate(); err != nil {
+		t.Fatalf("artifact conjunction invalid: %v", err)
+	}
+
+	candidate := managedValidationCandidate("validate-artifact-claim")
+	candidate.Validation.Operations[0].Operation.BindingRefs = []string{binding.ID}
+	candidate.Validation.Operations[0].Operation.CoverageWorkItemIDs = nil
+	sealed, err := beginAndAcceptCandidate(t, controller, aggregate, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit := ExecutionEvidence{
+		EventID: "evidence-artifact-claim", WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: sealed.ActiveDispatch.ID,
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: runtimeTestActiveOperationID(t, sealed, 0),
+		Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,
+		Evidence: runtimecontract.RuntimeOperationEvidence{
+			Summary: "artifact validation executed cleanly", Quality: common.EvidenceQualityValid,
+			Validation: &runtimecontract.RuntimeValidationObservation{
+				RecipeID:               recipeID,
+				ObservationProtocolRef: protocolRef,
+				ProofClass:             runtimecontract.RuntimeValidationProofExecuted,
+				ExecutedChecks:         append([]string(nil), nativeChecks...),
+				PassedChecks:           append([]string(nil), nativeChecks...),
+				ExecutionConjunction:   &conjunction,
+			},
+		},
+	}
+	attachRuntimeTestOwnerReceipt(t, repository.aggregate, &commit)
+	evidence, err := controller.commitEvidence(context.Background(), commit)
+	if err != nil || evidence.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
+		t.Fatalf("artifact validation evidence did not reach assessment: state=%+v err=%v", evidence.Aggregate.Decision, err)
+	}
+	var acceptedRef string
+	for _, ev := range evidence.Aggregate.Facts.Evidence.Accepted {
+		if ev.Kind == runtimecontract.EvidenceKindValidation && ev.Validation != nil && ev.Validation.ProofClass == runtimecontract.RuntimeValidationProofExecuted {
+			acceptedRef = string(ev.ID)
+			break
+		}
+	}
+	if acceptedRef == "" {
+		t.Fatalf("expected accepted validation evidence with executed proof class, got %+v", evidence.Aggregate.Facts.Evidence.Accepted)
+	}
+	if msg := canonicalAssessmentEvidenceQualityFailure(evidence.Aggregate, "cwi-v2", []string{acceptedRef}); msg != "" {
+		t.Fatalf("canonical assessment quality gate rejected executed artifact proof: %s", msg)
+	}
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "assessment-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
+		FocusID: evidence.Aggregate.Facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
+		Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "artifact claim satisfied", EvidenceRefs: []string{acceptedRef},
+		Items: []runtimecontract.RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-v2", Satisfied: true, EvidenceRefs: []string{acceptedRef}}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	progressed, err := controller.commitAssessment(context.Background(), "ws-v2", "run-v2")
+	if err != nil || progressed.Decision.State != runtimecontract.ConvergenceStateComplete || progressed.Facts.Coverage[0].State != runtimecontract.RuntimeCoverageItemStateSatisfied {
+		t.Fatalf("executed artifact validation did not close CWI through assessment: state=%+v err=%v", progressed.Decision, err)
+	}
 }

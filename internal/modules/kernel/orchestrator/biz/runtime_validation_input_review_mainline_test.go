@@ -153,14 +153,18 @@ func TestDriveRuntimeIsolatedInputReviewMainline(t *testing.T) {
 		t.Fatal(err)
 	}
 	adapter, protocol := "", ""
+	artifactAdapter, artifactProtocol := "", ""
 	for _, template := range templates {
 		if template.ID == "software-dev" {
 			for _, policy := range template.EvidencePolicies {
-				if ref, ok := policy["recipeAdapterRef"].(string); ok {
-					adapter = ref
-				}
-				if ref, ok := policy["recipeInputReviewProtocolRef"].(string); ok {
-					protocol = ref
+				id, _ := policy["id"].(string)
+				switch id {
+				case "software-dev-validation-evidence":
+					adapter, _ = policy["recipeAdapterRef"].(string)
+					protocol, _ = policy["recipeInputReviewProtocolRef"].(string)
+				case "software-dev-artifact-validation-evidence":
+					artifactAdapter, _ = policy["recipeAdapterRef"].(string)
+					artifactProtocol, _ = policy["recipeInputReviewProtocolRef"].(string)
 				}
 			}
 		}
@@ -170,6 +174,9 @@ func TestDriveRuntimeIsolatedInputReviewMainline(t *testing.T) {
 	}
 	if protocol != runtimecontract.RuntimeValidationInputReviewProtocol {
 		t.Fatal("default template does not seal the obligation-review protocol")
+	}
+	if artifactAdapter != shellcommon.ValidationRecipeAdapterProjectMultiFailureArtifact || artifactProtocol != runtimecontract.RuntimeValidationInputReviewProtocol {
+		t.Fatalf("default template artifact policy = (%q, %q), want (%q, %q)", artifactAdapter, artifactProtocol, shellcommon.ValidationRecipeAdapterProjectMultiFailureArtifact, runtimecontract.RuntimeValidationInputReviewProtocol)
 	}
 	options := validationInputReviewMainlineOptions{Adapter: adapter, ValidationCount: 1, ProtocolRef: protocol}
 	for _, mode := range []string{"consistent", "conflict", "clarify", "exhausted", "malformed", "reject"} {

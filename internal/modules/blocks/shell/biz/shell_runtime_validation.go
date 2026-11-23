@@ -47,7 +47,7 @@ func resolveRuntimeValidationRecipeDeclarations(recipes []runtimemodel.RuntimeVa
 			continue
 		}
 		switch declaration.AdapterRef {
-		case modulecommon.ValidationRecipeAdapterProjectNative, modulecommon.ValidationRecipeAdapterProjectEntrypoint, modulecommon.ValidationRecipeAdapterReviewedEntrypoint, modulecommon.ValidationRecipeAdapterIsolatedEntrypoint, modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint, modulecommon.ValidationRecipeAdapterProjectConjunction, modulecommon.ValidationRecipeAdapterProjectFailureDiagnostic, modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic:
+		case modulecommon.ValidationRecipeAdapterProjectNative, modulecommon.ValidationRecipeAdapterProjectEntrypoint, modulecommon.ValidationRecipeAdapterReviewedEntrypoint, modulecommon.ValidationRecipeAdapterIsolatedEntrypoint, modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint, modulecommon.ValidationRecipeAdapterProjectConjunction, modulecommon.ValidationRecipeAdapterProjectFailureDiagnostic, modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, modulecommon.ValidationRecipeAdapterProjectMultiFailureArtifact:
 			// An empty workspace has no competing project fact. The currently
 			// registered owner implementation may therefore publish its bounded
 			// prerequisite contract; once any project files exist, resolution is
@@ -178,7 +178,8 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 		if staticIDs[recipe.ID] {
 			for _, requirement := range runtimemodel.NormalizeRuntimeValidationProofRequirements(requirements) {
 				if requirement.Validate() != nil ||
-					(requirement.ValidationRecipeID != "" && requirement.ValidationRecipeID != recipe.ID) {
+					(requirement.ValidationRecipeID != "" && requirement.ValidationRecipeID != recipe.ID) ||
+					(recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectMultiFailureArtifact && requirement.ValidationRecipeID != recipe.ID) {
 					continue
 				}
 				compatibleRequirements++
@@ -274,9 +275,11 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 			ID: recipe.ID, OwnerModuleID: ModuleID, OperationKind: runtimemodel.RuntimeBlockKindManagedValidationSession,
 			CheckRefs: normalizeShellStrings(checks), ProofRequirementBindings: bindings, ProofRequirementPreparations: preparations,
 			PreparationContentContracts: contentContracts, ProofRequirementUnavailabilities: unavailabilities,
-			ProofApplicability: runtimemodel.RuntimeValidationProofNotDeclared, EffectScope: runtimemodel.RuntimeEffectEphemeralSession,
-			IdempotencyClass: runtimemodel.RuntimeOperationIdempotencyAtMostOnce,
-			InputSchemaHash:  schemaHash,
+			ProofApplicability:          runtimemodel.RuntimeValidationProofNotDeclared,
+			RequireExactRecipeSelection: recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectMultiFailureArtifact,
+			EffectScope:                 runtimemodel.RuntimeEffectEphemeralSession,
+			IdempotencyClass:            runtimemodel.RuntimeOperationIdempotencyAtMostOnce,
+			InputSchemaHash:             schemaHash,
 		}
 		hasMaintenance := false
 		for _, u := range unavailabilities {
@@ -330,6 +333,9 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 func shellValidationCheckAttestations(recipe runtimemodel.RuntimeValidationRecipe, requirement runtimemodel.RuntimeValidationProofRequirement) ([]runtimemodel.RuntimeValidationCheckAttestationBinding, bool) {
 	project := shellProjectAdapter(recipe.AdapterRef)
 	if project && (!shellProjectRecipeDeclared(recipe) || requirement.Validate() != nil) {
+		return nil, false
+	}
+	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectMultiFailureArtifact && requirement.ValidationRecipeID != recipe.ID {
 		return nil, false
 	}
 	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint && (requirement.Validate() != nil || recipe.InputReviewProtocolRef != runtimemodel.RuntimeValidationInputReviewProtocol) {
@@ -414,7 +420,7 @@ func shellValidationCheckAttestations(recipe runtimemodel.RuntimeValidationRecip
 			if pkg == "" {
 				return nil, false
 			}
-			stagesHash = runtimemodel.StableRuntimeValidationExecutionStagesHash(shellProjectExecutionStageIdentities(pkg))
+			stagesHash = runtimemodel.StableRuntimeValidationExecutionStagesHash(shellProjectExecutionStageIdentitiesForProtocol(pkg, protocol))
 		}
 		ret = append(ret, runtimemodel.RuntimeValidationCheckAttestationBinding{
 			RequiredCheckRef: required, ObservationProtocolRef: protocol,
@@ -495,7 +501,7 @@ func shellValidationProofPreparationFromInspection(inspection shellNativeCheckIn
 		contentRequirements = strings.TrimSpace(shellConjunctiveInputContentRequirements + shellAssertionFeedbackRequirements)
 	}
 	if shellProjectAdapter(recipe.AdapterRef) && targetRef != "" {
-		preparation.ContentContractRef = shellProjectInputContentContractRef
+		preparation.ContentContractRef = shellProjectContentContractRef(recipe.AdapterRef)
 		contentRequirements = strings.TrimSpace(shellProjectContentRequirements(recipe.AdapterRef) + shellValidationDeclaredDeadlineRequirement(recipe.TimeoutMillis) + shellAssertionFeedbackRequirements)
 	}
 	if preparation.ContentContractRef != "" {
@@ -553,7 +559,7 @@ func instrumentManagedValidationNativeChecks(request *RuntimeCommandRequest) err
 			return fmt.Errorf("managed validation recipe already constrains native checks")
 		}
 	}
-	if shellRequiresWorkspaceBehavior(*request) {
+	if shellRequiresWorkspaceBehavior(*request) || (len(request.ValidationCheckAttestations) != 0 && shellProjectObservationProtocol(request.ValidationCheckAttestations[0].ObservationProtocolRef)) {
 		if len(nativeChecks) > maxShellBehaviorNativeChecks {
 			return fmt.Errorf("workspace behavior observation exceeds the native-check bound")
 		}

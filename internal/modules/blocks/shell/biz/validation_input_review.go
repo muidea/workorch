@@ -46,13 +46,13 @@ func shellReadValidationInputSubject(directory string, targets []string, binding
 		// Other packages' tests remain mandatory execution inputs, but are not
 		// semantic inputs to this requirement's independent review. Helpers and
 		// fixtures belonging to another isolated harness cannot be borrowed.
-		projectInput := binding.CheckAttestations[0].ObservationProtocolRef == shellProjectMultiFailureDiagnosticProtocolRef && !strings.HasSuffix(target, ".go") && !strings.HasPrefix(target, "workorch_validation/")
+		projectInput := shellProjectMultiFailureProtocol(binding.CheckAttestations[0].ObservationProtocolRef) && !strings.HasSuffix(target, ".go") && !strings.HasPrefix(target, "workorch_validation/")
 		if (!review && slices.Contains(maintenanceTargets, target)) || projectInput || strings.HasPrefix(target, prefix) || target == "go.mod" || target == "go.sum" || target == "go.work" || target == "go.work.sum" {
 			refs = append(refs, target)
 		}
 	}
 	maxFiles, maxBytes := runtimecontract.RuntimeValidationInputReviewMaxFiles, runtimecontract.RuntimeValidationInputReviewMaxBytes
-	if binding.CheckAttestations[0].ObservationProtocolRef == shellProjectMultiFailureDiagnosticProtocolRef {
+	if shellProjectMultiFailureProtocol(binding.CheckAttestations[0].ObservationProtocolRef) {
 		maxFiles, maxBytes = runtimecontract.RuntimeValidationDiagnosticSourceMaxFiles, runtimecontract.RuntimeValidationDiagnosticSourceMaxBytes
 	}
 	if len(refs) == 0 || len(refs) > maxFiles {
@@ -110,9 +110,13 @@ func shellReadValidationInputSubject(directory string, targets []string, binding
 		return subject, ""
 	}
 	subject.EvaluationScope = runtimecontract.RuntimeValidationInputSemantics
-	if binding.CheckAttestations[0].ObservationProtocolRef == shellProjectMultiFailureDiagnosticProtocolRef {
+	if shellProjectMultiFailureProtocol(binding.CheckAttestations[0].ObservationProtocolRef) {
 		subject.ProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocol
-		subject.ScopeContractRef, subject.ScopeRequirements = shellProjectMultiFailureReviewScopeRef, shellProjectMultiFailureRequirements
+		if binding.CheckAttestations[0].ObservationProtocolRef == shellProjectMultiFailureArtifactProtocolRef {
+			subject.ScopeContractRef, subject.ScopeRequirements = shellProjectMultiFailureArtifactReviewScopeRef, shellProjectMultiFailureArtifactReviewRequirements
+		} else {
+			subject.ScopeContractRef, subject.ScopeRequirements = shellProjectMultiFailureReviewScopeRef, shellProjectMultiFailureRequirements
+		}
 		subject.DiagnosticSourceContractRef = runtimecontract.RuntimeValidationDiagnosticSourceReviewV1
 		var code string
 		subject.DiagnosticSources, code = shellProjectDiagnosticSourceInventory(subject.Files)

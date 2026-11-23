@@ -192,6 +192,7 @@ func validateRuntimeValidationProofRequirementCatalogApplicability(requirements 
 				if !found || requirement.Hash != binding.RequirementHash || requirement.DefinitionRevision != binding.DefinitionRevision ||
 					requirement.DeclarationRef != binding.DeclarationRef || binding.ValidationRecipeID != surface.ID ||
 					(requirement.ValidationRecipeID != "" && requirement.ValidationRecipeID != binding.ValidationRecipeID) ||
+					(surface.RequireExactRecipeSelection && requirement.ValidationRecipeID != surface.ID) ||
 					!sameStrings(requirement.RequiredCheckRefs, binding.RequiredCheckRefs) {
 					return fmt.Errorf("runtime validation owner catalog published undeclared proof requirement binding %q", binding.RequirementHash)
 				}
@@ -209,6 +210,7 @@ func validateRuntimeValidationProofRequirementCatalogApplicability(requirements 
 				if !found || requirement.Hash != preparation.RequirementHash || requirement.DefinitionRevision != preparation.DefinitionRevision ||
 					requirement.DeclarationRef != preparation.DeclarationRef || preparation.ValidationRecipeID != surface.ID ||
 					(requirement.ValidationRecipeID != "" && requirement.ValidationRecipeID != preparation.ValidationRecipeID) ||
+					(surface.RequireExactRecipeSelection && requirement.ValidationRecipeID != surface.ID) ||
 					!sameStrings(requirement.RequiredCheckRefs, attestedChecks) {
 					return fmt.Errorf("runtime validation owner catalog published undeclared proof requirement preparation %q", preparation.RequirementHash)
 				}
@@ -216,13 +218,17 @@ func validateRuntimeValidationProofRequirementCatalogApplicability(requirements 
 			}
 			for _, unavailable := range surface.ProofRequirementUnavailabilities {
 				requirement, found := RuntimeValidationProofRequirementForCoverage(requested, unavailable.Requirement.CoverageWorkItemID)
-				if unavailable.Validate() != nil || !found || requirement.Hash != unavailable.Requirement.Hash || unavailable.ValidationRecipeID != surface.ID {
+				if unavailable.Validate() != nil || !found || requirement.Hash != unavailable.Requirement.Hash || unavailable.ValidationRecipeID != surface.ID ||
+					(surface.RequireExactRecipeSelection && requirement.ValidationRecipeID != surface.ID) {
 					return fmt.Errorf("runtime validation owner catalog published undeclared proof unavailability %q", unavailable.Requirement.Hash)
 				}
 				seenSurfaceRequirements[requirement.Hash] = struct{}{}
 			}
 			for _, requirement := range requested {
 				if requirement.ValidationRecipeID != "" && requirement.ValidationRecipeID != surface.ID {
+					continue
+				}
+				if surface.RequireExactRecipeSelection && requirement.ValidationRecipeID != surface.ID {
 					continue
 				}
 				if surface.Readiness == RuntimeValidationSurfaceUnavailable || surface.ProofApplicability == RuntimeValidationProofAuxiliary {

@@ -600,8 +600,21 @@ func (o RuntimeCWIReconciliationObservation) ValidateForRequest(request RuntimeC
 			}
 			if o.Status == RuntimeCWIReconciliationObservationSatisfied {
 				v := o.ValidationExecution.Validation
-				if v.ExecutionConjunction == nil || !v.ExecutionConjunction.Complete || v.ProofClass != RuntimeValidationProofBehavioral || len(RuntimeValidationConflictingChecks(v)) != 0 {
+				if v.ExecutionConjunction == nil || !v.ExecutionConjunction.Complete || len(RuntimeValidationConflictingChecks(v)) != 0 {
+					return fmt.Errorf("satisfied shared execution lacks complete validation conjunction")
+				}
+				requireBehavior := false
+				for _, stage := range v.ExecutionConjunction.Stages {
+					if stage.Identity.RequireBehavior {
+						requireBehavior = true
+						break
+					}
+				}
+				if requireBehavior && v.ProofClass != RuntimeValidationProofBehavioral {
 					return fmt.Errorf("satisfied shared execution lacks complete behavioral proof")
+				}
+				if !requireBehavior && v.ProofClass != RuntimeValidationProofExecuted && v.ProofClass != RuntimeValidationProofBehavioral {
+					return fmt.Errorf("satisfied shared execution lacks executed proof class")
 				}
 				for _, attestation := range binding.ValidationCheckAttestations {
 					if !RuntimeValidationAttestationPassed(v, attestation) {

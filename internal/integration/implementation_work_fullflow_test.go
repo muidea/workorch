@@ -1506,7 +1506,7 @@ func implementationWorkFullflowReviewCheck(validation *implementationWorkFullflo
 	}
 	reviewInput := func(text string) (string, string, string) {
 		if protocol == runtimecontract.RuntimeValidationInputReviewProtocol {
-			return implementationWorkFullflowReviewComposition(text, files, scope, plan, assertions)
+			return implementationWorkFullflowReviewComposition(text, validation.Recipe, files, scope, plan, assertions)
 		}
 		return implementationWorkFullflowReviewInput(text, files, scope)
 	}
@@ -1532,7 +1532,7 @@ func implementationWorkFullflowReviewCheck(validation *implementationWorkFullflo
 // This synthetic independent reviewer maps responsibilities, not execution
 // success. Every declared consumer is still checked by the production reducer
 // at its original cutoff or after real terminal material and ordered ACKs.
-func implementationWorkFullflowReviewComposition(criterion string, files []runtimecontract.RuntimeValidationInputReviewFile, scope string, plan *runtimecontract.RuntimeValidationExecutionPlan, assertions []runtimecontract.RuntimeLineageAssertion) (string, string, string) {
+func implementationWorkFullflowReviewComposition(criterion, recipeID string, files []runtimecontract.RuntimeValidationInputReviewFile, scope string, plan *runtimecontract.RuntimeValidationExecutionPlan, assertions []runtimecontract.RuntimeLineageAssertion) (string, string, string) {
 	ordinary, finding, reason := implementationWorkFullflowReviewInput("工程行为", files, scope)
 	if ordinary != runtimecontract.RuntimeValidationInputConsistent {
 		return ordinary, finding, reason
@@ -1580,7 +1580,7 @@ func implementationWorkFullflowReviewComposition(criterion string, files []runti
 	if strings.Contains(criterion, "决策工单") || strings.Contains(criterion, "审批工单") {
 		return runtimecontract.RuntimeValidationInputInconclusive, runtimecontract.RuntimeValidationInputUnknown, "当前组合不提供Decision/Approval工单证明消费者。"
 	}
-	if (strings.Contains(criterion, "完整") || strings.Contains(criterion, "全")) && !implementationWorkFullflowHasProjectPlan(plan) {
+	if (strings.Contains(criterion, "完整") || strings.Contains(criterion, "全")) && !implementationWorkFullflowHasProjectPlanForRecipe(plan, recipeID) {
 		return runtimecontract.RuntimeValidationInputInconclusive, runtimecontract.RuntimeValidationInputUnknown, "完整工程义务缺owner声明的实际项目级合取，不能从隔离包推定。"
 	}
 	return runtimecontract.RuntimeValidationInputConsistent, runtimecontract.RuntimeValidationInputCovered, "原全文义务由真实工程断言与subject中封存的typed消费者合取：输入直接调用生产实现并构建运行CLI；Shell声明根module build/test/race；工作/修复账本在原执行cutoff独立核验；Git历史receipt与最终snapshot、正式Result逐项索引及有序ACK在终态材料产生后核验。此评审仅封存职责，不声明未来事实存在，不授credit。"
@@ -1590,6 +1590,10 @@ func implementationWorkFullflowReviewComposition(criterion string, files []runti
 // This recognizes a declaration only; real stages and terminal consumers below
 // still have to execute and supply their independent receipts.
 func implementationWorkFullflowHasProjectPlan(plan *runtimecontract.RuntimeValidationExecutionPlan) bool {
+	return implementationWorkFullflowHasProjectPlanForRecipe(plan, "")
+}
+
+func implementationWorkFullflowHasProjectPlanForRecipe(plan *runtimecontract.RuntimeValidationExecutionPlan, recipeID string) bool {
 	if plan == nil || len(plan.Stages) != 4 {
 		return false
 	}
@@ -1600,7 +1604,13 @@ func implementationWorkFullflowHasProjectPlan(plan *runtimecontract.RuntimeValid
 		}
 	}
 	last := plan.Stages[3]
-	return last.Command == "go" && last.Identity.RequireTests && last.Identity.RequireBehavior && len(last.RequiredCheckRefs) != 0
+	if last.Command != "go" || !last.Identity.RequireTests || len(last.RequiredCheckRefs) == 0 {
+		return false
+	}
+	if recipeID == "software-dev-artifact-validation-evidence" {
+		return !last.Identity.RequireBehavior && last.Identity.ID == "reviewed-cwi-execution"
+	}
+	return last.Identity.RequireBehavior
 }
 
 func implementationWorkFullflowReviewInput(criterion string, files []runtimecontract.RuntimeValidationInputReviewFile, scope string) (string, string, string) {

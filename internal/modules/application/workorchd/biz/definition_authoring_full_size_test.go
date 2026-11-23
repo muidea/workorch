@@ -258,15 +258,25 @@ func testSoftwareDevFullSizeRestart(t *testing.T, updateMethods bool) {
 			t.Fatal("创作改变用户验收要求")
 		}
 	}
-	found := false
+	foundDefault, foundArtifact := false, false
 	for _, recipe := range runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(first.Activation.EvidencePolicies) {
-		if recipe.AdapterRef != shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic || recipe.InputReviewProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocol {
-			t.Fatalf("未使用已审查 adapter/protocol: %+v", recipe)
+		switch recipe.ID {
+		case "software-dev-validation-evidence":
+			if recipe.AdapterRef != shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic || recipe.InputReviewProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocol {
+				t.Fatalf("未使用已审查 adapter/protocol: %+v", recipe)
+			}
+			foundDefault = true
+		case "software-dev-artifact-validation-evidence":
+			if recipe.AdapterRef != shellcommon.ValidationRecipeAdapterProjectMultiFailureArtifact || recipe.InputReviewProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocol {
+				t.Fatalf("未使用已审查 artifact adapter/protocol: %+v", recipe)
+			}
+			foundArtifact = true
+		default:
+			t.Fatalf("未知已审查 recipe: %+v", recipe)
 		}
-		found = true
 	}
-	if !found {
-		t.Fatal("缺少已审查 adapter")
+	if !foundDefault || !foundArtifact {
+		t.Fatalf("缺少已审查 adapter: default=%v artifact=%v", foundDefault, foundArtifact)
 	}
 	requirements, err := runtimecontract.CompileRuntimeValidationProofRequirements(first.Definition.Revision, first.CoverageItems, first.DefinitionFocuses)
 	if err != nil || len(requirements) != 38 || len(first.CoverageItems) != 40 {

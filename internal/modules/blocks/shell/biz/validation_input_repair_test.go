@@ -100,3 +100,36 @@ func TestValidationInputRepairRefusesAmbiguityAndNonSymbolChanges(t *testing.T) 
 		})
 	}
 }
+
+func TestValidationInputCompileDiagnosticSupportsMultiCheckSupplement(t *testing.T) {
+	const native = "TestWorkOrchCWI_INPUT"
+	const otherNative = "TestWorkOrchCWI_OBLIGATION"
+	target := shellSupplementTargetRef(native)
+	otherTarget := shellSupplementTargetRef(otherNative)
+	root := t.TempDir()
+	input := "package checks\nconst workorchValue = 1\nfunc helper() int { return workOrchValue }\n"
+	writeNativeStructureSource(t, root, target, input)
+	writeNativeStructureSource(t, root, otherTarget, "package checks\n")
+	checks := []runtimecontract.RuntimeValidationCheckAttestationBinding{
+		{RequiredCheckRef: "workorch-cwi-check-1", NativeCheckRef: native, SupplementalNativeCheckRef: shellSupplementCheckRef(native), ObservationProtocolRef: shellGoConjunctiveEntrypointObservationProtocolRef},
+		{RequiredCheckRef: "workorch-obligation-check-1", NativeCheckRef: otherNative, ObservationProtocolRef: shellGoConjunctiveEntrypointObservationProtocolRef},
+	}
+	request := RuntimeCommandRequest{
+		ValidationScopeTargetRefs:   []string{target, otherTarget},
+		ValidationCheckAttestations: checks,
+		ManagedValidation:           runtimecontract.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}
+	record := shellGoTestJSONDiagnosticRecord{Action: "build-output", Output: target + ":3:28: undefined: workOrchValue\n"}
+	output := RuntimeCommandResult{WorkingDirectory: root, Command: "go", Args: []string{"test", "-json", "./..."}, ExitCode: 1, validationSourcesUnchanged: true,
+		goTestJSONFacts: &shellGoTestJSONFacts{DiagnosticRecords: []shellGoTestJSONDiagnosticRecord{record}}}
+	locations, repair := shellValidationInputCompileFact(output, request, "go")
+	if len(locations) != 1 || repair == nil || repair.RequiredCheckRef != checks[0].RequiredCheckRef || repair.TargetRef != target {
+		t.Fatalf("multi-check supplement input repair failed: locations=%+v repair=%+v", locations, repair)
+	}
+	ambiguous := checks
+	ambiguous[1].SupplementalNativeCheckRef = shellSupplementCheckRef(otherNative)
+	request.ValidationCheckAttestations = ambiguous
+	if _, ambiguousRepair := shellValidationInputCompileFact(output, request, "go"); ambiguousRepair != nil {
+		t.Fatalf("ambiguous multi-supplement granted repair: %+v", ambiguousRepair)
+	}
+}

@@ -16,9 +16,10 @@ func shellProjectConjunctionObservation(fact shellProjectConjunctionFact, expect
 	if len(expected) != 4 || len(fact.Stages) == 0 || len(fact.Stages) > runtimecontract.RuntimeValidationExecutionMaxStages || !shellProjectObservationProtocol(fact.ProtocolRef) {
 		return runtimecontract.RuntimeValidationExecutionConjunction{}, fmt.Errorf("复合验证缺少准确的四阶段合同或实际执行事实")
 	}
+	requireBehavior := shellProjectRequiresBehavior(fact.ProtocolRef)
 	var identities []runtimecontract.RuntimeValidationExecutionStageIdentity
 	for index, spec := range expected {
-		identities = append(identities, runtimecontract.RuntimeValidationExecutionStageIdentity{ID: spec.ID, Scope: spec.Scope, RequireTests: index > 0, RequireBehavior: index == 3})
+		identities = append(identities, runtimecontract.RuntimeValidationExecutionStageIdentity{ID: spec.ID, Scope: spec.Scope, RequireTests: index > 0, RequireBehavior: index == 3 && requireBehavior})
 	}
 	ret := runtimecontract.RuntimeValidationExecutionConjunction{ProtocolRef: fact.ProtocolRef, RequiredStagesHash: runtimecontract.StableRuntimeValidationExecutionStagesHash(identities), Complete: fact.Complete, BehaviorTargetRefs: append([]string(nil), fact.BehaviorTargetRefs...)}
 	ret.NativeSources = slices.Clone(fact.NativeSources)
@@ -27,7 +28,7 @@ func shellProjectConjunctionObservation(fact shellProjectConjunctionFact, expect
 	for index, stage := range fact.Stages {
 		identity, spec := identities[min(index, 3)], expected[min(index, 3)]
 		if strings.HasPrefix(stage.ID, "project-diagnostic-") {
-			if fact.ProtocolRef != shellProjectMultiFailureDiagnosticProtocolRef || fact.Complete || index < 2 {
+			if !shellProjectMultiFailureProtocol(fact.ProtocolRef) || fact.Complete || index < 2 {
 				return runtimecontract.RuntimeValidationExecutionConjunction{}, fmt.Errorf("multi-source diagnostic lacks failed project prefix")
 			}
 			prefix := index

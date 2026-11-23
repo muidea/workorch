@@ -106,9 +106,8 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 	if ownerCode == "validation_test_failure_unattributed" {
 		diagnostic.Reason = "test execution failed, but complete bounded workspace implementation observations are unavailable; neither an implementation defect nor a validation-input defect is established; original failure: " + diagnostic.Reason
 	}
-	if ownerCode == "validation_workspace_behavior_unobserved" && len(request.ValidationCheckAttestations) == 1 {
-		check := request.ValidationCheckAttestations[0]
-		if (check.ObservationProtocolRef == shellGoBehaviorObservationProtocolRef || shellEntrypointObservationProtocol(check.ObservationProtocolRef)) && check.SupplementalNativeCheckRef == "" {
+	if ownerCode == "validation_workspace_behavior_unobserved" {
+		if check, ok := shellSelectValidationInputAdditionCheck(request.ValidationCheckAttestations); ok {
 			diagnostic.InputAddition = shellValidationInputAddition(check)
 			if shellProjectObservationProtocol(check.ObservationProtocolRef) {
 				diagnostic.InputAddition.ContentRequirements += shellValidationDeclaredDeadlineRequirement(request.TimeoutMillis)

@@ -261,7 +261,8 @@
             },
             "policyRefs": {
               "evidencePolicies": [
-                "software-dev-validation-evidence"
+                "software-dev-validation-evidence",
+                "software-dev-artifact-validation-evidence"
               ],
               "capabilityUsagePolicies": [
                 "software-dev-code-semantics-guidance"
@@ -288,7 +289,8 @@
             },
             "policyRefs": {
               "evidencePolicies": [
-                "software-dev-validation-evidence"
+                "software-dev-validation-evidence",
+                "software-dev-artifact-validation-evidence"
               ],
               "capabilityUsagePolicies": [
                 "software-dev-code-semantics-guidance"
@@ -315,7 +317,8 @@
             },
             "policyRefs": {
               "evidencePolicies": [
-                "software-dev-validation-evidence"
+                "software-dev-validation-evidence",
+                "software-dev-artifact-validation-evidence"
               ],
               "capabilityUsagePolicies": []
             }
@@ -1343,9 +1346,16 @@
             ]
           },
           {
+            "candidateItemRef": "derived-dod:template:000002",
+            "text": "已从 PRD、README、需求文档或用户 Goal 中提取功能目标、约束和验收点，并映射到执行计划",
+            "profileId": "software-dev",
+            "validationRecipeId": "software-dev-artifact-validation-evidence"
+          },
+          {
             "candidateItemRef": "derived-dod:template:000003",
             "text": "代码和配置变更保持最小且与目标直接相关，并提供 capability-owner receipt 可追溯的 state_change 证据",
             "profileId": "software-dev",
+            "validationRecipeId": "software-dev-artifact-validation-evidence",
             "lineageAssertions": [
               {
                 "ref": "template-minimal-change-owner-receipt",
@@ -1382,6 +1392,7 @@
             "candidateItemRef": "derived-dod:template:000004",
             "text": "若 workspace 输出发生有意义变更，必须通过 git/write add/commit 形成本地版本控制快照，并在证据中引用 commit",
             "profileId": "software-dev",
+            "validationRecipeId": "software-dev-artifact-validation-evidence",
             "lineageAssertions": [
               {
                 "ref": "template-final-git-snapshot",
@@ -1400,9 +1411,22 @@
             ]
           },
           {
+            "candidateItemRef": "derived-dod:template:000011",
+            "text": "lint/静态检查按项目约定执行；缺失命令时记录替代检查或跳过原因",
+            "profileId": "software-dev",
+            "validationRecipeId": "software-dev-artifact-validation-evidence"
+          },
+          {
+            "candidateItemRef": "derived-dod:template:000012",
+            "text": "最终结果包含改动摘要、验证命令、验证结果、失败/跳过说明、残余风险和后续建议",
+            "profileId": "software-dev",
+            "validationRecipeId": "software-dev-artifact-validation-evidence"
+          },
+          {
             "candidateItemRef": "derived-dod:template:000013",
             "text": "DoD 验收评估逐项给出 evidenceRefs，并在交付物索引中可追溯",
             "profileId": "software-dev",
+            "validationRecipeId": "software-dev-artifact-validation-evidence",
             "lineageAssertions": [
               {
                 "ref": "template-final-result-evidence-index",
@@ -1484,6 +1508,30 @@
           }
         ],
         "description": "Validation evidence must represent actual executed work before it can support a satisfied DoD item."
+      },
+      {
+        "id": "software-dev-artifact-validation-evidence",
+        "profile": "software-dev",
+        "rule": "software_dev_test_zero_work_is_inconclusive",
+        "appliesTo": "shell/command",
+        "recipeAdapterRef": "shell/project-multi-failure-artifact-validation",
+        "recipeInputReviewProtocolRef": "validation/input-consistency",
+        "recipeDeclared": true,
+        "recipeTimeoutMillis": 300000,
+        "zeroWorkMarkers": [
+          "no tests to run",
+          "0 tests"
+        ],
+        "qualityOnZeroWork": "inconclusive",
+        "zeroWork": true,
+        "evidenceTags": [
+          "software-dev",
+          "test",
+          "artifact_validation",
+          "zero_work"
+        ],
+        "evidenceReason": "test command completed without executing matching tests",
+        "description": "Exact-bound validation for non-runtime artifact/process template DoD items (plan traceability, change minimality/receipts, git snapshots, static lint, final summary/evidence index): runs project build/test/race and exact reviewed checks without requiring production runtime coverage."
       }
     ]
   },

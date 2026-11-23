@@ -63,20 +63,35 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 	}
 	// 原生 selector 和当前输入必须仍由原 owner 合同完整验证；caller 不能以
 	// instrumented argv 或 package 名称替代检查映射与当前 source membership。
-	behaviorArgs, coveragePath, err := prepareShellBehaviorObservation(request, request.Args, directory)
-	processPath := ""
-	if err == nil {
-		processPath, err = prepareShellProcessBehavior(request, directory)
+	requireBehavior := shellProjectRequiresBehavior(protocol)
+	multiFailure := shellProjectMultiFailureProtocol(protocol)
+	var (
+		behaviorArgs []string
+		coveragePath string
+		processPath  string
+	)
+	if requireBehavior {
+		behaviorArgs, coveragePath, err = prepareShellBehaviorObservation(request, request.Args, directory)
+		if err == nil {
+			processPath, err = prepareShellProcessBehavior(request, directory)
+		}
+		if err == nil {
+			behaviorArgs = shellProcessBehaviorArgs(behaviorArgs, processPath)
+		}
+	} else {
+		_, err = validateShellExactNativeCheckArgs(request, request.Args, directory)
+		if err == nil {
+			behaviorArgs = append([]string(nil), request.Args...)
+		}
 	}
 	if err != nil {
 		output.Status, output.FailureCode = "failed", "validation_project_binding_invalid"
 		result, err := finalizeShellResult(output, err)
-		return result, sealShellProjectConjunction(nil, nil, nil), err
+		return result, sealShellProjectConjunctionWithProtocol(protocol, nil, nil, nil), err
 	}
-	behaviorArgs = shellProcessBehaviorArgs(behaviorArgs, processPath)
-	specs := shellProjectFixedStages(behaviorArgs, pkg)
+	specs := shellProjectFixedStages(behaviorArgs, pkg, requireBehavior)
 	var executionSourceRevision string
-	if protocol == shellProjectMultiFailureDiagnosticProtocolRef {
+	if multiFailure {
 		var code string
 		executionSourceRevision, err = shellProjectSourceSetHash(directory)
 		if err != nil {
@@ -109,7 +124,7 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 	var executeErr error
 	for index, spec := range specs {
 		stageEnv := shellBehaviorEnvironment(env)
-		if index == len(specs)-1 {
+		if index == len(specs)-1 && requireBehavior && processPath != "" {
 			stageEnv = shellProcessBehaviorEnvironment(stageEnv, processPath, behaviorArgs)
 		}
 		var stage shellProjectStageFact
@@ -128,7 +143,7 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 			}
 		}
 		stages = append(stages, stage)
-		if protocol == shellProjectMultiFailureDiagnosticProtocolRef && stage.SourceBefore != executionSourceRevision {
+		if multiFailure && stage.SourceBefore != executionSourceRevision {
 			stageErr = fmt.Errorf("execution source inventory differs from the actual operation snapshot")
 			stages[len(stages)-1].FailureCode = "validation_execution_sources_changed"
 		}
@@ -152,9 +167,13 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 			}
 		}
 		if index == len(specs)-1 {
-			output.workspaceProcessBehaviorTargetRefs, output.workspaceProcessBehaviorError = shellProcessBehaviorTargets(ctx, "go", directory, processPath, stageEnv, request.ValidationScopeTargetRefs)
-			if behaviorErr := attachShellWorkspaceBehavior(&output, request, directory, coveragePath); stageErr == nil && behaviorErr != nil {
-				stageErr = behaviorErr
+			if requireBehavior {
+				output.workspaceProcessBehaviorTargetRefs, output.workspaceProcessBehaviorError = shellProcessBehaviorTargets(ctx, "go", directory, processPath, stageEnv, request.ValidationScopeTargetRefs)
+				if behaviorErr := attachShellWorkspaceBehavior(&output, request, directory, coveragePath); stageErr == nil && behaviorErr != nil {
+					stageErr = behaviorErr
+				}
+			} else if output.ValidationObservation != nil {
+				output.ValidationObservation.ObservationProtocolRef = protocol
 			}
 			for _, check := range request.ValidationCheckAttestations {
 				for _, native := range check.NativeCheckRefs() {
@@ -232,7 +251,7 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 			// behavior stage too. Its instrumentation can expose a new failure
 			// after both whole-project stages passed; unscoped final-stage
 			// coverage must not bypass the complete failed-source union.
-			if protocol == shellProjectMultiFailureDiagnosticProtocolRef && spec.JSON && stage.KnownFailure && (output.ValidationFailureDiagnostic == nil || output.ValidationFailureDiagnostic.Class == runtimecontract.ValidationDiagnosticTestFailed) {
+			if multiFailure && spec.JSON && stage.KnownFailure && (output.ValidationFailureDiagnostic == nil || output.ValidationFailureDiagnostic.Class == runtimecontract.ValidationDiagnosticTestFailed) {
 				diagnosticStages, diagnosticSpecs, diagnostic := runShellProjectMultiFailureDiagnostic(ctx, directory, env, request, &stage, len(stages), stageOutput)
 				stages[len(stages)-1].FailedSourceRefs = stage.FailedSourceRefs
 				stages = append(stages, diagnosticStages...)
@@ -250,8 +269,11 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 			break
 		}
 	}
-	behavior := output.workspaceBehaviorTargetRefs
-	if protocol == shellProjectMultiFailureDiagnosticProtocolRef {
+	var behavior []string
+	if requireBehavior {
+		behavior = output.workspaceBehaviorTargetRefs
+	}
+	if multiFailure {
 		// Partial attribution is still historical fact. A later unobserved source
 		// cannot erase earlier independently observed behavior, and that union
 		// never supplies repair authority unless every failed source completed.
@@ -267,8 +289,8 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 			behavior = canonicalShellBehaviorTargets(attributed)
 		}
 	}
-	fact := sealShellProjectConjunction(stages, specs, behavior)
-	if protocol == shellProjectMultiFailureDiagnosticProtocolRef {
+	fact := sealShellProjectConjunctionWithProtocol(protocol, stages, specs, behavior)
+	if multiFailure {
 		fact.NativeSources = request.validationNativeSources
 		var reviewed []runtimecontract.RuntimeValidationInputReviewFile
 		if request.validationProofBinding.InputReview != nil {
@@ -278,9 +300,6 @@ func runShellProjectConjunctionShared(ctx context.Context, directory string, env
 		if len(stages) != 0 && stages[0].SourceBefore != executionSourceRevision {
 			fact.FailedSourceInputs, fact.SourceInputFailure = nil, "validation_execution_sources_changed"
 		}
-	}
-	if protocol != fact.ProtocolRef {
-		fact.ProtocolRef = protocol
 	}
 	fact.CommitmentHash = shellProjectConjunctionCommitmentHash(fact)
 	if executeErr == nil && !fact.Complete {

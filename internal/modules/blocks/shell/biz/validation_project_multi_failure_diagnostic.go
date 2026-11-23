@@ -117,7 +117,11 @@ func runShellProjectMultiFailureDiagnostic(ctx context.Context, directory string
 	if baseline.ValidationObservation != nil {
 		observation := baseline.ValidationObservation.Clone()
 		observation.ProofClass = ""
-		observation.ObservationProtocolRef = shellProjectMultiFailureDiagnosticProtocolRef
+		if len(request.ValidationCheckAttestations) != 0 && request.ValidationCheckAttestations[0].ObservationProtocolRef != "" {
+			observation.ObservationProtocolRef = request.ValidationCheckAttestations[0].ObservationProtocolRef
+		} else {
+			observation.ObservationProtocolRef = shellProjectMultiFailureDiagnosticProtocolRef
+		}
 		baseline.ValidationObservation = &observation
 	}
 	reject := func(unavailability runtimecontract.RuntimeValidationDiagnosticUnavailability, code, reason string) ([]shellProjectStageFact, []shellProjectStageSpec, *RuntimeCommandResult) {

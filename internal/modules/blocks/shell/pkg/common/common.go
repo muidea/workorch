@@ -30,6 +30,12 @@ const ValidationRecipeAdapterProjectConjunction = "shell/project-conjunction-val
 const ValidationRecipeAdapterProjectFailureDiagnostic = "shell/project-failure-diagnostic-validation"
 const ValidationRecipeAdapterProjectMultiFailureDiagnostic = "shell/project-multi-failure-validation"
 
+// ValidationRecipeAdapterProjectMultiFailureArtifact validates non-Go-runtime DoDs
+// (such as documentation traceability, VCS/receipt lineage, or static lint) via
+// exact-bound root build/test/race plus reviewed CWI execution without requiring
+// Go production coverage.
+const ValidationRecipeAdapterProjectMultiFailureArtifact = "shell/project-multi-failure-artifact-validation"
+
 // Validation owner diagnostic codes are Shell-owned, stable facts. Profiles
 // may match these exact values; Runtime core must not infer them from stderr.
 const (

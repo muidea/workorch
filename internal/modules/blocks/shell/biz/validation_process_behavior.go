@@ -36,7 +36,7 @@ func shellEntrypointHasSupplement(request RuntimeCommandRequest) bool {
 // import. GOFLAGS instruments Go children built by the harness; GOCOVERDIR
 // collects executed binaries, not successful builds or stdout declarations.
 func prepareShellProcessBehavior(request RuntimeCommandRequest, directory string) (string, error) {
-	if !shellRequiresEntrypointBehavior(request) {
+	if !shellRequiresEntrypointBehavior(request) || !shellRequiresWorkspaceBehavior(request) {
 		return "", nil
 	}
 	if inspection := inspectShellNativeValidationChecks(directory, request.ValidationScopeTargetRefs, request.ValidationCheckAttestations); inspection.Code != "" {

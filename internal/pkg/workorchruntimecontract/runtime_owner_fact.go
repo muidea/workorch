@@ -466,6 +466,7 @@ func observeRuntimeOwnerFactRequirementCatalog(requirement RuntimeOwnerFactRequi
 		}
 		observations = append(observations, observation)
 		if surface.Readiness == RuntimeValidationSurfaceReady && surface.ProofApplicability == RuntimeValidationProofDirect && published &&
+			(!surface.RequireExactRecipeSelection || requirement.ValidationProofRequirementHash != "") &&
 			(requirement.ValidationProofRequirementHash == "" || observation.RequirementBound) {
 			satisfied = true
 		}
