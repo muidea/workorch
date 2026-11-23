@@ -286,7 +286,7 @@ func candidateRequestSessionActionAllowed(aggregate RuntimeAggregate, documentKi
 	if aggregate.ActiveDispatch != nil {
 		return fmt.Errorf("%w: current runtime authority does not accept a candidate request", common.ErrConflict)
 	}
-	if !runtimeApplicabilityHasUnsettledProvider(aggregate) && runtimeApplicabilityGenerationPending(aggregate.Facts, aggregate.CoverageProofLineage, aggregate.Reconciliation.RequestHash) {
+	if !runtimeApplicabilityHasUnsettledProvider(aggregate) && !RuntimeImplementationWorkPurposePending(aggregate) && runtimeApplicabilityGenerationPending(aggregate.Facts, aggregate.CoverageProofLineage, aggregate.Reconciliation.RequestHash) {
 		return fmt.Errorf("%w: provider request awaits original-owner current-read obligations", common.ErrConflict)
 	}
 	if documentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {

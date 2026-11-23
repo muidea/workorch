@@ -347,6 +347,9 @@ func (b RuntimeImplementationWorkingBinding) validateForRoundInSemanticSession(r
 	if !reflect.DeepEqual(excluded, b.ExcludedTargetRefs) {
 		return fmt.Errorf("implementation work input exclusions do not match complete owner preimages")
 	}
+	if r.ScopeObservation != nil && r.ScopeObservation.Content != nil && !slices.Equal(excluded, r.ScopeObservation.Content.ExcludedTargetRefs) {
+		return fmt.Errorf("implementation work content exclusions do not match complete owner preimages")
+	}
 	seen := map[string]bool{}
 	for index, proposal := range b.Proposals {
 		if err := proposal.Validate(); err != nil {

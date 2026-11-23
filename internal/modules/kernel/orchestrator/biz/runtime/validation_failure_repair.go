@@ -923,11 +923,12 @@ func runtimeSemanticValidationFailureRepairForBinding(aggregate RuntimeAggregate
 			return runtimecontract.RuntimeSemanticValidationFailureRepair{}, false, err
 		}
 	}
-	for _, generation := range ledger.AllHistory() {
+	allHistory := runtimecontract.CollectRuntimeSemanticPlanningHistory(ledger)
+	for idx, generation := range ledger.AllHistory() {
 		if generation.Snapshot.Manifest == nil || generation.Snapshot.Manifest.Hash != ref.SemanticManifestHash {
 			continue
 		}
-		if err := generation.Validate(); err != nil {
+		if err := generation.ValidateWithHistory(allHistory[:idx]); err != nil {
 			return runtimecontract.RuntimeSemanticValidationFailureRepair{}, false, fmt.Errorf("%w: validation failure repair retired generation: %v", common.ErrConflict, err)
 		}
 		if err := resolve(*generation.Snapshot.Manifest); err != nil {

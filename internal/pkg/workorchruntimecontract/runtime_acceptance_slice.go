@@ -26,7 +26,7 @@ const (
 	// MaxCandidateContextItems: owner inventory establishes an SM-2 fact,
 	// whereas the latter bounds one candidate request's contextual work-item
 	// projection.
-	RuntimeOwnerInventoryItemsMaxCount   = 32
+	RuntimeOwnerInventoryItemsMaxCount   = 256
 	RuntimeCandidateContextItemsMaxCount = 32
 )
 

@@ -755,8 +755,9 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 		if _, wanted := wantDependencies[id]; !wanted {
 			continue
 		}
-		if item["requireSourceSettled"] != true {
-			t.Fatalf("coverage dependency %q does not declare admission semantics: %+v", id, item)
+		wantRequireSourceSettled := id != "source-change-precedes-and-refreshes-dod-validation"
+		if item["requireSourceSettled"] != wantRequireSourceSettled {
+			t.Fatalf("coverage dependency %q requireSourceSettled = %v, want %t: %+v", id, item["requireSourceSettled"], wantRequireSourceSettled, item)
 		}
 		if id != "validation-report-precedes-final-snapshot" {
 			triggers, ok := item["triggerEvidenceKinds"].([]any)

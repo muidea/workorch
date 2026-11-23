@@ -94,9 +94,17 @@ func runtimeAssessmentPurposePreimagesFromSemanticLedgerForCoverageInSession(led
 		}
 		ret = append(ret, activeEntries...)
 	}
+	var allHistory []RuntimeSemanticPlanningGeneration
+	if !semanticLedgerAlreadyValidated {
+		allHistory = CollectRuntimeSemanticPlanningHistory(ledger)
+	}
 	for index, generation := range ledger.AllHistory() {
 		if !semanticLedgerAlreadyValidated {
-			if err := validateRuntimeSemanticPlanningGenerationNormalized(generation, normalizeRuntimeSemanticGenerationForValidation(generation, session), session); err != nil {
+			var preceding []RuntimeSemanticPlanningGeneration
+			if index <= len(allHistory) {
+				preceding = allHistory[:index]
+			}
+			if err := validateRuntimeSemanticPlanningGenerationNormalizedWithHistory(generation, normalizeRuntimeSemanticGenerationForValidation(generation, session), preceding, session); err != nil {
 				return nil, fmt.Errorf("runtime assessment purpose semantic history %d: %w", index, err)
 			}
 		}

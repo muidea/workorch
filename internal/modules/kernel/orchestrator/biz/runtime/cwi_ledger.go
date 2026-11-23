@@ -441,8 +441,9 @@ func replaceRuntimeCWIFocusProjectionWithPending(
 		completed = append(completed, retained...)
 		requeued = append(requeued, pending...)
 	}
-	// Completed CWI become executable again before the already pending queue.
-	remaining = append(requeued, remaining...)
+	// Non-blocking reopened focuses trail remaining never-settled focuses so forward
+	// delivery completes before reopened revalidation sweeps.
+	remaining = append(remaining, requeued...)
 
 	return installRuntimeCWIFocusProjection(facts, currentQueue[0], remaining, completed)
 }

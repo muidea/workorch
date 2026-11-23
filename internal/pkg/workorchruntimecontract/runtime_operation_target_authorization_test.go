@@ -255,3 +255,205 @@ func targetAuthorizationAcceptedReceipt(operation RuntimeOperation, effect Runti
 		Evidence:   RuntimeOperationEvidence{Quality: common.EvidenceQualityValid},
 	}
 }
+
+func TestRuntimeOperationRequiresTargetRefsParity(t *testing.T) {
+	testCases := []struct {
+		name              string
+		kind              string
+		target            RuntimeOperationTargetAuthorization
+		evidenceKind      string
+		want              bool
+		checkSM3          bool
+		skipBindingLookup bool
+	}{
+		{
+			name:         "managed_validation_exact_target_non_empty",
+			kind:         RuntimeBlockKindManagedValidationSession,
+			target:       RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"tests/input_test.go"}},
+			evidenceKind: EvidenceKindValidation,
+			want:         true,
+			checkSM3:     true,
+		},
+		{
+			name:              "managed_validation_exact_target_empty",
+			kind:              RuntimeBlockKindManagedValidationSession,
+			target:            RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExactTarget},
+			evidenceKind:      EvidenceKindValidation,
+			want:              false,
+			skipBindingLookup: true,
+		},
+		{
+			name:         "managed_validation_existing_owner_scope_finite",
+			kind:         RuntimeBlockKindManagedValidationSession,
+			target:       RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerScopeTargetRefs: []string{"tests/input_test.go"}, OwnerSelectorRefs: []string{"shell/validation"}},
+			evidenceKind: EvidenceKindValidation,
+			want:         true,
+		},
+		{
+			name:         "managed_validation_existing_owner_scope_selector_only",
+			kind:         RuntimeBlockKindManagedValidationSession,
+			target:       RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{"shell/validation"}},
+			evidenceKind: EvidenceKindValidation,
+			want:         false,
+			checkSM3:     true,
+		},
+		{
+			name:         "git_write_selector_only_existing_owner_scope",
+			kind:         StepKindGitWrite,
+			target:       RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{"workspace-repository"}},
+			evidenceKind: EvidenceKindStateChange,
+			want:         false,
+		},
+		{
+			name:         "mcp_tool_call_selector_only_existing_owner_scope",
+			kind:         StepKindMCPToolCall,
+			target:       RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{"server-a"}},
+			evidenceKind: EvidenceKindValidation,
+			want:         false,
+		},
+		{
+			name:         "file_write_always_requires_target",
+			kind:         StepKindFileWrite,
+			target:       RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{"file/workspace_deliverable"}},
+			evidenceKind: EvidenceKindStateChange,
+			want:         true,
+		},
+		{
+			name:         "patch_apply_exact_target",
+			kind:         RuntimeBlockKindPatchApply,
+			target:       RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"main.go"}},
+			evidenceKind: EvidenceKindStateChange,
+			want:         true,
+			checkSM3:     true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			contract, ok := RuntimeOperationContractForKind(tc.kind)
+			if !ok {
+				t.Fatalf("missing contract for %q", tc.kind)
+			}
+			got := RuntimeOperationRequiresTargetRefs(contract, tc.target)
+			if got != tc.want {
+				t.Fatalf("RuntimeOperationRequiresTargetRefs = %t, want %t", got, tc.want)
+			}
+
+			effect := RuntimeEffectWorkspaceDurable
+			state := ConvergenceStateNeedStateChange
+			var validationObs *RuntimeValidationObservation
+			recipe := RuntimeValidationRecipe{ID: "recipe/parity", Command: "sh", Args: []string{"-c", "true"}}
+			declarationRef := CanonicalRuntimeDefinitionEvidenceDeclarationRef("test", "cwi-parity")
+			proof := CoverageEvidenceProof{
+				EvidenceKind:          tc.evidenceKind,
+				AllowedOperationKinds: []string{tc.kind},
+				RequiredEffectScopes:  []RuntimeEffectScope{effect},
+			}
+			if tc.evidenceKind == EvidenceKindValidation {
+				effect = RuntimeEffectNone
+				state = ConvergenceStateNeedValidation
+				proof.RequiredEffectScopes = []RuntimeEffectScope{effect}
+				proof.ValidationRecipeID = recipe.ID
+				proof.RequiredCheckRefs = []string{recipe.ID}
+				validationObs = &RuntimeValidationObservation{
+					RecipeID:       recipe.ID,
+					ExecutedChecks: []string{recipe.ID},
+					PassedChecks:   []string{recipe.ID},
+				}
+				if tc.kind == RuntimeBlockKindManagedValidationSession {
+					item := RuntimeCoverageItem{ID: "cwi-parity", SourceScope: "test", SourceID: "cwi-parity", TargetText: "parity test proof"}
+					requirement := runtimeValidationProofRequirementForTest(t, "def-parity", item, declarationRef, recipe.ID, nil)
+					attestations := runtimeValidationCheckAttestationsForTest(requirement.RequiredCheckRefs)
+					proof.ValidationProofRequirementHash = requirement.Hash
+					proof.RequiredCheckRefs = append([]string(nil), requirement.RequiredCheckRefs...)
+					proof.ValidationCheckAttestations = attestations
+					declarationRef = requirement.DeclarationRef
+					validationObs = &RuntimeValidationObservation{
+						RecipeID:               recipe.ID,
+						ObservationProtocolRef: attestations[0].ObservationProtocolRef,
+						ExecutedChecks:         []string{attestations[0].NativeCheckRef},
+						PassedChecks:           []string{attestations[0].NativeCheckRef},
+					}
+				}
+			}
+
+			binding := CoverageEvidenceBinding{
+				ID:                 "binding/" + tc.name,
+				CoverageWorkItemID: "cwi-parity",
+				FocusID:            "focus-parity",
+				DefinitionRevision: "def-parity",
+				DeclarationRef:     declarationRef,
+				Proofs:             []CoverageEvidenceProof{proof},
+			}
+			switch tc.target.Policy {
+			case RuntimeOperationTargetPolicyExactTarget:
+				binding.TargetRefs = append([]string(nil), tc.target.ExactTargetRefs...)
+			case RuntimeOperationTargetPolicyExistingOwnerScope:
+				binding.TargetSelectorRef = tc.target.OwnerSelectorRefs[0]
+				binding.TargetSelectorOwnerRef = RuntimeModuleForOperationKind(tc.kind)
+				binding.TargetSelectorSubjectRef = "subject-parity"
+				binding.TargetRefs = append([]string(nil), tc.target.OwnerScopeTargetRefs...)
+			}
+			binding = binding.Normalized()
+			binding.Hash = StableCoverageEvidenceBindingHash(binding)
+
+			if tc.checkSM3 {
+				decision := RuntimeDecision{
+					State:             state,
+					AuthoritySnapshot: AuthoritySnapshot{DefinitionRevision: "def-parity"},
+					Focus: CoverageFocus{
+						ID:                       "focus-parity",
+						CoverageWorkItemIDs:      []common.CoverageWorkItemID{"cwi-parity"},
+						RequiredEvidenceKinds:    []string{tc.evidenceKind},
+						TargetRefs:               append([]string(nil), binding.TargetRefs...),
+						TargetSelectorRef:        binding.TargetSelectorRef,
+						TargetSelectorOwnerRef:   binding.TargetSelectorOwnerRef,
+						TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef,
+						CoverageEvidenceBindings: []CoverageEvidenceBinding{binding},
+					},
+					RequiredOutput: RequiredOutputContract{
+						AcceptedKinds:         []string{tc.kind},
+						AcceptedEffectScopes:  []RuntimeEffectScope{effect},
+						RequiredEffectScopes:  []RuntimeEffectScope{effect},
+						RequiredEvidenceKinds: []string{tc.evidenceKind},
+						CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-parity"},
+						TargetRefs:            append([]string(nil), tc.target.ExactTargetRefs...),
+					},
+				}
+				var ownerFacts RuntimeCandidateManifestOwnerFacts
+				if tc.kind == RuntimeBlockKindManagedValidationSession {
+					ownerFacts.ValidationRecipes = []RuntimeValidationRecipe{recipe}
+				}
+				manifest, err := BuildRuntimeCandidateContractManifest(decision, ownerFacts)
+				if err != nil {
+					t.Fatalf("BuildRuntimeCandidateContractManifest: %v", err)
+				}
+				if len(manifest.Operations) != 1 || manifest.Operations[0].RequireTargetRefs != tc.want {
+					t.Fatalf("SM-3 manifest RequireTargetRefs = %t, want %t (%+v)", manifest.Operations[0].RequireTargetRefs, tc.want, manifest.Operations)
+				}
+			}
+
+			if tc.skipBindingLookup {
+				if err := ValidateRuntimeOperationTargetsAgainstAuthorization(tc.target, nil, got); err != nil {
+					t.Fatalf("empty exact target with requireTargets=%t rejected: %v", got, err)
+				}
+				return
+			}
+
+			emptyOp := RuntimeOperation{ID: "op-empty", Kind: tc.kind}
+			emptyReceipt := RuntimeOperationReceipt{
+				ExecutionKey: "execution/parity/" + emptyOp.ID, Fence: 1, OperationID: emptyOp.ID,
+				Outcome: RuntimeOperationOutcomeAccepted, ObservedEffectScope: effect, Changed: true,
+				Evidence: RuntimeOperationEvidence{Quality: common.EvidenceQualityValid, Validation: validationObs},
+			}
+			err := MatchCoverageEvidenceBindingReceipt(binding, tc.evidenceKind, emptyOp, emptyReceipt)
+			if tc.want {
+				if err == nil {
+					t.Fatalf("SM-2 receipt matcher unexpectedly accepted empty targetRefs when RequireTargetRefs=true")
+				}
+			} else if err != nil {
+				t.Fatalf("SM-2 receipt matcher rejected empty targetRefs when RequireTargetRefs=false: %v", err)
+			}
+		})
+	}
+}

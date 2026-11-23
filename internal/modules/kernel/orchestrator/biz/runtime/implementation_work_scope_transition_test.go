@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -305,8 +306,23 @@ func (f *implementationWorkRealFileFixture) scope(t *testing.T, request runtimec
 	response := f.send(t, fileevents.TopicAcquireRuntimeTargetSelection, fileevents.AcquireRuntimeTargetSelectionCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.AuthoritySnapshotID, PrerequisiteID: request.RequestID, WorkspaceDeliverableDirectory: f.directory, TargetRole: "implementation_work", TargetSelectorRef: p.TargetSelectorRef, TargetSelectorOwnerRef: p.TargetSelectorOwnerRef, TargetSelectorSubjectRef: p.TargetSelectorSubjectRef, TargetSelectorCandidateRefs: p.TargetSelectorCandidateRefs, ProspectiveTargetAllOfConstraintRefs: p.ProspectiveTargetAllOfConstraintRefs, MaxItems: runtimecontract.RuntimeOwnerInventoryItemsMaxCount}).(fileevents.AcquireRuntimeTargetSelectionResult)
 	scope := runtimecontract.RuntimeImplementationWorkScopeObservation{Request: request, Selection: response.Selection, Observation: response.Observation}
 	{
-		scope.Content = &runtimecontract.RuntimeImplementationWorkContent{ProtocolRef: runtimecontract.RuntimeImplementationWorkContentV1, ManifestRevision: scope.Selection.ObservedRevision}
+		var excluded []string
+		if f.repository != nil && f.repository.aggregate != nil {
+			excluded = runtimecontract.RuntimeImplementationWorkContentExcludedTargets(
+				request.Policy.OwnerModuleID,
+				f.repository.aggregate.Facts.Resources.OperationAdmissibilities,
+				request.InputRevision,
+			)
+		}
+		scope.Content = &runtimecontract.RuntimeImplementationWorkContent{
+			ProtocolRef:        runtimecontract.RuntimeImplementationWorkContentV1,
+			ManifestRevision:   scope.Selection.ObservedRevision,
+			ExcludedTargetRefs: excluded,
+		}
 		for _, target := range scope.Selection.TargetRefs {
+			if slices.Contains(excluded, target) {
+				continue
+			}
 			body, err := os.ReadFile(filepath.Join(f.directory, target))
 			if err != nil {
 				t.Fatal(err)
@@ -1094,4 +1110,135 @@ func TestImplementationWorkProgressRealFileTwoRoundsAndReload(t *testing.T) {
 			t.Fatalf("expected two exact implementation purposes, got %d", reviewed)
 		}
 	}, true)
+}
+
+func TestObserveImplementationWorkScopeRejectsMismatchedExcludedTargetRefs(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	file, err := filebiz.New(hub, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { file.Teardown(ctx) })
+	directory := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(directory, "checks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "target.txt"), []byte("implementation target\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "checks/input_test.go"), []byte("package checks\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, initial := implementationWorkPurposeController(t, []string{"target.txt", "checks/input_test.go"})
+	owner := &implementationWorkRealFileFixture{hub: hub, directory: directory}
+	controller, repository, base := owner.current(t, initial)
+
+	shellCatalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID:   "work-shell-input-protection",
+		OwnerModuleID:    runtimecontract.RuntimeModuleShell,
+		ObservedRevision: "shell-rev-1",
+		OperationKinds:   []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
+			ID:                       "recipe-work-input",
+			OwnerModuleID:            runtimecontract.RuntimeModuleShell,
+			OperationKind:            runtimecontract.RuntimeBlockKindManagedValidationSession,
+			Readiness:                runtimecontract.RuntimeValidationSurfaceReady,
+			InputSchemaHash:          "schema-1",
+			InputBindingRef:          "input-1",
+			ProofApplicability:       runtimecontract.RuntimeValidationProofNotDeclared,
+			EffectScope:              runtimecontract.RuntimeEffectEphemeralSession,
+			IdempotencyClass:         runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+			InputTargetOwnerModuleID: runtimecontract.RuntimeModuleFile,
+			InputTargetRefs:          []string{"checks/input_test.go"},
+		}},
+	}
+	shellCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(shellCatalog)
+	shellObs := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: shellCatalog.PrerequisiteID,
+		Kind:           runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID:  runtimecontract.RuntimeModuleShell,
+		ContentHash:    shellCatalog.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain:        runtimecontract.RuntimeResourceOwnerCatalog,
+			OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			SubjectRef:    "recipe-work-input",
+			Revision:      shellCatalog.ObservedRevision,
+		}},
+	}
+	shellObs.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(shellObs)
+	shellPrereq := runtimecontract.RuntimePrerequisite{
+		ID:                   shellCatalog.PrerequisiteID,
+		Kind:                 runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID:        runtimecontract.RuntimeModuleShell,
+		RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		Reason:               "test shell validation input exclusion",
+	}
+	base.Facts.Resources.OperationAdmissibilities = append(base.Facts.Resources.OperationAdmissibilities, shellCatalog)
+	base.Facts.Resources.PrerequisiteObservations = append(base.Facts.Resources.PrerequisiteObservations, shellObs)
+	base.Facts.Prerequisites.Satisfied = append(base.Facts.Prerequisites.Satisfied, shellPrereq)
+	*repository.aggregate = base.CloneRaw()
+
+	request, err := NextRuntimeImplementationWorkScopeRequest(base)
+	if err != nil || request == nil {
+		t.Fatalf("NextRuntimeImplementationWorkScopeRequest = %+v err=%v", request, err)
+	}
+	scope := RuntimeInternalEventScope{WorkspaceID: base.Facts.WorkspaceID, RunID: base.Facts.RunID}
+	reserved, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind:      RuntimeInternalEventImplementationWorkScopeRequired,
+		Scope:     scope,
+		Authority: &RuntimeInternalAuthorityPayload{ImplementationWorkScopeRequest: request},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	validObs := owner.scope(t, *request)
+	if validObs.Content == nil || !slices.Equal(validObs.Content.ExcludedTargetRefs, []string{"checks/input_test.go"}) || len(validObs.Content.Snapshots) != 1 || validObs.Content.Snapshots[0].TargetRef != "target.txt" {
+		t.Fatalf("valid fixture observation unexpected: %+v", validObs.Content)
+	}
+
+	// Build a tampered observation that omitted ExcludedTargetRefs and kept the
+	// protected input snapshot in Content.Snapshots (passing local ValidateForSources
+	// against Request-only sources, but failing owner catalog exclusion check).
+	tampered := validObs.Clone()
+	rawBody, err := os.ReadFile(filepath.Join(directory, "checks/input_test.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawHash := sha256.Sum256(rawBody)
+	var fullSnapshots []runtimecontract.TargetSnapshot
+	for _, target := range tampered.Selection.TargetRefs {
+		if target == "checks/input_test.go" {
+			fullSnapshots = append(fullSnapshots, runtimecontract.TargetSnapshot{
+				TargetRef: target, Content: string(rawBody), ContentHash: hex.EncodeToString(rawHash[:]),
+				ContentState: runtimecontract.SnapshotContentStateComplete, Size: int64(len(rawBody)),
+			})
+		} else {
+			fullSnapshots = append(fullSnapshots, tampered.Content.Snapshots[0])
+		}
+	}
+	tampered.Content.ExcludedTargetRefs = nil
+	tampered.Content.Snapshots = fullSnapshots
+	beforeSaves := repository.saves
+	if _, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind:      RuntimeInternalEventImplementationWorkScopeObserved,
+		Scope:     scope,
+		Authority: &RuntimeInternalAuthorityPayload{ImplementationWorkScopeObservation: &tampered},
+	}); !errors.Is(err, common.ErrConflict) || repository.saves != beforeSaves {
+		t.Fatalf("expected conflict rejecting mismatched Content.ExcludedTargetRefs, got err=%v saves=%d->%d", err, beforeSaves, repository.saves)
+	}
+
+	// Confirm the matching observation succeeds cleanly.
+	_ = reserved
+	if _, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind:      RuntimeInternalEventImplementationWorkScopeObserved,
+		Scope:     scope,
+		Authority: &RuntimeInternalAuthorityPayload{ImplementationWorkScopeObservation: &validObs},
+	}); err != nil {
+		t.Fatalf("valid excluded observation rejected: %v", err)
+	}
 }

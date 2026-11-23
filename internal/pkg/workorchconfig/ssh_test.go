@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestNormalizeSSHConfigAcceptsOnlyOpaqueOwnerRefsAndSecretLocations(t *testing.T) {
@@ -28,11 +30,13 @@ func TestNormalizeSSHConfigAcceptsOnlyOpaqueOwnerRefsAndSecretLocations(t *testi
 }
 
 func TestNormalizeSSHConfigRejectsUnboundedOwnerBindingCatalog(t *testing.T) {
-	credentials := make(map[string]SSHCredentialConfig, 17)
-	credentialRefs := make([]string, 0, 17)
-	for idx := 0; idx < 17; idx++ {
-		ref := fmt.Sprintf("credential-%02d", idx)
-		credentials[ref] = SSHCredentialConfig{PasswordEnv: fmt.Sprintf("SSH_PASSWORD_%02d", idx)}
+	max := runtimecontract.RuntimeOwnerInventoryItemsMaxCount
+	perSession := max/2 + 1
+	credentials := make(map[string]SSHCredentialConfig, perSession)
+	credentialRefs := make([]string, 0, perSession)
+	for idx := 0; idx < perSession; idx++ {
+		ref := fmt.Sprintf("credential-%03d", idx)
+		credentials[ref] = SSHCredentialConfig{PasswordEnv: fmt.Sprintf("SSH_PASSWORD_%03d", idx)}
 		credentialRefs = append(credentialRefs, ref)
 	}
 	_, err := NormalizeSSHConfig(SSHConfig{
@@ -45,8 +49,9 @@ func TestNormalizeSSHConfigRejectsUnboundedOwnerBindingCatalog(t *testing.T) {
 		},
 		Credentials: credentials,
 	})
-	if err == nil || !strings.Contains(err.Error(), "exceeds 32 target/session/credential bindings") {
-		t.Fatalf("err = %v, want bounded binding catalog rejection", err)
+	want := fmt.Sprintf("exceeds %d target/session/credential bindings", max)
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v, want bounded binding catalog rejection (%q)", err, want)
 	}
 }
 

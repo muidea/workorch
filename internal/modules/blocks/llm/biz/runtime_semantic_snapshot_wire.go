@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	rc "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -20,6 +21,7 @@ type runtimeSemanticContentWire struct {
 	ProtocolRef          string
 	Snapshots            []runtimeSemanticSnapshotBody
 	SnapshotObservations []rc.TargetSnapshot
+	ExcludedTargetRefs   []string `json:"excludedTargetRefs,omitempty"`
 	ManifestRevision     string
 }
 
@@ -33,7 +35,14 @@ func (p runtimeSemanticWorkProjection) MarshalJSON() ([]byte, error) {
 	w := runtimeSemanticWorkWire{PriorRounds: p.PriorRounds, Intent: p.Intent}
 	if p.Content != nil {
 		c := p.Content
-		w.Content = &runtimeSemanticContentWire{ProtocolRef: c.ProtocolRef, ManifestRevision: c.ManifestRevision}
+		w.Content = &runtimeSemanticContentWire{
+			ProtocolRef:        c.ProtocolRef,
+			ExcludedTargetRefs: slices.Clone(c.ExcludedTargetRefs),
+			ManifestRevision:   c.ManifestRevision,
+		}
+		if len(w.Content.ExcludedTargetRefs) == 0 {
+			w.Content.ExcludedTargetRefs = nil
+		}
 		if c.Snapshots != nil {
 			w.Content.Snapshots = make([]runtimeSemanticSnapshotBody, len(c.Snapshots))
 			w.Content.SnapshotObservations = make([]rc.TargetSnapshot, len(c.Snapshots))
@@ -60,7 +69,14 @@ func (p *runtimeSemanticWorkProjection) UnmarshalJSON(raw []byte) error {
 		if len(c.Snapshots) != len(c.SnapshotObservations) || (c.Snapshots == nil) != (c.SnapshotObservations == nil) {
 			return fmt.Errorf("semantic snapshot observations do not match complete body inventory")
 		}
-		v.Content = &rc.RuntimeImplementationWorkContent{ProtocolRef: c.ProtocolRef, ManifestRevision: c.ManifestRevision}
+		v.Content = &rc.RuntimeImplementationWorkContent{
+			ProtocolRef:        c.ProtocolRef,
+			ExcludedTargetRefs: slices.Clone(c.ExcludedTargetRefs),
+			ManifestRevision:   c.ManifestRevision,
+		}
+		if len(v.Content.ExcludedTargetRefs) == 0 {
+			v.Content.ExcludedTargetRefs = nil
+		}
 		if c.Snapshots != nil {
 			v.Content.Snapshots = make([]rc.TargetSnapshot, len(c.Snapshots))
 		}

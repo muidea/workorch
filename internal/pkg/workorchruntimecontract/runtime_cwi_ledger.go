@@ -13,13 +13,15 @@ import (
 // ledger; this schema does not introduce a parallel registry or owner.
 const RuntimeCWILedgerSchemaCurrent = "workorch.runtime_cwi_ledger"
 
-// RuntimeCWIBindingLineageLimit and RuntimeCWIReopenLineageLimit bound the
-// per-CWI audit trail. They keep reopening/resealing recoverable without
+// RuntimeCWIBindingLineageLimit, RuntimeCWIBindingRetirementLineageLimit and
+// RuntimeCWIReopenLineageLimit bound the per-CWI audit trail, aligned with
+// RuntimeHistoricalAcceptanceProofLimit for long multi-CWI runs with shared
+// acceptance consumers. They keep reopening/resealing recoverable without
 // turning the canonical coverage row into an unbounded history store.
 const (
-	RuntimeCWIBindingLineageLimit           = 32
-	RuntimeCWIBindingRetirementLineageLimit = 16
-	RuntimeCWIReopenLineageLimit            = 16
+	RuntimeCWIBindingLineageLimit           = 256
+	RuntimeCWIBindingRetirementLineageLimit = 128
+	RuntimeCWIReopenLineageLimit            = 128
 )
 
 // RuntimeCWIConvergenceState records the SM-2 authority state for one CWI.
@@ -693,6 +695,11 @@ func RuntimeCWIsEligibleForPlanning(facts RuntimeFacts) []common.CoverageWorkIte
 		order[item.ID] = value
 	}
 	sort.SliceStable(ret, func(i, j int) bool {
+		leftReopened := byID[ret[i]].CWIConvergenceState == RuntimeCWIConvergenceStateReopened
+		rightReopened := byID[ret[j]].CWIConvergenceState == RuntimeCWIConvergenceStateReopened
+		if leftReopened != rightReopened {
+			return !leftReopened
+		}
 		left, leftFound := order[ret[i]]
 		right, rightFound := order[ret[j]]
 		if leftFound != rightFound {

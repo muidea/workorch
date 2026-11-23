@@ -836,11 +836,8 @@ func MatchCoverageEvidenceBindingReceiptIdentity(binding CoverageEvidenceBinding
 	if err != nil {
 		return fmt.Errorf("binding %q target authorization: %w", binding.ID, err)
 	}
-	// A binding with a finite target surface proves a concrete owner target;
-	// selector-only existing scope is the sole shape whose membership remains
-	// an owner-feasibility fact. prospective_owner_target is always singleton
-	// per operation, while dispatch-level proof separately requires every member.
-	requireOperationTargets := targetAuthorization.Policy != RuntimeOperationTargetPolicyExistingOwnerScope || len(targetAuthorization.OwnerScopeTargetRefs) != 0
+	contract, _ := RuntimeOperationContractForKind(operation.Kind)
+	requireOperationTargets := RuntimeOperationRequiresTargetRefs(contract, targetAuthorization)
 	if err := ValidateRuntimeOperationTargetsAgainstAuthorization(targetAuthorization, operation.TargetRefs, requireOperationTargets); err != nil {
 		return fmt.Errorf("binding %q sealed operation targets are unauthorized: %w", binding.ID, err)
 	}

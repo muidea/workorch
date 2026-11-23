@@ -15,9 +15,10 @@ const RuntimeImplementationWorkContentV1 = "implementation-work-content/v1"
 // These are exact, detached read-only inputs, sealed with the scope observation.
 // They never become receipt, readiness, evidence, or completion authority.
 type RuntimeImplementationWorkContent struct {
-	ProtocolRef      string
-	ManifestRevision string
-	Snapshots        []TargetSnapshot
+	ProtocolRef        string
+	ManifestRevision   string
+	ExcludedTargetRefs []string `json:",omitempty"`
+	Snapshots          []TargetSnapshot
 }
 
 func (c *RuntimeImplementationWorkContent) Clone() *RuntimeImplementationWorkContent {
@@ -25,6 +26,7 @@ func (c *RuntimeImplementationWorkContent) Clone() *RuntimeImplementationWorkCon
 		return nil
 	}
 	v := *c
+	v.ExcludedTargetRefs = slices.Clone(c.ExcludedTargetRefs)
 	v.Snapshots = slices.Clone(c.Snapshots)
 	return &v
 }
@@ -32,12 +34,21 @@ func (c RuntimeImplementationWorkContent) Hash() string {
 	return implementationWorkRawHash("implementation-work-content:", c)
 }
 func (c RuntimeImplementationWorkContent) Validate(scope RuntimeImplementationWorkScopeObservation) error {
-	if c.ProtocolRef != RuntimeImplementationWorkContentV1 || c.ManifestRevision != scope.Selection.ObservedRevision || c.ManifestRevision == "" || len(c.Snapshots) != len(scope.Selection.TargetRefs) {
+	if c.ExcludedTargetRefs != nil && (len(c.ExcludedTargetRefs) == 0 || !slices.Equal(c.ExcludedTargetRefs, normalizeStrings(c.ExcludedTargetRefs))) {
+		return fmt.Errorf("implementation work content exclusions must be canonical non-empty exact targets")
+	}
+	for _, ref := range c.ExcludedTargetRefs {
+		if !implementationWorkExactRef(ref) {
+			return fmt.Errorf("implementation work content exclusion target %q is not an exact target", ref)
+		}
+	}
+	expectedTargets := runtimeTargetsWithoutExcluded(scope.Selection.TargetRefs, c.ExcludedTargetRefs)
+	if c.ProtocolRef != RuntimeImplementationWorkContentV1 || c.ManifestRevision != scope.Selection.ObservedRevision || c.ManifestRevision == "" || len(c.Snapshots) != len(expectedTargets) {
 		return fmt.Errorf("implementation work content requires exact complete scope revision and targets")
 	}
 	for i, s := range c.Snapshots {
 		h := sha256.Sum256([]byte(s.Content))
-		if s.TargetRef != scope.Selection.TargetRefs[i] || !s.Complete() || s.Size != int64(len(s.Content)) || s.ContentHash != hex.EncodeToString(h[:]) || !utf8.ValidString(s.Content) {
+		if s.TargetRef != expectedTargets[i] || !s.Complete() || s.Size != int64(len(s.Content)) || s.ContentHash != hex.EncodeToString(h[:]) || !utf8.ValidString(s.Content) {
 			return fmt.Errorf("implementation work content missing, altered or incomplete for target %q", s.TargetRef)
 		}
 	}

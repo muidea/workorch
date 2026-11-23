@@ -166,6 +166,9 @@ func compileRuntimeEvidenceApplicabilityRead(aggregate RuntimeAggregate) (runtim
 	if runtimeApplicabilityHasUnsettledProvider(aggregate) {
 		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, RuntimeOperationReadSource{}, false, nil
 	}
+	if RuntimeImplementationWorkPurposePending(aggregate) {
+		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, RuntimeOperationReadSource{}, false, nil
+	}
 	for _, fact := range aggregate.Facts.Evidence.Accepted {
 		if fact.ApplicabilityDependencies == nil || runtimecontract.RuntimeEvidenceIsHistoricalEffect(fact) {
 			continue
@@ -242,6 +245,9 @@ func runtimeApplicabilityGenerationPending(facts runtimecontract.RuntimeFacts, l
 // Generic prerequisite acquisition cannot submit this kind; SM-4 must use the
 // concrete original-owner query and EvidenceApplicabilityObserved transaction.
 func runtimeApplicabilityPrerequisiteDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts, lineage *RuntimeAggregate, proofLineage []runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, bool, error) {
+	if lineage != nil && RuntimeImplementationWorkPurposePending(*lineage) {
+		return runtimecontract.RuntimeDecision{}, false, nil
+	}
 	for _, fact := range facts.Evidence.Accepted {
 		if fact.ApplicabilityDependencies == nil || runtimecontract.RuntimeEvidenceIsHistoricalEffect(fact) {
 			continue
@@ -385,8 +391,12 @@ func (c *authorityComponent) recordEvidenceApplicability(ctx context.Context, wo
 		if err := retireSemanticPlanningForCurrentReopenedCWIs(&aggregate); err != nil {
 			return RuntimeAggregate{}, err
 		}
-		if _, err := suspendRuntimeSuccessorForStalePredecessor(&aggregate); err != nil {
+		if changed, err := suspendRuntimeSuccessorForStalePredecessor(&aggregate); err != nil {
 			return RuntimeAggregate{}, err
+		} else if changed && aggregate.Facts.Failure == nil {
+			if err := prepareSemanticPlanningForAdvancedFocus(&aggregate); err != nil {
+				return RuntimeAggregate{}, err
+			}
 		}
 	}
 	// Assessment advances the evidence revision, so its settled CWI remains

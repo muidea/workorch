@@ -9,18 +9,22 @@ import (
 )
 
 const (
-	RuntimeSemanticCompiledProofBatchRuleSingletonExactOwnerFactAcquisition     = "singleton_exact_owner_fact_acquisition"
-	RuntimeSemanticCompiledProofBatchRuleSingletonUniqueDirectValidationSurface = "singleton_unique_direct_validation_surface"
+	RuntimeSemanticCompiledProofBatchRuleSingletonExactOwnerFactAcquisition                 = "singleton_exact_owner_fact_acquisition"
+	RuntimeSemanticCompiledProofBatchRuleSingletonUniqueDirectValidationSurface             = "singleton_unique_direct_validation_surface"
+	RuntimeSemanticCompiledProofBatchRuleSingletonUniqueDirectValidationSurfaceReusedReview = "singleton_unique_direct_validation_surface_reused_review"
 )
 
 // RuntimeSemanticCompiledProofBatch records deterministic code origin for a
 // compiled singleton proof batch, never provider provenance, owner feasibility,
 // review approval, or execution/validation credit.
 type RuntimeSemanticCompiledProofBatch struct {
-	Rule         string
-	ManifestHash string
-	BatchID      string
-	DocumentHash string
+	Rule                          string
+	ManifestHash                  string
+	BatchID                       string
+	DocumentHash                  string
+	ReusedInputReviewManifestHash string `json:",omitempty"`
+	ReusedInputReviewDocumentHash string `json:",omitempty"`
+	ReusedInputReviewSubjectHash  string `json:",omitempty"`
 }
 
 func (c RuntimeSemanticCompiledProofBatch) Normalized() RuntimeSemanticCompiledProofBatch {
@@ -28,7 +32,24 @@ func (c RuntimeSemanticCompiledProofBatch) Normalized() RuntimeSemanticCompiledP
 	c.ManifestHash = strings.TrimSpace(c.ManifestHash)
 	c.BatchID = strings.TrimSpace(c.BatchID)
 	c.DocumentHash = strings.TrimSpace(c.DocumentHash)
+	c.ReusedInputReviewManifestHash = strings.TrimSpace(c.ReusedInputReviewManifestHash)
+	c.ReusedInputReviewDocumentHash = strings.TrimSpace(c.ReusedInputReviewDocumentHash)
+	c.ReusedInputReviewSubjectHash = strings.TrimSpace(c.ReusedInputReviewSubjectHash)
 	return c
+}
+
+// CollectRuntimeSemanticPlanningHistory materializes a ledger's complete
+// chronological generation lineage (archived segments followed by tail).
+func CollectRuntimeSemanticPlanningHistory(ledger RuntimeSemanticPlanningLedger) []RuntimeSemanticPlanningGeneration {
+	count := ledger.HistoryCount()
+	if count == 0 {
+		return nil
+	}
+	history := make([]RuntimeSemanticPlanningGeneration, 0, count)
+	for _, generation := range ledger.AllHistory() {
+		history = append(history, generation)
+	}
+	return history
 }
 
 func NewRuntimeSemanticCompiledProofBatch(m RuntimeSemanticPlanManifest, batch RuntimeSemanticPlanBatch, rule string, d RuntimeSemanticPlanDocument) *RuntimeSemanticCompiledProofBatch {
@@ -41,6 +62,15 @@ func NewRuntimeSemanticCompiledProofBatch(m RuntimeSemanticPlanManifest, batch R
 }
 
 func (c *RuntimeSemanticCompiledProofBatch) Validate(m *RuntimeSemanticPlanManifest, batch *RuntimeSemanticPlanBatch, d *RuntimeSemanticPlanDocument) error {
+	return c.ValidateWithHistory(m, batch, d, nil)
+}
+
+func (c *RuntimeSemanticCompiledProofBatch) ValidateWithHistory(
+	m *RuntimeSemanticPlanManifest,
+	batch *RuntimeSemanticPlanBatch,
+	d *RuntimeSemanticPlanDocument,
+	precedingHistory []RuntimeSemanticPlanningGeneration,
+) error {
 	if c == nil {
 		return nil
 	}
@@ -48,9 +78,36 @@ func (c *RuntimeSemanticCompiledProofBatch) Validate(m *RuntimeSemanticPlanManif
 		return fmt.Errorf("compiled semantic proof batch requires original manifest, batch and document")
 	}
 	normalized := c.Normalized()
-	expected, expectedRule, ok := CompileRuntimeSingletonProofBatch(*m, *batch)
-	if !ok || normalized.Rule != expectedRule || normalized.ManifestHash != m.Hash ||
-		normalized.BatchID != batch.BatchID || normalized.DocumentHash != StableRuntimeSemanticPlanDocumentHash(expected) ||
+	if normalized.Rule == RuntimeSemanticCompiledProofBatchRuleSingletonUniqueDirectValidationSurfaceReusedReview {
+		if normalized.ReusedInputReviewManifestHash == "" ||
+			normalized.ReusedInputReviewDocumentHash == "" ||
+			normalized.ReusedInputReviewSubjectHash == "" {
+			return fmt.Errorf("compiled semantic proof batch reused review requires complete source provenance")
+		}
+		sourceGen, found := findCompiledProofBatchSourceGeneration(
+			precedingHistory,
+			normalized.ReusedInputReviewManifestHash,
+			normalized.ReusedInputReviewDocumentHash,
+		)
+		if !found {
+			return fmt.Errorf("compiled semantic proof batch reused review lacks matching original generation")
+		}
+		expected, expectedCompiled, ok := CompileRuntimeSingletonProofBatchWithHistory(*m, *batch, []RuntimeSemanticPlanningGeneration{sourceGen})
+		if !ok || expectedCompiled == nil ||
+			*expectedCompiled != normalized ||
+			!reflect.DeepEqual(expected.Normalized(), d.Normalized()) {
+			return fmt.Errorf("compiled semantic proof batch differs from exact reused-review singleton rule")
+		}
+		return nil
+	}
+	if normalized.ReusedInputReviewManifestHash != "" ||
+		normalized.ReusedInputReviewDocumentHash != "" ||
+		normalized.ReusedInputReviewSubjectHash != "" {
+		return fmt.Errorf("non-reused compiled semantic proof batch cannot carry reused review provenance")
+	}
+	expected, expectedCompiled, ok := CompileRuntimeSingletonProofBatchWithHistory(*m, *batch, nil)
+	if !ok || expectedCompiled == nil ||
+		*expectedCompiled != normalized ||
 		!reflect.DeepEqual(expected.Normalized(), d.Normalized()) {
 		return fmt.Errorf("compiled semantic proof batch differs from exact singleton rule")
 	}
@@ -61,12 +118,28 @@ func (c *RuntimeSemanticCompiledProofBatch) Validate(m *RuntimeSemanticPlanManif
 // document only when the active single-CWI batch has an unambiguous closed
 // contract with zero semantic ambiguity and zero validation input review.
 func CompileRuntimeSingletonProofBatch(m RuntimeSemanticPlanManifest, batch RuntimeSemanticPlanBatch) (RuntimeSemanticPlanDocument, string, bool) {
+	doc, compiled, ok := CompileRuntimeSingletonProofBatchWithHistory(m, batch, nil)
+	if !ok || compiled == nil {
+		return RuntimeSemanticPlanDocument{}, "", false
+	}
+	return doc, compiled.Rule, true
+}
+
+// CompileRuntimeSingletonProofBatchWithHistory deterministically compiles an
+// unambiguous single-CWI proof batch, including reusing an already-committed
+// original consistent ValidationInputReview from precedingHistory when the
+// exact (CoverageWorkItemID, DeclarationRef, RequirementHash, SubjectHash) matches.
+func CompileRuntimeSingletonProofBatchWithHistory(
+	m RuntimeSemanticPlanManifest,
+	batch RuntimeSemanticPlanBatch,
+	precedingHistory []RuntimeSemanticPlanningGeneration,
+) (RuntimeSemanticPlanDocument, *RuntimeSemanticCompiledProofBatch, bool) {
 	m = m.Normalized()
 	batch = batch.Normalized()
 	if batch.BatchID == "" || batch.ManifestHash != m.Hash || batch.DefinitionSeedHash != m.DefinitionSeedHash ||
 		len(batch.CoverageWorkItemIDs) != 1 || m.FailureInputReview != nil ||
 		RuntimeSemanticPurposeChoice(m, RuntimeSemanticPlanStepProofBatch) {
-		return RuntimeSemanticPlanDocument{}, "", false
+		return RuntimeSemanticPlanDocument{}, nil, false
 	}
 	coverageID := batch.CoverageWorkItemIDs[0]
 	var obligation RuntimeSemanticProofObligation
@@ -79,17 +152,21 @@ func CompileRuntimeSingletonProofBatch(m RuntimeSemanticPlanManifest, batch Runt
 		}
 	}
 	if !obligationFound || obligation.ImplementationWork != nil || obligation.ValidationFailureRepair != nil || obligation.HistoricalAcceptance != nil {
-		return RuntimeSemanticPlanDocument{}, "", false
+		return RuntimeSemanticPlanDocument{}, nil, false
 	}
 	declarationRef := RuntimeSemanticCurrentDeclarationRef(obligation)
 	if declarationRef == "" {
-		return RuntimeSemanticPlanDocument{}, "", false
+		return RuntimeSemanticPlanDocument{}, nil, false
 	}
 
 	if obligation.OwnerFactAcquisition != nil {
-		return compileRuntimeSingletonExactOwnerFactAcquisition(m, batch, obligation, declarationRef)
+		doc, rule, ok := compileRuntimeSingletonExactOwnerFactAcquisition(m, batch, obligation, declarationRef)
+		if !ok {
+			return RuntimeSemanticPlanDocument{}, nil, false
+		}
+		return doc, NewRuntimeSemanticCompiledProofBatch(m, batch, rule, doc), true
 	}
-	return compileRuntimeSingletonUniqueDirectValidationSurface(m, batch, obligation, declarationRef)
+	return compileRuntimeSingletonUniqueDirectValidationSurface(m, batch, obligation, declarationRef, precedingHistory)
 }
 
 func compileRuntimeSingletonExactOwnerFactAcquisition(
@@ -157,11 +234,13 @@ func compileRuntimeSingletonUniqueDirectValidationSurface(
 	batch RuntimeSemanticPlanBatch,
 	obligation RuntimeSemanticProofObligation,
 	declarationRef string,
-) (RuntimeSemanticPlanDocument, string, bool) {
+	precedingHistory []RuntimeSemanticPlanningGeneration,
+) (RuntimeSemanticPlanDocument, *RuntimeSemanticCompiledProofBatch, bool) {
 	if len(obligation.RequiredEvidenceKinds) != 1 || obligation.RequiredEvidenceKinds[0] != EvidenceKindValidation {
-		return RuntimeSemanticPlanDocument{}, "", false
+		return RuntimeSemanticPlanDocument{}, nil, false
 	}
 	var candidates []RuntimeSemanticProofProposal
+	var reusedCompiled []*RuntimeSemanticCompiledProofBatch
 	for _, catalog := range m.OwnerCatalogs {
 		if !containsString(m.AllowedOwnerModuleIDs, catalog.OwnerModuleID) {
 			continue
@@ -198,20 +277,46 @@ func compileRuntimeSingletonUniqueDirectValidationSurface(
 					continue
 				}
 			}
+			var matchedReview *RuntimeValidationInputReview
+			var sourceManifestHash, sourceDocHash string
+			matchedBindings := 0
 			for _, binding := range surface.ProofRequirementBindings {
-				if binding.CoverageWorkItemID == obligation.CoverageWorkItemID && binding.DeclarationRef == declarationRef && binding.InputReview != nil {
-					return RuntimeSemanticPlanDocument{}, "", false
+				if binding.CoverageWorkItemID != obligation.CoverageWorkItemID || binding.DeclarationRef != declarationRef {
+					continue
 				}
+				matchedBindings++
+				if binding.InputReview == nil {
+					continue
+				}
+				if matchedReview != nil || len(precedingHistory) == 0 {
+					return RuntimeSemanticPlanDocument{}, nil, false
+				}
+				review, srcManifest, srcDoc, found := findCommittedConsistentValidationInputReview(
+					precedingHistory,
+					obligation.CoverageWorkItemID,
+					declarationRef,
+					binding.RequirementHash,
+					binding.InputReview.Hash,
+				)
+				if !found || review.ValidateAgainstBinding(binding) != nil {
+					return RuntimeSemanticPlanDocument{}, nil, false
+				}
+				matchedReview = review
+				sourceManifestHash = srcManifest
+				sourceDocHash = srcDoc
+			}
+			if matchedReview != nil && matchedBindings > 1 {
+				return RuntimeSemanticPlanDocument{}, nil, false
 			}
 			variantID, ok := compileRuntimeSingletonVariantID(catalog, surface.OperationKind)
 			if !ok {
-				return RuntimeSemanticPlanDocument{}, "", false
+				return RuntimeSemanticPlanDocument{}, nil, false
 			}
 			target, ok := compileRuntimeSingletonValidationTarget(m, catalog, obligation, surface.OperationKind, variantID)
 			if !ok {
-				return RuntimeSemanticPlanDocument{}, "", false
+				return RuntimeSemanticPlanDocument{}, nil, false
 			}
-			candidates = append(candidates, RuntimeSemanticProofProposal{
+			proposal := RuntimeSemanticProofProposal{
 				CoverageWorkItemID:    obligation.CoverageWorkItemID,
 				OwnerModuleID:         surface.OwnerModuleID,
 				OperationKind:         surface.OperationKind,
@@ -221,11 +326,24 @@ func compileRuntimeSingletonUniqueDirectValidationSurface(
 				RequiredEffectScopes:  []RuntimeEffectScope{surface.EffectScope},
 				ValidationRecipeID:    surface.ID,
 				DeclarationRef:        declarationRef,
-			})
+			}
+			var reusedMeta *RuntimeSemanticCompiledProofBatch
+			if matchedReview != nil {
+				clonedReview := matchedReview.Clone()
+				proposal.ValidationInputReview = &clonedReview
+				reusedMeta = &RuntimeSemanticCompiledProofBatch{
+					Rule:                          RuntimeSemanticCompiledProofBatchRuleSingletonUniqueDirectValidationSurfaceReusedReview,
+					ReusedInputReviewManifestHash: sourceManifestHash,
+					ReusedInputReviewDocumentHash: sourceDocHash,
+					ReusedInputReviewSubjectHash:  matchedReview.SubjectHash,
+				}
+			}
+			candidates = append(candidates, proposal)
+			reusedCompiled = append(reusedCompiled, reusedMeta)
 		}
 	}
 	if len(candidates) != 1 {
-		return RuntimeSemanticPlanDocument{}, "", false
+		return RuntimeSemanticPlanDocument{}, nil, false
 	}
 	doc := RuntimeSemanticPlanDocument{
 		SchemaVersion:            RuntimeSemanticPlanDocumentSchemaCurrent,
@@ -238,9 +356,105 @@ func compileRuntimeSingletonUniqueDirectValidationSurface(
 		Proposals:                candidates,
 	}.Normalized()
 	if err := doc.ValidateAgainstManifest(m); err != nil {
-		return RuntimeSemanticPlanDocument{}, "", false
+		return RuntimeSemanticPlanDocument{}, nil, false
 	}
-	return doc, RuntimeSemanticCompiledProofBatchRuleSingletonUniqueDirectValidationSurface, true
+	if meta := reusedCompiled[0]; meta != nil {
+		meta.ManifestHash = strings.TrimSpace(m.Hash)
+		meta.BatchID = strings.TrimSpace(batch.BatchID)
+		meta.DocumentHash = StableRuntimeSemanticPlanDocumentHash(doc)
+		return doc, meta, true
+	}
+	return doc, NewRuntimeSemanticCompiledProofBatch(m, batch, RuntimeSemanticCompiledProofBatchRuleSingletonUniqueDirectValidationSurface, doc), true
+}
+
+func findCompiledProofBatchSourceGeneration(
+	history []RuntimeSemanticPlanningGeneration,
+	manifestHash string,
+	docHash string,
+) (RuntimeSemanticPlanningGeneration, bool) {
+	if manifestHash == "" || docHash == "" {
+		return RuntimeSemanticPlanningGeneration{}, false
+	}
+	for _, generation := range history {
+		snap := generation.Snapshot
+		if snap.Manifest == nil || snap.Manifest.Hash != manifestHash ||
+			snap.Phase == RuntimeSemanticPlanningRequired || snap.Phase == RuntimeSemanticPlanningFailed {
+			continue
+		}
+		compiledBatchIDs := make(map[string]struct{}, len(snap.CompiledProofBatches))
+		for _, compiled := range snap.CompiledProofBatches {
+			compiledBatchIDs[compiled.BatchID] = struct{}{}
+		}
+		for _, doc := range snap.BatchDocuments {
+			if _, isCompiled := compiledBatchIDs[doc.BatchID]; isCompiled {
+				continue
+			}
+			if StableRuntimeSemanticPlanDocumentHash(doc) == docHash {
+				return generation, true
+			}
+		}
+	}
+	return RuntimeSemanticPlanningGeneration{}, false
+}
+
+func findCommittedConsistentValidationInputReview(
+	history []RuntimeSemanticPlanningGeneration,
+	coverageID common.CoverageWorkItemID,
+	declarationRef string,
+	requirementHash string,
+	subjectHash string,
+) (*RuntimeValidationInputReview, string, string, bool) {
+	if coverageID == "" || declarationRef == "" || requirementHash == "" || subjectHash == "" {
+		return nil, "", "", false
+	}
+	for _, generation := range history {
+		snap := generation.Snapshot
+		if snap.Manifest == nil || snap.Phase == RuntimeSemanticPlanningRequired || snap.Phase == RuntimeSemanticPlanningFailed {
+			continue
+		}
+		compiledBatchIDs := make(map[string]struct{}, len(snap.CompiledProofBatches))
+		for _, compiled := range snap.CompiledProofBatches {
+			compiledBatchIDs[compiled.BatchID] = struct{}{}
+		}
+		for _, doc := range snap.BatchDocuments {
+			if _, isCompiled := compiledBatchIDs[doc.BatchID]; isCompiled {
+				continue
+			}
+			batch, batchFound := runtimeSemanticPlanningBatch(snap.Batches, doc.BatchID)
+			if !batchFound ||
+				batch.State == RuntimeSemanticPlanBatchPending ||
+				batch.State == RuntimeSemanticPlanBatchRequesting ||
+				batch.State == RuntimeSemanticPlanBatchFailed {
+				continue
+			}
+			docHash := StableRuntimeSemanticPlanDocumentHash(doc)
+			if batch.DocumentHash != docHash {
+				continue
+			}
+			for _, proposal := range doc.Proposals {
+				if proposal.CoverageWorkItemID != coverageID ||
+					proposal.DeclarationRef != declarationRef ||
+					proposal.ValidationInputReview == nil ||
+					proposal.ValidationInputReview.SubjectHash != subjectHash {
+					continue
+				}
+				if RuntimeValidationInputReviewConclusion(*proposal.ValidationInputReview) != RuntimeValidationInputConsistent {
+					continue
+				}
+				sourceBinding, bindingFound := RuntimeSemanticValidationInputReviewBinding(proposal, snap.Manifest.OwnerCatalogs)
+				if !bindingFound ||
+					sourceBinding.RequirementHash != requirementHash ||
+					sourceBinding.InputReview == nil ||
+					sourceBinding.InputReview.Hash != subjectHash ||
+					proposal.ValidationInputReview.ValidateAgainstBinding(sourceBinding) != nil {
+					continue
+				}
+				cloned := proposal.ValidationInputReview.Clone()
+				return &cloned, snap.Manifest.Hash, docHash, true
+			}
+		}
+	}
+	return nil, "", "", false
 }
 
 func compiledProofBatchManifestAllowsTargetPolicy(allowed []RuntimeOperationTargetPolicy, want RuntimeOperationTargetPolicy) bool {

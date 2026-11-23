@@ -126,6 +126,47 @@ func TestRuntimeCWIsEligibleForPlanningPreservesDefinitionOrder(t *testing.T) {
 	}
 }
 
+func TestRuntimeCWIsEligibleForPlanningForwardFirstDefersNonBlockingReopened(t *testing.T) {
+	facts := RuntimeFacts{
+		DefinitionSeed: RuntimeDefinitionSeed{CoverageItems: []RuntimeCoverageItem{
+			{ID: "cwi-reopened-early", Order: 1},
+			{ID: "cwi-unbound-mid", Order: 2},
+			{ID: "cwi-planning-late", Order: 3},
+			{ID: "cwi-reopened-late", Order: 4},
+			{ID: "cwi-blocked-by-reopened", Order: 5},
+		}},
+		Coverage: []RuntimeCoverageItemFact{
+			{ID: "cwi-reopened-early", State: RuntimeCoverageItemStateOpen, CWIConvergenceState: RuntimeCWIConvergenceStateReopened},
+			{ID: "cwi-unbound-mid", State: RuntimeCoverageItemStateOpen, CWIConvergenceState: RuntimeCWIConvergenceStateUnbound},
+			{ID: "cwi-planning-late", State: RuntimeCoverageItemStateOpen, CWIConvergenceState: RuntimeCWIConvergenceStatePlanning},
+			{ID: "cwi-reopened-late", State: RuntimeCoverageItemStateOpen, CWIConvergenceState: RuntimeCWIConvergenceStateReopened},
+			{
+				ID: "cwi-blocked-by-reopened", State: RuntimeCoverageItemStateOpen,
+				CWIConvergenceState:             RuntimeCWIConvergenceStateUnbound,
+				PrerequisiteCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-reopened-early"},
+			},
+		},
+	}
+	eligible := RuntimeCWIsEligibleForPlanning(facts)
+	want := []common.CoverageWorkItemID{"cwi-unbound-mid", "cwi-planning-late", "cwi-reopened-early", "cwi-reopened-late"}
+	if len(eligible) != len(want) {
+		t.Fatalf("eligible = %+v, want %+v", eligible, want)
+	}
+	for i := range want {
+		if eligible[i] != want[i] {
+			t.Fatalf("eligible[%d] = %q, want %q (full=%+v)", i, eligible[i], want[i], eligible)
+		}
+	}
+
+	// Blocking reopened prerequisite still runs ahead of its downstream dependent
+	// when no unrelated forward CWI remains.
+	blockingOnly := facts
+	blockingOnly.Coverage = []RuntimeCoverageItemFact{facts.Coverage[0], facts.Coverage[4]}
+	if got := RuntimeCWIsEligibleForPlanning(blockingOnly); len(got) != 1 || got[0] != "cwi-reopened-early" {
+		t.Fatalf("blocking reopened prerequisite did not exclude downstream consumer: %+v", got)
+	}
+}
+
 func TestProjectRuntimeCWIEligibilityKeepsBlockedQueueHeadBehindEligibleClosure(t *testing.T) {
 	settled := RuntimeCWIBindingRef{BindingID: "binding-source", BindingHash: "hash-source", FocusID: "focus-source", SemanticManifestHash: "manifest-source"}
 	facts := RuntimeFacts{

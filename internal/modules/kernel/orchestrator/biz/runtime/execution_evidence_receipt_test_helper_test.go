@@ -2435,8 +2435,8 @@ func runtimeTestBindingAuthorizesOperation(binding runtimecontract.CoverageEvide
 	if err != nil {
 		return false
 	}
-	requireTargets := authorization.Policy != runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope ||
-		len(authorization.OwnerScopeTargetRefs) != 0
+	contract, _ := runtimecontract.RuntimeOperationContractForKind(operation.Kind)
+	requireTargets := runtimecontract.RuntimeOperationRequiresTargetRefs(contract, authorization)
 	return runtimecontract.ValidateRuntimeOperationTargetsAgainstAuthorization(authorization, operation.TargetRefs, requireTargets) == nil
 }
 

@@ -107,6 +107,9 @@ func (w RuntimeSemanticImplementationWork) validateInSemanticSession(session *ru
 	if !reflect.DeepEqual(excluded, w.ExcludedTargetRefs) {
 		return fmt.Errorf("semantic work exclusions do not match complete mutation input catalogs")
 	}
+	if w.Scope.Content != nil && !slices.Equal(excluded, w.Scope.Content.ExcludedTargetRefs) {
+		return fmt.Errorf("semantic work content exclusions do not match complete mutation input catalogs")
+	}
 	if len(w.SelectedDependencyTargetRefs) > w.Scope.Request.Policy.MaxTargetsPerRound {
 		return fmt.Errorf("selected work dependencies exceed the sealed round limit")
 	}

@@ -2600,10 +2600,12 @@ func TestRuntimeAdapterRuntimeFeasibilityRejectsStaleUnifiedDiff(t *testing.T) {
 }
 
 func TestRuntimeAdapterOperationAdmissibilityPreservesAllRequiredTargetsWithinBoundedInventory(t *testing.T) {
+	max := runtimecontract.RuntimeOwnerInventoryItemsMaxCount
+	total := max + 3
 	workspace := t.TempDir()
-	allFiles := make([]string, 0, 35)
-	for i := 1; i <= 35; i++ {
-		name := fmt.Sprintf("file_%02d.txt", i)
+	allFiles := make([]string, 0, total)
+	for i := 1; i <= total; i++ {
+		name := fmt.Sprintf("file_%03d.txt", i)
 		allFiles = append(allFiles, name)
 		if err := os.WriteFile(filepath.Join(workspace, name), []byte(name+"\n"), 0o644); err != nil {
 			t.Fatalf("seed %s: %v", name, err)
@@ -2611,19 +2613,19 @@ func TestRuntimeAdapterOperationAdmissibilityPreservesAllRequiredTargetsWithinBo
 	}
 
 	adapter := NewRuntimeAdapter()
-	requiredTail := []string{"file_33.txt", "file_34.txt", "file_35.txt"}
+	requiredTail := allFiles[max:]
 	inventory, err := adapter.AcquireRuntimeOperationAdmissibility(
 		workspace,
 		"admissibility-file",
 		[]string{runtimecontract.StepKindFileRead, runtimecontract.StepKindFileEdit},
 		requiredTail,
-		runtimecontract.RuntimeOwnerInventoryItemsMaxCount,
+		max,
 	)
 	if err != nil {
 		t.Fatalf("AcquireRuntimeOperationAdmissibility failed: %v", err)
 	}
-	if len(inventory.TargetRefs) != runtimecontract.RuntimeOwnerInventoryItemsMaxCount {
-		t.Fatalf("len(TargetRefs) = %d, want %d", len(inventory.TargetRefs), runtimecontract.RuntimeOwnerInventoryItemsMaxCount)
+	if len(inventory.TargetRefs) != max {
+		t.Fatalf("len(TargetRefs) = %d, want %d", len(inventory.TargetRefs), max)
 	}
 	for _, required := range requiredTail {
 		if !slices.Contains(inventory.TargetRefs, required) {
@@ -2657,11 +2659,53 @@ func TestRuntimeAdapterOperationAdmissibilityPreservesAllRequiredTargetsWithinBo
 		workspace,
 		"admissibility-file",
 		[]string{runtimecontract.StepKindFileRead},
-		allFiles[:33],
-		runtimecontract.RuntimeOwnerInventoryItemsMaxCount,
+		allFiles[:max+1],
+		max,
 	)
 	var budgetErr *runtimecontract.RuntimeOwnerInventoryBudgetExceededError
-	if !errors.As(overErr, &budgetErr) || budgetErr.ItemCount != 33 || budgetErr.MaxItems != runtimecontract.RuntimeOwnerInventoryItemsMaxCount {
-		t.Fatalf("over-budget required targets err = %v, want RuntimeOwnerInventoryBudgetExceededError(33/32)", overErr)
+	if !errors.As(overErr, &budgetErr) || budgetErr.ItemCount != max+1 || budgetErr.MaxItems != max {
+		t.Fatalf("over-budget required targets err = %v, want RuntimeOwnerInventoryBudgetExceededError(%d/%d)", overErr, max+1, max)
+	}
+}
+
+func TestRuntimeAdapterAcquiresOver32TargetsWithoutAmbiguousFailure(t *testing.T) {
+	const fileCount = 80
+	workspace := t.TempDir()
+	for i := 1; i <= fileCount; i++ {
+		name := fmt.Sprintf("module_%03d.go", i)
+		if err := os.WriteFile(filepath.Join(workspace, name), []byte("package main\n"), 0o644); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+
+	adapter := NewRuntimeAdapter()
+	inventory, err := adapter.AcquireRuntimeOperationAdmissibility(
+		workspace,
+		"admissibility-over32",
+		[]string{runtimecontract.StepKindFileRead, runtimecontract.StepKindFileEdit},
+		nil,
+		runtimecontract.RuntimeOwnerInventoryItemsMaxCount,
+	)
+	if err != nil {
+		t.Fatalf("AcquireRuntimeOperationAdmissibility(80 files) failed: %v", err)
+	}
+	if len(inventory.TargetRefs) != fileCount {
+		t.Fatalf("len(inventory.TargetRefs) = %d, want %d", len(inventory.TargetRefs), fileCount)
+	}
+
+	selection, err := adapter.AcquireRuntimeTargetSelection(
+		workspace,
+		"selection-over32",
+		"implementation_work",
+		runtimeFileTargetSelectorWorkspaceDeliverable,
+		"",
+		runtimecontract.RuntimeOwnerInventoryItemsMaxCount,
+		runtimeTargetSelectionBinding{},
+	)
+	if err != nil {
+		t.Fatalf("AcquireRuntimeTargetSelection(80 files) failed: %v", err)
+	}
+	if selection.Disposition == runtimecontract.RuntimeTargetSelectionAmbiguous || len(selection.TargetRefs) != fileCount {
+		t.Fatalf("selection(80 files) = %+v, want complete %d targets without ambiguous failure", selection, fileCount)
 	}
 }

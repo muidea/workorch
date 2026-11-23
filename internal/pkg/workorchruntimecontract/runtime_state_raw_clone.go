@@ -2425,6 +2425,7 @@ func snapshotRuntimeImplementationWorkScopeObservationFromStored(in RuntimeImple
 	out := in
 	if in.Content != nil {
 		contentCopy := *in.Content
+		contentCopy.ExcludedTargetRefs = clipRuntimeStateRawSliceCap(in.Content.ExcludedTargetRefs)
 		contentCopy.Snapshots = clipRuntimeStateRawSliceCap(in.Content.Snapshots)
 		out.Content = &contentCopy
 	}

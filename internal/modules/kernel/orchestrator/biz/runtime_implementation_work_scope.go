@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
@@ -51,7 +52,12 @@ func (m *Biz) driveRuntimeImplementationWorkScope(ctx context.Context, aggregate
 	if err != nil {
 		return runtime.RuntimeAggregate{}, true, err
 	}
-	observation, err := acquireRuntimeImplementationWorkScope(ctx, m.EventHub(), workspace.DeliverableDirectory, request, sources)
+	excludedTargets := runtimecontract.RuntimeImplementationWorkContentExcludedTargets(
+		request.Policy.OwnerModuleID,
+		aggregate.Facts.Resources.OperationAdmissibilities,
+		request.InputRevision,
+	)
+	observation, err := acquireRuntimeImplementationWorkScopeWithExclusions(ctx, m.EventHub(), workspace.DeliverableDirectory, request, sources, excludedTargets)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, true, err
 	}
@@ -67,6 +73,10 @@ func (m *Biz) driveRuntimeImplementationWorkScope(ctx context.Context, aggregate
 // not commit terminal-proof TargetSelection, select work, or bypass activation.
 // The working-binding private event/consumer remains a separate requirement.
 func acquireRuntimeImplementationWorkScope(ctx context.Context, hub magicevent.Hub, directory string, request runtimecontract.RuntimeImplementationWorkScopeRequest, sources runtimecontract.RuntimeImplementationWorkScopeSources) (runtimecontract.RuntimeImplementationWorkScopeObservation, error) {
+	return acquireRuntimeImplementationWorkScopeWithExclusions(ctx, hub, directory, request, sources, nil)
+}
+
+func acquireRuntimeImplementationWorkScopeWithExclusions(ctx context.Context, hub magicevent.Hub, directory string, request runtimecontract.RuntimeImplementationWorkScopeRequest, sources runtimecontract.RuntimeImplementationWorkScopeSources, excludedTargets []string) (runtimecontract.RuntimeImplementationWorkScopeObservation, error) {
 	if err := request.ValidateForSources(sources); err != nil {
 		return runtimecontract.RuntimeImplementationWorkScopeObservation{}, err
 	}
@@ -99,8 +109,15 @@ func acquireRuntimeImplementationWorkScope(ctx context.Context, hub magicevent.H
 	// manifest. No partial/truncated body may be labelled complete. The private
 	// scope CAS freezes this same input for attempt 1 and process recovery.
 	if result.Selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected || result.Selection.Disposition == runtimecontract.RuntimeTargetSelectionScope {
-		content := &runtimecontract.RuntimeImplementationWorkContent{ProtocolRef: runtimecontract.RuntimeImplementationWorkContentV1, ManifestRevision: result.Selection.ObservedRevision}
+		content := &runtimecontract.RuntimeImplementationWorkContent{
+			ProtocolRef:        runtimecontract.RuntimeImplementationWorkContentV1,
+			ManifestRevision:   result.Selection.ObservedRevision,
+			ExcludedTargetRefs: slices.Clone(excludedTargets),
+		}
 		for _, target := range result.Selection.TargetRefs {
+			if slices.Contains(excludedTargets, target) {
+				continue
+			}
 			snapshot, err := AcquireTargetSnapshotPrerequisite(ctx, hub, fileevents.AcquireTargetSnapshotCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.AuthoritySnapshotID, PrerequisiteID: request.RequestID, WorkspaceDeliverableDirectory: directory, TargetRef: target, MaxBytes: fileevents.DefaultTargetSnapshotBytes})
 			if err != nil {
 				return observation, fmt.Errorf("implementation_work_content_unavailable: %w", err)

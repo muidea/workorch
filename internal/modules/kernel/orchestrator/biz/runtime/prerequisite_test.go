@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -934,5 +935,174 @@ func TestValidationDiscoveryReconciliationReturnsMissingManifestToPending(t *tes
 	if len(updated.Prerequisites.Pending) != 1 || updated.Prerequisites.Pending[0].ID != prerequisite.ID ||
 		len(updated.Prerequisites.Satisfied) != 0 || updated.Feasibility != nil {
 		t.Fatalf("missing manifest freshness did not return to typed acquisition: %+v", updated)
+	}
+}
+
+func TestReduceRuntimeStateReactivatesRetiredCanonicalPrerequisiteForUnboundDefinitionSeedFocus(t *testing.T) {
+	for _, convState := range []runtimecontract.RuntimeCWIConvergenceState{
+		runtimecontract.RuntimeCWIConvergenceStateUnbound,
+		runtimecontract.RuntimeCWIConvergenceStatePlanning,
+	} {
+		t.Run(string(convState), func(t *testing.T) {
+			facts := validationFacts()
+			defFocusID := "focus-seed-003"
+			facts.Focus.ID = defFocusID
+			facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+			facts.Focus.TargetRole = "deliverable_implementation"
+			facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+			facts.Focus.TargetSelectorRef = "file/workspace_deliverable"
+			facts.Focus.TargetSelectorOwnerRef = "software-dev"
+			facts.Focus.TargetSelectorSubjectRef = "dodItem"
+			facts.Focus.TargetSelectorCandidateRefs = []string{"new-target-requires-owner-selector", "workspace-relative-path"}
+			facts.Focus.RequireTargetGrounding = true
+			facts.Resources.Manifest = &runtimecontract.WorkspaceManifest{Revision: "tree-1", TargetRefs: []string{"main.go"}}
+			facts.DefinitionFocuses = []runtimecontract.RuntimeDefinitionFocus{{
+				ID:                          defFocusID,
+				CoverageWorkItemIDs:         []common.CoverageWorkItemID{"cwi-1"},
+				RequiredEvidenceKinds:       []string{runtimecontract.EvidenceKindStateChange},
+				TargetRole:                  "deliverable_implementation",
+				TargetDiscoverySources:      facts.Focus.TargetDiscoverySources,
+				TargetSelectorRef:           facts.Focus.TargetSelectorRef,
+				TargetSelectorOwnerRef:      facts.Focus.TargetSelectorOwnerRef,
+				TargetSelectorSubjectRef:    facts.Focus.TargetSelectorSubjectRef,
+				TargetSelectorCandidateRefs: facts.Focus.TargetSelectorCandidateRefs,
+				RequireTargetGrounding:      true,
+				RequireAssessment:           true,
+			}}
+			facts.Coverage[0].CWIConvergenceState = convState
+			facts.Coverage[0].CurrentBindingRef = nil
+			facts.Coverage[0].FocusID = defFocusID
+
+			requirement := focusScopedRuntimeRequirement(facts, runtimecontract.RuntimeRequirement{
+				Kind:                        runtimecontract.PrerequisiteKindTargetSelection,
+				OwnerModuleID:               runtimecontract.RuntimeModuleFile,
+				SubjectRef:                  facts.Focus.TargetRole,
+				TargetSelectorRef:           facts.Focus.TargetSelectorRef,
+				TargetSelectorOwnerRef:      facts.Focus.TargetSelectorOwnerRef,
+				TargetSelectorSubjectRef:    facts.Focus.TargetSelectorSubjectRef,
+				TargetSelectorCandidateRefs: facts.Focus.TargetSelectorCandidateRefs,
+				Reason:                      "focus target grounding requires owner target selection",
+			})
+			prepared := PreflightRuntimeFacts(facts, []runtimecontract.RuntimeRequirement{requirement})
+			if len(prepared.Prerequisites.Pending) != 1 {
+				t.Fatalf("expected 1 pending target selection, got %+v", prepared.Prerequisites.Pending)
+			}
+			retired := prepared.Prerequisites.Pending[0]
+			retiredObservation := runtimecontract.RuntimePrerequisiteObservation{
+				PrerequisiteID: retired.ID,
+				Kind:           retired.Kind,
+				OwnerModuleID:  retired.OwnerModuleID,
+				ContentHash:    "selection-old",
+				Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+					Domain:        runtimecontract.RuntimeResourceWorkspaceTree,
+					OwnerModuleID: runtimecontract.RuntimeModuleFile,
+					SubjectRef:    "workspace_deliverable",
+					Revision:      "tree-old",
+				}},
+			}
+			retiredObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(retiredObservation)
+			unrelated := runtimecontract.RuntimePrerequisite{
+				ID:            "target_selection:focus:completed-focus:blocks/file:unrelated",
+				Kind:          runtimecontract.PrerequisiteKindTargetSelection,
+				Scope:         runtimecontract.RuntimePrerequisiteScopeFocus,
+				FocusID:       "completed-focus",
+				OwnerModuleID: runtimecontract.RuntimeModuleFile,
+				Reason:        "unrelated completed focus lineage",
+			}
+			unrelatedObservation := runtimecontract.RuntimePrerequisiteObservation{
+				PrerequisiteID: unrelated.ID,
+				Kind:           unrelated.Kind,
+				OwnerModuleID:  unrelated.OwnerModuleID,
+				ContentHash:    "selection-unrelated",
+				Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+					Domain:        runtimecontract.RuntimeResourceWorkspaceTree,
+					OwnerModuleID: runtimecontract.RuntimeModuleFile,
+					SubjectRef:    "workspace_deliverable",
+					Revision:      "tree-unrelated",
+				}},
+			}
+			unrelatedObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(unrelatedObservation)
+			prepared.Prerequisites.Pending = nil
+			prepared.Prerequisites.Retired = []runtimecontract.RuntimePrerequisite{retired, unrelated}
+			prepared.Resources.RetiredPrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{retiredObservation, unrelatedObservation}
+			if err := prepared.Validate(); err != nil {
+				t.Fatalf("fixture invalid: %v", err)
+			}
+
+			reactivated, decision, err := ReduceRuntimeStateWithDirective(prepared, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
+				t.Fatalf("decision = %+v, want need_prerequisite", decision)
+			}
+			if len(reactivated.Prerequisites.Pending) != 1 || reactivated.Prerequisites.Pending[0].ID != retired.ID {
+				t.Fatalf("pending prerequisite not reactivated once: %+v", reactivated.Prerequisites.Pending)
+			}
+			if len(reactivated.Prerequisites.Retired) != 1 || reactivated.Prerequisites.Retired[0].ID != unrelated.ID {
+				t.Fatalf("unrelated retired prerequisite lost: %+v", reactivated.Prerequisites.Retired)
+			}
+			if len(reactivated.Resources.RetiredPrerequisiteObservations) != 1 || reactivated.Resources.RetiredPrerequisiteObservations[0].ObservationID != unrelatedObservation.ObservationID {
+				t.Fatalf("retired observation cleanup mismatch: %+v", reactivated.Resources.RetiredPrerequisiteObservations)
+			}
+			if len(reactivated.Resources.PrerequisiteObservations) != 0 {
+				t.Fatalf("old retired observation leaked into active observations: %+v", reactivated.Resources.PrerequisiteObservations)
+			}
+			if err := reactivated.Validate(); err != nil {
+				t.Fatalf("reactivated facts invalid: %v", err)
+			}
+			report := InspectRuntimeAuthorityInvariants(RuntimeAggregate{Facts: reactivated, Decision: decision})
+			if len(report.Violations) != 0 {
+				t.Fatalf("expected zero authority invariant violations, got %+v", report.Violations)
+			}
+
+			replayed := PreflightRuntimeFacts(reactivated, []runtimecontract.RuntimeRequirement{requirement})
+			if !runtimecontract.RuntimeRawEqual(replayed.Prerequisites, reactivated.Prerequisites) || !runtimecontract.RuntimeRawEqual(replayed.Resources, reactivated.Resources) {
+				t.Fatalf("preflight replay mutated reactivation state: preflight=%+v reactivated=%+v", replayed.Prerequisites, reactivated.Prerequisites)
+			}
+			rereduced, _, err := ReduceRuntimeStateWithDirective(reactivated, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !runtimecontract.RuntimeRawEqual(rereduced.Normalized(), reactivated.Normalized()) {
+				t.Fatalf("reducer replay mutated reactivation state: pending1=%d pending2=%d obs1=%#v obs2=%#v",
+					len(reactivated.Prerequisites.Pending), len(rereduced.Prerequisites.Pending),
+					reactivated.Resources.PrerequisiteObservations, rereduced.Resources.PrerequisiteObservations)
+			}
+
+			t.Run("malformed_retired_rejected", func(t *testing.T) {
+				malformed := prepared
+				malformed.Prerequisites.Retired = append([]runtimecontract.RuntimePrerequisite(nil), prepared.Prerequisites.Retired...)
+				malformed.Prerequisites.Retired[0].SubjectRef = "tampered-subject"
+				if _, _, err := ReduceRuntimeStateWithDirective(malformed, nil); err == nil {
+					t.Fatal("malformed retired prerequisite was hidden by reactivation")
+				}
+			})
+
+			t.Run("mismatched_focus_id_not_reactivated", func(t *testing.T) {
+				otherFocus := prepared
+				otherFocus.DefinitionFocuses = append([]runtimecontract.RuntimeDefinitionFocus(nil), prepared.DefinitionFocuses...)
+				otherFocus.DefinitionFocuses[0].ID = "different-definition-focus"
+				if _, _, err := ReduceRuntimeStateWithDirective(otherFocus, nil); err == nil || !strings.Contains(err.Error(), "cannot be both active and retired") {
+					t.Fatalf("expected active/retired rejection when Focus.ID != DefinitionFocus.ID, got err=%v", err)
+				}
+			})
+
+			t.Run("bound_cwi_not_reactivated", func(t *testing.T) {
+				bound := prepared
+				bound.Coverage = append([]runtimecontract.RuntimeCoverageItemFact(nil), prepared.Coverage...)
+				ref := runtimecontract.RuntimeCWIBindingRef{
+					BindingID:            "binding-1",
+					BindingHash:          "binding-hash-1",
+					FocusID:              defFocusID,
+					SemanticManifestHash: "manifest-1",
+				}
+				bound.Coverage[0].CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStateBound
+				bound.Coverage[0].CurrentBindingRef = &ref
+				if _, _, err := ReduceRuntimeStateWithDirective(bound, nil); err == nil || !strings.Contains(err.Error(), "cannot be both active and retired") {
+					t.Fatalf("expected active/retired rejection for bound CWI, got err=%v", err)
+				}
+			})
+		})
 	}
 }

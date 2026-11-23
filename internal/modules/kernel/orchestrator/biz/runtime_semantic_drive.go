@@ -207,7 +207,7 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 	}
 	if expected.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch && ledger.Attempt == 0 && ledger.FailureInputReview == nil {
 		if activeBatch := activeRuntimeSemanticBatch(ledger); activeBatch != nil {
-			if _, _, compiled := runtimecontract.CompileRuntimeSingletonProofBatch(manifest, *activeBatch); compiled {
+			if _, _, compiled := runtimecontract.CompileRuntimeSingletonProofBatchWithHistory(manifest, *activeBatch, runtimecontract.CollectRuntimeSemanticPlanningHistory(ledger)); compiled {
 				if _, hasSession := runtimeCandidateRequestSession(aggregate, ledger.LogicalRequestID); !hasSession {
 					result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventSemanticSingletonProofBatchCompiled, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{LogicalRequestID: ledger.LogicalRequestID}})
 					return result.Aggregate, err

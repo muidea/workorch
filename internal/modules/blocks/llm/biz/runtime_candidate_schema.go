@@ -201,14 +201,12 @@ func runtimeOperationTargetRefsSchema(operation runtimecontract.RuntimeCandidate
 	if len(allowedTargets) > 0 {
 		targetSchema["maxItems"] = len(allowedTargets)
 	}
-	switch operation.TargetCardinality {
-	case runtimecontract.RuntimeOperationTargetCardinalityOne:
+	if operation.RequireTargetRefs {
+		targetSchema["minItems"] = 1
+	}
+	if operation.TargetCardinality == runtimecontract.RuntimeOperationTargetCardinalityOne {
 		targetSchema["minItems"] = 1
 		targetSchema["maxItems"] = 1
-	case runtimecontract.RuntimeOperationTargetCardinalityMany:
-		if operation.RequireTargetRefs {
-			targetSchema["minItems"] = 1
-		}
 	}
 	return targetSchema
 }

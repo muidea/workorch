@@ -1117,8 +1117,8 @@ func (c *planningTransactionComponent) compileSingletonProofBatch(ctx context.Co
 			return RuntimeAggregate{}, fmt.Errorf("%w: provider transaction already exists", common.ErrConflict)
 		}
 	}
-	doc, rule, ok := runtimecontract.CompileRuntimeSingletonProofBatch(*ledger.Manifest, batch)
-	if !ok {
+	doc, compiledBatch, ok := runtimecontract.CompileRuntimeSingletonProofBatchWithHistory(*ledger.Manifest, batch, runtimecontract.CollectRuntimeSemanticPlanningHistory(*ledger))
+	if !ok || compiledBatch == nil {
 		return RuntimeAggregate{}, common.ErrConflict
 	}
 	changed, err := evaluateSemanticPlanMutation(transaction.aggregate, ledger, logical, doc)
@@ -1129,7 +1129,7 @@ func (c *planningTransactionComponent) compileSingletonProofBatch(ctx context.Co
 		if err := advanceProofBatchToFeasibilityRequired(ledger); err != nil {
 			return RuntimeAggregate{}, err
 		}
-		ledger.CompiledProofBatches = append(ledger.CompiledProofBatches, *runtimecontract.NewRuntimeSemanticCompiledProofBatch(*ledger.Manifest, batch, rule, doc))
+		ledger.CompiledProofBatches = append(ledger.CompiledProofBatches, *compiledBatch)
 	}
 	return c.commitSemanticPlanningMutation(ctx, transaction, changed)
 }

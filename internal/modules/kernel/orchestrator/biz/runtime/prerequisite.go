@@ -109,29 +109,41 @@ func preflightRuntimeFactsPreservingPendingNormalized(facts runtimecontract.Runt
 	return preflightRuntimeFactsNormalized(facts, requirements)
 }
 
-// reactivateReopenedPendingFocusPrerequisites handles the one bounded case in
-// which a retired prerequisite identity can become current again. A reopened
-// CWI deliberately returns to the stable semantic-pending/<cwi> focus identity;
-// therefore a focus-scoped prerequisite acquired by an earlier semantic
-// generation can have the exact ID needed by the new generation. SM-2 removes
-// that ID and its old owner observation from the retired current collection
-// before scheduling acquisition. Immutable audit remains in the CWI reopen and
-// semantic-generation histories; the old observation must not become authority
-// for the reopened generation.
+// reactivateReopenedPendingFocusPrerequisites handles the two bounded cases in
+// which a retired prerequisite identity can become current again: (1) a reopened
+// CWI returns to the stable semantic-pending/<cwi> focus identity, or (2) a
+// binding-free Definition seed focus returns to the queue after temporarily
+// yielding to a reopened predecessor. In both cases SM-2 removes only exact
+// canonical retired focus-scoped IDs and their old owner observations before
+// scheduling fresh acquisition. Immutable audit remains in CWI/reopen/semantic
+// histories; old observations must not become authority for the current focus.
 func reactivateReopenedPendingFocusPrerequisites(facts runtimecontract.RuntimeFacts, reacquiring map[string]struct{}) runtimecontract.RuntimeFacts {
-	if len(reacquiring) == 0 || len(facts.Focus.CoverageWorkItemIDs) != 1 ||
-		facts.Focus.ID != "semantic-pending/"+string(facts.Focus.CoverageWorkItemIDs[0]) {
+	if len(reacquiring) == 0 || len(facts.Focus.CoverageWorkItemIDs) != 1 || len(facts.Focus.CoverageEvidenceBindings) != 0 {
 		return facts
 	}
 	coverageID := facts.Focus.CoverageWorkItemIDs[0]
-	reopened := false
+	eligible := false
 	for _, item := range facts.Coverage {
-		if item.ID == coverageID && item.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStateReopened && len(item.ReopenLineage) != 0 {
-			reopened = true
+		if item.ID != coverageID || item.CurrentBindingRef != nil {
+			continue
+		}
+		if facts.Focus.ID == "semantic-pending/"+string(coverageID) &&
+			item.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStateReopened &&
+			len(item.ReopenLineage) != 0 {
+			eligible = true
+			break
+		}
+		if item.State != runtimecontract.RuntimeCoverageItemStateSatisfied &&
+			(item.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStateUnbound ||
+				item.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStatePlanning) {
+			declaration, found, err := runtimeDefinitionFocusForCoverage(facts.DefinitionFocuses, coverageID)
+			if err == nil && found && facts.Focus.ID == declaration.ID {
+				eligible = true
+			}
 			break
 		}
 	}
-	if !reopened {
+	if !eligible {
 		return facts
 	}
 

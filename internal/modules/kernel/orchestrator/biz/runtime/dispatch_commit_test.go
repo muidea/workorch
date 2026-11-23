@@ -253,7 +253,7 @@ func TestReopenRuntimeCWIsPreservesAuditAndCanonicalQueueProjection(t *testing.T
 	}
 }
 
-func TestReopenRuntimeCWIsRequeuesCompletedFocusAheadOfPendingQueue(t *testing.T) {
+func TestReopenRuntimeCWIsRequeuesCompletedFocusBehindPendingQueue(t *testing.T) {
 	facts := canonicalReopenFixtureFacts(t)
 	updated, reopened, err := reopenRuntimeCWIs(facts, []runtimeCWIReopenTrigger{{
 		CoverageWorkItemID: "cwi-validation", TriggerRef: "state-after", Reason: "accepted state-change invalidated dependent validation",
@@ -261,14 +261,15 @@ func TestReopenRuntimeCWIsRequeuesCompletedFocusAheadOfPendingQueue(t *testing.T
 	if err != nil || len(reopened) != 1 {
 		t.Fatalf("canonical reopen = reopened=%v err=%v", reopened, err)
 	}
-	if len(updated.RemainingFocuses) != 2 || updated.RemainingFocuses[0].ID != "semantic-pending/cwi-validation" || updated.RemainingFocuses[1].ID != "focus-pending" ||
+	if len(updated.RemainingFocuses) != 2 || updated.RemainingFocuses[0].ID != "focus-pending" || updated.RemainingFocuses[1].ID != "semantic-pending/cwi-validation" ||
 		len(updated.CompletedFocuses) != 1 || updated.CompletedFocuses[0].ID != "focus-unrelated" {
 		t.Fatalf("canonical requeued focus queues = current=%+v remaining=%+v completed=%+v", updated.Focus, updated.RemainingFocuses, updated.CompletedFocuses)
 	}
 	// Normalization models the persisted/reloaded aggregate shape; the pending
 	// focus remains a stable CWI projection rather than a recursive old ID.
 	reloaded := updated.Normalized()
-	if len(reloaded.RemainingFocuses) != 2 || reloaded.RemainingFocuses[0].ID != "semantic-pending/cwi-validation" || len(reloaded.CompletedFocuses) != 1 || reloaded.CompletedFocuses[0].ID != "focus-unrelated" {
+	if len(reloaded.RemainingFocuses) != 2 || reloaded.RemainingFocuses[0].ID != "focus-pending" || reloaded.RemainingFocuses[1].ID != "semantic-pending/cwi-validation" ||
+		len(reloaded.CompletedFocuses) != 1 || reloaded.CompletedFocuses[0].ID != "focus-unrelated" {
 		t.Fatalf("reloaded canonical focus queues = %+v", reloaded)
 	}
 }

@@ -316,6 +316,16 @@ func (c *authorityComponent) observeImplementationWorkScope(ctx context.Context,
 	if err := observation.ValidateForSources(sources); err != nil {
 		return RuntimeAggregate{}, err
 	}
+	if observation.Content != nil {
+		expectedExcluded := runtimecontract.RuntimeImplementationWorkContentExcludedTargets(
+			observation.Request.Policy.OwnerModuleID,
+			a.Facts.Resources.OperationAdmissibilities,
+			observation.Request.InputRevision,
+		)
+		if !slices.Equal(observation.Content.ExcludedTargetRefs, expectedExcluded) {
+			return RuntimeAggregate{}, fmt.Errorf("%w: implementation work content exclusions do not match current owner catalogs", common.ErrConflict)
+		}
+	}
 	a.ImplementationWork = a.ImplementationWork.Clone()
 	if preview := a.ImplementationWork.ScopePreview; preview != nil && reflect.DeepEqual(preview.Request, observation.Request) {
 		expected := a.StateRevision

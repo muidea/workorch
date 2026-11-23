@@ -2716,7 +2716,11 @@ func (g RuntimeSemanticPlanningGeneration) Clone() RuntimeSemanticPlanningGenera
 }
 
 func (g RuntimeSemanticPlanningGeneration) Validate() error {
-	return validateRuntimeSemanticPlanningGenerationNormalized(g, g.Normalized(), newRuntimeSemanticValidationSession())
+	return g.ValidateWithHistory(nil)
+}
+
+func (g RuntimeSemanticPlanningGeneration) ValidateWithHistory(precedingHistory []RuntimeSemanticPlanningGeneration) error {
+	return validateRuntimeSemanticPlanningGenerationNormalizedWithHistory(g, g.Normalized(), precedingHistory, newRuntimeSemanticValidationSession())
 }
 
 func sameRuntimeSemanticPlanningGenerationShallow(a, b RuntimeSemanticPlanningGeneration) bool {
@@ -2777,13 +2781,21 @@ func sameSlicePtrHeader[T any](a, b []T) bool {
 }
 
 func validateRuntimeSemanticPlanningGenerationNormalized(raw, g RuntimeSemanticPlanningGeneration, session *runtimeSemanticValidationSession) error {
+	return validateRuntimeSemanticPlanningGenerationNormalizedWithHistory(raw, g, nil, session)
+}
+
+func validateRuntimeSemanticPlanningGenerationNormalizedWithHistory(raw, g RuntimeSemanticPlanningGeneration, precedingHistory []RuntimeSemanticPlanningGeneration, session *runtimeSemanticValidationSession) error {
 	if session.committedGeneration(raw) && (sameRuntimeSemanticPlanningGenerationShallow(raw, g) || runtimeRawEqual(raw, g)) {
 		return nil
 	}
-	return validateRuntimeSemanticPlanningGenerationComplete(raw, g, session)
+	return validateRuntimeSemanticPlanningGenerationCompleteWithHistory(raw, g, precedingHistory, session)
 }
 
 func validateRuntimeSemanticPlanningGenerationComplete(raw, g RuntimeSemanticPlanningGeneration, session *runtimeSemanticValidationSession) error {
+	return validateRuntimeSemanticPlanningGenerationCompleteWithHistory(raw, g, nil, session)
+}
+
+func validateRuntimeSemanticPlanningGenerationCompleteWithHistory(raw, g RuntimeSemanticPlanningGeneration, precedingHistory []RuntimeSemanticPlanningGeneration, session *runtimeSemanticValidationSession) error {
 	if len(raw.InvalidationSignatures) != len(g.InvalidationSignatures) || len(raw.PrerequisiteIDs) != len(g.PrerequisiteIDs) ||
 		len(raw.ReopenedCoverageIDs) != len(g.ReopenedCoverageIDs) || len(raw.ReopenTriggerRefs) != len(g.ReopenTriggerRefs) ||
 		len(raw.ChangedCoverageIDs) != len(g.ChangedCoverageIDs) || len(raw.ClosureChangeTriggerRefs) != len(g.ClosureChangeTriggerRefs) {
@@ -2858,7 +2870,7 @@ func validateRuntimeSemanticPlanningGenerationComplete(raw, g RuntimeSemanticPla
 	if g.Snapshot.Manifest == nil {
 		return fmt.Errorf("runtime semantic planning generation snapshot requires a manifest")
 	}
-	if err := validateRuntimeSemanticPlanningLedgerNormalized(raw.Snapshot, g.Snapshot, session); err != nil {
+	if err := validateRuntimeSemanticPlanningLedgerNormalizedWithHistory(raw.Snapshot, g.Snapshot, precedingHistory, session); err != nil {
 		return fmt.Errorf("runtime semantic planning generation snapshot: %w", err)
 	}
 	manifestCatalogs := append([]RuntimeOperationAdmissibility(nil), g.Snapshot.Manifest.OwnerCatalogs...)
@@ -3162,15 +3174,19 @@ func validateRuntimeSemanticPlanningLedgerInSession(l RuntimeSemanticPlanningLed
 	}
 	raw := l
 	return runtimeProcessingRegion("semantic_ledger", func() error {
-		return validateRuntimeSemanticPlanningLedgerNormalizedWithPreimage(raw, l.normalizedForValidationWithPreimage(session, prev), session, prev)
+		return validateRuntimeSemanticPlanningLedgerNormalizedWithPreimage(raw, l.normalizedForValidationWithPreimage(session, prev), nil, session, prev)
 	})
 }
 
 func validateRuntimeSemanticPlanningLedgerNormalized(raw, l RuntimeSemanticPlanningLedger, session *runtimeSemanticValidationSession) error {
-	return validateRuntimeSemanticPlanningLedgerNormalizedWithPreimage(raw, l, session, nil)
+	return validateRuntimeSemanticPlanningLedgerNormalizedWithHistory(raw, l, nil, session)
 }
 
-func validateRuntimeSemanticPlanningLedgerNormalizedWithPreimage(raw, l RuntimeSemanticPlanningLedger, session *runtimeSemanticValidationSession, prev *RuntimeSemanticPlanningLedger) error {
+func validateRuntimeSemanticPlanningLedgerNormalizedWithHistory(raw, l RuntimeSemanticPlanningLedger, precedingHistory []RuntimeSemanticPlanningGeneration, session *runtimeSemanticValidationSession) error {
+	return validateRuntimeSemanticPlanningLedgerNormalizedWithPreimage(raw, l, precedingHistory, session, nil)
+}
+
+func validateRuntimeSemanticPlanningLedgerNormalizedWithPreimage(raw, l RuntimeSemanticPlanningLedger, precedingHistory []RuntimeSemanticPlanningGeneration, session *runtimeSemanticValidationSession, prev *RuntimeSemanticPlanningLedger) error {
 	rawHistory := make([]RuntimeSemanticPlanningGeneration, 0, raw.HistoryCount())
 	for _, generation := range raw.AllHistory() {
 		rawHistory = append(rawHistory, generation)
@@ -3200,13 +3216,14 @@ func validateRuntimeSemanticPlanningLedgerNormalizedWithPreimage(raw, l RuntimeS
 	seenHistory := make(map[generationIdentity]struct{}, l.HistoryCount())
 	seenInvalidationSignatures := make(map[string]struct{})
 	lastRetiredRevision := uint64(0)
+	allHistory := CollectRuntimeSemanticPlanningHistory(l)
 	for idx, history := range l.AllHistory() {
 		if idx >= len(rawHistory) || len(rawHistory[idx].InvalidationSignatures) != len(history.InvalidationSignatures) || len(rawHistory[idx].PrerequisiteIDs) != len(history.PrerequisiteIDs) ||
 			len(rawHistory[idx].ReopenedCoverageIDs) != len(history.ReopenedCoverageIDs) || len(rawHistory[idx].ReopenTriggerRefs) != len(history.ReopenTriggerRefs) ||
 			len(rawHistory[idx].ChangedCoverageIDs) != len(history.ChangedCoverageIDs) || len(rawHistory[idx].ClosureChangeTriggerRefs) != len(history.ClosureChangeTriggerRefs) {
 			return fmt.Errorf("runtime semantic planning history %d contains duplicate or empty lineage values", idx)
 		}
-		if err := validateRuntimeSemanticPlanningGenerationNormalized(rawHistory[idx], history, session); err != nil {
+		if err := validateRuntimeSemanticPlanningGenerationNormalizedWithHistory(rawHistory[idx], history, allHistory[:idx], session); err != nil {
 			return fmt.Errorf("runtime semantic planning history %d: %w", idx, err)
 		}
 		if history.Snapshot.DefinitionSeedHash != l.DefinitionSeedHash {
@@ -3421,6 +3438,10 @@ func validateRuntimeSemanticPlanningLedgerNormalizedWithPreimage(raw, l RuntimeS
 		if l.Manifest == nil {
 			return fmt.Errorf("compiled semantic proof batch requires original manifest/document")
 		}
+		batchHistory := precedingHistory
+		if len(allHistory) != 0 {
+			batchHistory = allHistory
+		}
 		seenCompiledBatches := make(map[string]struct{}, len(l.CompiledProofBatches))
 		for _, compiled := range l.CompiledProofBatches {
 			if compiled.Rule == "" || compiled.ManifestHash == "" || compiled.BatchID == "" || compiled.DocumentHash == "" {
@@ -3435,7 +3456,7 @@ func validateRuntimeSemanticPlanningLedgerNormalizedWithPreimage(raw, l RuntimeS
 			if !batchFound || !docFound {
 				return fmt.Errorf("compiled semantic proof batch %q lacks matching batch or document", compiled.BatchID)
 			}
-			if err := compiled.Validate(l.Manifest, &batch, &doc); err != nil {
+			if err := compiled.ValidateWithHistory(l.Manifest, &batch, &doc, batchHistory); err != nil {
 				return err
 			}
 		}

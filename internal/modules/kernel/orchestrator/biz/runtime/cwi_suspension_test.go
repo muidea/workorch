@@ -331,3 +331,177 @@ func TestCWISuspensionReopenedConsumerRequiresNewProofWithoutRewritingPriorProof
 		t.Fatal("duplicate new source was not idempotent")
 	}
 }
+
+func runtimeUnboundYieldProjectionFixture(t *testing.T) RuntimeAggregate {
+	t.Helper()
+	a := runtimeSuspensionProjectionFixture(t)
+	id := a.Facts.Focus.CoverageWorkItemIDs[0]
+	a.Facts.Focus.CoverageEvidenceBindings = nil
+	for i := range a.Facts.Coverage {
+		if a.Facts.Coverage[i].ID == id {
+			a.Facts.Coverage[i].CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStatePlanning
+			a.Facts.Coverage[i].CurrentBindingRef = nil
+			a.Facts.Coverage[i].BindingLineage = nil
+			a.Facts.Coverage[i].FocusID = a.Facts.Focus.ID
+		}
+	}
+	a.Facts.Evidence.Accepted = nil
+	a.Facts.Repair = runtimecontract.RuntimeRepairLedger{
+		FocusID:              a.Facts.Focus.ID,
+		SliceID:              a.Facts.Focus.SliceID,
+		LastProgressRevision: "runtime-evidence-00000000000000000001",
+	}
+	a.Facts.RepairDirective = nil
+	a.Facts.Failure = nil
+	a.SemanticPlanning.Phase = runtimecontract.RuntimeSemanticPlanningRequired
+	a.SemanticPlanning.Manifest = nil
+	a.SemanticPlanning.FailureInputReview = nil
+	a.ImplementationWork.PurposeChoices = []runtimecontract.RuntimeImplementationWorkPurposeChoice{{
+		CoverageWorkItemID: id,
+		ScopeRequestID:     "scope-req-1",
+		Purpose:            runtimecontract.RuntimeImplementationWorkPurposeEffect,
+	}}
+	a.ImplementationWork.Rounds = []runtimecontract.RuntimeImplementationWorkRound{{
+		CoverageWorkItemID:      id,
+		Ordinal:                 1,
+		CompletedReceiptSetHash: "completed-receipts-1",
+		ScopeRequest: runtimecontract.RuntimeImplementationWorkScopeRequest{
+			RequestID:          "scope-req-1",
+			CoverageWorkItemID: id,
+		},
+	}}
+	focusPrereq := focusScopedRuntimeRequirement(a.Facts, runtimecontract.RuntimeRequirement{
+		Kind:          runtimecontract.PrerequisiteKindTargetSelection,
+		OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		SubjectRef:    "deliverable_implementation",
+	})
+	a.Facts.Prerequisites.Pending = append(a.Facts.Prerequisites.Pending, runtimePrerequisiteFromRequirement(focusPrereq))
+	return a
+}
+
+func TestCWISuspensionCleanlyUnboundSuccessorYieldsWithoutPauseAndIsIdempotent(t *testing.T) {
+	for _, withPreview := range []bool{false, true} {
+		name := "no_preview"
+		if withPreview {
+			name = "with_matching_scope_preview"
+		}
+		t.Run(name, func(t *testing.T) {
+			before := runtimeUnboundYieldProjectionFixture(t)
+			currentID := before.Facts.Focus.CoverageWorkItemIDs[0]
+			originalFocus := before.Facts.Focus.Normalized()
+			if withPreview {
+				before.ImplementationWork.ScopePreview = &runtimecontract.RuntimeImplementationWorkScopePreview{
+					Request: runtimecontract.RuntimeImplementationWorkScopeRequest{
+						RequestID:          "preview-req-1",
+						CoverageWorkItemID: currentID,
+					},
+				}
+			}
+			a := before.CloneRaw()
+			changed, err := suspendRuntimeSuccessorForStalePredecessor(&a)
+			if err != nil || !changed {
+				t.Fatalf("unbound yield failed: err=%v changed=%t", err, changed)
+			}
+			if a.Facts.Failure != nil {
+				t.Fatalf("unbound yield recorded unexpected failure: %+v", a.Facts.Failure)
+			}
+			if len(a.Facts.CWISuspensions) != 0 {
+				t.Fatalf("unbound yield must not manufacture CWISuspension: %+v", a.Facts.CWISuspensions)
+			}
+			if len(a.Facts.Focus.CoverageWorkItemIDs) != 1 || a.Facts.Focus.CoverageWorkItemIDs[0] != "ordinary-source" {
+				t.Fatalf("unbound yield did not advance to reopened ordinary consumer: %+v", a.Facts.Focus)
+			}
+			if len(a.Facts.RemainingFocuses) == 0 || !reflect.DeepEqual(a.Facts.RemainingFocuses[0], originalFocus) {
+				t.Fatalf("unbound yield did not retain original focus at RemainingFocuses[0]: %+v", a.Facts.RemainingFocuses)
+			}
+			if len(a.Facts.Prerequisites.Pending) != 0 || len(a.Facts.Prerequisites.Retired) == 0 ||
+				a.Facts.Prerequisites.Retired[len(a.Facts.Prerequisites.Retired)-1].FocusID != originalFocus.ID {
+				t.Fatalf("unbound yield did not retire original focus-scoped prerequisite: pending=%+v retired=%+v", a.Facts.Prerequisites.Pending, a.Facts.Prerequisites.Retired)
+			}
+			if !reflect.DeepEqual(a.ImplementationWork.Rounds, before.ImplementationWork.Rounds) ||
+				!reflect.DeepEqual(a.ImplementationWork.PurposeChoices, before.ImplementationWork.PurposeChoices) ||
+				!reflect.DeepEqual(a.OperationReceipts, before.OperationReceipts) ||
+				!reflect.DeepEqual(a.ExecutionBudget, before.ExecutionBudget) {
+				t.Fatal("unbound yield modified completed rounds, choices, receipts, or budget")
+			}
+			if a.ImplementationWork.ScopePreview != nil {
+				t.Fatalf("unbound yield did not clear matching ScopePreview: %+v", a.ImplementationWork.ScopePreview)
+			}
+			saved := a.CloneRaw()
+			if changed, err := suspendRuntimeSuccessorForStalePredecessor(&a); err != nil || changed || !reflect.DeepEqual(a, saved) {
+				t.Fatalf("duplicate unbound yield was not idempotent: err=%v changed=%t", err, changed)
+			}
+		})
+	}
+}
+
+func TestCWISuspensionUnboundSuccessorGuardFailClosed(t *testing.T) {
+	scenarios := []string{
+		"repair_debt",
+		"repair_exhausted",
+		"repair_directive",
+		"active_failure",
+		"failure_input_review",
+		"active_semantic_phase",
+		"unsettled_work_round",
+		"failed_work_round",
+		"foreign_scope_preview",
+		"unknown_execution",
+		"undeclared_consumer",
+		"missing_owner_source",
+	}
+	for _, scenario := range scenarios {
+		t.Run(scenario, func(t *testing.T) {
+			a := runtimeUnboundYieldProjectionFixture(t)
+			switch scenario {
+			case "repair_debt":
+				a.Facts.Repair.RepairAttempts = 1
+			case "repair_exhausted":
+				a.Facts.Repair.Exhausted = true
+			case "repair_directive":
+				a.Facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{ID: "repair-1", FocusID: a.Facts.Focus.ID}
+			case "active_failure":
+				a.Facts.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassExecutionFailure, Code: "prior_failure", Message: "prior"}
+			case "failure_input_review":
+				a.SemanticPlanning.FailureInputReview = &runtimecontract.RuntimeValidationFailureInputReview{SubjectHash: "review"}
+			case "active_semantic_phase":
+				a.SemanticPlanning.Phase = runtimecontract.RuntimeSemanticPlanningOrderRequestOpen
+			case "unsettled_work_round":
+				a.ImplementationWork.Rounds[0].CompletedReceiptSetHash = ""
+			case "failed_work_round":
+				a.ImplementationWork.Rounds[0].CompletedReceiptSetHash = ""
+				a.ImplementationWork.Rounds[0].FailedReceiptHash = "failed-receipt-hash"
+			case "foreign_scope_preview":
+				a.ImplementationWork.ScopePreview = &runtimecontract.RuntimeImplementationWorkScopePreview{
+					Request: runtimecontract.RuntimeImplementationWorkScopeRequest{
+						RequestID:          "foreign-preview",
+						CoverageWorkItemID: "foreign-cwi",
+					},
+				}
+			case "unknown_execution":
+				a.CompletedDispatches[0].OperationExecutions[0].State = runtimecontract.OperationExecutionOutcomeUnknown
+			case "undeclared_consumer":
+				a.Facts.DefinitionFocuses[len(a.Facts.DefinitionFocuses)-1].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
+			case "missing_owner_source":
+				a.Reconciliation.Reopened = nil
+				a.Facts.EvidenceApplicabilityObservations = nil
+			}
+			before := a.CloneRaw()
+			changed, err := suspendRuntimeSuccessorForStalePredecessor(&a)
+			if err != nil || !changed || a.Facts.Failure == nil || a.Facts.Failure.Code != runtimeCWIRevalidationSourceUnavailable {
+				t.Fatalf("expected fail-closed unavailability for %s: err=%v changed=%t failure=%+v", scenario, err, changed, a.Facts.Failure)
+			}
+			if len(a.Facts.CWISuspensions) != 0 {
+				t.Fatalf("fail-closed case %s created suspension: %+v", scenario, a.Facts.CWISuspensions)
+			}
+			if !reflect.DeepEqual(a.Facts.Focus, before.Facts.Focus) {
+				t.Fatalf("fail-closed case %s switched focus unexpectedly: %+v", scenario, a.Facts.Focus)
+			}
+			if !reflect.DeepEqual(a.ExecutionBudget, before.ExecutionBudget) ||
+				!reflect.DeepEqual(a.OperationReceipts, before.OperationReceipts) ||
+				!reflect.DeepEqual(a.Facts.Repair, before.Facts.Repair) {
+				t.Fatalf("fail-closed case %s altered budget, receipts, or repair", scenario)
+			}
+		})
+	}
+}

@@ -954,12 +954,13 @@ Result 写后丢回复、冷 owner 恢复 running claim、有界 owner 失败、
 ### Semantic and candidate authority
 
 `runtime/cwi-suspension/v1` 的安全暂停／普通重验／原后继恢复见
-[CWI Suspension](../../../../docs/00-core/runtime/cwi-suspension.md)。SM-2 原 applicability-observation CAS
+[CWI Suspension](../../../../docs/00-core/runtime/cwi-suspension.md)（仅作用于 SM-2，SM-1/SM-3/SM-4 职责不变）。SM-2 原 applicability-observation CAS
 或 reconciliation-batch CAS
-封存 `Facts.CWISuspensions` 的完整来源；current bound fence 本身不放宽。失效的历史来源经已声明的
+在后继持有唯一 current bound binding 时封存 `Facts.CWISuspensions` 的完整来源；current bound fence 本身不放宽。
+若后继尚处于 cleanly unbound 状态（无当前 binding、无 repair 债务/失效/active semantic generation、且已完成或尚无 `ImplementationWork` round，例如 `ImplementationWork` 刚完成写盘后尚未建立 semantic binding），经同一 declared validation-only ordinary consumer、exact owner invalidation source 与无 unknown execution 检查后，直接清理当前 focus-scoped 临时权威并让渡焦点给已重开前驱，不伪造 `RuntimeCWISuspension`、不丢失已完成工作轮次／receipt／预算；当焦点退回 binding-free Definition seed focus 时，`reactivateReopenedPendingFocusPrerequisites` 只移除 exact canonical retired focus-scoped ID 以便重新获取 fresh owner observation（不恢复旧观察结果）。存在 repair 债务、未决／失败工作轮次或缺失普通来源／真实 owner source 时仍以 `cwi_revalidation_source_unavailable` fail-closed。CWI reopen/binding-retirement/binding 谱系上限分别设为 `128`/`128`/`256`（与 `RuntimeHistoricalAcceptanceProofLimit` 对齐）。失效的历史来源经已声明的
 AcceptanceCoverageWorkItemID 回到普通验收消费者，多条依赖边归并到同一消费者；多个独立的
 validation-only ordinary 消费者各自保留 exact reopen 来源、fresh validation/assessment 与 owner 观察。
-选择任务沿 Definition 顺序及原 eligibility；没有声明普通来源时明确
+选择任务采用前向优先顺序：从未完成收敛（`Unbound`/`Planning`）的合格 CWI 优先于非阻断的 `Reopened` CWI，`projectRuntimeCWIFocusQueues` 将重新入队的 focus 置于其余未完成 focus 之后，其余仍沿 Definition 顺序及原 eligibility；`source-change-precedes-and-refreshes-dod-validation` 模板屏障采用 `requireSourceSettled: false`。跨 CWI `EvidenceApplicability` 读取、reducer 前置及 provider session 阻塞在 `RuntimeImplementationWorkPurposePending` 期间暂缓，并在选择 `terminal_proof`、进入 `RepairDirective` 或失败路径时立即恢复；没有声明普通来源时明确
 `cwi_revalidation_source_unavailable`，不继续请求 blocked 后继候选。暂停内后续正式失效观察追加受影响来源，
 不创建嵌套暂停、不覆盖已完成 proof；全部当前依赖恢复后才续接冻结后继。
 后继尚无 effect 时也可安全暂停；暂停时封存 evidence revision，后续真实 effect 不追溯改变暂停前像。
@@ -967,6 +968,7 @@ validation-only ordinary 消费者各自保留 exact reopen 来源、fresh valid
 旧 owner qualification 不复用。独立 coordinator 前像／写集与 aggregate/schema reload 双门禁反证来源。
 `TestDriveRuntimeCWISuspensionRevalidatesOrdinaryPredecessorWithinOriginalBudget` 配对真实 File/Shell/Run/Workspace/Result、
 暂停／恢复 CAS 前后四切点、原预算、单次 effect、来源篡改与三 ACK；scripted provider/controller 重建不冒 live/fresh-process。
+`TestDriveRuntimeUnboundImplementationWorkYieldsToStalePredecessorAndResumes` 覆盖 `ImplementationWork` 首轮落盘触发共享普通验收消费者重开、cleanly unbound 让渡、普通重验后返回 Definition seed focus 并重新获取 focus-scoped prerequisite、以及切点恢复与三 ACK。
 `TestDriveRuntimeCWISuspensionProcessRecovery` 在暂停／恢复 CAS 后真实退出进程，新 Hub/owners 续驱原 JSON，
 保全 pause/receipt/原分配和消费；仍不是公开 authoring fullflow 或 live 模型验证。
 `TestDriveRuntimeDurableDispatchBudgetRejectsUndeclaredPredecessorRevalidation` 保留原无普通来源输入作为明确失败负例。
@@ -979,7 +981,8 @@ validation-only ordinary 消费者各自保留 exact reopen 来源、fresh valid
   compiler 形成 `ExcludedTargetRefs`；三种 target policy（含 selector-only）共同执行。manifest 保留完整
   `MutationInputCatalogs` 前像，accepted attempt、dispatch target authorization、hash 与 restart fence 不得丢失或改写
   排除集合。只有 exact confirmed-validation `InputRepair` 可开放自己的单一 target，其余输入不开放；create-only addition
-  与合法实现修改仍走原事务。Core 不解析文件名/语言，capability owner 不选择 SM-2/SM-3/SM-4 transition；SM-1 不变。
+  与合法实现修改仍走原事务。普通 `RuntimeImplementationWorkContent` 同样经
+  `RuntimeImplementationWorkContentExcludedTargets` 携带 canonical `ExcludedTargetRefs` 并在采集阶段跳过受保护输入读盘，使受保护验证输入不进入普通 `Snapshots`（仅显式 `InputRevision` 解锁的目标除外）；scope 采集、`observeImplementationWorkScope`、working/semantic 校验与 LLM wire 往返均强制一致性。Core 不解析文件名/语言，capability owner 不选择 SM-2/SM-3/SM-4 transition；SM-1 不变。
   这是普通修改准入，不是 LLM semantic review；越界重复只走既有 bounded candidate failure，不能制造治理 ticket。
 - 验收扩展只允许与原 Goal/DoD 一致的补充和细化，并与原义务合取；不允许通过 approval、输入版本或外部参考
   覆盖原准则。测试实现不等同于验收准则，修改输入不能从失败本身推导授权。shared contract 的
@@ -1027,7 +1030,7 @@ validation-only ordinary 消费者各自保留 exact reopen 来源、fresh valid
 - Goal/DoD、prospective constraint、required sequence 和 collective receipt 只支持 conjunctive `all_of`；不存在
   `one_of`/`any_of` terminal escape。Definition gap 只能进入专用 clarification transaction。
 - provider-facing manifest、closed JSON Schema、strict decoder、single evaluator 和 owner feasibility 共享一个 sealed
-  `RuntimeCandidateContractManifest`。Orchestrator 从它纯编译 `RuntimeCandidateWireContract`；required slot 仅由
+  `RuntimeCandidateContractManifest`；`RuntimeOperationRequiresTargetRefs` 是 SM-3 manifest 编译、LLM candidate schema（`minItems: 1`）与 SM-2 receipt/binding 校验共享的唯一 targetRefs 必需谓词（非空 `exact_target` 与之保持一致，要求提供 `targetRefs`）。Orchestrator 从该 manifest 纯编译 `RuntimeCandidateWireContract`；required slot 仅由
   `requiredOperationRef` 选中，auxiliary rule 仅由 canonical kind 选中。唯一 reachable variant、所有 reachable
   authorization 共有的 singleton binding、required cardinality-one singleton target 和 fixed parameter 均本地派生；
   unreachable variant authorization 不扩大 wire。LLM wire 不包含这些本地值或 operation ID/dependency；本地 compiler
@@ -1381,12 +1384,12 @@ File 输入修改、review 或执行 credit。脚本化 provider 主线只能证
   `runtime_prospective_manifest_projection_test.go` 使用优化前完整规范化 oracle 对照首个错误、raw/重复/空值、
   accepted/stale、JSON 重载、原值保全、后续变化、返回隔离、fuzz 和分配；此片不改变 SM-1～SM-4 transition 或预算。
 
-- `OperationAdmissibility` 采用绑定当前 focus/scope 的有界投影合同：`OwnerInventoryBudget.MaxItems = 32` 仅计数
+- `OperationAdmissibility` 采用绑定当前 focus/scope 的有界投影合同：`OwnerInventoryBudget.MaxItems = 256`（`RuntimeOwnerInventoryItemsMaxCount = 256`）仅计数
   `TargetRefs`，`SelectorRefs` 与 `ConstraintRefs` 不消耗 target 名额；请求编译期先校验
   `ValidateRuntimeRequiredTargetsWithinInventoryBudget` 并保持当前 scope 所需 `RequiredTargetRefs` 100% 不可截断
   （超限时在 provider/owner 执行前 fail-closed 返回 `RuntimeOwnerInventoryBudgetExceededError`），Shell 采集在保留全部
   active focus 目标前提下仅按剩余名额合并 File `TargetRefs`。对于枚举了 `TargetRefs` 的 `existing_owner_scope`
-  catalog（`len(TargetRefs) != 0`），当 focus 切换至当前 32 项投影之外的目标时，`CatalogCoversFocusTargets`
+  catalog（`len(TargetRefs) != 0`），当 focus 切换至当前 256 项投影之外的目标时，`CatalogCoversFocusTargets`
   拒绝被 selector 掩盖并触发 `semantic_catalog_focus_scope` 零预算重采集。
 
 - capability owner 只返回 factual catalog/feasibility/receipt。receipt 必须绑定 exact dispatch、operation、execution key/fence、
@@ -1927,6 +1930,12 @@ An ordinary singleton coverage order with no implementation-purpose choice is co
 `singleton_ordinary_order` rule. SM-2 records `CompiledOrder` manifest/document provenance through its private event/CAS;
 SM-3 creates no provider session, usage or review for that order. Multi-member ordering, purpose choice and subsequent
 proof/feasibility keep their semantic transactions. Compilation grants no readiness, effect, validation or completion credit.
+Deterministic singleton proof-batch compilation (`CompileRuntimeSingletonProofBatchWithHistory`) also reuses an
+already-committed original `consistent` `ValidationInputReview` when the exact `subjectHash` matches
+(`singleton_unique_direct_validation_surface_reused_review`, recording source manifest/document/subject provenance
+validated against preceding semantic history), without inventing new validation or skipping changed inputs.
+`RuntimeImplementationWorkTerminalPurposeSelected` ignores `PurposeChoices` bound to completed `InputRevision`
+rounds so an accepted `terminal_proof` survives intervening input-revision rounds.
 
 ### Intent-bound implementation and honest exhaustion
 

@@ -1,6 +1,8 @@
 package workorchruntimecontract
 
 import (
+	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -405,5 +407,248 @@ func TestRuntimeSemanticCompiledProofBatchRejectsForgedProvenance(t *testing.T) 
 	}
 	if dupCompiledLedger.Validate() == nil {
 		t.Fatal("accepted duplicate BatchID in CompiledProofBatches")
+	}
+}
+
+func reusedReviewSingletonManifestFixture(t *testing.T, inputBody string) (RuntimeSemanticPlanManifest, RuntimeSemanticPlanDocument, RuntimeValidationProofRequirementBinding, RuntimeValidationInputReview) {
+	t.Helper()
+	manifest := validationSingletonTestManifest(t, []string{"main.go"}, nil, false, nil)
+	catalog := &manifest.OwnerCatalogs[0]
+	surface := &catalog.ValidationSurfaces[0]
+	binding := surface.ProofRequirementBindings[0].Clone()
+	subject := RuntimeValidationInputReviewSubject{
+		ProtocolRef: RuntimeValidationInputReviewProtocol,
+		Files: []RuntimeValidationInputReviewFile{{
+			TargetRef:   "checks/input_test.go",
+			Content:     inputBody,
+			ContentHash: RuntimeValidationInputContentHash(inputBody),
+		}},
+	}
+	subject.Hash = StableRuntimeValidationInputReviewSubjectHash(subject, binding)
+	binding.InputReview = &subject
+	surface.ProofRequirementBindings[0] = binding.Clone()
+	catalog.ValidationRecipes = []RuntimeValidationRecipe{{
+		ID: binding.ValidationRecipeID, AdapterRef: "owner/review", Command: "check",
+		InputReviewProtocolRef: RuntimeValidationInputReviewProtocol,
+	}}
+	catalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
+	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("manifest validate: %v", err)
+	}
+	orderDoc := RuntimeSemanticPlanDocument{
+		SchemaVersion:      RuntimeSemanticPlanDocumentSchemaCurrent,
+		ManifestHash:       manifest.Hash,
+		DefinitionSeedHash: manifest.DefinitionSeedHash,
+		PlanStep:           RuntimeSemanticPlanStepCoverageOrder,
+		CoverageOrder:      []common.CoverageWorkItemID{manifest.CoverageItems[0].ID},
+	}
+	review := RuntimeValidationInputReview{SubjectHash: subject.Hash}
+	for _, check := range binding.RequiredCheckRefs {
+		review.Checks = append(review.Checks, RuntimeValidationInputCheckReview{
+			RequiredCheckRef: check,
+			Conclusion:       RuntimeValidationInputConsistent,
+			Reason:           "Preserves the original requirement without skipping or waiving checks.",
+			InputTargetRefs:  []string{"checks/input_test.go"},
+			Obligations: []RuntimeValidationInputObligationReview{{
+				CriterionText:   manifest.CoverageItems[0].TargetText,
+				Finding:         RuntimeValidationInputCovered,
+				Reason:          "Original criterion verified",
+				InputTargetRefs: []string{"checks/input_test.go"},
+			}},
+		})
+	}
+	return manifest, orderDoc, binding, review
+}
+
+func TestCompileRuntimeSingletonProofBatchReusesCommittedConsistentInputReview(t *testing.T) {
+	manifest1, orderDoc1, _, consistentReview := reusedReviewSingletonManifestFixture(t, "package checks\n// stable input\n")
+	cwi := manifest1.CoverageItems[0].ID
+	orderHash1 := StableRuntimeSemanticPlanCoverageOrderHash(orderDoc1)
+
+	batch1 := compiledProofBatchForManifest(manifest1, cwi)
+	batch1.CoverageOrderHash = orderHash1
+	batch1.State = RuntimeSemanticPlanBatchRequesting
+	batch1.Hash = StableRuntimeSemanticPlanBatchHash(batch1)
+	variant1, ok := compileRuntimeSingletonVariantID(manifest1.OwnerCatalogs[0], RuntimeBlockKindManagedValidationSession)
+	if !ok {
+		t.Fatal("missing singleton variant")
+	}
+	doc1 := RuntimeSemanticPlanDocument{
+		SchemaVersion:            RuntimeSemanticPlanDocumentSchemaCurrent,
+		ManifestHash:             manifest1.Hash,
+		DefinitionSeedHash:       manifest1.DefinitionSeedHash,
+		PlanStep:                 RuntimeSemanticPlanStepProofBatch,
+		BatchID:                  batch1.BatchID,
+		BatchSequence:            0,
+		BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{cwi},
+		Proposals: []RuntimeSemanticProofProposal{{
+			CoverageWorkItemID:    cwi,
+			OwnerModuleID:         RuntimeModuleShell,
+			OperationKind:         RuntimeBlockKindManagedValidationSession,
+			OperationVariantID:    variant1,
+			Target:                RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"main.go"}},
+			RequiredEvidenceKinds: []string{EvidenceKindValidation},
+			RequiredEffectScopes:  []RuntimeEffectScope{RuntimeEffectEphemeralSession},
+			ValidationRecipeID:    manifest1.OwnerCatalogs[0].ValidationSurfaces[0].ID,
+			DeclarationRef:        RuntimeSemanticCurrentDeclarationRef(manifest1.ProofObligations[0]),
+			ValidationInputReview: &consistentReview,
+		}},
+	}.Normalized()
+	if err := doc1.ValidateAgainstManifest(manifest1); err != nil {
+		t.Fatalf("source doc1 invalid: %v", err)
+	}
+	batch1.DocumentHash = StableRuntimeSemanticPlanDocumentHash(doc1)
+	batch1.State = RuntimeSemanticPlanBatchFeasibilityPending
+	batch1.Hash = StableRuntimeSemanticPlanBatchHash(batch1)
+
+	gen1 := RuntimeSemanticPlanningGeneration{
+		RetiredAtStateRevision: 10,
+		Reason:                 RuntimeSemanticPlanningRetirementCWIReopened,
+		ReopenedCoverageIDs:    []common.CoverageWorkItemID{cwi},
+		ReopenTriggerRefs:      []string{"receipt/source-edited"},
+		Snapshot: RuntimeSemanticPlanningLedger{
+			SchemaVersion:         RuntimeSemanticPlanningLedgerSchemaCurrent,
+			DefinitionSeedHash:    manifest1.DefinitionSeedHash,
+			Manifest:              &manifest1,
+			StablePrefixHash:      "prefix-1",
+			LogicalRequestID:      "req-gen-1",
+			CoverageOrderDocument: &orderDoc1,
+			Document:              &orderDoc1,
+			DocumentHash:          StableRuntimeSemanticPlanDocumentHash(orderDoc1),
+			Batches:               []RuntimeSemanticPlanBatch{batch1},
+			BatchDocuments:        []RuntimeSemanticPlanDocument{doc1},
+			ActiveBatchID:         batch1.BatchID,
+			NextBatchSequence:     1,
+			FeasibilityBatchID:    StableRuntimeSemanticFeasibilityBatchID(manifest1, doc1),
+			Phase:                 RuntimeSemanticPlanningFeasibilityRequired,
+		},
+	}
+
+	// Same input body in a later generation compiles deterministically without calling LLM.
+	manifest2, orderDoc2, _, _ := reusedReviewSingletonManifestFixture(t, "package checks\n// stable input\n")
+	// Perturb non-review catalog revision so manifest2 has a distinct ManifestHash.
+	manifest2.OwnerCatalogs[0].ObservedRevision = "shell-policy-v2"
+	manifest2.OwnerCatalogs[0].SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(manifest2.OwnerCatalogs[0])
+	manifest2.Hash = StableRuntimeSemanticPlanManifestHash(manifest2)
+	orderDoc2.ManifestHash = manifest2.Hash
+	batch2 := compiledProofBatchForManifest(manifest2, cwi)
+	batch2.CoverageOrderHash = StableRuntimeSemanticPlanCoverageOrderHash(orderDoc2)
+	batch2.RequestLogicalID = "req-gen-2"
+
+	doc2, compiled2, ok := CompileRuntimeSingletonProofBatchWithHistory(manifest2, batch2, []RuntimeSemanticPlanningGeneration{gen1})
+	if !ok || compiled2 == nil {
+		t.Fatal("expected deterministic reuse of committed consistent ValidationInputReview")
+	}
+	if compiled2.Rule != RuntimeSemanticCompiledProofBatchRuleSingletonUniqueDirectValidationSurfaceReusedReview ||
+		compiled2.ReusedInputReviewManifestHash != manifest1.Hash ||
+		compiled2.ReusedInputReviewDocumentHash != StableRuntimeSemanticPlanDocumentHash(doc1) ||
+		compiled2.ReusedInputReviewSubjectHash != consistentReview.SubjectHash {
+		t.Fatalf("unexpected compiled provenance: %+v", compiled2)
+	}
+	if !reflect.DeepEqual(doc2.Proposals[0].ValidationInputReview, &consistentReview) {
+		t.Fatalf("reused review body mismatch: %+v", doc2.Proposals[0].ValidationInputReview)
+	}
+	if err := compiled2.ValidateWithHistory(&manifest2, &batch2, &doc2, []RuntimeSemanticPlanningGeneration{gen1}); err != nil {
+		t.Fatalf("ValidateWithHistory failed: %v", err)
+	}
+
+	batch2.DocumentHash = StableRuntimeSemanticPlanDocumentHash(doc2)
+	batch2.State = RuntimeSemanticPlanBatchFeasibilityPending
+	batch2.Hash = StableRuntimeSemanticPlanBatchHash(batch2)
+	ledger2 := RuntimeSemanticPlanningLedger{
+		SchemaVersion:         RuntimeSemanticPlanningLedgerSchemaCurrent,
+		DefinitionSeedHash:    manifest2.DefinitionSeedHash,
+		History:               []RuntimeSemanticPlanningGeneration{gen1},
+		Manifest:              &manifest2,
+		StablePrefixHash:      "prefix-2",
+		LogicalRequestID:      "req-gen-2",
+		CoverageOrderDocument: &orderDoc2,
+		Document:              &orderDoc2,
+		DocumentHash:          StableRuntimeSemanticPlanDocumentHash(orderDoc2),
+		Batches:               []RuntimeSemanticPlanBatch{batch2},
+		BatchDocuments:        []RuntimeSemanticPlanDocument{doc2},
+		CompiledProofBatches:  []RuntimeSemanticCompiledProofBatch{*compiled2},
+		ActiveBatchID:         batch2.BatchID,
+		NextBatchSequence:     1,
+		FeasibilityBatchID:    StableRuntimeSemanticFeasibilityBatchID(manifest2, doc2),
+		Phase:                 RuntimeSemanticPlanningFeasibilityRequired,
+	}
+	if err := ledger2.Validate(); err != nil {
+		t.Fatalf("active ledger with reused-review compiled batch failed Validate: %v", err)
+	}
+
+	// Retiring gen2 into History and compiling gen3 must preserve cold JSON round-trip validation
+	// and keep gen3 pointing 1-hop to gen1 (anti-chaining).
+	gen2 := RuntimeSemanticPlanningGeneration{
+		RetiredAtStateRevision: 20,
+		Reason:                 RuntimeSemanticPlanningRetirementCWIReopened,
+		ReopenedCoverageIDs:    []common.CoverageWorkItemID{cwi},
+		ReopenTriggerRefs:      []string{"receipt/source-edited-2"},
+		Snapshot:               ledger2.WithoutHistory().CloneRaw(),
+	}
+	ledger3 := ledger2.CloneRaw()
+	ledger3.History = []RuntimeSemanticPlanningGeneration{gen1, gen2}
+	rawJSON, err := json.Marshal(ledger3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reloaded RuntimeSemanticPlanningLedger
+	if err := json.Unmarshal(rawJSON, &reloaded); err != nil {
+		t.Fatal(err)
+	}
+	if err := reloaded.Validate(); err != nil {
+		t.Fatalf("fresh cold load of ledger with historical reused-review compiled batch failed: %v", err)
+	}
+
+	// Anti-chaining: only passing gen2 (compiled) as preceding history must fail both compile & validate.
+	if _, _, chained := CompileRuntimeSingletonProofBatchWithHistory(manifest2, batch2, []RuntimeSemanticPlanningGeneration{gen2}); chained {
+		t.Fatal("compiled proof batch chained onto another compiled batch instead of original provider review")
+	}
+	if compiled2.ValidateWithHistory(&manifest2, &batch2, &doc2, []RuntimeSemanticPlanningGeneration{gen2}) == nil {
+		t.Fatal("ValidateWithHistory allowed chaining onto a compiled generation")
+	}
+
+	// Negative: 1-byte SubjectHash drift, changed RequirementHash, non-consistent conclusion,
+	// FailureInputReview != nil, or forged provenance are all rejected.
+	driftedManifest, driftedOrder, _, _ := reusedReviewSingletonManifestFixture(t, "package checks\n// 1-byte edited input\n")
+	driftedBatch := compiledProofBatchForManifest(driftedManifest, cwi)
+	driftedBatch.CoverageOrderHash = StableRuntimeSemanticPlanCoverageOrderHash(driftedOrder)
+	if _, _, reused := CompileRuntimeSingletonProofBatchWithHistory(driftedManifest, driftedBatch, []RuntimeSemanticPlanningGeneration{gen1}); reused {
+		t.Fatal("reused committed review after input file content changed")
+	}
+
+	reqChanged := manifest2.Clone()
+	reqChanged.ProofObligations[0].ValidationProofRequirement.RequiredCheckRefs = []string{"check/validate", "check/extra"}
+	reqChanged.ProofObligations[0].ValidationProofRequirement.Hash = StableRuntimeValidationProofRequirementHash(*reqChanged.ProofObligations[0].ValidationProofRequirement)
+	reqChanged.Hash = StableRuntimeSemanticPlanManifestHash(reqChanged)
+	if _, _, reused := CompileRuntimeSingletonProofBatchWithHistory(reqChanged, compiledProofBatchForManifest(reqChanged, cwi), []RuntimeSemanticPlanningGeneration{gen1}); reused {
+		t.Fatal("reused committed review across changed RequirementHash")
+	}
+
+	failureReviewManifest := manifest2.Clone()
+	failureReviewManifest.FailureInputReview = &RuntimeValidationFailureInputReview{SubjectHash: "review-failure"}
+	failureReviewManifest.Hash = StableRuntimeSemanticPlanManifestHash(failureReviewManifest)
+	if _, _, reused := CompileRuntimeSingletonProofBatchWithHistory(failureReviewManifest, compiledProofBatchForManifest(failureReviewManifest, cwi), []RuntimeSemanticPlanningGeneration{gen1}); reused {
+		t.Fatal("compiled singleton proof batch during FailureInputReview")
+	}
+
+	nonConsistentGen := gen1.Clone()
+	badReview := consistentReview.Clone()
+	badReview.Checks[0].Conclusion = RuntimeValidationInputConflict
+	badReview.Checks[0].Obligations[0].Finding = RuntimeValidationInputConflicting
+	nonConsistentDoc := nonConsistentGen.Snapshot.BatchDocuments[0].Clone()
+	nonConsistentDoc.Proposals[0].ValidationInputReview = &badReview
+	nonConsistentGen.Snapshot.BatchDocuments[0] = nonConsistentDoc
+	nonConsistentGen.Snapshot.Batches[0].DocumentHash = StableRuntimeSemanticPlanDocumentHash(nonConsistentDoc)
+	nonConsistentGen.Snapshot.Batches[0].Hash = StableRuntimeSemanticPlanBatchHash(nonConsistentGen.Snapshot.Batches[0])
+	if _, _, reused := CompileRuntimeSingletonProofBatchWithHistory(manifest2, batch2, []RuntimeSemanticPlanningGeneration{nonConsistentGen}); reused {
+		t.Fatal("reused non-consistent review")
+	}
+
+	forged := *compiled2
+	forged.ReusedInputReviewDocumentHash = "forged-doc-hash"
+	if forged.ValidateWithHistory(&manifest2, &batch2, &doc2, []RuntimeSemanticPlanningGeneration{gen1}) == nil {
+		t.Fatal("accepted forged ReusedInputReviewDocumentHash")
 	}
 }

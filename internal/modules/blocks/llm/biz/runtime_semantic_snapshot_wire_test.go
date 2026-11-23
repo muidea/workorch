@@ -66,3 +66,46 @@ func TestSemanticSnapshotBodiesPrecedeChangingObservationMetadata(t *testing.T) 
 		})
 	}
 }
+
+func TestSemanticWorkWirePreservesExcludedTargetRefs(t *testing.T) {
+	content := &rc.RuntimeImplementationWorkContent{
+		ProtocolRef:        rc.RuntimeImplementationWorkContentV1,
+		ManifestRevision:   "rev-1",
+		ExcludedTargetRefs: []string{"checks/input_test.go", "checks/spec_test.go"},
+		Snapshots: []rc.TargetSnapshot{
+			{TargetRef: "a.go", Content: "package main\n", ContentHash: "hash-a", ContentState: rc.SnapshotContentStateComplete, Size: 13},
+		},
+	}
+	projection := runtimeSemanticWorkProjection{Content: content}
+	encoded, err := json.Marshal(projection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored runtimeSemanticWorkProjection
+	if err := json.Unmarshal(encoded, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(projection, restored) || restored.Content.Hash() != content.Hash() {
+		t.Fatalf("wire round-trip lost ExcludedTargetRefs: got=%+v want=%+v", restored.Content, content)
+	}
+
+	// Omitting ExcludedTargetRefs must decode to nil (matching raw contract equality).
+	plain := runtimeSemanticWorkProjection{
+		Content: &rc.RuntimeImplementationWorkContent{
+			ProtocolRef:      rc.RuntimeImplementationWorkContentV1,
+			ManifestRevision: "rev-1",
+			Snapshots:        content.Snapshots,
+		},
+	}
+	plainEncoded, err := json.Marshal(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plainRestored runtimeSemanticWorkProjection
+	if err := json.Unmarshal(plainEncoded, &plainRestored); err != nil {
+		t.Fatal(err)
+	}
+	if plainRestored.Content == nil || plainRestored.Content.ExcludedTargetRefs != nil || !reflect.DeepEqual(plain, plainRestored) {
+		t.Fatalf("empty ExcludedTargetRefs decoded as non-nil or drifted: %+v", plainRestored.Content)
+	}
+}

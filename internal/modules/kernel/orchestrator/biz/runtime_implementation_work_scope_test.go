@@ -249,3 +249,179 @@ func TestImplementationWorkScopeRealOwnerReadOnlyAndRevisionFence(t *testing.T) 
 		t.Fatal("oversized current content became complete semantic input")
 	}
 }
+
+func TestImplementationWorkScopeWithExclusionsSkipsProtectedInputsUnlessRevised(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	defer hub.Terminate(ctx)
+	owner := filemodule.New()
+	if err := owner.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Stop(ctx) }()
+
+	directory := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(directory, "checks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "implementation.go"), []byte("package impl\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "checks/input_test.go"), []byte("package checks\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{WorkspaceID: "ws", RunID: "run", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1"},
+		[]runtimecontract.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile}})
+	prereqID := facts.Prerequisites.Pending[0].ID
+	committed, err := AcquireAndCommitWorkspaceManifestPrerequisite(ctx, hub, facts, fileevents.AcquireWorkspaceManifestCommand{
+		WorkspaceID: "ws", RunID: "run", AuthoritySnapshotID: "authority", PrerequisiteID: prereqID, WorkspaceDeliverableDirectory: directory,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs, ok := runtimecontract.RuntimePrerequisiteObservationForID(committed.Resources.PrerequisiteObservations, prereqID)
+	if !ok || committed.Resources.Manifest == nil {
+		t.Fatal("missing owner manifest observation")
+	}
+	binding := runtimecontract.RuntimeWorkspaceManifestBinding{Manifest: *committed.Resources.Manifest, Observation: obs}
+
+	seed := runtimecontract.RuntimeDefinitionSeed{
+		SchemaVersion: runtimecontract.RuntimeDefinitionSeedSchemaCurrent, DefinitionRevision: "definition-1", PolicyHash: "policy-1",
+		CoverageItems: []runtimecontract.RuntimeCoverageItem{{ID: "cwi", SliceID: "slice", SourceScope: "dodItem", SourceID: "dod-1", TargetText: "criterion"}},
+		Slices: []runtimecontract.RuntimeAcceptanceSlice{{ID: "slice", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi"},
+			CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed}},
+	}.Normalized()
+	seed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(seed)
+	policy := runtimecontract.RuntimeImplementationWorkPolicy{
+		ProtocolRef: runtimecontract.RuntimeImplementationWorkProtocolV1, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		AllowedOperations: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileEdit}},
+		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+			runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+		},
+		TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: "profile", TargetSelectorSubjectRef: "work",
+		MaxRepeatedWorkStates: 2, MaxTargetsPerRound: 2, RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true,
+		InputRevisionProtocolRef: runtimecontract.RuntimeValidationInputRevisionProtocolV1,
+	}
+	focuses := []runtimecontract.RuntimeDefinitionFocus{{
+		ID: "focus", SliceID: "slice", AssessmentScope: "dodItem", AssessmentID: "dod-1", AssessmentText: "criterion",
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+		RequireAssessment: true, EvidenceDeclarationRef: "definition/dodItem/dod-1",
+		AcceptedStepKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		ValidationRecipeID: "recipe-1",
+		RequiredCheckRefs:  []string{"check-1"}, ImplementationWorkPolicy: &policy,
+	}}
+	profiles := []runtimecontract.RuntimeProfileContract{{ID: "profile", EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+		ID: "dod-1", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, ImplementationWorkPolicy: &policy,
+	}}}}
+	catalogs := []runtimecontract.RuntimeOperationAdmissibility{{
+		PrerequisiteID: "shell-inputs",
+		OwnerModuleID:  runtimecontract.RuntimeModuleShell,
+		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
+			ID: "recipe-1", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			OperationKind:            runtimecontract.RuntimeBlockKindManagedValidationSession,
+			InputTargetOwnerModuleID: runtimecontract.RuntimeModuleFile,
+			InputTargetRefs:          []string{"checks/input_test.go"},
+		}},
+	}}
+
+	ordinarySource := runtimecontract.RuntimeImplementationWorkScopeSources{
+		WorkspaceID: "ws", RunID: "run", AuthoritySnapshotID: "authority",
+		Seed: seed, Focuses: focuses, Profiles: profiles, CoverageWorkItemID: "cwi", ManifestBinding: binding,
+	}
+	ordinaryReq, err := ordinarySource.Compile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	excluded := runtimecontract.RuntimeImplementationWorkContentExcludedTargets(runtimecontract.RuntimeModuleFile, catalogs, nil)
+	ordinaryObs, err := acquireRuntimeImplementationWorkScopeWithExclusions(ctx, hub, directory, ordinaryReq, ordinarySource, excluded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ordinaryObs.Selection.TargetRefs) != 2 || ordinaryObs.Content == nil ||
+		!reflect.DeepEqual(ordinaryObs.Content.ExcludedTargetRefs, []string{"checks/input_test.go"}) ||
+		len(ordinaryObs.Content.Snapshots) != 1 || ordinaryObs.Content.Snapshots[0].TargetRef != "implementation.go" ||
+		ordinaryObs.Content.Validate(ordinaryObs) != nil {
+		t.Fatalf("ordinary excluded scope observation unexpected: sel=%v content=%+v", ordinaryObs.Selection.TargetRefs, ordinaryObs.Content)
+	}
+
+	reqs, err := runtimecontract.CompileRuntimeValidationProofRequirements("definition-1", seed.CoverageItems, focuses)
+	if err != nil || len(reqs) != 1 {
+		t.Fatalf("CompileRuntimeValidationProofRequirements = %+v err=%v", reqs, err)
+	}
+	attestations := make([]runtimecontract.RuntimeValidationCheckAttestationBinding, 0, len(reqs[0].RequiredCheckRefs))
+	for _, checkRef := range reqs[0].RequiredCheckRefs {
+		attestations = append(attestations, runtimecontract.RuntimeValidationCheckAttestationBinding{
+			RequiredCheckRef:       checkRef,
+			ObservationProtocolRef: "test-validation-protocol/v1",
+			NativeCheckRef:         "native/" + checkRef,
+		})
+	}
+	revBinding, err := runtimecontract.RuntimeValidationProofRequirementBindingForRecipe(reqs[0], "recipe-1", attestations...)
+	if err != nil {
+		t.Fatalf("RuntimeValidationProofRequirementBindingForRecipe: %v", err)
+	}
+	inputContent := "package checks\n"
+	subject := runtimecontract.RuntimeValidationInputReviewSubject{
+		ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol,
+		Files: []runtimecontract.RuntimeValidationInputReviewFile{{
+			TargetRef:   "checks/input_test.go",
+			Content:     inputContent,
+			ContentHash: runtimecontract.RuntimeValidationInputContentHash(inputContent),
+		}},
+	}
+	subject.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(subject, revBinding)
+	revBinding.InputReview = &subject
+	checks := make([]runtimecontract.RuntimeValidationInputCheckReview, 0, len(revBinding.RequiredCheckRefs))
+	for _, checkRef := range revBinding.RequiredCheckRefs {
+		checks = append(checks, runtimecontract.RuntimeValidationInputCheckReview{
+			RequiredCheckRef: checkRef,
+			Conclusion:       runtimecontract.RuntimeValidationInputConflict,
+			Reason:           "input requires revision",
+			InputTargetRefs:  []string{"checks/input_test.go"},
+			Obligations: []runtimecontract.RuntimeValidationInputObligationReview{{
+				CriterionText:   "criterion",
+				Finding:         runtimecontract.RuntimeValidationInputConflicting,
+				Reason:          "input conflicts with criterion",
+				InputTargetRefs: []string{"checks/input_test.go"},
+			}},
+		})
+	}
+	revision := &runtimecontract.RuntimeValidationInputRevision{
+		WorkspaceID:            "ws",
+		RunID:                  "run",
+		DefinitionSeedHash:     seed.Hash,
+		SourceManifestHash:     "manifest-rev-1",
+		SourceLogicalRequestID: "logical-rev-1",
+		SourceDocumentHash:     "doc-rev-1",
+		OwnerModuleID:          runtimecontract.RuntimeModuleFile,
+		InputTargetRefs:        []string{"checks/input_test.go"},
+		Binding:                revBinding,
+		Report: runtimecontract.RuntimeValidationInputReview{
+			SubjectHash: subject.Hash,
+			Checks:      checks,
+		},
+	}
+	if err := revision.Validate(); err != nil {
+		t.Fatalf("invalid test input revision: %v", err)
+	}
+	revisedSource := ordinarySource
+	revisedSource.InputRevision = revision
+	revisedReq, err := revisedSource.Compile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	revisedExcluded := runtimecontract.RuntimeImplementationWorkContentExcludedTargets(runtimecontract.RuntimeModuleFile, catalogs, revisedReq.InputRevision)
+	revisedObs, err := acquireRuntimeImplementationWorkScopeWithExclusions(ctx, hub, directory, revisedReq, revisedSource, revisedExcluded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revisedObs.Content == nil || revisedObs.Content.ExcludedTargetRefs != nil ||
+		len(revisedObs.Content.Snapshots) != 2 || revisedObs.Content.Validate(revisedObs) != nil {
+		t.Fatalf("revision-unlocked scope observation unexpected: content=%+v", revisedObs.Content)
+	}
+}

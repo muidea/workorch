@@ -714,20 +714,6 @@ func (t RuntimeOperationTargetAuthorization) Normalized() RuntimeOperationTarget
 	return t
 }
 
-// RequireTargets reports whether the sealed TargetPolicy obligates a non-empty
-// candidate targetRefs field. It is the pure membership of RequireTargetRefs.
-func (t RuntimeOperationTargetAuthorization) RequireTargets() bool {
-	t = t.Normalized()
-	switch t.Policy {
-	case RuntimeOperationTargetPolicyExactTarget:
-		return len(t.ExactTargetRefs) > 0
-	case RuntimeOperationTargetPolicyExistingOwnerScope, RuntimeOperationTargetPolicyProspectiveOwnerTarget:
-		return true
-	default:
-		return false
-	}
-}
-
 // AllowedTargetRefs returns the bounded membership set a pure evaluator may use
 // for target membership checks under the sealed TargetPolicy. Prospective
 // create only returns the complete SM-2 binding-sealed prospective target set.
@@ -1114,21 +1100,10 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 	if state == ConvergenceStateNeedStateChange {
 		target.ExcludedTargetRefs = runtimeValidationInputMutationExclusions(descriptor.OwnerModuleID, ownerFacts, required, bindings)
 	}
-	// Wire-level RequireTargetRefs stays contract-driven for exact_target so
-	// kinds without a target field (git init, shell read-only, MCP tool call, …)
-	// remain legal even when the focus seals an exact membership set.
-	// prospective_owner_target always obligates a concrete candidate target.
-	// existing_owner_scope only obligates a target when the sealed scope actually
-	// carries membership TargetRefs; selector-only catalog bindings do not.
-	requireTargetRefs := contract.RequireTargetRefs
-	switch target.Normalized().Policy {
-	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
-		requireTargetRefs = true
-	case RuntimeOperationTargetPolicyExistingOwnerScope:
-		if len(target.OwnerScopeTargetRefs) != 0 {
-			requireTargetRefs = true
-		}
-	}
+	// RequireTargetRefs is computed by the sole shared SM-2/SM-3 predicate so
+	// manifest generation, candidate admission, LLM schema and SM-2 receipt
+	// verification agree across every operation kind and target policy.
+	requireTargetRefs := RuntimeOperationRequiresTargetRefs(contract, target)
 	operationManifest := RuntimeCandidateOperationManifest{
 		InputRepair:                 ownerFacts.InputRepair.Clone(),
 		TargetParameterBindings:     runtimeCandidateTargetParameterBindings(contract.Kind, target, ownerFacts.OperationAdmissibilities, descriptor.OwnerModuleID),

@@ -549,3 +549,467 @@ func withHistoricalSuspensionSource(t *testing.T, b runtimecontract.RuntimeBoots
 	b.CoverageItems = items
 	return b
 }
+
+func TestDriveRuntimeUnboundImplementationWorkYieldsToStalePredecessorAndResumes(t *testing.T) {
+	var baseline int64
+	for _, cut := range []string{"uninterrupted", "after_yield", "after_revalidation"} {
+		t.Run(cut, func(t *testing.T) {
+			calls := runRuntimeUnboundImplementationWorkYieldMainline(t, cut)
+			if baseline == 0 {
+				baseline = calls
+			} else if calls != baseline {
+				t.Fatalf("recovery repeated provider work: got=%d baseline=%d", calls, baseline)
+			}
+		})
+	}
+}
+
+func runRuntimeUnboundImplementationWorkYieldMainline(t *testing.T, cut string) int64 {
+	t.Helper()
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	root := t.TempDir()
+	deliverable, internalDir := filepath.Join(root, "workspace"), filepath.Join(root, "internal")
+	for _, directory := range []string{deliverable, internalDir} {
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	workPolicy := runtimecontract.RuntimeImplementationWorkPolicy{
+		ProtocolRef:              runtimecontract.RuntimeImplementationWorkProtocolV1,
+		OwnerModuleID:            runtimecontract.RuntimeModuleFile,
+		AllowedOperations:        []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileEdit}},
+		AllowedTargetPolicies:    []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
+		TargetSelectorRef:        runtimecontract.RuntimeImplementationWorkFileWorkspaceDeliverableSelectorRef,
+		TargetSelectorOwnerRef:   "mainline-profile",
+		TargetSelectorSubjectRef: "implementation",
+		MaxRepeatedWorkStates:    2,
+		MaxTargetsPerRound:       1,
+		RequireFreshObservation:  true,
+		RequireFreshValidation:   true,
+		ProtectValidationInputs:  true,
+	}
+
+	bootstrap := validationInputAdditionMainlineBootstrap()
+	bootstrap.CoverageItems[0].TargetText = "独立普通验收：DeliveredValue() 必须至少为 2"
+	bootstrap.CoverageItems[1].TargetText = "修改 subject.go 使 DeliveredValue() 返回 3，并用独立普通证明验证 DeliveredValue() 至少为 3"
+	bootstrap.DefinitionFocuses[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	bootstrap.DefinitionFocuses[0].AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	bootstrap.DefinitionFocuses[1].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	bootstrap.DefinitionFocuses[1].AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	bootstrap.DefinitionFocuses[1].ValidationFailureRepairConvergence = nil
+	bootstrap.DefinitionFocuses[1].RequireTargetGrounding = true
+	bootstrap.DefinitionFocuses[1].TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	bootstrap.DefinitionFocuses[1].TargetSelectorRef = runtimecontract.RuntimeImplementationWorkFileWorkspaceDeliverableSelectorRef
+	bootstrap.DefinitionFocuses[1].TargetSelectorOwnerRef = "mainline-profile"
+	bootstrap.DefinitionFocuses[1].TargetSelectorSubjectRef = "dodItem"
+	bootstrap.DefinitionFocuses[1].ImplementationWorkPolicy = &workPolicy
+
+	profile := &bootstrap.Activation.ExecutionContract.ProfileContracts[0]
+	profile.EvidenceRequirements[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	profile.EvidenceRequirements[0].AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	profile.EvidenceRequirements[0].ValidationRecipeID = "behavior-validation"
+	profile.EvidenceRequirements[1].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	profile.EvidenceRequirements[1].AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	profile.EvidenceRequirements[1].ValidationRecipeID = "behavior-validation"
+	profile.EvidenceRequirements[1].ValidationFailureRepairConvergence = nil
+	profile.EvidenceRequirements[1].TargetRefs = nil
+	profile.EvidenceRequirements[1].RequireTargetGrounding = true
+	profile.EvidenceRequirements[1].TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	profile.EvidenceRequirements[1].TargetSelectorRef = runtimecontract.RuntimeImplementationWorkFileWorkspaceDeliverableSelectorRef
+	profile.EvidenceRequirements[1].TargetSelectorOwnerRef = "mainline-profile"
+	profile.EvidenceRequirements[1].TargetSelectorSubjectRef = "dodItem"
+	profile.EvidenceRequirements[1].ImplementationWorkPolicy = &workPolicy
+
+	bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{
+		Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile, Reason: "workspace manifest",
+	})
+	runtimeTestDeclareExactManagedValidationOwnerFact(&bootstrap, "cwi-1", "behavior-validation", false)
+	limits := &runtimecontract.RuntimeExecutionLimits{
+		ProtocolRef: runtimecontract.RuntimeExecutionLimitsV1, MaxProviderCalls: 64, MaxCapabilityOperations: 32, MaxDurableDispatchesPerCWI: 2,
+	}
+	bootstrap.Activation.ExecutionContract.ExecutionLimits = limits
+	var err error
+	bootstrap.ExecutionBudgetPolicy, err = runtimecontract.RuntimeExecutionBudgetPolicyWithLimits(bootstrap.ConvergencePolicy, bootstrap.RecoveryPolicy, limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrap = withHistoricalSuspensionSource(t, bootstrap)
+	bootstrap.DefinitionFocuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite}
+	bootstrap.DefinitionFocuses[0].TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	bootstrap.DefinitionFocuses[0].TargetSelectorRef = runtimecontract.RuntimeImplementationWorkFileWorkspaceDeliverableSelectorRef
+	bootstrap.DefinitionFocuses[0].TargetSelectorOwnerRef = "mainline-profile"
+	bootstrap.DefinitionFocuses[0].TargetSelectorSubjectRef = "history_create"
+	bootstrap.DefinitionFocuses[0].ProspectiveTargetAllOfConstraintRefs = []string{
+		runtimecontract.RuntimeImplementationWorkConstraintWorkspaceRelativePath,
+		runtimecontract.RuntimeImplementationWorkConstraintNewTargetOwnerSelector,
+	}
+	profile = &bootstrap.Activation.ExecutionContract.ProfileContracts[0]
+	profile.EvidenceRequirements[0].AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite}
+	profile.EvidenceRequirements[0].TargetRefs = nil
+	profile.EvidenceRequirements[0].TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	profile.EvidenceRequirements[0].TargetSelectorRef = runtimecontract.RuntimeImplementationWorkFileWorkspaceDeliverableSelectorRef
+	profile.EvidenceRequirements[0].TargetSelectorOwnerRef = "mainline-profile"
+	profile.EvidenceRequirements[0].TargetSelectorSubjectRef = "history_create"
+	profile.EvidenceRequirements[0].ProspectiveTargetAllOfConstraintRefs = []string{
+		runtimecontract.RuntimeImplementationWorkConstraintWorkspaceRelativePath,
+		runtimecontract.RuntimeImplementationWorkConstraintNewTargetOwnerSelector,
+	}
+	bootstrap = runtimeTestBootstrapWithBindings(bootstrap)
+
+	runtimeTestPrepareNativeValidationThroughOwners(t, bootstrap, deliverable, func(preparation runtimecontract.RuntimeValidationProofPreparation) string {
+		var source strings.Builder
+		source.WriteString("package workorch_validation\nimport (\"testing\"; subject \"example.com/workorch-runtime-native-fixture\")\n")
+		for _, check := range preparation.CheckAttestations {
+			condition := "subject.DeliveredValue() < 2 || subject.HistoricalValue() != 1"
+			if preparation.CoverageWorkItemID == "cwi-2" {
+				condition = "subject.DeliveredValue() < 3 || subject.HistoricalValue() != 1"
+			}
+			fmt.Fprintf(&source, "func %s(t *testing.T) { if %s { t.Fatal(\"actual current behavior below sealed minimum\") } }\n", check.NativeCheckRef, condition)
+		}
+		return source.String()
+	})
+	if err := os.WriteFile(filepath.Join(deliverable, "subject.go"), []byte("package fixture\nfunc DeliveredValue() int { return 2 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
+	workspaces := filerepository.NewWorkspaceRepository(filepath.Join(root, "workspaces.json"))
+	results := filerepository.NewResultRepository(filepath.Join(root, "results.json"))
+	if err := runs.Create(ctx, &runmodel.Run{
+		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2",
+		DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap,
+		ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeCurrentRun, State: common.RunStateActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspaces.Create(ctx, runtimeWorkspaceForPersistedRunTest(t, ctx, runs, "ws-v2", "run-v2", deliverable, internalDir)); err != nil {
+		t.Fatal(err)
+	}
+	initialRun, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+	workspaceOwner := workspacemodule.New()
+	if err := workspaceOwner.Configure(workspaceOwnerTestDependencies(hub, workspaces, workspaces, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspaceOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
+	fileOwner := filemodule.New()
+	if err := fileOwner.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+	startRuntimeReceiptTestOwner(t, hub)
+	startRuntimeManagedValidationTestOwner(t, hub)
+	startRuntimeProviderCeilingTestOwner(t, hub)
+	resultOwner := resultmodule.New()
+	if err := resultOwner.Configure(resultbiz.Dependencies{
+		OwnerRepositories: testResultOwnerRepositories(results, memory.NewArtifactRepository(), memory.NewResultWorkspaceDeletionRepository()),
+		EventHub:          hub,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := resultOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = resultOwner.Stop(ctx) })
+
+	var calls atomic.Int64
+	llm := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	if err := llm.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		calls.Add(1)
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		if command.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+			manifest := command.SemanticManifest
+			document := runtimecontract.RuntimeSemanticPlanDocument{
+				SchemaVersion:      runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
+				ManifestHash:       manifest.Hash,
+				DefinitionSeedHash: manifest.DefinitionSeedHash,
+				PlanStep:           command.SemanticContext.PlanStep,
+			}
+			handledWork := false
+			for _, obligation := range manifest.ProofObligations {
+				work := obligation.ImplementationWork
+				if work == nil || obligation.CoverageWorkItemID != "cwi-2" {
+					continue
+				}
+				handledWork = true
+				if work.PurposeChoiceOnly {
+					document.CoverageOrder = []common.CoverageWorkItemID{"cwi-2"}
+					intent := implementationWorkIntentForTest(manifest)
+					if intent == nil {
+						t.Errorf("implementationWorkIntentForTest returned nil for ordinal %d", work.Ordinal)
+						result.Set(nil, nil)
+						return
+					}
+					if work.Ordinal == 1 {
+						document.ImplementationPurpose = runtimecontract.RuntimeImplementationWorkPurposeEffect
+						document.ImplementationIntent = intent
+					} else {
+						document.ImplementationPurpose = runtimecontract.RuntimeImplementationWorkPurposeTerminal
+						intent.SelectedRequirementRefs = nil
+						intent.RemainingWork = "No remaining implementation; ordinary validation must independently establish acceptance."
+						for i := range intent.RequirementReviews {
+							intent.RequirementReviews[i].WorkRequired = false
+						}
+						document.ImplementationIntent = intent
+					}
+					break
+				}
+				if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
+					document.CoverageOrder = []common.CoverageWorkItemID{"cwi-2"}
+				} else {
+					document.BatchID, document.BatchSequence = command.SemanticContext.BatchID, command.SemanticContext.BatchSequence
+					document.BatchCoverageWorkItemIDs = command.SemanticContext.BatchCoverageWorkItemIDs
+					document.Proposals = []runtimecontract.RuntimeSemanticProofProposal{{
+						CoverageWorkItemID:    "cwi-2",
+						OwnerModuleID:         runtimecontract.RuntimeModuleFile,
+						OperationKind:         runtimecontract.StepKindFileEdit,
+						Target:                runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, OwnerScopeTargetRefs: []string{"subject.go"}},
+						RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+						RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+						DeclarationRef:        runtimecontract.RuntimeSemanticCurrentDeclarationRef(obligation),
+					}}
+				}
+				break
+			}
+			if !handledWork {
+				document = validationInputAdditionMainlineSemanticDocument(command)
+				for i := range document.Proposals {
+					if document.Proposals[i].CoverageWorkItemID == "cwi-history" {
+						document.Proposals[i].OperationKind = runtimecontract.StepKindFileWrite
+						document.Proposals[i].Target = runtimecontract.RuntimeOperationTargetAuthorization{
+							Policy:                    runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+							OwnerSelectorRefs:         []string{"workspace-relative-new-file-target"},
+							ProspectiveTargetRefs:     []string{"history.go"},
+							ProspectiveConstraintRefs: []string{runtimecontract.RuntimeImplementationWorkConstraintWorkspaceRelativePath, runtimecontract.RuntimeImplementationWorkConstraintNewTargetOwnerSelector},
+						}
+					}
+				}
+			}
+			payload, encErr := runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(manifest, document)
+			if encErr != nil {
+				t.Errorf("encode semantic plan step=%s handledWork=%t err=%v", command.SemanticContext.PlanStep, handledWork, encErr)
+				result.Set(nil, nil)
+				return
+			}
+			result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
+				DocumentKind:         command.DocumentKind,
+				RequestIdentity:      command.RequestIdentity,
+				ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
+				DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload),
+			}), nil)
+			return
+		}
+		if len(command.Decision.Focus.CoverageWorkItemIDs) == 0 {
+			err := fmt.Errorf("candidate command missing focus coverage IDs: state=%s", command.Decision.State)
+			t.Error(err)
+			result.Set(nil, nil)
+			return
+		}
+		id := command.Decision.Focus.CoverageWorkItemIDs[0]
+		var candidate runtimecontract.RuntimeCandidate
+		if command.CandidateManifest.ImplementationWorkingBinding != nil {
+			manifest := command.CandidateManifest
+			target := "subject.go"
+			baseHash := ""
+			for _, operation := range manifest.Operations {
+				for _, binding := range operation.TargetParameterBindings {
+					if binding.Name == "baseHash" {
+						for _, value := range binding.Values {
+							if value.TargetRef == target {
+								baseHash = value.Value
+							}
+						}
+					}
+				}
+			}
+			requirement := ""
+			if len(manifest.RequiredOperationSequence) > 0 {
+				requirement = manifest.RequiredOperationSequence[0].RequirementID
+			}
+			oldText, newText := "return 2", "return 3"
+			candidate = runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+				ID:                   "cwi-2-work-edit-subject",
+				Kind:                 runtimecontract.StepKindFileEdit,
+				TargetRefs:           []string{target},
+				RequiredOperationRef: requirement,
+				Parameters: []runtimecontract.OperationParameter{
+					{Name: "oldText", String: &oldText},
+					{Name: "newText", String: &newText},
+					{Name: "baseHash", String: &baseHash},
+				},
+			}}}}}
+		} else {
+			switch command.Decision.State {
+			case runtimecontract.ConvergenceStateNeedStateChange:
+				if id != "cwi-history" {
+					err := fmt.Errorf("unexpected state change on CWI %s (working=%v)", id, command.CandidateManifest.ImplementationWorkingBinding != nil)
+					t.Error(err)
+					result.Set(nil, nil)
+					return
+				}
+				content := "package fixture\nfunc HistoricalValue() int { return 1 }\n"
+				candidate = runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+					ID:                  "original-historical-effect",
+					Kind:                runtimecontract.StepKindFileWrite,
+					TargetRefs:          []string{"history.go"},
+					CoverageWorkItemIDs: []common.CoverageWorkItemID{id},
+					Parameters:          []runtimecontract.OperationParameter{{Name: "content", String: &content}},
+				}}}}}
+			case runtimecontract.ConvergenceStateNeedValidation:
+				candidate = runtimeManagedShellValidationCandidate("validate-current", id, "subject.go", "behavior-validation")
+			case runtimecontract.ConvergenceStateNeedAssessment:
+				candidate = runtimeSatisfiedAssessmentCandidate(command, "actual current ordinary proof")
+			default:
+				err := fmt.Errorf("unexpected action %s on CWI %s", command.Decision.State, id)
+				t.Error(err)
+				result.Set(nil, nil)
+				return
+			}
+		}
+		boundCandidate := bindRuntimeTestCandidateToManifest(command.CandidateManifest, candidate)
+		payload, encErr := runtimecontract.EncodeRuntimeCandidatePayloadWithManifest(command.CandidateManifest, boundCandidate)
+		if encErr != nil {
+			t.Errorf("encode operations candidate cwi=%s state=%s working=%t err=%v", id, command.Decision.State, command.CandidateManifest.ImplementationWorkingBinding != nil, encErr)
+			result.Set(nil, nil)
+			return
+		}
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
+			Transaction:          command.Transaction,
+			DocumentKind:         command.DocumentKind,
+			RequestIdentity:      command.RequestIdentity,
+			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
+			DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload),
+		}), nil)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = llm.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
+
+	runtimeTestPersistBootstrappedPreSemanticFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
+	owner := newRuntimeDriveTestModule(t, hub)
+	command := orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"}
+	if cut != "uninterrupted" {
+		crash := &runtimeSaveCrashRepository{
+			delegate: runtimeStateRepository{hub: hub},
+			after:    true,
+			marker:   cut,
+			match: func(a runtime.RuntimeAggregate) bool {
+				completedRound := len(a.ImplementationWork.Rounds) == 1 && a.ImplementationWork.Rounds[0].CompletedReceiptSetHash != ""
+				if !completedRound || len(a.Facts.Focus.CoverageWorkItemIDs) != 1 {
+					return false
+				}
+				switch cut {
+				case "after_yield":
+					return a.Facts.Focus.CoverageWorkItemIDs[0] == "cwi-1" && len(a.Facts.CWISuspensions) == 0
+				case "after_revalidation":
+					if a.Facts.Focus.CoverageWorkItemIDs[0] != "cwi-2" {
+						return false
+					}
+					for _, row := range a.Facts.Coverage {
+						if row.ID == "cwi-history" {
+							return len(row.HistoricalAcceptanceProofs) == 2
+						}
+					}
+					return false
+				default:
+					return false
+				}
+			},
+		}
+		if err := owner.ConfigureRuntimeRepository(crash); err != nil {
+			t.Fatal(err)
+		}
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != cut {
+					t.Fatalf("expected %s crash, got=%v", cut, recovered)
+				}
+			}()
+			response, driveErr := owner.driveRuntimeLocked(ctx, command)
+			t.Fatalf("crash cut %s not reached: response=%+v err=%v", cut, response, driveErr)
+		}()
+		if !crash.fired {
+			t.Fatalf("crash cut %s did not fire", cut)
+		}
+		persisted, err := filerepository.NewRunRepository(filepath.Join(root, "runs.json")).GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+		if err != nil || persisted.RuntimeState == nil {
+			t.Fatalf("reload crash preimage: %v", err)
+		}
+		reloaded := runtimeAggregateFromRecord(*persisted.RuntimeState)
+		if err := reloaded.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		if report := runtime.InspectRuntimeAuthorityInvariants(reloaded); len(report.Violations) != 0 {
+			t.Fatalf("authority invariant violations at cut %s: %+v", cut, report.Violations)
+		}
+		owner = newRuntimeDriveTestModule(t, hub)
+	}
+
+	completed, err := owner.driveRuntime(ctx, command)
+	if err != nil || completed.State != runtimecontract.ConvergenceStateComplete {
+		a, _ := owner.loadRuntime(ctx, "ws-v2", "run-v2")
+		t.Fatalf("unbound implementation work yield mainline did not complete: err=%v state=%s focus=%s failure=%+v pauses=%+v", err, completed.State, a.Facts.Focus.ID, a.Facts.Failure, a.Facts.CWISuspensions)
+	}
+	if err := owner.driveAndProjectRuntimeLockedWithCommand(ctx, command); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := runtimeAggregateFromRecord(*persisted.RuntimeState)
+	if err := a.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if report := runtime.InspectRuntimeAuthorityInvariants(a); len(report.Violations) != 0 {
+		t.Fatalf("final authority invariant violations: %+v", report.Violations)
+	}
+	if len(a.Facts.CWISuspensions) != 0 {
+		t.Fatalf("unbound yield mainline manufactured unexpected CWISuspension: %+v", a.Facts.CWISuspensions)
+	}
+	if len(a.ImplementationWork.Rounds) != 1 || a.ImplementationWork.Rounds[0].CompletedReceiptSetHash == "" {
+		t.Fatalf("expected 1 completed ImplementationWork round, got: %+v", a.ImplementationWork.Rounds)
+	}
+	if !runtimeTerminalDeliveryFullyAcknowledged(a) {
+		t.Fatal("terminal delivery not fully acknowledged")
+	}
+	for _, row := range a.Facts.Coverage {
+		if row.ID == "cwi-history" && (row.HistoricalBehavior == nil || len(row.HistoricalAcceptanceProofs) != 2 || row.State != runtimecontract.RuntimeCoverageItemStateSatisfied) {
+			t.Fatalf("historical acceptance did not revalidate after unbound yield: %+v", row)
+		}
+	}
+	if !reflect.DeepEqual(persisted.RuntimeBootstrap, initialRun.RuntimeBootstrap) {
+		t.Fatal("mainline mutated sealed RuntimeBootstrap")
+	}
+	before, count := persisted.RuntimeState.Clone(), calls.Load()
+	for range 2 {
+		if _, err := newRuntimeDriveTestModule(t, hub).driveRuntime(ctx, command); err != nil {
+			t.Fatal(err)
+		}
+	}
+	after, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || calls.Load() != count || !reflect.DeepEqual(after.RuntimeState, &before) {
+		t.Fatal("duplicate terminal drive changed receipts, budget, or provider calls")
+	}
+	return count
+}

@@ -115,3 +115,31 @@ func TestCardinalitySchemaKeepsDynamicParameterCapacity(t *testing.T) {
 		t.Fatal("wire and File encoding instructions missing")
 	}
 }
+
+func TestValidationManagedSessionTargetRefsSchemaMinimum(t *testing.T) {
+	requiredSchema := runtimeOperationTargetRefsSchema(rc.RuntimeCandidateOperationManifest{
+		Kind:              rc.RuntimeBlockKindManagedValidationSession,
+		TargetCardinality: "",
+		RequireTargetRefs: true,
+		Target: rc.RuntimeOperationTargetAuthorization{
+			Policy:          rc.RuntimeOperationTargetPolicyExactTarget,
+			ExactTargetRefs: []string{"tests/input_test.go"},
+		},
+	})
+	if minItems, ok := requiredSchema["minItems"].(int); !ok || minItems != 1 {
+		t.Fatalf("managed_session with empty cardinality and RequireTargetRefs=true minItems = %v (%T), want 1", requiredSchema["minItems"], requiredSchema["minItems"])
+	}
+
+	optionalSchema := runtimeOperationTargetRefsSchema(rc.RuntimeCandidateOperationManifest{
+		Kind:              rc.RuntimeBlockKindManagedValidationSession,
+		TargetCardinality: "",
+		RequireTargetRefs: false,
+		Target: rc.RuntimeOperationTargetAuthorization{
+			Policy:            rc.RuntimeOperationTargetPolicyExistingOwnerScope,
+			OwnerSelectorRefs: []string{"shell/validation"},
+		},
+	})
+	if _, hasMin := optionalSchema["minItems"]; hasMin {
+		t.Fatalf("managed_session with RequireTargetRefs=false unexpectedly emitted minItems: %+v", optionalSchema)
+	}
+}

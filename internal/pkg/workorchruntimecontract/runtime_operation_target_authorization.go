@@ -41,6 +41,26 @@ func (e *RuntimeOperationTargetAuthorizationError) Error() string {
 	return strings.Join(parts, "; ")
 }
 
+// RuntimeOperationRequiresTargetRefs is the sole authority predicate shared by
+// SM-3 candidate manifest compilation, SM-2 receipt/binding verification, and
+// LLM candidate schema generation.
+func RuntimeOperationRequiresTargetRefs(contract RuntimeOperationContract, target RuntimeOperationTargetAuthorization) bool {
+	if contract.RequireTargetRefs {
+		return true
+	}
+	target = target.Normalized()
+	switch target.Policy {
+	case RuntimeOperationTargetPolicyExactTarget:
+		return len(target.ExactTargetRefs) != 0
+	case RuntimeOperationTargetPolicyExistingOwnerScope:
+		return len(target.OwnerScopeTargetRefs) != 0
+	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
+		return true
+	default:
+		return false
+	}
+}
+
 // ValidateRuntimeOperationTargetsAgainstAuthorization is the single pure
 // target-policy evaluator shared by strict candidate decoding, semantic
 // candidate admission and owner-receipt proof matching.

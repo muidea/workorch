@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -115,5 +117,101 @@ func TestImplementationWorkContentHasNoCumulativeWorkspaceByteCeiling(t *testing
 				t.Fatal("capacity error silently truncated original")
 			}
 		}
+	}
+}
+
+func TestImplementationWorkContentExcludesProtectedValidationInputs(t *testing.T) {
+	revision, ledger := inputRevisionFixture(t)
+	catalogs := ledger.Manifest.OwnerCatalogs
+	inputTarget := revision.InputTargetRefs[0]
+	excludedOrdinary := RuntimeImplementationWorkContentExcludedTargets(RuntimeModuleFile, catalogs, nil)
+	if !reflect.DeepEqual(excludedOrdinary, []string{inputTarget}) {
+		t.Fatalf("ordinary excluded = %v, want [%s]", excludedOrdinary, inputTarget)
+	}
+	if got := RuntimeImplementationWorkContentExcludedTargets(RuntimeModuleFile, catalogs, revision); got != nil {
+		t.Fatalf("revision-unlocked excluded = %v, want nil", got)
+	}
+
+	scope := RuntimeImplementationWorkScopeObservation{
+		Selection: RuntimeTargetSelection{
+			ObservedRevision: "tree-v1",
+			TargetRefs:       []string{"app.go", inputTarget, "helper.go"},
+		},
+	}
+	slices.Sort(scope.Selection.TargetRefs)
+	var ordinarySnapshots []TargetSnapshot
+	var revisionSnapshots []TargetSnapshot
+	for _, target := range scope.Selection.TargetRefs {
+		snap := workContentSnapshot(target, "package work\n// "+target+"\n")
+		revisionSnapshots = append(revisionSnapshots, snap)
+		if target != inputTarget {
+			ordinarySnapshots = append(ordinarySnapshots, snap)
+		}
+	}
+
+	ordinaryContent := RuntimeImplementationWorkContent{
+		ProtocolRef:        RuntimeImplementationWorkContentV1,
+		ManifestRevision:   "tree-v1",
+		ExcludedTargetRefs: slices.Clone(excludedOrdinary),
+		Snapshots:          ordinarySnapshots,
+	}
+	if err := ordinaryContent.Validate(scope); err != nil {
+		t.Fatalf("ordinary excluded content rejected: %v", err)
+	}
+	cloned := ordinaryContent.Clone()
+	cloned.ExcludedTargetRefs[0] = "tampered.go"
+	if ordinaryContent.ExcludedTargetRefs[0] != inputTarget {
+		t.Fatal("Clone aliased ExcludedTargetRefs slice")
+	}
+
+	revisionContent := RuntimeImplementationWorkContent{
+		ProtocolRef:      RuntimeImplementationWorkContentV1,
+		ManifestRevision: "tree-v1",
+		Snapshots:        revisionSnapshots,
+	}
+	if err := revisionContent.Validate(scope); err != nil {
+		t.Fatalf("revision-unlocked content rejected: %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(*RuntimeImplementationWorkContent)
+	}{
+		{
+			name: "includes excluded target in snapshots",
+			mutate: func(c *RuntimeImplementationWorkContent) {
+				*c = revisionContent
+				c.ExcludedTargetRefs = []string{inputTarget}
+			},
+		},
+		{
+			name: "empty non-nil ExcludedTargetRefs",
+			mutate: func(c *RuntimeImplementationWorkContent) {
+				*c = revisionContent
+				c.ExcludedTargetRefs = []string{}
+			},
+		},
+		{
+			name: "unsorted ExcludedTargetRefs",
+			mutate: func(c *RuntimeImplementationWorkContent) {
+				c.ExcludedTargetRefs = []string{"helper.go", "app.go"}
+				c.Snapshots = []TargetSnapshot{workContentSnapshot(inputTarget, "package work\n")}
+			},
+		},
+		{
+			name: "wildcard ExcludedTargetRefs",
+			mutate: func(c *RuntimeImplementationWorkContent) {
+				c.ExcludedTargetRefs = []string{"checks/*"}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bad := ordinaryContent.Clone()
+			tc.mutate(bad)
+			if err := bad.Validate(scope); err == nil {
+				t.Fatalf("invalid content accepted (%s)", tc.name)
+			}
+		})
 	}
 }

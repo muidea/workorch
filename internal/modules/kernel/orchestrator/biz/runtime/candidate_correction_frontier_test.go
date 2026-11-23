@@ -947,23 +947,52 @@ func TestCandidateCorrectionFrontierRejectsEquivalentManagedTargets(t *testing.T
 		t.Fatal(err)
 	}
 	original = runtimeTestMustDeriveCandidateForManifest(t, manifest, original)
-	omitted := original
-	omitted.Validation = &runtimecontract.ValidationCandidate{Operations: append([]runtimecontract.ValidationOperation(nil), original.Validation.Operations...)}
-	omitted.Validation.Operations[0].Operation = original.Validation.Operations[0].Operation.Clone()
-	omitted.Validation.Operations[0].Operation.TargetRefs = nil
-	omitted = runtimeTestMustDeriveCandidateForManifest(t, manifest, omitted)
-	if err := runtimecontract.ValidateRuntimeCandidateAgainstManifest(manifest, omitted); err != nil {
+
+	// Under Pillar 1, non-empty exact_target requires targetRefs consistently across
+	// SM-3 manifest admission, LLM schema, and SM-2 receipt verification.
+	omittedExact := original
+	omittedExact.Validation = &runtimecontract.ValidationCandidate{Operations: append([]runtimecontract.ValidationOperation(nil), original.Validation.Operations...)}
+	omittedExact.Validation.Operations[0].Operation = original.Validation.Operations[0].Operation.Clone()
+	omittedExact.Validation.Operations[0].Operation.TargetRefs = nil
+	omittedExact = runtimeTestMustDeriveCandidateForManifest(t, manifest, omittedExact)
+	if err := runtimecontract.ValidateRuntimeCandidateAgainstManifest(manifest, omittedExact); err == nil {
+		t.Fatal("non-empty exact_target managed validation must reject omitted targetRefs")
+	}
+
+	// Swapping to another authorized target spelling on managed validation is
+	// admitted by SM-3 and rejected as an equivalent replay shape.
+	multiAggregate := validationAggregateWithPreparation(t, func(initial *RuntimeAggregate) {
+		initial.Facts.Focus.TargetRefs = []string{"main.go", "support.go"}
+		initial.Facts.Resources.Manifest = &runtimecontract.WorkspaceManifest{
+			Revision:   "manifest-multi",
+			TargetRefs: []string{"main.go", "support.go"},
+		}
+	})
+	multiOriginal := runtimeTestBindCandidateToCurrentFocus(t, multiAggregate, validationCandidate())
+	multiManifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(multiAggregate.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(multiAggregate.Facts, multiAggregate.Decision, nil)))
+	if err != nil {
 		t.Fatal(err)
 	}
-	blocked := []runtimecontract.RuntimeRejectedOperationShape{{Operation: original.Validation.Operations[0].Operation}}
-	failure := candidateadmission.Evaluate(candidateadmission.EvaluationInput{Manifest: manifest, Decision: aggregate.Decision, Facts: aggregate.Facts, Candidate: omitted, RejectedOperationShapes: blocked})
-	if failure == nil || failure.Code != candidateAdmissionCodeReplaysRejectedShape {
-		t.Fatalf("optional targets bypassed owner admission: %+v", failure)
+	multiOriginal = runtimeTestMustDeriveCandidateForManifest(t, multiManifest, multiOriginal)
+	swapped := multiOriginal
+	swapped.Validation = &runtimecontract.ValidationCandidate{Operations: append([]runtimecontract.ValidationOperation(nil), multiOriginal.Validation.Operations...)}
+	swapped.Validation.Operations[0].Operation = multiOriginal.Validation.Operations[0].Operation.Clone()
+	swapped.Validation.Operations[0].Operation.TargetRefs = []string{"support.go"}
+	swapped = runtimeTestMustDeriveCandidateForManifest(t, multiManifest, swapped)
+	if err := runtimecontract.ValidateRuntimeCandidateAgainstManifest(multiManifest, swapped); err != nil {
+		t.Fatal(err)
 	}
-	_, correction, err := sealCandidateRejectionWithFrontier(failure, manifest, candidateCorrectionFrontier{candidate: &omitted, rejectedOperationShapes: blocked})
+	multiBlocked := []runtimecontract.RuntimeRejectedOperationShape{{Operation: multiOriginal.Validation.Operations[0].Operation}}
+	failure := candidateadmission.Evaluate(candidateadmission.EvaluationInput{Manifest: multiManifest, Decision: multiAggregate.Decision, Facts: multiAggregate.Facts, Candidate: swapped, RejectedOperationShapes: multiBlocked})
+	if failure == nil || failure.Code != candidateAdmissionCodeReplaysRejectedShape {
+		t.Fatalf("equivalent authorized targets bypassed replay check: %+v", failure)
+	}
+	_, correction, err := sealCandidateRejectionWithFrontier(failure, multiManifest, candidateCorrectionFrontier{candidate: &swapped, rejectedOperationShapes: multiBlocked})
 	if err != nil || correction == nil || correction.Disposition != runtimecontract.RuntimeCandidateCorrectionRejectedFinal || correction.Witness != nil {
 		t.Fatalf("equivalent targets offered as new execution: %+v %v", correction, err)
 	}
+
+	blocked := []runtimecontract.RuntimeRejectedOperationShape{{Operation: original.Validation.Operations[0].Operation}}
 	outside := original
 	outside.Validation = &runtimecontract.ValidationCandidate{Operations: append([]runtimecontract.ValidationOperation(nil), original.Validation.Operations...)}
 	outside.Validation.Operations[0].Operation = original.Validation.Operations[0].Operation.Clone()
@@ -972,5 +1001,60 @@ func TestCandidateCorrectionFrontierRejectsEquivalentManagedTargets(t *testing.T
 	failure = candidateadmission.Evaluate(candidateadmission.EvaluationInput{Manifest: manifest, Decision: aggregate.Decision, Facts: aggregate.Facts, Candidate: outside, RejectedOperationShapes: blocked})
 	if failure == nil || failure.Code != candidateadmission.CodeInvalid {
 		t.Fatalf("replay masked target authority failure: %+v", failure)
+	}
+
+	// Selector-only existing_owner_scope keeps TargetRefs optional on SM-3/SM-2
+	// while still rejecting omitted TargetRefs as equivalent managed replay.
+	selectorOnly := validationOnlyAggregateWithPreparation(t, func(initial *RuntimeAggregate) {
+		initial.Facts.Activation.EvidencePolicies = runtimeManagedValidationEvidencePolicies()
+		initial.Facts.Focus.TargetRefs = nil
+		initial.Facts.Focus.TargetSelectorRef = "shell/validation"
+		initial.Facts.Focus.TargetSelectorOwnerRef = runtimecontract.RuntimeModuleShell
+		initial.Facts.Focus.TargetSelectorSubjectRef = "subject-validation"
+		initial.Facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+		initial.Facts.Focus.ValidationRecipeID = runtimeManagedValidationEvidencePolicy().ID
+		initial.Facts.Focus.RequiredCheckRefs = []string{"check/" + runtimeManagedValidationEvidencePolicy().ID}
+		inv := runtimeTestManagedValidationInventory("operation-admissibility-shell-selector-only")
+		inv.TargetRefs = nil
+		inv.SelectorRefs = []string{"shell/validation"}
+		inv.ValidationRecipeRefs = []string{runtimeManagedValidationEvidencePolicy().ID}
+		inv.ValidationSurfaces[0].ProofApplicability = runtimecontract.RuntimeValidationProofDirect
+		inv.OperationVariants = []runtimecontract.RuntimeOperationAdmissibilityVariant{{
+			Kind:                  runtimecontract.RuntimeBlockKindManagedValidationSession,
+			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
+			SelectorRefs:          []string{"shell/validation"},
+		}}
+		inv.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inv)
+		initial.Facts.Resources.OperationAdmissibilities = append(initial.Facts.Resources.OperationAdmissibilities, inv)
+		initial.Facts.Prerequisites.Satisfied = append(initial.Facts.Prerequisites.Satisfied, runtimeTestManagedValidationPrerequisite("operation-admissibility-shell-selector-only"))
+	})
+	selectorManifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(selectorOnly.Decision, runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(selectorOnly.Facts, selectorOnly.Decision, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selectorManifest.Operations) == 0 || selectorManifest.Operations[0].RequireTargetRefs {
+		t.Fatalf("selector-only manifest unexpectedly required targetRefs: %+v", selectorManifest.Operations)
+	}
+	selectorBase := runtimeTestBindCandidateToCurrentFocus(t, selectorOnly, validationCandidate())
+	selectorBase.Validation = &runtimecontract.ValidationCandidate{Operations: append([]runtimecontract.ValidationOperation(nil), selectorBase.Validation.Operations...)}
+	selectorBase.Validation.Operations[0].Operation = selectorBase.Validation.Operations[0].Operation.Clone()
+	selectorBase.Validation.Operations[0].Operation.TargetRefs = nil
+	selectorBase = runtimeTestMustDeriveCandidateForManifest(t, selectorManifest, selectorBase)
+	selectorOmitted := selectorBase
+	selectorOmitted.Validation = &runtimecontract.ValidationCandidate{Operations: append([]runtimecontract.ValidationOperation(nil), selectorBase.Validation.Operations...)}
+	selectorOmitted.Validation.Operations[0].Operation = selectorBase.Validation.Operations[0].Operation.Clone()
+	selectorOmitted.Validation.Operations[0].Operation.TargetRefs = nil
+	selectorOmitted = runtimeTestMustDeriveCandidateForManifest(t, selectorManifest, selectorOmitted)
+	if err := runtimecontract.ValidateRuntimeCandidateAgainstManifest(selectorManifest, selectorOmitted); err != nil {
+		t.Fatalf("selector-only validation unexpectedly required targetRefs: %v", err)
+	}
+	selectorBlocked := []runtimecontract.RuntimeRejectedOperationShape{{Operation: selectorBase.Validation.Operations[0].Operation}}
+	failure = candidateadmission.Evaluate(candidateadmission.EvaluationInput{Manifest: selectorManifest, Decision: selectorOnly.Decision, Facts: selectorOnly.Facts, Candidate: selectorOmitted, RejectedOperationShapes: selectorBlocked})
+	if failure == nil || failure.Code != candidateAdmissionCodeReplaysRejectedShape {
+		t.Fatalf("selector-only optional targets bypassed replay check: %+v", failure)
+	}
+	_, correction, err = sealCandidateRejectionWithFrontier(failure, selectorManifest, candidateCorrectionFrontier{candidate: &selectorOmitted, rejectedOperationShapes: selectorBlocked})
+	if err != nil || correction == nil || correction.Disposition != runtimecontract.RuntimeCandidateCorrectionRejectedFinal || correction.Witness != nil {
+		t.Fatalf("selector-only equivalent targets offered as new execution: %+v %v", correction, err)
 	}
 }

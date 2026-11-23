@@ -643,7 +643,7 @@
               "sourceRequirementId": "source_change",
               "dependentScope": "dodItem",
               "dependentRequirementId": "*",
-              "requireSourceSettled": true,
+              "requireSourceSettled": false,
               "triggerEvidenceKinds": [
                 "state_change"
               ]

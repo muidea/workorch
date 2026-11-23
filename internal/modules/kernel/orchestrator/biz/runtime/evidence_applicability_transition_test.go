@@ -490,3 +490,149 @@ func TestEvidenceApplicabilityReadMatchesIndependentCompleteGates(t *testing.T) 
 		})
 	}
 }
+
+func TestEvidenceApplicabilityDeferredDuringImplementationWorkPurpose(t *testing.T) {
+	base, _ := applicabilityTransitionFixture(t)
+	if _, required, err := NextRuntimeEvidenceApplicabilityRequest(base); err != nil || !required {
+		t.Fatalf("base applicability fixture did not require read: required=%t err=%v", required, err)
+	}
+	aggregate := base.CloneRaw()
+	// Move the earlier settled/accepted evidence focus to CompletedFocuses and
+	// focus on an eligible Unbound CWI that declares an ImplementationWorkPolicy.
+	priorFocus := aggregate.Facts.Focus.Normalized()
+	aggregate.Facts.CompletedFocuses = append(aggregate.Facts.CompletedFocuses, priorFocus)
+	workPolicy := runtimecontract.RuntimeImplementationWorkPolicy{
+		ProtocolRef:                 runtimecontract.RuntimeImplementationWorkProtocolV1,
+		OwnerModuleID:               runtimecontract.RuntimeModuleFile,
+		MaxTargetsPerRound:          1,
+		MaxRepeatedWorkStates:       2,
+		TargetSelectorRef:           "work-defer-scope",
+		TargetSelectorOwnerRef:      "profile/work-defer",
+		TargetSelectorSubjectRef:    "implementation",
+		TargetSelectorCandidateRefs: []string{"main.go"},
+		AllowedOperations:           []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileWrite}},
+		AllowedTargetPolicies:       []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
+		RequireFreshObservation:     true,
+		RequireFreshValidation:      true,
+		ProtectValidationInputs:     true,
+	}
+	workCWI := common.CoverageWorkItemID("cwi-work-defer")
+	workSlice := "slice-work-defer"
+	workScope := "dodItem"
+	workID := "work-defer"
+	workText := "work defer criterion"
+	aggregate.Facts.Activation.ExecutionContract.ProfileContracts = append(
+		aggregate.Facts.Activation.ExecutionContract.ProfileContracts,
+		runtimecontract.RuntimeProfileContract{
+			ID: "profile-work-defer",
+			EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+				ID:                       workID,
+				Scope:                    workScope,
+				RequiredEvidenceKinds:    []string{runtimecontract.EvidenceKindValidation},
+				AcceptedStepKinds:        []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+				ImplementationWorkPolicy: &workPolicy,
+			}},
+		},
+	)
+	aggregate.Facts.DefinitionSeed.CoverageItems = append(aggregate.Facts.DefinitionSeed.CoverageItems, runtimecontract.RuntimeCoverageItem{
+		ID: workCWI, SliceID: workSlice, SourceScope: workScope, SourceID: workID, TargetText: workText, Order: 2,
+	})
+	aggregate.Facts.DefinitionSeed.Slices = append(aggregate.Facts.DefinitionSeed.Slices, runtimecontract.RuntimeAcceptanceSlice{
+		ID: workSlice, CoverageWorkItemIDs: []common.CoverageWorkItemID{workCWI},
+	})
+	aggregate.Facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(aggregate.Facts.DefinitionSeed)
+	declarationRef := runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef(workScope, workID)
+	aggregate.Facts.DefinitionFocuses = append(aggregate.Facts.DefinitionFocuses, runtimecontract.RuntimeDefinitionFocus{
+		ID:                       "focus-work-defer",
+		SliceID:                  workSlice,
+		CoverageWorkItemIDs:      []common.CoverageWorkItemID{workCWI},
+		AssessmentScope:          workScope,
+		AssessmentID:             workID,
+		AssessmentText:           workText,
+		EvidenceDeclarationRef:   declarationRef,
+		RequiredEvidenceKinds:    []string{runtimecontract.EvidenceKindValidation},
+		AcceptedStepKinds:        []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		ImplementationWorkPolicy: &workPolicy,
+	})
+	aggregate.Facts.Focus = runtimecontract.CoverageFocus{
+		ID:                     "semantic-pending/" + string(workCWI),
+		SliceID:                workSlice,
+		CoverageWorkItemIDs:    []common.CoverageWorkItemID{workCWI},
+		AssessmentScope:        workScope,
+		AssessmentID:           workID,
+		AssessmentText:         workText,
+		EvidenceDeclarationRef: declarationRef,
+		RequiredEvidenceKinds:  []string{runtimecontract.EvidenceKindValidation},
+		AcceptedStepKinds:      []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+	}
+	aggregate.Facts.Coverage = append(aggregate.Facts.Coverage, runtimecontract.RuntimeCoverageItemFact{
+		ID:                  workCWI,
+		SliceID:             workSlice,
+		SourceScope:         workScope,
+		SourceID:            workID,
+		TargetText:          workText,
+		State:               runtimecontract.RuntimeCoverageItemStateOpen,
+		CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStateUnbound,
+		FocusID:             aggregate.Facts.Focus.ID,
+	})
+	aggregate.SemanticPlanning = runtimecontract.RuntimeSemanticPlanningLedger{
+		SchemaVersion:      runtimecontract.RuntimeSemanticPlanningLedgerSchemaCurrent,
+		Phase:              runtimecontract.RuntimeSemanticPlanningRequired,
+		DefinitionSeedHash: aggregate.Facts.DefinitionSeed.Hash,
+	}
+
+	if !RuntimeImplementationWorkPurposePending(aggregate) {
+		t.Fatal("expected RuntimeImplementationWorkPurposePending=true for active implementation work focus")
+	}
+	if _, required, err := nextRuntimeEvidenceApplicabilityRequest(aggregate); err != nil || required {
+		t.Fatalf("cross-CWI applicability was not deferred during ImplementationWork: required=%t err=%v", required, err)
+	}
+	if _, pending, err := runtimeApplicabilityPrerequisiteDecision(runtimecontract.RuntimeDecision{Focus: aggregate.Facts.Focus}, aggregate.Facts, &aggregate, aggregate.CoverageProofLineage); err != nil || pending {
+		t.Fatalf("reducer injected applicability prerequisite during ImplementationWork: pending=%t err=%v", pending, err)
+	}
+
+	withScope := aggregate.CloneRaw()
+	withScope.ImplementationWork.ScopePreview = &runtimecontract.RuntimeImplementationWorkScopePreview{
+		Request: runtimecontract.RuntimeImplementationWorkScopeRequest{CoverageWorkItemID: workCWI},
+	}
+	withScope.SemanticPlanning.Phase = runtimecontract.RuntimeSemanticPlanningOrderRequestOpen
+	if !RuntimeImplementationWorkPurposePending(withScope) {
+		t.Fatal("expected RuntimeImplementationWorkPurposePending=true while ScopePreview is active")
+	}
+	if _, required, err := nextRuntimeEvidenceApplicabilityRequest(withScope); err != nil || required {
+		t.Fatalf("cross-CWI applicability was not deferred while ScopePreview is active: required=%t err=%v", required, err)
+	}
+	if err := candidateRequestSessionActionAllowed(withScope, runtimecontract.RuntimeProviderDocumentSemanticPlan); err != nil {
+		t.Fatalf("candidateRequestSessionActionAllowed blocked ImplementationWork semantic request for cross-CWI applicability: %v", err)
+	}
+
+	// Selecting terminal_proof immediately restores cross-CWI applicability checks.
+	withTerminal := withScope.CloneRaw()
+	withTerminal.ImplementationWork.PurposeChoices = []runtimecontract.RuntimeImplementationWorkPurposeChoice{{
+		CoverageWorkItemID: workCWI,
+		ScopeRequestID:     "scope-req-work-defer",
+		Purpose:            runtimecontract.RuntimeImplementationWorkPurposeTerminal,
+	}}
+	if RuntimeImplementationWorkPurposePending(withTerminal) {
+		t.Fatal("terminal_proof left RuntimeImplementationWorkPurposePending=true")
+	}
+	if _, required, err := nextRuntimeEvidenceApplicabilityRequest(withTerminal); err != nil || !required {
+		t.Fatalf("terminal_proof did not restore cross-CWI applicability check: required=%t err=%v", required, err)
+	}
+	if _, pending, err := runtimeApplicabilityPrerequisiteDecision(runtimecontract.RuntimeDecision{Focus: withTerminal.Facts.Focus}, withTerminal.Facts, &withTerminal, withTerminal.CoverageProofLineage); err != nil || !pending {
+		t.Fatalf("reducer did not restore applicability prerequisite after terminal_proof: pending=%t err=%v", pending, err)
+	}
+	if err := candidateRequestSessionActionAllowed(withTerminal, runtimecontract.RuntimeProviderDocumentSemanticPlan); err == nil {
+		t.Fatal("candidateRequestSessionActionAllowed allowed terminal semantic request while cross-CWI applicability remained pending")
+	}
+
+	// RepairDirective and Failure also immediately restore applicability checks.
+	withRepair := aggregate.CloneRaw()
+	withRepair.Facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{ID: "repair-restore", FocusID: withRepair.Facts.Focus.ID}
+	if RuntimeImplementationWorkPurposePending(withRepair) {
+		t.Fatal("RepairDirective left RuntimeImplementationWorkPurposePending=true")
+	}
+	if _, required, err := nextRuntimeEvidenceApplicabilityRequest(withRepair); err != nil || !required {
+		t.Fatalf("RepairDirective did not restore cross-CWI applicability check: required=%t err=%v", required, err)
+	}
+}

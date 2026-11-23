@@ -462,3 +462,39 @@ func TestCurrentRuntimeCWIOrderFromSemanticLineageRetainsCurrentGenerationBoundQ
 		t.Fatalf("bound lineage with reopened prerequisite error = %v", err)
 	}
 }
+
+func TestReplaceRuntimeCWIFocusProjectionAppendsRequeuedBehindRemaining(t *testing.T) {
+	settledBinding := runtimecontract.CoverageEvidenceBinding{
+		ID: "binding-settled", CoverageWorkItemID: "cwi-reopened", FocusID: "focus-reopened", DefinitionRevision: "definition-1",
+		Proofs:     []runtimecontract.CoverageEvidenceProof{{EvidenceKind: runtimecontract.EvidenceKindValidation, AllowedOperationKinds: []string{runtimecontract.StepKindMCPToolCall}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}, ValidationRecipeID: "recipe/reopened", RequiredCheckRefs: []string{"recipe/reopened"}}},
+		TargetRefs: []string{"target-reopened"}, DeclarationRef: "dod/reopened",
+	}.Normalized()
+	settledBinding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(settledBinding)
+	facts := runtimecontract.RuntimeFacts{
+		DefinitionRevision:     "definition-1",
+		CWILedgerSchemaVersion: runtimecontract.RuntimeCWILedgerSchemaCurrent,
+		DefinitionSeed: runtimecontract.RuntimeDefinitionSeed{CoverageItems: []runtimecontract.RuntimeCoverageItem{
+			{ID: "cwi-current", Order: 1},
+			{ID: "cwi-forward-1", Order: 2},
+			{ID: "cwi-reopened", Order: 3},
+		}},
+		Focus:            runtimecontract.CoverageFocus{ID: "focus-current", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-current"}},
+		RemainingFocuses: []runtimecontract.CoverageFocus{{ID: "focus-forward-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-forward-1"}}},
+		CompletedFocuses: []runtimecontract.CoverageFocus{{ID: settledBinding.FocusID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-reopened"}, CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{settledBinding}}},
+		Coverage: []runtimecontract.RuntimeCoverageItemFact{
+			{ID: "cwi-current", State: runtimecontract.RuntimeCoverageItemStateOpen, CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStateUnbound, FocusID: "focus-current"},
+			{ID: "cwi-forward-1", State: runtimecontract.RuntimeCoverageItemStateOpen, CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStateUnbound, FocusID: "focus-forward-1"},
+			{ID: "cwi-reopened", State: runtimecontract.RuntimeCoverageItemStateOpen, CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStateReopened, FocusID: settledBinding.FocusID},
+		},
+	}
+
+	projected, err := replaceRuntimeCWIFocusProjection(facts, []common.CoverageWorkItemID{"cwi-reopened"})
+	if err != nil {
+		t.Fatalf("replaceRuntimeCWIFocusProjection: %v", err)
+	}
+	if len(projected.RemainingFocuses) != 2 ||
+		projected.RemainingFocuses[0].CoverageWorkItemIDs[0] != "cwi-forward-1" ||
+		projected.RemainingFocuses[1].CoverageWorkItemIDs[0] != "cwi-reopened" {
+		t.Fatalf("RemainingFocuses order = %+v, want [cwi-forward-1, cwi-reopened]", projected.RemainingFocuses)
+	}
+}

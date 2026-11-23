@@ -91,9 +91,18 @@ func suspendRuntimeSuccessorForStalePredecessor(a *RuntimeAggregate) (bool, erro
 			break
 		}
 	}
-	if current.CurrentBindingRef == nil || current.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateBound {
+	if current.CurrentBindingRef == nil {
+		canYield, reason, yieldErr := runtimeCWICurrentFocusCanYieldWithoutSuspension(*a, current)
+		if yieldErr != nil {
+			return false, yieldErr
+		}
+		if !canYield {
+			return unavailable(reason)
+		}
+	} else if current.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateBound {
 		return unavailable("stale predecessor revalidation cannot freeze a successor without its original current binding")
 	}
+	unboundYield := current.CurrentBindingRef == nil
 	if a.Facts.Repair.Exhausted {
 		return unavailable("CWI suspension cannot reset exhausted repair budget")
 	}
@@ -105,25 +114,27 @@ func suspendRuntimeSuccessorForStalePredecessor(a *RuntimeAggregate) (bool, erro
 		return unavailable("exact stale predecessor is not currently eligible; nested suspension is unavailable")
 	}
 	var effectID common.EvidenceRecordID
-	for _, fact := range a.Facts.Evidence.Accepted {
-		if fact.Kind != runtimecontract.EvidenceKindStateChange || !runtimecontract.EvidenceAppliesToCoverageWorkItem(a.Facts.Focus, fact, currentID) {
-			continue
-		}
-		for _, dispatch := range a.CompletedDispatches {
-			if dispatch.ID != fact.DispatchID {
+	if !unboundYield {
+		for _, fact := range a.Facts.Evidence.Accepted {
+			if fact.Kind != runtimecontract.EvidenceKindStateChange || !runtimecontract.EvidenceAppliesToCoverageWorkItem(a.Facts.Focus, fact, currentID) {
 				continue
 			}
-			for _, execution := range dispatch.OperationExecutions {
-				if execution.OperationID == fact.OperationID && execution.State == runtimecontract.OperationExecutionEvidenceCommitted && execution.EvidenceFactID == fact.ID && execution.EvidenceFactHash == runtimecontract.StableRuntimeEvidenceFactHash(fact) && runtimecontract.RuntimeEffectIsDurable(execution.ExpectedEffectScope) {
-					effectID = fact.ID
+			for _, dispatch := range a.CompletedDispatches {
+				if dispatch.ID != fact.DispatchID {
+					continue
+				}
+				for _, execution := range dispatch.OperationExecutions {
+					if execution.OperationID == fact.OperationID && execution.State == runtimecontract.OperationExecutionEvidenceCommitted && execution.EvidenceFactID == fact.ID && execution.EvidenceFactHash == runtimecontract.StableRuntimeEvidenceFactHash(fact) && runtimecontract.RuntimeEffectIsDurable(execution.ExpectedEffectScope) {
+						effectID = fact.ID
+					}
 				}
 			}
 		}
-	}
-	if effectID == "" {
-		for _, fact := range a.Facts.Evidence.Accepted {
-			if fact.Kind == runtimecontract.EvidenceKindStateChange && runtimecontract.EvidenceAppliesToCoverageWorkItem(a.Facts.Focus, fact, currentID) {
-				return unavailable("CWI suspension cannot drop an unsettled successor effect")
+		if effectID == "" {
+			for _, fact := range a.Facts.Evidence.Accepted {
+				if fact.Kind == runtimecontract.EvidenceKindStateChange && runtimecontract.EvidenceAppliesToCoverageWorkItem(a.Facts.Focus, fact, currentID) {
+					return unavailable("CWI suspension cannot drop an unsettled successor effect")
+				}
 			}
 		}
 	}
@@ -149,6 +160,21 @@ func suspendRuntimeSuccessorForStalePredecessor(a *RuntimeAggregate) (bool, erro
 	if next.ID == "" {
 		return false, fmt.Errorf("%w: missing suspension predecessor cursor", common.ErrConflict)
 	}
+	if unboundYield {
+		previousFocus := a.Facts.Focus.Normalized()
+		facts := a.Facts.Normalized()
+		clearRuntimeSuspendedFocusAuthority(&facts)
+		remaining = append([]runtimecontract.CoverageFocus{previousFocus}, remaining...)
+		projected, err := installRuntimeCWIFocusProjection(facts, next, remaining, facts.CompletedFocuses)
+		if err != nil {
+			return false, err
+		}
+		a.Facts = projected
+		if a.ImplementationWork.ScopePreview != nil {
+			a.ImplementationWork.ScopePreview = nil
+		}
+		return true, nil
+	}
 	pause := (runtimecontract.RuntimeCWISuspension{ProtocolRef: runtimecontract.RuntimeCWISuspensionV1, SuspendedAtStateRevision: a.StateRevision + 1, SuspendedEvidenceRevision: a.Facts.EvidenceRevision,
 		FrozenFocus: a.Facts.Focus, FrozenBinding: *current.CurrentBindingRef, EffectEvidenceID: effectID, Consumers: consumers,
 		Repair: a.Facts.Repair, RepairDirective: a.Facts.RepairDirective, Failure: a.Facts.Failure}).CloneRaw()
@@ -163,6 +189,62 @@ func suspendRuntimeSuccessorForStalePredecessor(a *RuntimeAggregate) (bool, erro
 	}
 	a.Facts = projected
 	return true, nil
+}
+
+// runtimeCWICurrentFocusCanYieldWithoutSuspension determines whether an unbound
+// current focus holds no binding fence, repair debt, active failure/directive,
+// semantic generation, or unsettled implementation-work commitment, so SM-2 can
+// yield focus directly to a reopened declared ordinary predecessor without
+// manufacturing a RuntimeCWISuspension.
+func runtimeCWICurrentFocusCanYieldWithoutSuspension(a RuntimeAggregate, current runtimecontract.RuntimeCoverageItemFact) (bool, string, error) {
+	switch current.CWIConvergenceState {
+	case runtimecontract.RuntimeCWIConvergenceStateUnbound,
+		runtimecontract.RuntimeCWIConvergenceStatePlanning,
+		runtimecontract.RuntimeCWIConvergenceStateReopened:
+	default:
+		return false, "stale predecessor revalidation cannot freeze a successor without its original current binding", nil
+	}
+	if len(a.Facts.Focus.CoverageEvidenceBindings) != 0 {
+		return false, "stale predecessor revalidation cannot freeze a successor without its original current binding", nil
+	}
+	for _, fact := range a.Facts.Evidence.Accepted {
+		if fact.Kind == runtimecontract.EvidenceKindStateChange && runtimecontract.EvidenceAppliesToCoverageWorkItem(a.Facts.Focus, fact, current.ID) {
+			return false, "CWI suspension cannot drop an unsettled successor effect", nil
+		}
+	}
+	if a.Facts.Repair.Exhausted {
+		return false, "CWI suspension cannot reset exhausted repair budget", nil
+	}
+	if a.Facts.Repair.RepairAttempts != 0 ||
+		a.Facts.Repair.ValidationOnlyRetries != 0 ||
+		a.Facts.Repair.NoProgressCount != 0 ||
+		len(a.Facts.Repair.SignatureCounts) != 0 ||
+		len(a.Facts.Repair.NoProgressOperationShapes) != 0 ||
+		a.Facts.Repair.ActiveGap != nil {
+		return false, "unbound successor with repair debt cannot yield without its original current binding", nil
+	}
+	if a.Facts.RepairDirective != nil || a.Facts.Failure != nil || a.SemanticPlanning.FailureInputReview != nil {
+		return false, "unbound successor with active failure or repair authority cannot yield without its original current binding", nil
+	}
+	if (a.SemanticPlanning.Phase != "" && a.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired) || a.SemanticPlanning.Manifest != nil {
+		return false, "unbound successor cannot yield across an active semantic planning generation", nil
+	}
+	reservation, err := CurrentRuntimeImplementationWorkReservation(a)
+	if err != nil {
+		return false, "", err
+	}
+	if reservation != nil {
+		return false, "unbound successor cannot yield with an unsettled implementation work reservation", nil
+	}
+	for _, round := range a.ImplementationWork.Rounds {
+		if round.CoverageWorkItemID == current.ID && (round.CompletedReceiptSetHash == "" || round.FailedReceiptHash != "") {
+			return false, "unbound successor cannot yield with an unsettled or failed implementation work round", nil
+		}
+	}
+	if a.ImplementationWork.ScopePreview != nil && a.ImplementationWork.ScopePreview.Request.CoverageWorkItemID != current.ID {
+		return false, "unbound successor cannot yield across another CWI scope preview", nil
+	}
+	return true, "", nil
 }
 
 // Resolve only current, affected acceptance edges at the formal observation

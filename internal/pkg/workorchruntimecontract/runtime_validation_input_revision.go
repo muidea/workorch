@@ -274,6 +274,14 @@ func ValidateRuntimeInputRevisionSource(v *RuntimeValidationInputRevision, l Run
 	return nil
 }
 
+// RuntimeImplementationWorkContentExcludedTargets returns the canonical list of
+// owner-declared protected validation input targets excluded from ordinary
+// ImplementationWork read-only Content snapshots (unlocked only when included
+// in an explicit InputRevision).
+func RuntimeImplementationWorkContentExcludedTargets(owner string, catalogs []RuntimeOperationAdmissibility, v *RuntimeValidationInputRevision) []string {
+	return runtimeWorkInputExclusions(owner, catalogs, v)
+}
+
 func runtimeWorkInputExclusions(owner string, catalogs []RuntimeOperationAdmissibility, v *RuntimeValidationInputRevision) []string {
 	excluded := runtimeValidationInputMutationExclusions(owner, RuntimeCandidateManifestOwnerFacts{OperationAdmissibilities: catalogs}, RequiredOutputContract{}, nil)
 	if v != nil && v.OwnerModuleID == owner && v.Validate() == nil {
@@ -382,11 +390,21 @@ func RuntimeImplementationWorkTerminalPurposeSelected(w RuntimeImplementationWor
 	if pending != nil {
 		return false
 	}
+	inputRevisionScopes := make(map[string]struct{})
+	for _, r := range w.Rounds {
+		if r.CoverageWorkItemID == cwi && r.ScopeRequest.InputRevision != nil {
+			inputRevisionScopes[r.ScopeRequest.RequestID] = struct{}{}
+		}
+	}
 	last := RuntimeImplementationWorkPurpose("")
 	for _, p := range w.PurposeChoices {
-		if p.CoverageWorkItemID == cwi {
-			last = p.Purpose
+		if p.CoverageWorkItemID != cwi {
+			continue
 		}
+		if _, isRevision := inputRevisionScopes[p.ScopeRequestID]; isRevision {
+			continue
+		}
+		last = p.Purpose
 	}
 	return last == RuntimeImplementationWorkPurposeTerminal
 }

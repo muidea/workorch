@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func inputRevisionFixture(t *testing.T, declareMethod ...bool) (*RuntimeValidationInputRevision, RuntimeSemanticPlanningLedger) {
@@ -314,5 +316,68 @@ func TestInputRevisionRequiresOriginalRetiredRequest(t *testing.T) {
 				t.Fatal("unbound retired request accepted")
 			}
 		})
+	}
+}
+
+func TestRuntimeImplementationWorkTerminalPurposeSelectedSkipsInputRevisionRounds(t *testing.T) {
+	v, l := inputRevisionFixture(t)
+	cwi := v.Binding.CoverageWorkItemID
+	history := RuntimeSemanticPlanningLedger{History: []RuntimeSemanticPlanningGeneration{{
+		Reason: RuntimeSemanticPlanningRetirementInputRevision, Snapshot: l,
+	}}}
+
+	// 1. No prior terminal_proof, only an InputRevision round completed -> false.
+	onlyRevision := RuntimeImplementationWorkLedger{
+		PurposeChoices: []RuntimeImplementationWorkPurposeChoice{
+			{CoverageWorkItemID: cwi, ScopeRequestID: "req-work-1", Purpose: RuntimeImplementationWorkPurposeEffect},
+			{CoverageWorkItemID: cwi, ScopeRequestID: "req-rev-1", Purpose: RuntimeImplementationWorkPurposeEffect},
+		},
+		Rounds: []RuntimeImplementationWorkRound{
+			{CoverageWorkItemID: cwi, Ordinal: 1, ScopeRequest: RuntimeImplementationWorkScopeRequest{RequestID: "req-work-1", CoverageWorkItemID: cwi}, CompletedReceiptSetHash: "receipt-1"},
+			{CoverageWorkItemID: cwi, Ordinal: 2, ScopeRequest: RuntimeImplementationWorkScopeRequest{RequestID: "req-rev-1", CoverageWorkItemID: cwi, InputRevision: v}, CompletedReceiptSetHash: "receipt-2"},
+		},
+	}
+	if RuntimeImplementationWorkTerminalPurposeSelected(onlyRevision, history, cwi) {
+		t.Fatal("expected false when no ordinary terminal_proof preceded InputRevision")
+	}
+
+	// 2. Prior ordinary terminal_proof + still-pending InputRevision -> false until revision finishes.
+	pendingRevision := RuntimeImplementationWorkLedger{
+		PurposeChoices: []RuntimeImplementationWorkPurposeChoice{
+			{CoverageWorkItemID: cwi, ScopeRequestID: "req-work-1", Purpose: RuntimeImplementationWorkPurposeEffect},
+			{CoverageWorkItemID: cwi, ScopeRequestID: "req-term-1", Purpose: RuntimeImplementationWorkPurposeTerminal},
+		},
+		Rounds: []RuntimeImplementationWorkRound{
+			{CoverageWorkItemID: cwi, Ordinal: 1, ScopeRequest: RuntimeImplementationWorkScopeRequest{RequestID: "req-work-1", CoverageWorkItemID: cwi}, CompletedReceiptSetHash: "receipt-1"},
+		},
+	}
+	if RuntimeImplementationWorkTerminalPurposeSelected(pendingRevision, history, cwi) {
+		t.Fatal("expected false while InputRevision remains pending")
+	}
+
+	// 3. Prior ordinary terminal_proof + in-flight InputRevision round -> still false until completed.
+	inFlight := pendingRevision
+	inFlight.PurposeChoices = append(inFlight.PurposeChoices, RuntimeImplementationWorkPurposeChoice{
+		CoverageWorkItemID: cwi, ScopeRequestID: "req-rev-1", Purpose: RuntimeImplementationWorkPurposeEffect,
+	})
+	inFlight.Rounds = append(inFlight.Rounds, RuntimeImplementationWorkRound{
+		CoverageWorkItemID: cwi, Ordinal: 2,
+		ScopeRequest: RuntimeImplementationWorkScopeRequest{RequestID: "req-rev-1", CoverageWorkItemID: cwi, InputRevision: v},
+	})
+	if RuntimeImplementationWorkTerminalPurposeSelected(inFlight, history, cwi) {
+		t.Fatal("expected false while InputRevision round is outstanding")
+	}
+
+	// 4. Once the InputRevision round completes, prior terminal_proof is preserved (true),
+	// avoiding an extra ScopePreview + coverage_order LLM call.
+	completed := inFlight
+	completed.Rounds[1].CompletedReceiptSetHash = "receipt-rev-1"
+	if !RuntimeImplementationWorkTerminalPurposeSelected(completed, history, cwi) {
+		t.Fatal("expected preserved terminal_proof after InputRevision round completed")
+	}
+
+	// 5. Unrelated CWI choices do not interfere with another CWI.
+	if RuntimeImplementationWorkTerminalPurposeSelected(completed, RuntimeSemanticPlanningLedger{}, common.CoverageWorkItemID("cwi-other")) {
+		t.Fatal("unrelated CWI inherited terminal_proof")
 	}
 }
