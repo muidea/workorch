@@ -218,17 +218,9 @@ func completeEvidenceDispatch(
 		return err
 	}
 	canAdvanceFocus := !invalidated && !reviewPending && len(aggregate.Facts.Prerequisites.Pending) == 0
-	previousFocusID := aggregate.Facts.Focus.ID
 	if canAdvanceFocus && !historicalHandoff {
-		advanced, err := advanceRuntimeCWIFocus(aggregate.Facts, aggregate.CoverageProofLineage)
-		if err != nil {
+		if err := advanceRuntimeCWIFocusWithSemanticPlanning(aggregate); err != nil {
 			return err
-		}
-		aggregate.Facts = advanced
-		if aggregate.Facts.Focus.ID != previousFocusID {
-			if err := prepareSemanticPlanningForAdvancedFocus(aggregate); err != nil {
-				return err
-			}
 		}
 	}
 	var previousSnapshot *runtimecontract.AuthoritySnapshot

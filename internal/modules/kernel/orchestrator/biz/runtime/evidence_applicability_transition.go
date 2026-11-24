@@ -403,17 +403,9 @@ func (c *authorityComponent) recordEvidenceApplicability(ctx context.Context, wo
 	// fenced until fresh reads are complete. The matching observation must use
 	// the ordinary SM-2 advancement path before reducing a focus-level complete;
 	// otherwise a remaining CWI could be mistaken for whole-Run completion.
-	previousFocusID := aggregate.Facts.Focus.ID
 	if len(aggregate.Facts.Prerequisites.Pending) == 0 {
-		advanced, advanceErr := advanceRuntimeCWIFocus(aggregate.Facts, aggregate.CoverageProofLineage)
-		if advanceErr != nil {
+		if advanceErr := advanceRuntimeCWIFocusWithSemanticPlanning(&aggregate); advanceErr != nil {
 			return RuntimeAggregate{}, advanceErr
-		}
-		aggregate.Facts = advanced
-		if aggregate.Facts.Focus.ID != previousFocusID {
-			if err := prepareSemanticPlanningForAdvancedFocus(&aggregate); err != nil {
-				return RuntimeAggregate{}, err
-			}
 		}
 	}
 	facts, decision, err := reduceRuntimeAggregateWithDirective(aggregate, aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)

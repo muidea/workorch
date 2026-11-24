@@ -239,7 +239,6 @@ func (c *authorityComponent) commitPrerequisites(ctx context.Context, workspaceI
 	if _, _, waiting := currentRuntimeRecoverableWait(aggregate.RecoverableWaits); waiting && probeObservation == nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: active recoverable wait requires a matching probe observation", common.ErrConflict)
 	}
-	previousFocusID := aggregate.Facts.Focus.ID
 	semanticCatalogRefreshPending := false
 	for _, result := range results {
 		if semanticCatalogPrerequisitePending(aggregate, result.PrerequisiteID) {
@@ -317,16 +316,8 @@ func (c *authorityComponent) commitPrerequisites(ctx context.Context, workspaceI
 	// focus advancement is still valid.
 	facts = aggregate.Facts
 	if !semanticGenerationRetired && len(facts.Prerequisites.Pending) == 0 {
-		advanced, advanceErr := advanceRuntimeCWIFocus(facts, aggregate.CoverageProofLineage)
-		if advanceErr != nil {
+		if advanceErr := advanceRuntimeCWIFocusWithSemanticPlanning(&aggregate); advanceErr != nil {
 			return RuntimeAggregate{}, advanceErr
-		}
-		facts = advanced
-		aggregate.Facts = facts
-	}
-	if aggregate.Facts.Focus.ID != previousFocusID {
-		if err := prepareSemanticPlanningForAdvancedFocus(&aggregate); err != nil {
-			return RuntimeAggregate{}, err
 		}
 		facts = aggregate.Facts
 	}

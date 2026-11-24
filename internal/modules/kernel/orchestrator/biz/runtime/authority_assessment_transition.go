@@ -165,7 +165,6 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 			return RuntimeAggregate{}, err
 		}
 	}
-	previousFocusID := aggregate.Facts.Focus.ID
 	replanned := false
 	if ownerFactAcquisitionSettled {
 		replanned, err = settleRuntimeOwnerFactAcquisition(&aggregate, fact.ID, ownerFactAcquisition, assessmentProofPreimage, evaluation)
@@ -179,18 +178,12 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 		}
 	}
 	if !replanned {
-		advanced, advanceErr := advanceRuntimeCWIFocus(aggregate.Facts, aggregate.CoverageProofLineage)
-		if advanceErr != nil {
+		// Reaching an unbound placeholder is a local SM-2 transition, not a
+		// continuation chosen by the assessment. Preserve a still-current
+		// semantic order or retire only the just-sealed batch working state so
+		// SM-4 can request the next scoped proof batch.
+		if advanceErr := advanceRuntimeCWIFocusWithSemanticPlanning(&aggregate); advanceErr != nil {
 			return RuntimeAggregate{}, advanceErr
-		}
-		aggregate.Facts = advanced
-		if aggregate.Facts.Focus.ID != previousFocusID {
-			// Reaching an unbound placeholder is a local SM-2 transition, not a
-			// continuation chosen by the assessment. Retire only the just-sealed
-			// batch working state so SM-4 can request the next scoped proof batch.
-			if err := prepareSemanticPlanningForAdvancedFocus(&aggregate); err != nil {
-				return RuntimeAggregate{}, err
-			}
 		}
 	}
 	facts, nextDecision, err := reduceRuntimeAggregateWithDirective(aggregate, aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)

@@ -505,3 +505,200 @@ func TestCWISuspensionUnboundSuccessorGuardFailClosed(t *testing.T) {
 		})
 	}
 }
+
+func TestCWISuspensionCleanlyUnboundSemanticPendingCursorYieldsAndReactivatesOnReturn(t *testing.T) {
+	a := runtimeUnboundYieldProjectionFixture(t)
+	currentID := a.Facts.Focus.CoverageWorkItemIDs[0]
+	pendingID := "semantic-pending/" + string(currentID)
+	sliceID := a.Facts.Focus.SliceID
+	if sliceID == "" {
+		sliceID = "slice-1"
+	}
+	a.Facts.Focus.SliceID = sliceID
+	a.Facts.Repair.SliceID = sliceID
+	for i := range a.Facts.RemainingFocuses {
+		a.Facts.RemainingFocuses[i].SliceID = sliceID
+	}
+	sliceCoverageIDs := make([]common.CoverageWorkItemID, 0, len(a.Facts.Coverage))
+	seedItems := make([]runtimecontract.RuntimeCoverageItem, 0, len(a.Facts.Coverage))
+	coverageByID := make(map[common.CoverageWorkItemID]runtimecontract.RuntimeCoverageItemFact, len(a.Facts.Coverage))
+	for i := range a.Facts.Coverage {
+		a.Facts.Coverage[i].SliceID = sliceID
+		if a.Facts.Coverage[i].SourceScope == "" {
+			a.Facts.Coverage[i].SourceScope = "dodItem"
+		}
+		if a.Facts.Coverage[i].SourceID == "" {
+			a.Facts.Coverage[i].SourceID = "dod-" + string(a.Facts.Coverage[i].ID)
+		}
+		if a.Facts.Coverage[i].TargetText == "" {
+			a.Facts.Coverage[i].TargetText = "deliver " + string(a.Facts.Coverage[i].ID)
+		}
+		item := a.Facts.Coverage[i]
+		sliceCoverageIDs = append(sliceCoverageIDs, item.ID)
+		coverageByID[item.ID] = item
+		seedItems = append(seedItems, runtimecontract.RuntimeCoverageItem{
+			ID:          item.ID,
+			SliceID:     sliceID,
+			SourceScope: item.SourceScope,
+			SourceID:    item.SourceID,
+			TargetText:  item.TargetText,
+			Order:       i + 1,
+		})
+	}
+	a.Facts.Slices = []runtimecontract.RuntimeAcceptanceSlice{{ID: sliceID, CoverageWorkItemIDs: sliceCoverageIDs}}
+	a.Facts.DefinitionSeed = runtimecontract.RuntimeDefinitionSeed{
+		SchemaVersion:      runtimecontract.RuntimeDefinitionSeedSchemaCurrent,
+		DefinitionRevision: a.Facts.DefinitionRevision,
+		PolicyHash:         "policy-unbound-yield",
+		CoverageItems:      seedItems,
+		Slices:             a.Facts.Slices,
+	}
+	a.Facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(a.Facts.DefinitionSeed)
+
+	a.Facts.Focus.ID = pendingID
+	a.Facts.Focus.TargetDiscoverySources = []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest}
+	a.Facts.Focus.TargetSelectorRef = "file/workspace_deliverable"
+	a.Facts.Focus.TargetSelectorOwnerRef = "software-dev"
+	a.Facts.Focus.TargetSelectorSubjectRef = "dodItem"
+	a.Facts.Focus.TargetSelectorCandidateRefs = []string{"new-target-requires-owner-selector", "workspace-relative-path"}
+	a.Facts.Focus.TargetRefs = nil
+	a.Facts.Focus.RequireTargetGrounding = true
+	a.Facts.Repair.FocusID = pendingID
+	for i := range a.Facts.Coverage {
+		if a.Facts.Coverage[i].ID == currentID {
+			a.Facts.Coverage[i].FocusID = pendingID
+		}
+	}
+	for i := range a.Facts.DefinitionFocuses {
+		a.Facts.DefinitionFocuses[i].SliceID = sliceID
+		if len(a.Facts.DefinitionFocuses[i].CoverageWorkItemIDs) == 1 {
+			if row, ok := coverageByID[a.Facts.DefinitionFocuses[i].CoverageWorkItemIDs[0]]; ok {
+				a.Facts.DefinitionFocuses[i].AssessmentScope = row.SourceScope
+				a.Facts.DefinitionFocuses[i].AssessmentID = row.SourceID
+				a.Facts.DefinitionFocuses[i].AssessmentText = row.TargetText
+				a.Facts.DefinitionFocuses[i].EvidenceDeclarationRef = runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef(row.SourceScope, row.SourceID)
+			}
+		}
+		if len(a.Facts.DefinitionFocuses[i].CoverageWorkItemIDs) == 1 && a.Facts.DefinitionFocuses[i].CoverageWorkItemIDs[0] == currentID {
+			a.Facts.DefinitionFocuses[i].TargetRole = a.Facts.Focus.TargetRole
+			a.Facts.DefinitionFocuses[i].TargetDiscoverySources = append([]string(nil), a.Facts.Focus.TargetDiscoverySources...)
+			a.Facts.DefinitionFocuses[i].TargetSelectorRef = a.Facts.Focus.TargetSelectorRef
+			a.Facts.DefinitionFocuses[i].TargetSelectorOwnerRef = a.Facts.Focus.TargetSelectorOwnerRef
+			a.Facts.DefinitionFocuses[i].TargetSelectorSubjectRef = a.Facts.Focus.TargetSelectorSubjectRef
+			a.Facts.DefinitionFocuses[i].TargetSelectorCandidateRefs = append([]string(nil), a.Facts.Focus.TargetSelectorCandidateRefs...)
+			a.Facts.DefinitionFocuses[i].RequireTargetGrounding = true
+		}
+	}
+	a.Facts.Prerequisites.Pending = nil
+	a.Facts.Prerequisites.Retired = nil
+	a.Facts.Resources.Manifest = &runtimecontract.WorkspaceManifest{Revision: "tree-1", TargetRefs: []string{"main.go"}}
+	focusReq := focusScopedRuntimeRequirement(a.Facts, runtimecontract.RuntimeRequirement{
+		Kind:                        runtimecontract.PrerequisiteKindTargetSelection,
+		OwnerModuleID:               runtimecontract.RuntimeModuleFile,
+		SubjectRef:                  a.Facts.Focus.TargetRole,
+		TargetSelectorRef:           a.Facts.Focus.TargetSelectorRef,
+		TargetSelectorOwnerRef:      a.Facts.Focus.TargetSelectorOwnerRef,
+		TargetSelectorSubjectRef:    a.Facts.Focus.TargetSelectorSubjectRef,
+		TargetSelectorCandidateRefs: a.Facts.Focus.TargetSelectorCandidateRefs,
+		Reason:                      "focus target grounding requires owner target selection",
+	})
+	a.Facts = PreflightRuntimeFacts(a.Facts, []runtimecontract.RuntimeRequirement{focusReq})
+	if len(a.Facts.Prerequisites.Pending) != 1 || a.Facts.Prerequisites.Pending[0].FocusID != pendingID {
+		t.Fatalf("fixture did not seed focus-scoped prerequisite for %s: %+v", pendingID, a.Facts.Prerequisites.Pending)
+	}
+	originalPrereq := a.Facts.Prerequisites.Pending[0]
+
+	changed, err := suspendRuntimeSuccessorForStalePredecessor(&a)
+	if err != nil || !changed || a.Facts.Failure != nil {
+		t.Fatalf("semantic-pending unbound yield failed: changed=%t err=%v failure=%+v", changed, err, a.Facts.Failure)
+	}
+	if a.Facts.Focus.CoverageWorkItemIDs[0] != "ordinary-source" {
+		t.Fatalf("unbound yield did not switch to ordinary-source: %+v", a.Facts.Focus)
+	}
+	if len(a.Facts.Prerequisites.Pending) != 0 || len(a.Facts.Prerequisites.Retired) != 1 || a.Facts.Prerequisites.Retired[0].ID != originalPrereq.ID {
+		t.Fatalf("unbound yield did not retire %s prerequisite cleanly: pending=%+v retired=%+v", pendingID, a.Facts.Prerequisites.Pending, a.Facts.Prerequisites.Retired)
+	}
+
+	// Simulate ordinary-source completion and focus return to semantic-pending/<cwi>.
+	a.Facts.Focus.ID = "semantic-focus-ordinary-revalidation"
+	a.Facts.Focus.CoverageEvidenceBindings = nil
+	a.Facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	predID := a.Facts.Focus.CoverageWorkItemIDs[0]
+	predBinding := runtimecontract.CoverageEvidenceBinding{
+		ID:                                   "binding-" + string(predID),
+		CoverageWorkItemID:                   predID,
+		FocusID:                              a.Facts.Focus.ID,
+		DefinitionRevision:                   a.Facts.DefinitionRevision,
+		DeclarationRef:                       a.Facts.Focus.EvidenceDeclarationRef,
+		VerificationPolicy:                   a.Facts.Focus.VerificationPolicy,
+		Proofs:                               []runtimecontract.CoverageEvidenceProof{{EvidenceKind: runtimecontract.EvidenceKindValidation, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectEphemeralSession}, AllowedOperationKinds: []string{runtimecontract.StepKindMCPToolCall}, ValidationRecipeID: "recipe/ordinary-revalidation"}},
+		TargetRefs:                           append([]string(nil), a.Facts.Focus.TargetRefs...),
+		TargetSelectorRef:                    a.Facts.Focus.TargetSelectorRef,
+		TargetSelectorOwnerRef:               a.Facts.Focus.TargetSelectorOwnerRef,
+		TargetSelectorSubjectRef:             a.Facts.Focus.TargetSelectorSubjectRef,
+		TargetSelectorCandidateRefs:          append([]string(nil), a.Facts.Focus.TargetSelectorCandidateRefs...),
+		ProspectiveTargetAllOfConstraintRefs: append([]string(nil), a.Facts.Focus.ProspectiveTargetAllOfConstraintRefs...),
+		ProspectiveTargetRefs:                append([]string(nil), a.Facts.Focus.ProspectiveTargetRefs...),
+	}
+	if predBinding.DeclarationRef == "" {
+		predBinding.DeclarationRef = "definition/dodItem/" + string(predID)
+	}
+	predBinding = predBinding.Normalized()
+	predBinding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(predBinding)
+	a.Facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{predBinding}
+	predBindingRef := runtimecontract.RuntimeCWIBindingRefForCoverageBinding(predBinding, "semantic-manifest-ordinary")
+	predFact := runtimecontract.EvidenceFact{
+		ID: "evidence-ordinary-revalidation", Kind: runtimecontract.EvidenceKindValidation,
+		BindingRefs: []string{predBinding.ID}, CoverageWorkItemIDs: []common.CoverageWorkItemID{predID},
+		DispatchID: "dispatch-ordinary-revalidation", OperationID: "op-ordinary-revalidation",
+	}
+	a.Facts.Evidence.Accepted = append(a.Facts.Evidence.Accepted, predFact)
+	for i := range a.Facts.Coverage {
+		if a.Facts.Coverage[i].ID == predID {
+			a.Facts.Coverage[i].FocusID = a.Facts.Focus.ID
+			a.Facts.Coverage[i].State = runtimecontract.RuntimeCoverageItemStateSatisfied
+			a.Facts.Coverage[i].CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStateBound
+			a.Facts.Coverage[i].CurrentBindingRef = &predBindingRef
+			if len(a.Facts.Coverage[i].ReopenLineage) != 0 && len(a.Facts.Coverage[i].BindingLineage) == 0 {
+				a.Facts.Coverage[i].BindingLineage = []runtimecontract.RuntimeCWIBindingRef{a.Facts.Coverage[i].ReopenLineage[0].PreviousBindingRef}
+			}
+			a.Facts.Coverage[i].BindingLineage = append(a.Facts.Coverage[i].BindingLineage, predBindingRef)
+			a.Facts.Coverage[i].LastAssessmentID = "dispatch-ordinary-revalidation"
+		}
+	}
+	reconciliation, err := canonicalRuntimeCWIReconciliationContract(a.Facts)
+	if err != nil {
+		t.Fatalf("canonicalRuntimeCWIReconciliationContract: %v", err)
+	}
+	a.Facts.ReconciliationContract = reconciliation
+	returned, err := advanceRuntimeCWIFocus(a.Facts, a.CoverageProofLineage)
+	if err != nil {
+		t.Fatalf("advanceRuntimeCWIFocus after ordinary-source completion: %v", err)
+	}
+	if returned.Focus.ID != pendingID {
+		t.Fatalf("returned focus = %q, want %q (remaining=%+v)", returned.Focus.ID, pendingID, returned.RemainingFocuses)
+	}
+	reduced, decision, err := ReduceRuntimeStateWithDirective(returned, nil)
+	if err != nil {
+		t.Fatalf("ReduceRuntimeStateWithDirective after return to %s failed: %v", pendingID, err)
+	}
+	if decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
+		t.Fatalf("decision = %+v, want need_prerequisite", decision)
+	}
+	if len(reduced.Prerequisites.Pending) != 1 || reduced.Prerequisites.Pending[0].ID != originalPrereq.ID || len(reduced.Prerequisites.Retired) != 0 {
+		t.Fatalf("expected retired canonical prerequisite to reactivate on return: pending=%+v retired=%+v", reduced.Prerequisites.Pending, reduced.Prerequisites.Retired)
+	}
+	if err := reduced.Validate(); err != nil {
+		t.Fatalf("reduced facts invalid after return to %s: %v", pendingID, err)
+	}
+	if report := InspectRuntimeAuthorityInvariants(RuntimeAggregate{Facts: reduced, Decision: decision}); len(report.Violations) != 0 {
+		t.Fatalf("authority invariant violations after return to %s: %+v", pendingID, report.Violations)
+	}
+	replayed, _, err := ReduceRuntimeStateWithDirective(reduced, nil)
+	if err != nil {
+		t.Fatalf("idempotent replay failed: %v", err)
+	}
+	if !runtimecontract.RuntimeRawEqual(replayed.Normalized(), reduced.Normalized()) {
+		t.Fatalf("reducer replay mutated reactivation state after unbound yield return")
+	}
+}

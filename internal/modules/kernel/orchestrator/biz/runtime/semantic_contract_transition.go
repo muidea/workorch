@@ -357,16 +357,8 @@ func (c *planningTransactionComponent) sealSemanticContract(ctx context.Context,
 	if err := resolveCoverageProofLineageForFocus(&aggregate, aggregate.Facts.Focus); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	previousFocusID := aggregate.Facts.Focus.ID
-	advanced, advanceErr := advanceRuntimeCWIFocus(aggregate.Facts, aggregate.CoverageProofLineage)
-	if advanceErr != nil {
+	if advanceErr := advanceRuntimeCWIFocusWithSemanticPlanning(&aggregate); advanceErr != nil {
 		return RuntimeAggregate{}, advanceErr
-	}
-	aggregate.Facts = advanced
-	if aggregate.Facts.Focus.ID != previousFocusID {
-		if err := prepareSemanticPlanningForAdvancedFocus(&aggregate); err != nil {
-			return RuntimeAggregate{}, err
-		}
 	}
 	aggregate.Facts, aggregate.Decision, err = reduceRuntimeAggregateWithDirective(aggregate, aggregate.Facts, nil)
 	if err != nil {

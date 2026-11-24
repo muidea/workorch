@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -874,11 +875,40 @@ func settleRuntimeCWIsForCurrentFocus(facts runtimecontract.RuntimeFacts) (runti
 	return facts.Normalized(), nil
 }
 
+// advanceRuntimeCWIFocusWithSemanticPlanning unifies SM-2 focus advancement
+// with sealed semantic-order continuity inside one owner-local transition.
+// When the current sealed semantic generation remains current and has a
+// remaining member in its accepted order, SM-2 advances directly along that
+// order instead of temporarily bouncing back to Definition order; otherwise it
+// falls back to canonical eligibility and retires the superseded semantic
+// generation in prepareSemanticPlanningForAdvancedFocus.
+func advanceRuntimeCWIFocusWithSemanticPlanning(aggregate *RuntimeAggregate) error {
+	if aggregate == nil {
+		return common.ErrInvalidArgument
+	}
+	previousFocusID := aggregate.Facts.Focus.ID
+	advanced, err := advanceRuntimeCWIFocusCore(aggregate.Facts, aggregate, aggregate.CoverageProofLineage)
+	if err != nil {
+		return err
+	}
+	aggregate.Facts = advanced
+	if aggregate.Facts.Focus.ID != previousFocusID {
+		if err := prepareSemanticPlanningForAdvancedFocus(aggregate); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // advanceRuntimeCWIFocus is the sole production wrapper around the focus-queue
 // helper. Current-schema aggregates must first prove that all current CWI have
 // exact binding-matched credit, then mark those rows settled, before moving the
 // focus projection.
 func advanceRuntimeCWIFocus(facts runtimecontract.RuntimeFacts, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeFacts, error) {
+	return advanceRuntimeCWIFocusCore(facts, nil, proofLineages...)
+}
+
+func advanceRuntimeCWIFocusCore(facts runtimecontract.RuntimeFacts, aggregate *RuntimeAggregate, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeFacts, error) {
 	if err := requireCurrentRuntimeCWILedger(facts); err != nil {
 		return runtimecontract.RuntimeFacts{}, err
 	}
@@ -900,7 +930,11 @@ func advanceRuntimeCWIFocus(facts runtimecontract.RuntimeFacts, proofLineages ..
 	} else if resumed {
 		return restored, nil
 	}
-	advanced, advanceErr := advanceSatisfiedCoverageFocus(settled, proofLineages...)
+	var acceptedOrder, generationEligible []common.CoverageWorkItemID
+	if aggregate != nil {
+		acceptedOrder, generationEligible = retainedSemanticOrderForAdvancedFocus(*aggregate, settled)
+	}
+	advanced, advanceErr := advanceSatisfiedCoverageFocusWithOrder(settled, acceptedOrder, generationEligible, proofLineages...)
 	if advanceErr != nil {
 		return runtimecontract.RuntimeFacts{}, advanceErr
 	}
@@ -908,6 +942,46 @@ func advanceRuntimeCWIFocus(facts runtimecontract.RuntimeFacts, proofLineages ..
 		return runtimecontract.RuntimeFacts{}, err
 	}
 	return advanced, nil
+}
+
+func retainedSemanticOrderForAdvancedFocus(aggregate RuntimeAggregate, settled runtimecontract.RuntimeFacts) ([]common.CoverageWorkItemID, []common.CoverageWorkItemID) {
+	ledger := aggregate.SemanticPlanning
+	if ledger.Phase != runtimecontract.RuntimeSemanticPlanningSealed ||
+		ledger.Manifest == nil ||
+		ledger.CoverageOrderDocument == nil ||
+		ledger.FailureInputReview != nil {
+		return nil, nil
+	}
+	checked := aggregate
+	checked.Facts = settled
+	if _, current := semanticPlanningCatalogsCurrent(checked, *ledger.Manifest); !current {
+		return nil, nil
+	}
+	order, closureChanged, err := currentRuntimeCWIOrderFromSemanticLineage(settled, *ledger.Manifest, ledger.CoverageOrderDocument.CoverageOrder)
+	if err != nil || len(closureChanged) != 0 || len(order) == 0 {
+		return nil, nil
+	}
+	generationEligible, err := runtimeSemanticGenerationEligibleClosure(settled, *ledger.Manifest)
+	if err != nil {
+		return nil, nil
+	}
+	coverage := runtimeCoverageByID(settled.Coverage)
+	firstRow, found := coverage[order[0]]
+	if !found {
+		return nil, nil
+	}
+	firstBound := runtimeCWIBoundBySemanticLineage(settled, firstRow, ledger.Manifest.Hash, coverage)
+	if !firstBound && !slices.Contains(ledger.PendingCoverageIDs, order[0]) {
+		return nil, nil
+	}
+	planningOrder := runtimeCWIPlanningMembersOfSemanticOrder(settled, order)
+	if len(order) == len(planningOrder) {
+		if len(planningOrder) == 0 {
+			return nil, nil
+		}
+		return planningOrder, generationEligible
+	}
+	return order, nil
 }
 
 // projectRuntimeCWIExecutionFocus applies the detached eligibility decision to

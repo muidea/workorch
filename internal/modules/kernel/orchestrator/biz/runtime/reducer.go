@@ -1611,6 +1611,10 @@ func evidenceRevisionAfter(left string, right string) bool {
 }
 
 func advanceSatisfiedCoverageFocus(facts runtimecontract.RuntimeFacts, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeFacts, error) {
+	return advanceSatisfiedCoverageFocusWithOrder(facts, nil, nil, proofLineages...)
+}
+
+func advanceSatisfiedCoverageFocusWithOrder(facts runtimecontract.RuntimeFacts, acceptedOrder, generationEligible []common.CoverageWorkItemID, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeFacts, error) {
 	facts = facts.Normalized()
 	if len(missingEvidenceKinds(facts, proofLineages...)) != 0 || !currentFocusCoverageSatisfied(facts, proofLineages...) || len(facts.RemainingFocuses) == 0 {
 		return facts, nil
@@ -1618,7 +1622,7 @@ func advanceSatisfiedCoverageFocus(facts runtimecontract.RuntimeFacts, proofLine
 	// A settled current CWI may leave every remaining row dependency-blocked.
 	// Preserve that settled cursor for the typed dependency/terminal decision;
 	// do not duplicate it in CompletedFocuses or fabricate an unbound focus.
-	if len(runtimecontract.RuntimeCWIsEligibleForPlanning(facts)) == 0 {
+	if len(acceptedOrder) == 0 && len(runtimecontract.RuntimeCWIsEligibleForPlanning(facts)) == 0 {
 		return facts, nil
 	}
 	completedFocusID := facts.Focus.ID
@@ -1636,6 +1640,15 @@ func advanceSatisfiedCoverageFocus(facts runtimecontract.RuntimeFacts, proofLine
 	facts.Resources.TargetSnapshots = nil
 	facts.Resources.FailureTarget = nil
 	facts.RepairDirective = nil
+	if len(acceptedOrder) != 0 {
+		if len(generationEligible) != 0 && len(acceptedOrder) == len(generationEligible) {
+			return projectRuntimeCWIExecutionFocusForGeneration(facts, acceptedOrder, generationEligible, &completedFocus)
+		}
+		if runtimeCWICurrentFocusHasBindingFence(facts) {
+			return facts.Normalized(), nil
+		}
+		return applyRuntimeCWIExecutionFocusProjection(facts, acceptedOrder, &completedFocus)
+	}
 	return projectRuntimeCWIExecutionFocus(facts, nil, &completedFocus)
 }
 

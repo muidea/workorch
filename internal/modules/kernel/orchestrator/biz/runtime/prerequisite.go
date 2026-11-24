@@ -80,7 +80,7 @@ func preflightRuntimeFactsNormalized(facts runtimecontract.RuntimeFacts, require
 			observations = append(observations, observation)
 		}
 		facts.Resources.PrerequisiteObservations = observations
-		facts = reactivateReopenedPendingFocusPrerequisites(facts, reacquiring)
+		facts = reactivateBindingFreeFocusPrerequisites(facts, reacquiring)
 		facts.Prerequisites.Pending = runtimecontract.NormalizeRuntimePrerequisites(pending)
 		facts.Prerequisites.Satisfied = runtimecontract.NormalizeRuntimePrerequisites(facts.Prerequisites.Satisfied)
 		facts.Prerequisites.Retired = runtimecontract.NormalizeRuntimePrerequisites(facts.Prerequisites.Retired)
@@ -109,39 +109,45 @@ func preflightRuntimeFactsPreservingPendingNormalized(facts runtimecontract.Runt
 	return preflightRuntimeFactsNormalized(facts, requirements)
 }
 
-// reactivateReopenedPendingFocusPrerequisites handles the two bounded cases in
-// which a retired prerequisite identity can become current again: (1) a reopened
-// CWI returns to the stable semantic-pending/<cwi> focus identity, or (2) a
-// binding-free Definition seed focus returns to the queue after temporarily
-// yielding to a reopened predecessor. In both cases SM-2 removes only exact
-// canonical retired focus-scoped IDs and their old owner observations before
-// scheduling fresh acquisition. Immutable audit remains in CWI/reopen/semantic
-// histories; old observations must not become authority for the current focus.
-func reactivateReopenedPendingFocusPrerequisites(facts runtimecontract.RuntimeFacts, reacquiring map[string]struct{}) runtimecontract.RuntimeFacts {
+// reactivateBindingFreeFocusPrerequisites enforces the single CWI binding-free
+// cursor invariant for focus-scoped prerequisites whose focus ID was previously
+// retired (e.g., a reopened CWI at semantic-pending/<cwi>, or an Unbound/
+// Planning CWI returning to either its Definition seed focus or canonical
+// semantic-pending/<cwi> cursor after yielding or generation retirement). SM-2
+// removes only exact canonical retired focus-scoped IDs and their old owner
+// observations before scheduling fresh acquisition. Bound/settled/generation
+// focuses remain fail-closed, and old observations never become current
+// authority.
+func reactivateBindingFreeFocusPrerequisites(facts runtimecontract.RuntimeFacts, reacquiring map[string]struct{}) runtimecontract.RuntimeFacts {
 	if len(reacquiring) == 0 || len(facts.Focus.CoverageWorkItemIDs) != 1 || len(facts.Focus.CoverageEvidenceBindings) != 0 {
 		return facts
 	}
 	coverageID := facts.Focus.CoverageWorkItemIDs[0]
+	pendingFocusID := "semantic-pending/" + string(coverageID)
 	eligible := false
 	for _, item := range facts.Coverage {
-		if item.ID != coverageID || item.CurrentBindingRef != nil {
+		if item.ID != coverageID {
 			continue
 		}
-		if facts.Focus.ID == "semantic-pending/"+string(coverageID) &&
-			item.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStateReopened &&
-			len(item.ReopenLineage) != 0 {
-			eligible = true
+		if item.State == runtimecontract.RuntimeCoverageItemStateSatisfied ||
+			item.CurrentBindingRef != nil ||
+			(item.FocusID != "" && item.FocusID != facts.Focus.ID) {
 			break
 		}
-		if item.State != runtimecontract.RuntimeCoverageItemStateSatisfied &&
-			(item.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStateUnbound ||
-				item.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStatePlanning) {
-			declaration, found, err := runtimeDefinitionFocusForCoverage(facts.DefinitionFocuses, coverageID)
-			if err == nil && found && facts.Focus.ID == declaration.ID {
+		switch item.CWIConvergenceState {
+		case runtimecontract.RuntimeCWIConvergenceStateReopened:
+			eligible = len(item.ReopenLineage) != 0 && facts.Focus.ID == pendingFocusID
+		case runtimecontract.RuntimeCWIConvergenceStateUnbound, runtimecontract.RuntimeCWIConvergenceStatePlanning:
+			if facts.Focus.ID == pendingFocusID {
 				eligible = true
+			} else {
+				declaration, found, err := runtimeDefinitionFocusForCoverage(facts.DefinitionFocuses, coverageID)
+				eligible = err == nil && found && facts.Focus.ID == declaration.ID
 			}
-			break
+		default:
+			eligible = false
 		}
+		break
 	}
 	if !eligible {
 		return facts
