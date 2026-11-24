@@ -175,6 +175,39 @@ class ActivationContractTest(unittest.TestCase):
             self.assertEqual(len(logs), 1)
             self.assertEqual(logs[0].read_text(), raw)
 
+    def test_managed_failure_index_preserves_long_test_tail_diagnostic(self):
+        progress = [f"    fullflow_test.go:181: elapsed={i}ms RunRevision={i}" for i in range(500)]
+        final_assertion = "    fullflow_test.go:230: 完整公开 DriveRuntime 未完成: timeout"
+        lines = (
+            ["head"]
+            + [
+                "--- FAIL: TestLongFullflow (605.75s)",
+                *progress,
+                final_assertion,
+                "FAIL\tgithub.com/example/integration\t636.027s",
+            ]
+            + ["ok github.com/example/other"] * 20
+            + ["tail"]
+        )
+        raw = "\n".join(lines) + "\n"
+        with tempfile.TemporaryDirectory(prefix="workorch-failure-tail-index-") as directory:
+            env = dict(os.environ, STEP_LOG_DIR=directory, STEP_LOG_INDEX="0", VERBOSE_LOGS="0",
+                       FAILURE_LOG_HEAD_LINES="1", FAILURE_LOG_TAIL_LINES="1")
+            payload = "import sys; sys.stdout.write(" + repr(raw) + "); raise SystemExit(1)"
+            command = ('set -Eeuo pipefail\n' + shell_function("verify-workorch-managed-full.sh", "run_step")
+                       + "run_step python3 -c " + shlex.quote(payload))
+            result = subprocess.run(["bash", "-c", command], env=env, capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("2:--- FAIL: TestLongFullflow (605.75s)\n", result.stderr)
+            self.assertIn("3:    fullflow_test.go:181: elapsed=0ms RunRevision=0\n", result.stderr)
+            self.assertIn("... (485 lines omitted) ...\n", result.stderr)
+            self.assertIn(f"503:{final_assertion}\n", result.stderr)
+            self.assertIn("504:FAIL\tgithub.com/example/integration\t636.027s\n", result.stderr)
+            self.assertNotIn("elapsed=250ms RunRevision=250\n", result.stderr)
+            logs = list(Path(directory).glob("*.log"))
+            self.assertEqual(len(logs), 1)
+            self.assertEqual(logs[0].read_text(), raw)
+
     def test_failed_verifiers_keep_evidence_without_json_console_dump(self):
         for script in ("verify-llm-workspace-execution.sh", "verify-mcp-stdio-workspace-execution.sh"):
             with self.subTest(script=script), tempfile.TemporaryDirectory(prefix="workorch-evidence-test-") as directory:

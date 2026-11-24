@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -125,15 +126,23 @@ func TestRuntimeCandidateRequestSessionRestartClearsIncompleteFramingAcrossTrans
 		t.Fatal(err)
 	}
 	stored := transportPending.CandidateRequestSessions[0]
-	if stored.State != runtimecontract.RuntimeCandidateRequestSessionTransportPending || stored.NextSequence != 3 || stored.LastDocumentFraming != nil {
-		t.Fatalf("transport successor retained stale incomplete framing: %+v", stored)
+	if stored.State != runtimecontract.RuntimeCandidateRequestSessionTransportPending || stored.NextSequence != 3 || stored.LastDocumentFraming != nil || stored.TransportRetryDueAt == "" {
+		t.Fatalf("transport successor retained stale incomplete framing or missing dueAt: %+v", stored)
 	}
 
 	restartedAgain, err := NewRuntimeController(repository)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := restartedAgain.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 3, "physical-complete"); err != nil {
+	earlySubmit := time.Date(2026, 11, 23, 8, 0, 1, 0, time.UTC).Format(time.RFC3339Nano)
+	beforeEarlyRevision := transportPending.StateRevision
+	if _, err := restartedAgain.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 3, "physical-complete", earlySubmit); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("early transport resubmit err = %v, want conflict", err)
+	}
+	if current, loadErr := repository.Load(ctx, "ws-1", "run-1"); loadErr != nil || current.StateRevision != beforeEarlyRevision {
+		t.Fatalf("early transport resubmit mutated aggregate: rev=%d/%d err=%v", current.StateRevision, beforeEarlyRevision, loadErr)
+	}
+	if _, err := restartedAgain.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 3, "physical-complete", stored.TransportRetryDueAt); err != nil {
 		t.Fatal(err)
 	}
 	completed, err := restartedAgain.completeCandidateRequestDocument(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-complete")
@@ -141,8 +150,8 @@ func TestRuntimeCandidateRequestSessionRestartClearsIncompleteFramingAcrossTrans
 		t.Fatal(err)
 	}
 	stored = completed.CandidateRequestSessions[0]
-	if stored.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || stored.LastDocumentFraming != nil || stored.NextSequence != 3 {
-		t.Fatalf("complete successor retained stale framing after restart: %+v", stored)
+	if stored.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || stored.LastDocumentFraming != nil || stored.TransportRetryDueAt != "" || stored.NextSequence != 3 {
+		t.Fatalf("complete successor retained stale framing or dueAt after restart: %+v", stored)
 	}
 }
 
@@ -438,14 +447,17 @@ func TestRuntimeCandidateRequestSessionTransportAndTerminalOutcomesAreAttemptFre
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pending.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTransportPending || pending.CandidateRequestSessions[0].NextSequence != 2 || pending.CandidateRequestSessions[0].TransportOutcomes != 1 || len(pending.CandidateAttempts) != 0 || pending.Facts.Repair.RepairAttempts != 0 {
+	if pending.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTransportPending || pending.CandidateRequestSessions[0].NextSequence != 2 || pending.CandidateRequestSessions[0].TransportOutcomes != 1 || pending.CandidateRequestSessions[0].TransportRetryDueAt != "2026-11-23T08:00:02Z" || len(pending.CandidateAttempts) != 0 || pending.Facts.Repair.RepairAttempts != 0 {
 		t.Fatalf("transport pending aggregate = %+v", pending)
 	}
 	duplicate, err := controller.coordinateProviderRequestRecovery(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-timeout", transport, runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-timeout", nil))
 	if err != nil || duplicate.StateRevision != pending.StateRevision {
 		t.Fatalf("duplicate transport = %+v err=%v", duplicate, err)
 	}
-	if _, err := controller.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 2, "physical-auth"); err != nil {
+	if _, err := controller.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 2, "physical-auth", "2026-11-23T08:00:01Z"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("early transport submit error = %v, want conflict", err)
+	}
+	if _, err := controller.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 2, "physical-auth", pending.CandidateRequestSessions[0].TransportRetryDueAt); err != nil {
 		t.Fatal(err)
 	}
 	fact, err := NormalizeRuntimeProviderRequestTerminal(RuntimeProviderRequestTerminalInput{

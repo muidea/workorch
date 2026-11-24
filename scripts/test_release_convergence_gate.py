@@ -44,9 +44,19 @@ class ReleaseConvergenceGateTest(unittest.TestCase):
         repo = Path(__file__).resolve().parent.parent
         managed = (repo / "scripts" / "verify-workorch-managed-full.sh").read_text(encoding="utf-8")
         self.assertIn(
-            'run_step go test "-timeout=$(make --no-print-directory -s go-test-timeout)" $GO_TEST_FLAGS $GO_TEST_PACKAGES',
+            'run_step go test "-p=$(make --no-print-directory -s go-test-package-parallelism)" "-timeout=$(make --no-print-directory -s go-test-timeout)" $GO_TEST_FLAGS $GO_TEST_PACKAGES',
             managed,
         )
+        default_parallel = subprocess.run(
+            ["make", "--no-print-directory", "-s", "go-test-package-parallelism"],
+            cwd=repo, capture_output=True, text=True, timeout=10, check=True,
+        )
+        self.assertEqual(default_parallel.stdout.strip(), "1")
+        custom_parallel = subprocess.run(
+            ["make", "--no-print-directory", "-s", "go-test-package-parallelism", "GOTEST_PACKAGE_PARALLELISM=2"],
+            cwd=repo, capture_output=True, text=True, timeout=10, check=True,
+        )
+        self.assertEqual(custom_parallel.stdout.strip(), "2")
         for timeout in ("15m", "20m"):
             with self.subTest(timeout=timeout):
                 queried = subprocess.run(

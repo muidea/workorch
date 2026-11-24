@@ -523,6 +523,9 @@ func (m *Biz) driveOneRuntimeSemanticTransition(ctx context.Context, aggregate r
 	if updated.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningFailed {
 		return terminalRuntimeDriveTransition(updated), nil
 	}
+	if pending, ok := runtimePendingProviderTransportRetry(updated); ok {
+		return runtimeDriveTransitionOutcome{}, &pending
+	}
 	if updated.StateRevision <= previousRevision {
 		return runtimeDriveTransitionOutcome{}, &runtimeInvariantError{Message: fmt.Sprintf("Runtime semantic planning made no persisted progress at revision %d", previousRevision)}
 	}
@@ -569,6 +572,9 @@ func finishRuntimeConvergenceTransition(aggregate runtime.RuntimeAggregate, prev
 	}
 	if runtimeTerminalDeliveryReady(aggregate) {
 		return terminalRuntimeDriveTransition(aggregate), nil
+	}
+	if pending, ok := runtimePendingProviderTransportRetry(aggregate); ok {
+		return runtimeDriveTransitionOutcome{}, &pending
 	}
 	if aggregate.StateRevision <= previousRevision {
 		return runtimeDriveTransitionOutcome{}, &runtimeInvariantError{Message: fmt.Sprintf("Runtime drive made no persisted progress at revision %d", previousRevision)}

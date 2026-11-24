@@ -101,6 +101,7 @@ type Biz struct {
 	runtimeLeaseTimerEpoch            uint64
 	runtimeLeaseTimerClosing          bool
 	started                           bool
+	nowFn                             func() time.Time
 }
 
 type runtimeLeaseTimerRegistration struct {
@@ -1783,6 +1784,10 @@ func (m *Biz) handleScheduledRuntimeDriveFailure(ctx context.Context, request sc
 			Delay:            delay, Source: request.source,
 		}, true
 	}
+	var providerRetry *runtimeProviderTransportRetryPendingError
+	if errors.As(err, &providerRetry) && providerRetry != nil {
+		return m.runtimeProviderTransportRecoveryLeaseRequest(*providerRetry, request.source), true
+	}
 	var persisted *runtimePersistedDrivePendingError
 	if errors.As(err, &persisted) {
 		slog.Debug("workorch Runtime persisted bounded retry state", "source", request.source, "workspaceID", request.workspaceID, "runID", request.runID, "revision", persisted.Revision)
@@ -2186,6 +2191,7 @@ type runtimeRecoveryLeaseRequest struct {
 	Reason                          runtimecontract.RuntimeDriveLeaseReason
 	FailureSignature                string
 	RecoveryRequestID               string
+	DueAt                           string
 	Delay                           time.Duration
 	Source                          string
 	FromRunningGeneration           uint64
@@ -2299,13 +2305,17 @@ func (m *Biz) scheduleRuntimeRecoveryLeaseDisposition(ctx context.Context, works
 	if request.Delay <= 0 {
 		request.Delay = time.Second
 	}
+	dueAt := strings.TrimSpace(request.DueAt)
+	if dueAt == "" {
+		dueAt = m.runtimeNowUTC().Add(request.Delay).Format(time.RFC3339Nano)
+	}
 	var result runtime.RuntimeInternalEventResult
 	var err error
 	terminalDelivery := request.Reason == runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry && request.FailureSignature == "terminal-delivery"
 	for attempt := 0; attempt < runtimeTerminalDeliveryCASRebaseLimit; attempt++ {
 		result, err = m.applyRuntimeDriveLeaseSchedule(ctx, workspaceID, runID, runtimecontract.RuntimeDriveLease{
 			WorkspaceID: workspaceID, RunID: runID, Reason: request.Reason, FailureSignature: request.FailureSignature,
-			RecoveryRequestID: request.RecoveryRequestID, DueAt: time.Now().UTC().Add(request.Delay).Format(time.RFC3339Nano),
+			RecoveryRequestID: request.RecoveryRequestID, DueAt: dueAt,
 		}, request.FromRunningGeneration)
 		if err == nil {
 			break
@@ -2709,6 +2719,10 @@ func (m *Biz) settleActionableRuntimeWithoutDriveLease(ctx context.Context, aggr
 	}
 	if aggregate.Decision.State == runtimecontract.ConvergenceStateNeedGovernance && m.runtimeGovernanceWaitAcknowledged(ctx, aggregate) {
 		return m.releaseRuntimeDriveGateAfterFreshNoLease(ctx, request)
+	}
+	if pending, ok := runtimePendingProviderTransportRetry(aggregate); ok {
+		retry := *m.runtimeProviderTransportRecoveryLeaseRequest(pending, request.Source)
+		return m.scheduleRuntimeRecoveryLeaseDisposition(ctx, request.WorkspaceID, request.RunID, retry) == runtimeRecoveryLeaseScheduleMounted
 	}
 	// Any other no-lease nonterminal remains actionable. Persist an immediate
 	// owner-private re-drive authority instead of opening the gate to naked
@@ -3184,7 +3198,7 @@ func (m *Biz) launchRuntimeDriveLeaseTimer(_ context.Context, lease runtimecontr
 		if parseErr != nil {
 			return
 		}
-		if delay := time.Until(dueAt); delay > 0 {
+		if delay := dueAt.Sub(m.runtimeNowUTC()); delay > 0 {
 			timer := time.NewTimer(delay)
 			defer timer.Stop()
 			select {
@@ -3202,7 +3216,7 @@ func (m *Biz) launchRuntimeDriveLeaseTimer(_ context.Context, lease runtimecontr
 			WorkspaceID: lease.WorkspaceID, RunID: lease.RunID, Kind: orchestratorevents.RuntimeDriveObservationRetryTimerFired,
 			AggregateRevision: lease.AggregateRevision, RecoveryGeneration: lease.RecoveryGeneration, FailureCategory: string(lease.Reason), LeaseState: lease.State, Source: source,
 		})
-		claimedLease, claimed, claimErr := m.claimRuntimeDriveLeaseWhileStarted(retryCtx, lease, time.Now().UTC().Format(time.RFC3339Nano), epoch, gateToken)
+		claimedLease, claimed, claimErr := m.claimRuntimeDriveLeaseWhileStarted(retryCtx, lease, m.runtimeNowUTC().Format(time.RFC3339Nano), epoch, gateToken)
 		if claimErr != nil {
 			if errors.Is(claimErr, context.Canceled) && m.runtimeDriveLeaseTimerLifecycleCanceled(retryCtx, epoch) {
 				stopCanceled = true

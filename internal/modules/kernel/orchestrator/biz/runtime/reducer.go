@@ -654,7 +654,8 @@ func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtime
 	}
 	switch failure.Class {
 	case runtimecontract.FailureClassProviderTransient:
-		if facts.Recovery.ProviderTransportAttempts < facts.RecoveryPolicy.MaxProviderTransportAttempts {
+		if strings.TrimSpace(failure.Code) != "provider_transport_exhausted" &&
+			facts.Recovery.ProviderTransportAttempts < facts.RecoveryPolicy.MaxProviderTransportAttempts {
 			return runtimecontract.RuntimeDecision{}, false, nil
 		}
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "provider_transport_exhausted", failure.Message), true, nil

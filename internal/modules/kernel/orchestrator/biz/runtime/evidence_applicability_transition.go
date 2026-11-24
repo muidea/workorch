@@ -462,6 +462,7 @@ func retireUnsealedCandidateForApplicability(aggregate *RuntimeAggregate, transa
 		session.State = runtimecontract.RuntimeCandidateRequestSessionTerminal
 		session.ProviderSubmitted = false
 		session.LastDocumentFraming = nil
+		session.TransportRetryDueAt = ""
 		session.LastOutcome = runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale, Code: "evidence_applicability_changed", Signature: request.RequestID}
 	}
 }

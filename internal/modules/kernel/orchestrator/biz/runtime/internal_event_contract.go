@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
@@ -162,6 +163,28 @@ func (event RuntimeInternalEvent) validateEnvelope() error {
 	}
 	if err := event.validateExecutionTransaction(); err != nil {
 		return err
+	}
+	if err := event.validateCandidateRequestSubmittedEnvelope(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (event RuntimeInternalEvent) validateCandidateRequestSubmittedEnvelope() error {
+	if event.Transaction == nil {
+		return nil
+	}
+	submittedAt := strings.TrimSpace(event.Transaction.SubmittedAt)
+	if event.Kind != RuntimeInternalEventCandidateRequestSubmitted {
+		if submittedAt != "" || event.Transaction.SubmittedAt != "" {
+			return fmt.Errorf("%w: runtime internal event %q cannot carry candidate request submission time", common.ErrInvalidArgument, event.Kind)
+		}
+		return nil
+	}
+	if submittedAt != "" {
+		if _, err := time.Parse(time.RFC3339Nano, submittedAt); err != nil {
+			return fmt.Errorf("%w: candidate request submission time must be RFC3339: %v", common.ErrInvalidArgument, err)
+		}
 	}
 	return nil
 }

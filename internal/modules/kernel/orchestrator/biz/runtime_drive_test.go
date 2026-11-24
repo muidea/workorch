@@ -11369,6 +11369,9 @@ func TestRequestAndSealRuntimeCandidateRetriesTransportWithoutCandidateAttempt(t
 		t.Fatal(err)
 	}
 	module := newTestBiz(owner, hub, nil)
+	clock := time.Date(2026, 11, 23, 8, 0, 0, 0, time.UTC)
+	module.nowFn = func() time.Time { return clock }
+	wantDueAt := clock.Add(runtimecontract.RuntimeProviderTransportBackoff(1)).Format(time.RFC3339Nano)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
 	document := []byte(`{"operations":[{"kind":"file/edit","targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"old"},{"name":"newText","string":"new"}]}]}`)
 	var calls []llmevents.RequestRuntimeCandidateCommand
@@ -11395,11 +11398,25 @@ func TestRequestAndSealRuntimeCandidateRetriesTransportWithoutCandidateAttempt(t
 		}), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
-	completed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, prefix)
+	pending, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, prefix)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(calls) != 2 || calls[0].RequestIdentity.LogicalRequestID != calls[1].RequestIdentity.LogicalRequestID || calls[0].RequestIdentity.Sequence != 1 || calls[1].RequestIdentity.Sequence != 2 || calls[0].RequestIdentity.PhysicalCallID == calls[1].RequestIdentity.PhysicalCallID || completed.Facts.Recovery.ProviderTransportAttempts != 1 || len(completed.CandidateAttempts) != 1 || completed.ActiveDispatch == nil || len(completed.CandidateRequestSessions) != 1 || completed.CandidateRequestSessions[0].TransportOutcomes != 1 {
+	if len(calls) != 1 || len(pending.CandidateRequestSessions) != 1 || pending.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTransportPending || pending.CandidateRequestSessions[0].TransportOutcomes != 1 || pending.CandidateRequestSessions[0].TransportRetryDueAt != wantDueAt || pending.Facts.Recovery.ProviderTransportAttempts != 1 || pending.ActiveDispatch != nil {
+		t.Fatalf("first transient call did not yield at transport retry boundary: calls=%d aggregate=%+v", len(calls), pending)
+	}
+	clock = clock.Add(time.Second)
+	_, earlyErr := module.requestAndSealRuntimeCandidateWithRetry(ctx, pending, prefix)
+	var retryPending *runtimeProviderTransportRetryPendingError
+	if !errors.As(earlyErr, &retryPending) || len(calls) != 1 || retryPending.DueAt != wantDueAt {
+		t.Fatalf("early retry before dueAt err=%v calls=%d, want *runtimeProviderTransportRetryPendingError dueAt=%s", earlyErr, len(calls), wantDueAt)
+	}
+	clock = clock.Add(time.Second)
+	completed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, pending, prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 2 || calls[0].RequestIdentity.LogicalRequestID != calls[1].RequestIdentity.LogicalRequestID || calls[0].RequestIdentity.Sequence != 1 || calls[1].RequestIdentity.Sequence != 2 || calls[0].RequestIdentity.PhysicalCallID == calls[1].RequestIdentity.PhysicalCallID || completed.Facts.Recovery.ProviderTransportAttempts != 1 || len(completed.CandidateAttempts) != 1 || completed.ActiveDispatch == nil || len(completed.CandidateRequestSessions) != 1 || completed.CandidateRequestSessions[0].TransportOutcomes != 1 || completed.CandidateRequestSessions[0].TransportRetryDueAt != "" {
 		t.Fatalf("transport retry did not preserve request identity and candidate budget: calls=%+v aggregate=%+v", calls, completed)
 	}
 }
@@ -11426,6 +11443,9 @@ func TestRequestAndSealRuntimeCandidateBodyIdleExhaustionReloadsWithoutProviderR
 		t.Fatal(err)
 	}
 	module := newTestBiz(owner, hub, nil)
+	clock := time.Date(2026, 11, 23, 8, 0, 0, 0, time.UTC)
+	module.nowFn = func() time.Time { return clock }
+	wantDueAt := clock.Add(runtimecontract.RuntimeProviderTransportBackoff(1)).Format(time.RFC3339Nano)
 	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
@@ -11443,7 +11463,21 @@ func TestRequestAndSealRuntimeCandidateBodyIdleExhaustionReloadsWithoutProviderR
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 
-	failed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, prefix)
+	pending, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, initialized, prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 1 || len(pending.CandidateRequestSessions) != 1 || pending.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTransportPending || pending.CandidateRequestSessions[0].TransportRetryDueAt != wantDueAt || pending.Facts.Recovery.ProviderTransportAttempts != 1 || pending.Facts.Failure != nil {
+		t.Fatalf("first body-idle call did not yield pending transport retry: calls=%d aggregate=%+v", providerCalls, pending)
+	}
+	clock = clock.Add(time.Second)
+	_, earlyErr := module.requestAndSealRuntimeCandidateWithRetry(ctx, pending, prefix)
+	var retryPending *runtimeProviderTransportRetryPendingError
+	if !errors.As(earlyErr, &retryPending) || providerCalls != 1 || retryPending.DueAt != wantDueAt {
+		t.Fatalf("early exhaustion retry err=%v calls=%d, want *runtimeProviderTransportRetryPendingError dueAt=%s", earlyErr, providerCalls, wantDueAt)
+	}
+	clock = clock.Add(time.Second)
+	failed, err := module.requestAndSealRuntimeCandidateWithRetry(ctx, pending, prefix)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -11451,8 +11485,8 @@ func TestRequestAndSealRuntimeCandidateBodyIdleExhaustionReloadsWithoutProviderR
 		t.Fatalf("body-idle exhaustion did not retain atomic transport authority: calls=%d aggregate=%+v", providerCalls, failed)
 	}
 	session := failed.CandidateRequestSessions[0]
-	if session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient || session.LastOutcome.Code != "provider_body_idle_timeout" || session.LastOutcome.Signature != "provider-body-idle-timeout/exact" || session.TransportOutcomes != 2 {
-		t.Fatalf("body-idle terminal session rewrote LLM fact: %+v", session)
+	if session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || session.TransportRetryDueAt != "" || session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient || session.LastOutcome.Code != "provider_body_idle_timeout" || session.LastOutcome.Signature != "provider-body-idle-timeout/exact" || session.TransportOutcomes != 2 {
+		t.Fatalf("body-idle terminal session rewrote LLM fact or retained dueAt: %+v", session)
 	}
 	reloaded, err := state.Load(ctx, failed.Facts.WorkspaceID, failed.Facts.RunID)
 	if err != nil {

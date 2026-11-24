@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/requestcontent"
@@ -397,6 +398,7 @@ func (m *Biz) handleRuntimeSemanticProviderFeedback(ctx context.Context, aggrega
 	return m.runtimeCoordinateProviderRequestRecovery(ctx, aggregate, session.LogicalRequestID, physicalCallID, runtime.RuntimeProviderRequestRecoveryInput{
 		DocumentKind:     runtimecontract.RuntimeProviderDocumentSemanticPlan,
 		TransportOutcome: &outcome, Message: providerFailure.Reason, OriginalDiagnostic: providerDiagnostic,
+		ObservedAt: m.runtimeNowUTC().Format(time.RFC3339Nano),
 	}, settlement)
 }
 
@@ -989,6 +991,9 @@ func (m *Biz) resumeRuntimeSemanticRequestSession(ctx context.Context, aggregate
 		}
 		updated, err := m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_submission_unknown", "semantic provider submission has no durable outcome", nil, settlement)
 		return updated, true, err
+	}
+	if pending, notDue := m.runtimeProviderTransportRetryNotDue(aggregate, session); notDue {
+		return runtime.RuntimeAggregate{}, true, &pending
 	}
 
 	return aggregate, false, nil

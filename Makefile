@@ -157,9 +157,12 @@ fmt-check:
 		exit 1; \
 	fi
 
-.PHONY: go-test-timeout
+.PHONY: go-test-timeout go-test-package-parallelism
 go-test-timeout:
 	@printf '%s\n' '$(GOTEST_TIMEOUT)'
+
+go-test-package-parallelism:
+	@printf '%s\n' '$(GOTEST_PACKAGE_PARALLELISM)'
 
 test: go-deps
 	$(GO) test -p=$(GOTEST_PACKAGE_PARALLELISM) -timeout=$(GOTEST_TIMEOUT) $(GOTEST_FLAGS) $(PKGS)

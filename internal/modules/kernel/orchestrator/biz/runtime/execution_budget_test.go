@@ -280,10 +280,13 @@ func TestCandidateProviderTransportRetryUsesDistinctPhysicalAllocation(t *testin
 	}
 	retry := pending.CandidateRequestSessions[0]
 	secondPhysicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, retry.NextSequence)
-	if retry.NextSequence != 2 || retry.TransportOutcomes != 1 || secondPhysicalCallID == firstPhysicalCallID {
+	if retry.NextSequence != 2 || retry.TransportOutcomes != 1 || retry.TransportRetryDueAt != "2026-11-23T08:00:02Z" || secondPhysicalCallID == firstPhysicalCallID {
 		t.Fatalf("transport retry identity did not advance: session=%+v first=%s second=%s", retry, firstPhysicalCallID, secondPhysicalCallID)
 	}
-	resubmitted, err := controller.markCandidateRequestSubmitted(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, retry.NextSequence, secondPhysicalCallID)
+	if _, err := controller.markCandidateRequestSubmitted(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, retry.NextSequence, secondPhysicalCallID, "2026-11-23T08:00:01Z"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("early transport resubmission err=%v, want conflict", err)
+	}
+	resubmitted, err := controller.markCandidateRequestSubmitted(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, retry.NextSequence, secondPhysicalCallID, retry.TransportRetryDueAt)
 	if err != nil {
 		t.Fatal(err)
 	}

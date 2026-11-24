@@ -314,6 +314,7 @@ func equalRuntimeCandidateRequestSession(a, b *RuntimeCandidateRequestSession) b
 		a.NextSequence != b.NextSequence ||
 		a.DocumentRecoveryOutcomes != b.DocumentRecoveryOutcomes ||
 		a.TransportOutcomes != b.TransportOutcomes ||
+		a.TransportRetryDueAt != b.TransportRetryDueAt ||
 		a.LastPhysicalCallID != b.LastPhysicalCallID ||
 		a.ProviderSubmitted != b.ProviderSubmitted ||
 		a.LastOutcome != b.LastOutcome ||

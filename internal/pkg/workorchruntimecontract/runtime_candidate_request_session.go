@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -113,6 +114,7 @@ type RuntimeCandidateRequestSession struct {
 	NextSequence             int
 	DocumentRecoveryOutcomes int
 	TransportOutcomes        int
+	TransportRetryDueAt      string `json:",omitempty"`
 	// LastDocumentFraming stores only owner-neutral response framing. The
 	// authoritative physical-response fact is emitted by the LLM owner.
 	LastDocumentFraming *RuntimeProviderDocumentFraming
@@ -166,6 +168,7 @@ func (s RuntimeCandidateRequestSession) Normalized() RuntimeCandidateRequestSess
 	}
 	s.CorrectionHash = strings.TrimSpace(s.CorrectionHash)
 	s.State = RuntimeCandidateRequestSessionState(strings.TrimSpace(string(s.State)))
+	s.TransportRetryDueAt = strings.TrimSpace(s.TransportRetryDueAt)
 	s.LastPhysicalCallID = strings.TrimSpace(s.LastPhysicalCallID)
 	s.LastOutcome = s.LastOutcome.Normalized()
 	if s.ExpectedDocument != nil {
@@ -251,23 +254,30 @@ func (s RuntimeCandidateRequestSession) Validate() error {
 	}
 	switch s.State {
 	case RuntimeCandidateRequestSessionPrepared:
-		if s.LastOutcome.Class != RuntimeCandidateRequestOutcomeNone {
+		if s.LastOutcome.Class != RuntimeCandidateRequestOutcomeNone || s.TransportRetryDueAt != "" {
 			return common.ErrInvalidArgument
 		}
 	case RuntimeCandidateRequestSessionRecoveryPending:
 		if s.LastOutcome.Class != RuntimeCandidateRequestOutcomeDocumentRecovery || s.LastDocumentFraming == nil ||
-			s.LastOutcome.Code != s.LastDocumentFraming.Code || s.LastOutcome.Signature != s.LastDocumentFraming.Signature {
+			s.LastOutcome.Code != s.LastDocumentFraming.Code || s.LastOutcome.Signature != s.LastDocumentFraming.Signature ||
+			s.TransportRetryDueAt != "" {
 			return common.ErrInvalidArgument
 		}
 	case RuntimeCandidateRequestSessionTransportPending:
-		if s.LastOutcome.Class != RuntimeCandidateRequestOutcomeProviderTransient {
+		if s.LastOutcome.Class != RuntimeCandidateRequestOutcomeProviderTransient || s.TransportOutcomes <= 0 || s.TransportRetryDueAt == "" {
+			return common.ErrInvalidArgument
+		}
+		if _, err := time.Parse(time.RFC3339Nano, s.TransportRetryDueAt); err != nil {
 			return common.ErrInvalidArgument
 		}
 	case RuntimeCandidateRequestSessionDocumentComplete:
-		if s.LastOutcome.Class != RuntimeCandidateRequestOutcomeDocumentComplete || !s.ProviderSubmitted {
+		if s.LastOutcome.Class != RuntimeCandidateRequestOutcomeDocumentComplete || !s.ProviderSubmitted || s.TransportRetryDueAt != "" {
 			return common.ErrInvalidArgument
 		}
 	case RuntimeCandidateRequestSessionTerminal:
+		if s.TransportRetryDueAt != "" {
+			return common.ErrInvalidArgument
+		}
 		switch s.LastOutcome.Class {
 		case RuntimeCandidateRequestOutcomeProviderAuthentication,
 			RuntimeCandidateRequestOutcomeProviderConfiguration,

@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"reflect"
+	"time"
 
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -184,7 +185,11 @@ func (m *Biz) runtimeEnsureCandidateRequestWithExpected(ctx context.Context, agg
 }
 
 func (m *Biz) runtimeCandidateSession(ctx context.Context, aggregate runtime.RuntimeAggregate, kind runtime.RuntimeInternalEventKind, logicalRequestID string, sequence int, physicalCallID string, stale *runtimecontract.RuntimePrerequisiteStale, budgetSettlement ...*runtime.RuntimeProviderBudgetSettlement) (runtime.RuntimeAggregate, error) {
-	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: kind, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{LogicalRequestID: logicalRequestID, Sequence: sequence, PhysicalCallID: physicalCallID, Stale: stale, ProviderBudgetSettlement: firstRuntimeProviderBudgetSettlement(budgetSettlement)}})
+	submittedAt := ""
+	if kind == runtime.RuntimeInternalEventCandidateRequestSubmitted {
+		submittedAt = m.runtimeNowUTC().Format(time.RFC3339Nano)
+	}
+	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: kind, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{LogicalRequestID: logicalRequestID, Sequence: sequence, PhysicalCallID: physicalCallID, SubmittedAt: submittedAt, Stale: stale, ProviderBudgetSettlement: firstRuntimeProviderBudgetSettlement(budgetSettlement)}})
 	return result.Aggregate, err
 }
 

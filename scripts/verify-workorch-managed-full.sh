@@ -126,17 +126,63 @@ run_step() {
       # of the head/tail excerpt (including timeout running-test durations).
       echo "--- command failure index (complete log line numbers) ---" >&2
       awk '
+        function flush_fail_tail(    omitted, count, start, i, slot) {
+          if (!in_fail || fail_tail_count == 0) {
+            in_fail = 0
+            fail_tail_count = 0
+            return
+          }
+          omitted = fail_tail_count - 8
+          if (omitted > 0) {
+            printf "... (%d lines omitted) ...\n", omitted
+          }
+          count = (fail_tail_count < 8) ? fail_tail_count : 8
+          start = fail_tail_count - count
+          for (i = 0; i < count; i++) {
+            slot = (start + i) % 8
+            printf "%d:%s\n", fail_tail_nr[slot], fail_tail_line[slot]
+          }
+          in_fail = 0
+          fail_tail_count = 0
+        }
         /^[[:space:]]*--- FAIL:|^FAIL([[:space:]]|$)|^panic:|^fatal error:|^# / {
+          flush_fail_tail()
           matches++
           remaining = 0
           if (matches <= 80) {
             printf "%d:%s\n", NR, $0
             remaining = 8
+            if ($0 ~ /^[[:space:]]*--- FAIL:/) {
+              match($0, /^[[:space:]]*/)
+              fail_indent = RLENGTH
+              in_fail = 1
+            }
           }
+          next
+        }
+        in_fail {
+          if ($0 != "") {
+            match($0, /^[[:space:]]*/)
+            if (RLENGTH <= fail_indent) {
+              flush_fail_tail()
+              remaining = 0
+              next
+            }
+          }
+          if (remaining > 0) {
+            printf "%d:%s\n", NR, $0
+            remaining--
+            next
+          }
+          slot = fail_tail_count % 8
+          fail_tail_nr[slot] = NR
+          fail_tail_line[slot] = $0
+          fail_tail_count++
           next
         }
         remaining > 0 { printf "%d:%s\n", NR, $0; remaining-- }
         END {
+          flush_fail_tail()
           if (matches > 80) printf "%d additional failure markers; see complete command log\n", matches - 80
           if (matches == 0) print "No recognized failure markers; inspect the complete command log"
         }
@@ -352,9 +398,10 @@ if [[ "$SKIP_PREFLIGHT" != "1" && "$SKIP_PREFLIGHT" != "true" ]]; then
   run_step make fmt-check
   run_step make console-build
   run_step make vet
-  # Share the Makefile's package-level test deadline. Keep explicit caller
-  # flags/packages intact; this does not change Runtime convergence limits.
-  run_step go test "-timeout=$(make --no-print-directory -s go-test-timeout)" $GO_TEST_FLAGS $GO_TEST_PACKAGES
+  # Share the Makefile's package parallelism and package-level test deadline.
+  # Keep explicit caller flags/packages intact; this does not change Runtime
+  # convergence limits.
+  run_step go test "-p=$(make --no-print-directory -s go-test-package-parallelism)" "-timeout=$(make --no-print-directory -s go-test-timeout)" $GO_TEST_FLAGS $GO_TEST_PACKAGES
 else
   echo "==> skip managed preflight checks"
 fi

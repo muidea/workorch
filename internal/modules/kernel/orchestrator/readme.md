@@ -1573,6 +1573,7 @@ SM-4 唯一终态材料 compiler 规范化权威投影时必须另外保留原 `
   直接完成；budget CAS、new scheduled-successor CAS 或 exact-running cleanup CAS 已提交但返回普通 response-loss error 时，fresh load
   必须分别识别已消费 ledger、已持久化 exact scheduled lease 或 terminal-complete，不得重复 budget、generation 或 timer。预算结果无法
   线性化时只保留 process gate，禁止无预算 lease。
+- `provider_transient` 传输恢复使用同一唯一当前合同：semantic-plan 与 operations 请求在 `coordinateProviderRequestRecovery` 的同一 SM-3/SM-4/SM-2 CAS 内，按指数退避（基准 2s，每轮翻倍，上限 60s）写入 `RuntimeCandidateRequestSession.TransportRetryDueAt`（RFC3339Nano）；单次请求上限 8 次、整 Run 默认上限 `DefaultMaxProviderTransportAttempts=32`（封存 policy 优先），任一上限耗尽立即封存 SM-3 `terminal` 与 SM-2 `provider_transport_exhausted`（semantic 请求保留原 `semantic_contract_failed` 及 LLM `OriginalDiagnostic`）并清空 `TransportRetryDueAt`。`TransportRetryDueAt` 仅在 `transport_retry_pending` 期间允许非空；SM-3 在 `markCandidateRequestSubmitted` CAS 边界强制拒绝早于 `TransportRetryDueAt` 的提交且零预留，SM-4 在 `TransportPending` 退出并挂接 `RuntimeDriveLease{Reason: provider_retry, DueAt: TransportRetryDueAt}` 定时重驱。`ProviderSubmitted=true` 崩溃后仍保持 `provider_submission_unknown` 零重放，重复/迟到/过早唤醒与进程重启不跳过退避窗口。
   termination aggregate 上唯一合法 retained lease 是 exact `delivery_retry/terminal-delivery`。
   synchronous `DriveRuntime` EventHub ingress 与 scheduled worker 共用同一 workspace/run gate；两者都先检查 Run-owner durable
   retirement fence，同步入口持 gate 后还必须 fresh-load 并拒绝任何 persisted lease，不得执行 owner/provider work。

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/requestcontent"
@@ -384,6 +385,9 @@ func (m *Biz) resumeRuntimeCandidateDocumentSessionWithValidatedRevision(ctx con
 		return runtimeCandidateDocumentProgress{aggregate: aggregate, handled: true}, nil
 	}
 	if !session.ProviderSubmitted {
+		if pending, notDue := m.runtimeProviderTransportRetryNotDue(aggregate, session); notDue {
+			return runtimeCandidateDocumentProgress{handled: true}, &pending
+		}
 		return runtimeCandidateDocumentProgress{}, nil
 	}
 	settlement, settlementErr := runtimeProviderBudgetSettlement(string(aggregate.Facts.WorkspaceID), string(aggregate.Facts.RunID), session.LogicalRequestID, session.LastPhysicalCallID, nil, nil)
@@ -463,6 +467,7 @@ func (m *Biz) handleRuntimeCandidateTransientFeedback(ctx context.Context, aggre
 	updated, err := m.runtimeCoordinateProviderRequestRecovery(ctx, aggregate, session.LogicalRequestID, physicalCallID, runtime.RuntimeProviderRequestRecoveryInput{
 		DocumentKind:     runtimecontract.RuntimeProviderDocumentOperations,
 		TransportOutcome: &outcome, Message: failure.Reason, OriginalDiagnostic: originalDiagnostic,
+		ObservedAt: m.runtimeNowUTC().Format(time.RFC3339Nano),
 	}, settlement)
 	return updated, runtimecontract.RuntimeCandidate{}, false, err
 }
@@ -1074,6 +1079,12 @@ func (m *Biz) requestAndSealRuntimeCandidateWithRetry(
 			return runtime.RuntimeAggregate{}, err
 		}
 		aggregate = next
+		// A transient provider failure yields out of the candidate turn so SM-4
+		// can schedule the persisted TransportRetryDueAt lease instead of
+		// spinning inside SM-3.
+		if _, pending := runtimePendingProviderTransportRetry(aggregate); pending {
+			return aggregate, nil
+		}
 		// Owner infeasibility is a completed SM-2 fact handoff, not an SM-3
 		// correction. End this candidate turn so the outer drive reloads the
 		// newly reduced authority instead of manufacturing an attempt-1/second

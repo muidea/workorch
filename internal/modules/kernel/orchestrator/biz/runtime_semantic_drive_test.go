@@ -3,9 +3,11 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
@@ -1225,6 +1227,9 @@ func TestRuntimeSemanticDriveBodyIdleExhaustionReloadsWithoutProviderReplay(t *t
 	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	repository.aggregate = aggregate
 	module := newRuntimeGroundedTargetSequenceModule(t, hub, repository)
+	clock := time.Date(2026, 11, 23, 8, 0, 0, 0, time.UTC)
+	module.nowFn = func() time.Time { return clock }
+	wantDueAt := clock.Add(runtimecontract.RuntimeProviderTransportBackoff(1)).Format(time.RFC3339Nano)
 	providerCalls := 0
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
@@ -1249,15 +1254,22 @@ func TestRuntimeSemanticDriveBodyIdleExhaustionReloadsWithoutProviderReplay(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 1 || pending.Facts.Recovery.ProviderTransportAttempts != 1 || len(pending.CandidateRequestSessions) != 1 || pending.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTransportPending || pending.Facts.Failure != nil {
+	if providerCalls != 1 || pending.Facts.Recovery.ProviderTransportAttempts != 1 || len(pending.CandidateRequestSessions) != 1 || pending.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionTransportPending || pending.CandidateRequestSessions[0].TransportRetryDueAt != wantDueAt || pending.Facts.Failure != nil {
 		t.Fatalf("semantic body-idle did not consume one atomic recovery allowance: calls=%d aggregate=%+v", providerCalls, pending)
 	}
+	clock = clock.Add(time.Second)
+	_, earlyErr := module.driveRuntimeSemanticPlanning(ctx, pending)
+	var retryPending *runtimeProviderTransportRetryPendingError
+	if !errors.As(earlyErr, &retryPending) || providerCalls != 1 || retryPending.DueAt != wantDueAt {
+		t.Fatalf("semantic early retry err=%v calls=%d, want *runtimeProviderTransportRetryPendingError dueAt=%s", earlyErr, providerCalls, wantDueAt)
+	}
+	clock = clock.Add(time.Second)
 	failed, err := module.driveRuntimeSemanticPlanning(ctx, pending)
 	if err != nil {
 		t.Fatal(err)
 	}
 	session := failed.CandidateRequestSessions[0]
-	if providerCalls != 2 || failed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed || failed.Decision.State != runtimecontract.ConvergenceStateFailed || failed.Facts.Failure == nil || failed.Facts.Failure.OriginalDiagnostic == nil || failed.Facts.Failure.OriginalDiagnostic.OriginalCode != "provider_body_idle_timeout" || failed.Facts.Failure.OriginalDiagnostic.Signature != "semantic-provider-body-idle/exact" || session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient || session.LastOutcome.Code != "provider_body_idle_timeout" || session.LastOutcome.Signature != "semantic-provider-body-idle/exact" || session.TransportOutcomes != 2 || len(failed.CandidateAttempts) != 0 || failed.ActiveDispatch != nil {
+	if providerCalls != 2 || failed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed || failed.Decision.State != runtimecontract.ConvergenceStateFailed || failed.Facts.Failure == nil || failed.Facts.Failure.OriginalDiagnostic == nil || failed.Facts.Failure.OriginalDiagnostic.OriginalCode != "provider_body_idle_timeout" || failed.Facts.Failure.OriginalDiagnostic.Signature != "semantic-provider-body-idle/exact" || session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || session.TransportRetryDueAt != "" || session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient || session.LastOutcome.Code != "provider_body_idle_timeout" || session.LastOutcome.Signature != "semantic-provider-body-idle/exact" || session.TransportOutcomes != 2 || len(failed.CandidateAttempts) != 0 || failed.ActiveDispatch != nil {
 		t.Fatalf("semantic body-idle exhaustion lost exact atomic terminal: calls=%d aggregate=%+v", providerCalls, failed)
 	}
 	reloaded, err := repository.Load(ctx, failed.Facts.WorkspaceID, failed.Facts.RunID)

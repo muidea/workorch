@@ -109,7 +109,7 @@ func (c *RuntimeController) applyPlanningTransactionInternalEvent(ctx context.Co
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateRequestSubmitted:
-		aggregate, err := c.planning.markCandidateRequestSubmitted(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.Sequence, event.Transaction.PhysicalCallID)
+		aggregate, err := c.planning.markCandidateRequestSubmitted(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.Sequence, event.Transaction.PhysicalCallID, event.Transaction.SubmittedAt)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventProviderRequestRecoveryCoordinated:

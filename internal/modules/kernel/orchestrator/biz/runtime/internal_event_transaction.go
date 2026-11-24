@@ -22,6 +22,7 @@ type RuntimeInternalTransactionPayload struct {
 	LogicalRequestID string
 	Sequence         int
 	PhysicalCallID   string
+	SubmittedAt      string
 	// ProviderRequestTerminal is the single owner-private coordination fact
 	// that atomically closes the SM-3 provider request and applies its already
 	// normalized SM-2 successor failure. It never crosses EventHub.

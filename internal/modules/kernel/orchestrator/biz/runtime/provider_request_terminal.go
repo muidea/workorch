@@ -336,6 +336,7 @@ func applyProviderRequestTerminalToAggregate(aggregate RuntimeAggregate, session
 	aggregate.CandidateRequestSessions[sessionIndex].State = runtimecontract.RuntimeCandidateRequestSessionTerminal
 	aggregate.CandidateRequestSessions[sessionIndex].LastOutcome = fact.RequestOutcome
 	aggregate.CandidateRequestSessions[sessionIndex].ProviderSubmitted = false
+	aggregate.CandidateRequestSessions[sessionIndex].TransportRetryDueAt = ""
 	if fact.RequestOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted {
 		aggregate.CandidateRequestSessions[sessionIndex].LastDocumentFraming = nil
 	}

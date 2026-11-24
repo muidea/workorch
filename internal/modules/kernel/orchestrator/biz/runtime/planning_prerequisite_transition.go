@@ -61,6 +61,7 @@ func (c *planningTransactionComponent) invalidateCandidateRequestSessionForPrere
 	aggregate.CandidateRequestSessions[idx].State = runtimecontract.RuntimeCandidateRequestSessionTerminal
 	aggregate.CandidateRequestSessions[idx].ProviderSubmitted = false
 	aggregate.CandidateRequestSessions[idx].LastDocumentFraming = nil
+	aggregate.CandidateRequestSessions[idx].TransportRetryDueAt = ""
 	aggregate.CandidateRequestSessions[idx].LastOutcome = runtimecontract.RuntimeCandidateRequestOutcome{
 		Class: runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale,
 		Code:  "prerequisite_stale", Signature: runtimecontract.StableRuntimePrerequisiteStaleSignature(stale),

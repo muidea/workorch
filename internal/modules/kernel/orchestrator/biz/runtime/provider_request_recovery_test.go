@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+const testProviderTransportObservedAt = "2026-11-23T08:00:00Z"
 
 func runtimeProviderDocumentRecoveryFactForTest(t *testing.T, kind runtimecontract.RuntimeProviderDocumentKind, framing runtimecontract.RuntimeProviderDocumentFraming) RuntimeProviderRequestRecoveryFact {
 	t.Helper()
@@ -21,8 +24,13 @@ func runtimeProviderDocumentRecoveryFactForTest(t *testing.T, kind runtimecontra
 
 func runtimeProviderTransportRecoveryFactForTest(t *testing.T, kind runtimecontract.RuntimeProviderDocumentKind, outcome runtimecontract.RuntimeCandidateRequestOutcome, message string, diagnostic *runtimecontract.RuntimeOriginalDiagnostic) RuntimeProviderRequestRecoveryFact {
 	t.Helper()
+	return runtimeProviderTransportRecoveryFactAtTimeForTest(t, kind, outcome, message, diagnostic, testProviderTransportObservedAt)
+}
+
+func runtimeProviderTransportRecoveryFactAtTimeForTest(t *testing.T, kind runtimecontract.RuntimeProviderDocumentKind, outcome runtimecontract.RuntimeCandidateRequestOutcome, message string, diagnostic *runtimecontract.RuntimeOriginalDiagnostic, observedAt string) RuntimeProviderRequestRecoveryFact {
+	t.Helper()
 	fact, err := NormalizeRuntimeProviderRequestRecovery(RuntimeProviderRequestRecoveryInput{
-		DocumentKind: kind, TransportOutcome: &outcome, Message: message, OriginalDiagnostic: diagnostic,
+		DocumentKind: kind, TransportOutcome: &outcome, Message: message, OriginalDiagnostic: diagnostic, ObservedAt: observedAt,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -86,11 +94,33 @@ func TestNormalizeRuntimeProviderRequestRecoveryRejectsMissingOrMismatchedTransi
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := NormalizeRuntimeProviderRequestRecovery(RuntimeProviderRequestRecoveryInput{
 				DocumentKind:     runtimecontract.RuntimeProviderDocumentOperations,
-				TransportOutcome: &outcome, Message: tc.message, OriginalDiagnostic: tc.diagnostic,
+				TransportOutcome: &outcome, Message: tc.message, OriginalDiagnostic: tc.diagnostic, ObservedAt: testProviderTransportObservedAt,
 			}); err == nil {
 				t.Fatal("mismatched transient diagnostic was accepted")
 			}
 		})
+	}
+	if _, err := NormalizeRuntimeProviderRequestRecovery(RuntimeProviderRequestRecoveryInput{
+		DocumentKind:     runtimecontract.RuntimeProviderDocumentOperations,
+		TransportOutcome: &outcome, Message: base.OriginalMessage, OriginalDiagnostic: &base, ObservedAt: "",
+	}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("missing ObservedAt error = %v, want invalid argument", err)
+	}
+	if _, err := NormalizeRuntimeProviderRequestRecovery(RuntimeProviderRequestRecoveryInput{
+		DocumentKind:     runtimecontract.RuntimeProviderDocumentOperations,
+		TransportOutcome: &outcome, Message: base.OriginalMessage, OriginalDiagnostic: &base, ObservedAt: "not-rfc3339",
+	}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("invalid ObservedAt error = %v, want invalid argument", err)
+	}
+	if _, err := NormalizeRuntimeProviderRequestRecovery(RuntimeProviderRequestRecoveryInput{
+		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
+		DocumentFraming: &runtimecontract.RuntimeProviderDocumentFraming{
+			Disposition: runtimecontract.RuntimeProviderDocumentIncomplete, ExpectedDocumentHash: "hash-1",
+			ResponseHash: "resp-1", ResponseBytes: 4, Code: "incomplete_json", Signature: "incomplete",
+		},
+		ObservedAt: testProviderTransportObservedAt,
+	}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("non-empty ObservedAt on document framing error = %v, want invalid argument", err)
 	}
 
 	valid := runtimeProviderTransportRecoveryFactForTest(t, runtimecontract.RuntimeProviderDocumentOperations, outcome, base.OriginalMessage, &base)
@@ -331,12 +361,21 @@ func TestProviderRequestBodyIdleTransportBudgetAndExhaustedTerminalAreAtomic(t *
 		t.Fatal(err)
 	}
 	stored := pending.CandidateRequestSessions[0]
-	if repository.saves != 1 || stored.State != runtimecontract.RuntimeCandidateRequestSessionTransportPending || stored.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient || stored.LastOutcome.Code != diagnostic.OriginalCode || stored.LastOutcome.Signature != diagnostic.Signature || pending.Facts.Recovery.ProviderTransportAttempts != 1 || pending.Facts.Failure != nil {
+	wantDueAt := time.Date(2026, 11, 23, 8, 0, 2, 0, time.UTC).Format(time.RFC3339Nano)
+	if repository.saves != 1 || stored.State != runtimecontract.RuntimeCandidateRequestSessionTransportPending || stored.TransportRetryDueAt != wantDueAt || stored.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient || stored.LastOutcome.Code != diagnostic.OriginalCode || stored.LastOutcome.Signature != diagnostic.Signature || pending.Facts.Recovery.ProviderTransportAttempts != 1 || pending.Facts.Failure != nil {
 		t.Fatalf("body-idle did not atomically consume one transport allowance: saves=%d aggregate=%+v", repository.saves, pending)
+	}
+	laterFact := runtimeProviderTransportRecoveryFactAtTimeForTest(t, session.DocumentKind, outcome, diagnostic.OriginalMessage, &diagnostic, "2026-11-23T08:00:05Z")
+	duplicate, err := controller.coordinateProviderRequestRecovery(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, session.LastPhysicalCallID, laterFact, firstSettlement)
+	if err != nil || repository.saves != 1 || duplicate.StateRevision != pending.StateRevision || duplicate.CandidateRequestSessions[0].TransportRetryDueAt != wantDueAt {
+		t.Fatalf("duplicate transport recovery rewrote dueAt or revision: saves=%d aggregate=%+v err=%v", repository.saves, duplicate, err)
 	}
 
 	physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(stored.LogicalRequestID, stored.NextSequence)
-	submitted, err := controller.markCandidateRequestSubmitted(ctx, pending.Facts.WorkspaceID, pending.Facts.RunID, stored.LogicalRequestID, stored.NextSequence, physicalCallID)
+	if _, err := controller.markCandidateRequestSubmitted(ctx, pending.Facts.WorkspaceID, pending.Facts.RunID, stored.LogicalRequestID, stored.NextSequence, physicalCallID, "2026-11-23T08:00:01.999999999Z"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("early transport resubmission err=%v, want conflict", err)
+	}
+	submitted, err := controller.markCandidateRequestSubmitted(ctx, pending.Facts.WorkspaceID, pending.Facts.RunID, stored.LogicalRequestID, stored.NextSequence, physicalCallID, stored.TransportRetryDueAt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +388,7 @@ func TestProviderRequestBodyIdleTransportBudgetAndExhaustedTerminalAreAtomic(t *
 	}
 	durable := repository.aggregate
 	terminalSession := durable.CandidateRequestSessions[0]
-	if repository.saves != beforeSaves+1 || terminalSession.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || terminalSession.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient || terminalSession.LastOutcome.Code != diagnostic.OriginalCode || terminalSession.LastOutcome.Signature != diagnostic.Signature || durable.Facts.Failure == nil || durable.Facts.Failure.Class != runtimecontract.FailureClassProviderTransient || durable.Facts.Failure.Code != "provider_transport_exhausted" || durable.Facts.Failure.OriginalDiagnostic == nil || durable.Facts.Failure.OriginalDiagnostic.OriginalCode != diagnostic.OriginalCode || durable.Facts.Failure.OriginalDiagnostic.Signature != diagnostic.Signature || durable.Facts.Recovery.ProviderTransportAttempts != 1 {
+	if repository.saves != beforeSaves+1 || terminalSession.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || terminalSession.TransportRetryDueAt != "" || terminalSession.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient || terminalSession.LastOutcome.Code != diagnostic.OriginalCode || terminalSession.LastOutcome.Signature != diagnostic.Signature || durable.Facts.Failure == nil || durable.Facts.Failure.Class != runtimecontract.FailureClassProviderTransient || durable.Facts.Failure.Code != "provider_transport_exhausted" || durable.Facts.Failure.OriginalDiagnostic == nil || durable.Facts.Failure.OriginalDiagnostic.OriginalCode != diagnostic.OriginalCode || durable.Facts.Failure.OriginalDiagnostic.Signature != diagnostic.Signature || durable.Facts.Recovery.ProviderTransportAttempts != 1 {
 		t.Fatalf("transport exhaustion lost exact transient fact or atomic budget: saves=%d/%d aggregate=%+v", repository.saves, beforeSaves, durable)
 	}
 	fresh, err := NewRuntimeController(repository)
@@ -490,5 +529,198 @@ func TestProviderRequestRecoveryRejectsReleasedOrUnknownPhysicalSubmissionWithou
 				t.Fatalf("%s recovery changed state: saves=%d aggregate=%+v", status, repository.saves, repository.aggregate)
 			}
 		})
+	}
+}
+
+func TestProviderRequestRecoveryEnforcesPerRequestExhaustionAcrossDocumentKinds(t *testing.T) {
+	ctx := context.Background()
+	wantDeltas := []time.Duration{
+		2 * time.Second,
+		4 * time.Second,
+		8 * time.Second,
+		16 * time.Second,
+		32 * time.Second,
+		60 * time.Second,
+		60 * time.Second,
+		60 * time.Second,
+	}
+	for _, kind := range []runtimecontract.RuntimeProviderDocumentKind{
+		runtimecontract.RuntimeProviderDocumentOperations,
+		runtimecontract.RuntimeProviderDocumentSemanticPlan,
+	} {
+		t.Run(string(kind), func(t *testing.T) {
+			var aggregate RuntimeAggregate
+			var session runtimecontract.RuntimeCandidateRequestSession
+			if kind == runtimecontract.RuntimeProviderDocumentOperations {
+				aggregate, session = preparedOperationsProviderTerminalSession(t)
+			} else {
+				aggregate, session = preparedSemanticProviderTerminalSession(t)
+			}
+			if aggregate.Facts.RecoveryPolicy.MaxProviderTransportAttempts != runtimecontract.DefaultMaxProviderTransportAttempts {
+				t.Fatalf("default MaxProviderTransportAttempts = %d, want %d", aggregate.Facts.RecoveryPolicy.MaxProviderTransportAttempts, runtimecontract.DefaultMaxProviderTransportAttempts)
+			}
+			repository := &providerTerminalCASRepository{aggregate: aggregate, mode: providerTerminalCASNormal}
+			controller, err := NewRuntimeController(repository)
+			if err != nil {
+				t.Fatal(err)
+			}
+			diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
+				SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
+				OwnerModuleID: runtimecontract.RuntimeModuleLLM,
+				OriginalClass: string(runtimecontract.RuntimeCandidateFailureClassProviderTransient),
+				OriginalCode:  "provider_http_status_503", OriginalMessage: "upstream provider temporarily unavailable (HTTP 503)",
+				Signature: "provider-http-status-503/exact",
+			}
+			outcome := runtimecontract.RuntimeCandidateRequestOutcome{
+				Class: runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient,
+				Code:  diagnostic.OriginalCode, Signature: diagnostic.Signature,
+			}
+
+			tNow := time.Date(2026, 11, 23, 8, 0, 0, 0, time.UTC)
+			currentCallID := session.LastPhysicalCallID
+			var current RuntimeAggregate
+			for attempt := 1; attempt <= runtimecontract.DefaultMaxProviderTransportAttemptsPerRequest; attempt++ {
+				fact := runtimeProviderTransportRecoveryFactAtTimeForTest(t, kind, outcome, diagnostic.OriginalMessage, &diagnostic, tNow.Format(time.RFC3339Nano))
+				settlement := runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, currentCallID, nil)
+				pending, recErr := controller.coordinateProviderRequestRecovery(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, currentCallID, fact, settlement)
+				if recErr != nil {
+					t.Fatalf("attempt %d recovery failed: %v", attempt, recErr)
+				}
+				stored := pending.CandidateRequestSessions[0]
+				if stored.State != runtimecontract.RuntimeCandidateRequestSessionTransportPending ||
+					stored.TransportOutcomes != attempt ||
+					pending.Facts.Recovery.ProviderTransportAttempts != attempt ||
+					pending.Facts.Failure != nil {
+					t.Fatalf("attempt %d did not persist pending transport state: session=%+v recovery=%+v", attempt, stored, pending.Facts.Recovery)
+				}
+				dueAt, parseErr := time.Parse(time.RFC3339Nano, stored.TransportRetryDueAt)
+				if parseErr != nil {
+					t.Fatalf("attempt %d invalid TransportRetryDueAt %q: %v", attempt, stored.TransportRetryDueAt, parseErr)
+				}
+				if gotDelta := dueAt.Sub(tNow); gotDelta != wantDeltas[attempt-1] {
+					t.Fatalf("attempt %d backoff delta = %v, want %v", attempt, gotDelta, wantDeltas[attempt-1])
+				}
+
+				nextCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(stored.LogicalRequestID, stored.NextSequence)
+				earlyAt := dueAt.Add(-time.Nanosecond).Format(time.RFC3339Nano)
+				beforeSaves := repository.saves
+				if _, earlyErr := controller.markCandidateRequestSubmitted(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, stored.LogicalRequestID, stored.NextSequence, nextCallID, earlyAt); !errors.Is(earlyErr, common.ErrConflict) {
+					t.Fatalf("attempt %d early submit err = %v, want conflict", attempt, earlyErr)
+				}
+				if repository.saves != beforeSaves {
+					t.Fatalf("attempt %d early submit mutated repository: saves=%d/%d", attempt, repository.saves, beforeSaves)
+				}
+				tNow = dueAt
+				current, err = controller.markCandidateRequestSubmitted(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, stored.LogicalRequestID, stored.NextSequence, nextCallID, tNow.Format(time.RFC3339Nano))
+				if err != nil {
+					t.Fatalf("attempt %d submit at dueAt failed: %v", attempt, err)
+				}
+				currentCallID = nextCallID
+			}
+			_ = current
+
+			ninthFact := runtimeProviderTransportRecoveryFactAtTimeForTest(t, kind, outcome, diagnostic.OriginalMessage, &diagnostic, tNow.Format(time.RFC3339Nano))
+			ninthSettlement := runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, currentCallID, nil)
+			terminal, err := controller.coordinateProviderRequestRecovery(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, currentCallID, ninthFact, ninthSettlement)
+			if err != nil {
+				t.Fatalf("9th recovery failed: %v", err)
+			}
+			if err := terminal.Validate(); err != nil {
+				t.Fatalf("per-request terminal aggregate failed Validate: %v", err)
+			}
+			stored := terminal.CandidateRequestSessions[0]
+			if stored.State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
+				stored.TransportRetryDueAt != "" ||
+				stored.TransportOutcomes != 9 ||
+				terminal.Facts.Recovery.ProviderTransportAttempts != runtimecontract.DefaultMaxProviderTransportAttemptsPerRequest ||
+				terminal.Decision.State != runtimecontract.ConvergenceStateFailed ||
+				terminal.Facts.Failure == nil ||
+				terminal.Facts.Failure.Class != runtimecontract.FailureClassProviderTransient ||
+				terminal.Facts.Failure.OriginalDiagnostic == nil ||
+				terminal.Facts.Failure.OriginalDiagnostic.OriginalCode != diagnostic.OriginalCode ||
+				terminal.Facts.Failure.OriginalDiagnostic.Signature != diagnostic.Signature {
+				t.Fatalf("per-request exhaustion state mismatch: session=%+v recovery=%+v decision=%+v failure=%+v", stored, terminal.Facts.Recovery, terminal.Decision, terminal.Facts.Failure)
+			}
+			if kind == runtimecontract.RuntimeProviderDocumentOperations {
+				if terminal.Facts.Failure.Code != "provider_transport_exhausted" {
+					t.Fatalf("operations exhaustion code = %q, want provider_transport_exhausted", terminal.Facts.Failure.Code)
+				}
+			} else {
+				if terminal.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed ||
+					terminal.Facts.Failure.Code != "semantic_contract_failed" ||
+					terminal.SemanticPlanning.Failure == nil {
+					t.Fatalf("semantic exhaustion mismatch: semantic=%+v failure=%+v", terminal.SemanticPlanning, terminal.Facts.Failure)
+				}
+			}
+
+			beforeReplayRev := terminal.StateRevision
+			beforeReplaySaves := repository.saves
+			laterFact := runtimeProviderTransportRecoveryFactAtTimeForTest(t, kind, outcome, diagnostic.OriginalMessage, &diagnostic, tNow.Add(30*time.Second).Format(time.RFC3339Nano))
+			replayed, err := controller.coordinateProviderRequestRecovery(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, currentCallID, laterFact, ninthSettlement)
+			if err != nil || replayed.StateRevision != beforeReplayRev || repository.saves != beforeReplaySaves {
+				t.Fatalf("duplicate 9th recovery mutated state: saves=%d/%d rev=%d/%d err=%v", repository.saves, beforeReplaySaves, replayed.StateRevision, beforeReplayRev, err)
+			}
+		})
+	}
+}
+
+func TestProviderRequestTransportPendingStalePrerequisiteClearsDueAt(t *testing.T) {
+	ctx := context.Background()
+	aggregate := stateChangeAggregate(t)
+	prerequisite, observation := addFreshFileAdmissibilityObservation(t, &aggregate)
+	repository := &controllerRepository{aggregate: &aggregate}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, session, err := controller.ensureCandidateRequestSession(ctx, "ws-1", "run-1", runtimecontract.RuntimeProviderDocumentOperations, "stale-transport-prefix", "manifest-v1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 1, "physical-1"); err != nil {
+		t.Fatal(err)
+	}
+	diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
+		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
+		OwnerModuleID: runtimecontract.RuntimeModuleLLM,
+		OriginalClass: string(runtimecontract.RuntimeCandidateFailureClassProviderTransient),
+		OriginalCode:  "provider_timeout", OriginalMessage: "provider timed out",
+		Signature: "provider-timeout",
+	}
+	outcome := runtimecontract.RuntimeCandidateRequestOutcome{
+		Class: runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient,
+		Code:  diagnostic.OriginalCode, Signature: diagnostic.Signature,
+	}
+	recovery := runtimeProviderTransportRecoveryFactForTest(t, runtimecontract.RuntimeProviderDocumentOperations, outcome, diagnostic.OriginalMessage, &diagnostic)
+	pending, err := controller.coordinateProviderRequestRecovery(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-1", recovery, runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-1", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.markCandidateRequestSubmitted(ctx, "ws-1", "run-1", session.LogicalRequestID, 2, "physical-2", pending.CandidateRequestSessions[0].TransportRetryDueAt); err != nil {
+		t.Fatal(err)
+	}
+	stale := runtimecontract.RuntimePrerequisiteStale{
+		PrerequisiteID: prerequisite.ID, ObservationID: observation.ObservationID,
+		Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		SubjectRef: "workspace_deliverable", ExpectedRevision: "tree-v1", ObservedRevision: "tree-v2", Reason: "workspace tree changed",
+	}
+	applied, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind:  RuntimeInternalEventCandidateRequestStaleObserved,
+		Scope: RuntimeInternalEventScope{WorkspaceID: "ws-1", RunID: "run-1"},
+		Transaction: &RuntimeInternalTransactionPayload{
+			LogicalRequestID:         session.LogicalRequestID,
+			Stale:                    &stale,
+			ProviderBudgetSettlement: runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-2", nil),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := applied.Aggregate.Validate(); err != nil {
+		t.Fatalf("stale terminal aggregate failed Validate: %v", err)
+	}
+	stored := applied.Aggregate.CandidateRequestSessions[0]
+	if stored.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || stored.TransportRetryDueAt != "" || stored.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale || stored.ProviderSubmitted {
+		t.Fatalf("stale invalidation did not seal terminal or clear TransportRetryDueAt: %+v", stored)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -19,6 +20,7 @@ type RuntimeProviderRequestRecoveryInput struct {
 	DocumentFraming    *runtimecontract.RuntimeProviderDocumentFraming
 	Message            string
 	OriginalDiagnostic *runtimecontract.RuntimeOriginalDiagnostic
+	ObservedAt         string
 }
 
 // RuntimeProviderRequestRecoveryFact carries both the observed recoverable
@@ -29,6 +31,7 @@ type RuntimeProviderRequestRecoveryFact struct {
 	DocumentKind     runtimecontract.RuntimeProviderDocumentKind
 	TransportOutcome *runtimecontract.RuntimeCandidateRequestOutcome
 	DocumentFraming  *runtimecontract.RuntimeProviderDocumentFraming
+	ObservedAt       string
 	Terminal         RuntimeProviderRequestTerminalFact
 }
 
@@ -39,6 +42,7 @@ type RuntimeProviderRequestRecoveryFact struct {
 func NormalizeRuntimeProviderRequestRecovery(input RuntimeProviderRequestRecoveryInput) (RuntimeProviderRequestRecoveryFact, error) {
 	input.DocumentKind = runtimecontract.RuntimeProviderDocumentKind(strings.TrimSpace(string(input.DocumentKind)))
 	input.Message = strings.TrimSpace(input.Message)
+	input.ObservedAt = strings.TrimSpace(input.ObservedAt)
 	if input.DocumentKind != runtimecontract.RuntimeProviderDocumentOperations && input.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan {
 		return RuntimeProviderRequestRecoveryFact{}, common.ErrInvalidArgument
 	}
@@ -46,9 +50,12 @@ func NormalizeRuntimeProviderRequestRecovery(input RuntimeProviderRequestRecover
 		return RuntimeProviderRequestRecoveryFact{}, common.ErrInvalidArgument
 	}
 
-	fact := RuntimeProviderRequestRecoveryFact{DocumentKind: input.DocumentKind}
+	fact := RuntimeProviderRequestRecoveryFact{DocumentKind: input.DocumentKind, ObservedAt: input.ObservedAt}
 	terminalInput := RuntimeProviderRequestTerminalInput{DocumentKind: input.DocumentKind}
 	if input.TransportOutcome != nil {
+		if _, err := time.Parse(time.RFC3339Nano, input.ObservedAt); err != nil {
+			return RuntimeProviderRequestRecoveryFact{}, common.ErrInvalidArgument
+		}
 		outcome := input.TransportOutcome.Normalized()
 		if err := outcome.Validate(); err != nil || outcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient || outcome.Code == "" || outcome.Signature == "" || input.Message == "" {
 			return RuntimeProviderRequestRecoveryFact{}, common.ErrInvalidArgument
@@ -68,6 +75,9 @@ func NormalizeRuntimeProviderRequestRecovery(input RuntimeProviderRequestRecover
 		terminalInput.Message = input.Message
 		terminalInput.OriginalDiagnostic = diagnostic
 	} else {
+		if input.ObservedAt != "" {
+			return RuntimeProviderRequestRecoveryFact{}, common.ErrInvalidArgument
+		}
 		framing := input.DocumentFraming.Normalized()
 		if err := framing.Validate(); err != nil || !runtimecontract.RuntimeProviderDocumentDispositionNeedsRecovery(framing.Disposition) {
 			return RuntimeProviderRequestRecoveryFact{}, common.ErrInvalidArgument
@@ -96,6 +106,7 @@ func NormalizeRuntimeProviderRequestRecovery(input RuntimeProviderRequestRecover
 
 func (f RuntimeProviderRequestRecoveryFact) Validate() error {
 	f.DocumentKind = runtimecontract.RuntimeProviderDocumentKind(strings.TrimSpace(string(f.DocumentKind)))
+	f.ObservedAt = strings.TrimSpace(f.ObservedAt)
 	if f.DocumentKind != runtimecontract.RuntimeProviderDocumentOperations && f.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan {
 		return common.ErrInvalidArgument
 	}
@@ -106,6 +117,9 @@ func (f RuntimeProviderRequestRecoveryFact) Validate() error {
 		return err
 	}
 	if f.TransportOutcome != nil {
+		if _, err := time.Parse(time.RFC3339Nano, f.ObservedAt); err != nil {
+			return common.ErrInvalidArgument
+		}
 		outcome := f.TransportOutcome.Normalized()
 		if err := outcome.Validate(); err != nil || outcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeProviderTransient || outcome.Code == "" || outcome.Signature == "" || f.Terminal.RequestOutcome != outcome || !providerTransientRecoveryIdentityMatches(outcome, f.Terminal.Failure.OriginalDiagnostic) || strings.TrimSpace(f.Terminal.Failure.OriginalDiagnostic.OriginalMessage) != strings.TrimSpace(f.Terminal.Failure.Message) {
 			return common.ErrInvalidArgument
@@ -120,6 +134,9 @@ func (f RuntimeProviderRequestRecoveryFact) Validate() error {
 			return common.ErrInvalidArgument
 		}
 		return nil
+	}
+	if f.ObservedAt != "" {
+		return common.ErrInvalidArgument
 	}
 	framing := f.DocumentFraming.Normalized()
 	if err := framing.Validate(); err != nil || !runtimecontract.RuntimeProviderDocumentDispositionNeedsRecovery(framing.Disposition) || f.Terminal.RequestOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted {
@@ -216,20 +233,30 @@ func (c *planningTransactionComponent) coordinateProviderRequestRecovery(ctx con
 		updated.LastDocumentFraming = nil
 		updated.NextSequence++
 		updated.TransportOutcomes++
-		ledger, consumed, consumeErr := consumeRecoveryBudget(aggregate.Facts.Recovery, runtimecontract.RuntimeRecoveryBudgetProviderTransport, aggregate.Facts.RecoveryPolicy)
-		if consumeErr != nil {
-			return RuntimeAggregate{}, consumeErr
-		}
-		if consumed {
-			aggregate.Facts.Recovery = ledger
-		} else {
+		if updated.TransportOutcomes > runtimecontract.DefaultMaxProviderTransportAttemptsPerRequest {
 			terminal = true
+		} else {
+			ledger, consumed, consumeErr := consumeRecoveryBudget(aggregate.Facts.Recovery, runtimecontract.RuntimeRecoveryBudgetProviderTransport, aggregate.Facts.RecoveryPolicy)
+			if consumeErr != nil {
+				return RuntimeAggregate{}, consumeErr
+			}
+			if consumed {
+				aggregate.Facts.Recovery = ledger
+				dueAt, dueErr := runtimecontract.RuntimeProviderTransportRetryDueAt(fact.ObservedAt, updated.TransportOutcomes)
+				if dueErr != nil {
+					return RuntimeAggregate{}, dueErr
+				}
+				updated.TransportRetryDueAt = dueAt
+			} else {
+				terminal = true
+			}
 		}
 	} else {
 		framing := fact.DocumentFraming.Normalized()
 		updated.State = runtimecontract.RuntimeCandidateRequestSessionRecoveryPending
 		updated.LastOutcome = runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecovery, Code: framing.Code, Signature: framing.Signature}.Normalized()
 		updated.LastDocumentFraming = &framing
+		updated.TransportRetryDueAt = ""
 		updated.NextSequence++
 		updated.DocumentRecoveryOutcomes++
 		terminal = updated.ExpectedDocument == nil || updated.DocumentRecoveryOutcomes > updated.ExpectedDocument.MaxRecoveryAttempts
@@ -328,7 +355,7 @@ func providerRequestRecoveryDuplicateApplied(aggregate RuntimeAggregate, session
 		if fact.DocumentFraming != nil {
 			return session.LastDocumentFraming != nil && session.LastDocumentFraming.Normalized() == fact.DocumentFraming.Normalized() && session.ExpectedDocument != nil && session.DocumentRecoveryOutcomes > session.ExpectedDocument.MaxRecoveryAttempts
 		}
-		return session.TransportOutcomes > 0 && aggregate.Facts.Recovery.Used(runtimecontract.RuntimeRecoveryBudgetProviderTransport) >= aggregate.Facts.RecoveryPolicy.Limit(runtimecontract.RuntimeRecoveryBudgetProviderTransport)
+		return session.TransportOutcomes > 0 && (session.TransportOutcomes > runtimecontract.DefaultMaxProviderTransportAttemptsPerRequest || aggregate.Facts.Recovery.Used(runtimecontract.RuntimeRecoveryBudgetProviderTransport) >= aggregate.Facts.RecoveryPolicy.Limit(runtimecontract.RuntimeRecoveryBudgetProviderTransport))
 	}
 	if fact.TransportOutcome != nil {
 		return session.State == runtimecontract.RuntimeCandidateRequestSessionTransportPending && session.LastOutcome == fact.TransportOutcome.Normalized()

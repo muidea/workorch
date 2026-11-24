@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -137,7 +138,7 @@ func sameRuntimeExpectedDocument(left, right *runtimecontract.RuntimeExpectedDoc
 // before observing a provider outcome. A restart with this marker but without
 // an outcome must be classified as submission-unknown by the drive; it must
 // never create an attempt or resend a known call as a new candidate request.
-func (c *planningTransactionComponent) markCandidateRequestSubmitted(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, sequence int, physicalCallID string) (RuntimeAggregate, error) {
+func (c *planningTransactionComponent) markCandidateRequestSubmitted(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, sequence int, physicalCallID, submittedAt string) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" || sequence <= 0 || strings.TrimSpace(physicalCallID) == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -164,6 +165,20 @@ func (c *planningTransactionComponent) markCandidateRequestSubmitted(ctx context
 	}
 	if session.State != runtimecontract.RuntimeCandidateRequestSessionPrepared && session.State != runtimecontract.RuntimeCandidateRequestSessionRecoveryPending && session.State != runtimecontract.RuntimeCandidateRequestSessionTransportPending {
 		return RuntimeAggregate{}, fmt.Errorf("%w: runtime candidate request session does not accept a physical call", common.ErrConflict)
+	}
+	if session.State == runtimecontract.RuntimeCandidateRequestSessionTransportPending {
+		submittedAt = strings.TrimSpace(submittedAt)
+		submittedTime, parseErr := time.Parse(time.RFC3339Nano, submittedAt)
+		if parseErr != nil {
+			return RuntimeAggregate{}, fmt.Errorf("%w: transport retry submission requires RFC3339 submittedAt timestamp", common.ErrInvalidArgument)
+		}
+		dueAt, dueErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(session.TransportRetryDueAt))
+		if dueErr != nil {
+			return RuntimeAggregate{}, fmt.Errorf("%w: persisted transport retry dueAt is invalid", common.ErrInvalidArgument)
+		}
+		if submittedTime.Before(dueAt) {
+			return RuntimeAggregate{}, fmt.Errorf("%w: provider transport retry is not due until %s", common.ErrConflict, session.TransportRetryDueAt)
+		}
 	}
 	expectedRevision := aggregate.StateRevision
 	if err := reserveCandidateRequestExecutionBudget(&aggregate, session, sequence, physicalCallID); err != nil {
@@ -220,6 +235,7 @@ func (c *planningTransactionComponent) completeCandidateRequestDocument(ctx cont
 	updated.State = runtimecontract.RuntimeCandidateRequestSessionDocumentComplete
 	updated.LastOutcome = runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentComplete}
 	updated.LastDocumentFraming = nil
+	updated.TransportRetryDueAt = ""
 	updated.ProviderSubmitted = true
 	aggregate.StateRevision++
 

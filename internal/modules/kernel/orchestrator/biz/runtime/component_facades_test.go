@@ -168,11 +168,15 @@ func (c *RuntimeController) failSemanticContract(ctx context.Context, workspaceI
 	return c.planning.failSemanticContract(ctx, workspaceID, runID, terminalCode, failure)
 }
 
-func (c *RuntimeController) markCandidateRequestSubmitted(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, sequence int, physicalCallID string) (RuntimeAggregate, error) {
+func (c *RuntimeController) markCandidateRequestSubmitted(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID string, sequence int, physicalCallID string, submittedAt ...string) (RuntimeAggregate, error) {
 	if c == nil || c.planning == nil {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
-	return c.planning.markCandidateRequestSubmitted(ctx, workspaceID, runID, logicalRequestID, sequence, physicalCallID)
+	submittedAtValue := ""
+	if len(submittedAt) > 0 {
+		submittedAtValue = submittedAt[0]
+	}
+	return c.planning.markCandidateRequestSubmitted(ctx, workspaceID, runID, logicalRequestID, sequence, physicalCallID, submittedAtValue)
 }
 
 func (c *RuntimeController) coordinateProviderRequestRecovery(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID, physicalCallID string, fact RuntimeProviderRequestRecoveryFact, budgetSettlement ...*RuntimeProviderBudgetSettlement) (RuntimeAggregate, error) {

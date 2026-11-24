@@ -4,14 +4,18 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
-	DefaultMaxProviderTransportAttempts = 10
-	DefaultMaxOperationRecoveryAttempts = 3
-	DefaultMaxCASReloadAttempts         = 5
-	DefaultMaxTerminalDeliveryAttempts  = 5
-	DefaultMaxDriveScheduleAttempts     = 3
+	DefaultMaxProviderTransportAttempts           = 32
+	DefaultMaxProviderTransportAttemptsPerRequest = 8
+	RuntimeProviderTransportBackoffBase           = 2 * time.Second
+	RuntimeProviderTransportBackoffCap            = time.Minute
+	DefaultMaxOperationRecoveryAttempts           = 3
+	DefaultMaxCASReloadAttempts                   = 5
+	DefaultMaxTerminalDeliveryAttempts            = 5
+	DefaultMaxDriveScheduleAttempts               = 3
 	// DefaultMaxPrerequisiteRefreshes bounds stale/no-progress recovery. It is
 	// deliberately separate from normal owner-reported resource changes: a
 	// progressing Run may legitimately change several independent resources.
@@ -258,4 +262,32 @@ func (p RuntimeRecoveryPolicy) Limit(kind RuntimeRecoveryBudgetKind) int {
 	default:
 		return 0
 	}
+}
+
+// RuntimeProviderTransportBackoff returns the exponential delay before
+// retrying a transiently failed physical provider call on the same logical
+// request. Attempt is the persisted TransportOutcomes count (1-indexed).
+func RuntimeProviderTransportBackoff(attempt int) time.Duration {
+	if attempt <= 1 {
+		return RuntimeProviderTransportBackoffBase
+	}
+	delay := RuntimeProviderTransportBackoffBase
+	for current := 1; current < attempt && delay < RuntimeProviderTransportBackoffCap; current++ {
+		delay *= 2
+		if delay > RuntimeProviderTransportBackoffCap {
+			delay = RuntimeProviderTransportBackoffCap
+		}
+	}
+	return delay
+}
+
+// RuntimeProviderTransportRetryDueAt computes the authoritative SM-3 RFC3339Nano
+// timestamp before which the next physical attempt for this logical request
+// cannot be submitted.
+func RuntimeProviderTransportRetryDueAt(observedAt string, attempt int) (string, error) {
+	observed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(observedAt))
+	if err != nil || attempt < 1 {
+		return "", fmt.Errorf("runtime provider transport retry due-at input is invalid")
+	}
+	return observed.Add(RuntimeProviderTransportBackoff(attempt)).UTC().Format(time.RFC3339Nano), nil
 }

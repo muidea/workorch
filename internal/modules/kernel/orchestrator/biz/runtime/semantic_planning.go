@@ -288,6 +288,7 @@ func retireSemanticPlanningRequestSessions(aggregate *RuntimeAggregate, ledger r
 		// retirement is a distinct non-document terminal and keeps its immutable
 		// provider history in audit/settlement facts rather than this live slot.
 		session.LastDocumentFraming = nil
+		session.TransportRetryDueAt = ""
 		session.LastOutcome = runtimecontract.RuntimeCandidateRequestOutcome{
 			Class:     runtimecontract.RuntimeCandidateRequestOutcomePrerequisiteStale,
 			Code:      outcomeCode,
