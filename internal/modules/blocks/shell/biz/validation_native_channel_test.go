@@ -7,13 +7,13 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
-
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/common"
 	rc "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -271,6 +271,91 @@ func TestNativeSelfExecutionUsesStructuralMaintenance(t *testing.T) {
 	for _, timeout := range []int64{0, 1000, 300000, 600000} {
 		if len(shellProjectMultiFailureInputContentRequirements+shellValidationDeclaredDeadlineRequirement(timeout)+shellAssertionFeedbackRequirements) > 4096 {
 			t.Fatal("generation declaration exceeds original envelope")
+		}
+	}
+}
+
+func TestNativeTrimpathCallerPathUsesStructuralMaintenanceAndKeepsUserTests(t *testing.T) {
+	for _, tc := range []struct {
+		name, source string
+		want         bool
+	}{
+		{"runtime Caller", `package checks;import "runtime";func helper(){_,_,_,_=runtime.Caller(0)}`, true},
+		{"aliased Caller", `package checks;import rt "runtime";func helper(){_,_,_,_=rt.Caller(0)}`, true},
+		{"dot import Caller", `package checks;import . "runtime";func helper(){_,_,_,_=Caller(0)}`, true},
+		{"runtime CallersFrames", `package checks;import "runtime";func helper(){_=runtime.CallersFrames(nil)}`, true},
+		{"os Getwd allowed", `package checks;import "os";func helper(){_,_=os.Getwd()}`, false},
+		{"unrelated runtime GOOS", `package checks;import "runtime";func helper(){_=runtime.GOOS; _=runtime.NumCPU()}`, false},
+		{"blank import ignored", `package checks;import _ "runtime";func Caller(int){};func helper(){Caller(0)}`, false},
+		{"shadowed runtime ident", `package checks;import "runtime";func helper(){var runtime struct{Caller func(int)};runtime.Caller(0); _=runtime}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), "input_test.go", tc.source, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := shellNativeTrimpathCallerPath(file); got != tc.want {
+				t.Fatalf("shellNativeTrimpathCallerPath() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	recipe, r, _ := conjunctiveSourceRequirement(t)
+	recipe.AdapterRef = modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic
+	checks, ok := shellValidationCheckAttestations(recipe, r)
+	if !ok {
+		t.Fatal("mapping")
+	}
+	root := t.TempDir()
+	target := shellValidationNativeCheckTargetRef(r, checks...)
+	userTest := "internal/delivery/caller_helper_test.go"
+	userSource := "package delivery\nimport (\"runtime\"; \"testing\")\nfunc TestLogCallerLine(t *testing.T){_,_,_,ok:=runtime.Caller(0);if !ok{t.Fatal(\"no frame\")}}\n"
+	validSubject := strings.Replace(conjunctiveSourceInput(checks, "", ""), `"testing"`, `"os";"testing"`, 1) + "\nfunc wd() string { d, _ := os.Getwd(); return d }\n"
+	writeNativeStructureSource(t, root, "go.mod", "module fixture\ngo 1.26\n")
+	writeNativeStructureSource(t, root, userTest, userSource)
+
+	// Ordinary non-workorch_validation user tests using runtime.Caller must pass cleanly.
+	writeNativeStructureSource(t, root, target, validSubject)
+	refs := []string{"go.mod", userTest, target}
+	if inspection := inspectShellNativeValidationChecks(root, refs, checks); inspection.Code != "" {
+		t.Fatalf("ordinary user test with runtime.Caller unexpectedly blocked: %+v", inspection)
+	}
+
+	// workorch_validation input using runtime.Caller must fail readiness into Maintenance.
+	badSubject := strings.Replace(conjunctiveSourceInput(checks, "", ""), `"testing"`, `"runtime";"testing"`, 1) + "\nfunc bad(){ _,_,_,_=runtime.Caller(0) }\n"
+	writeNativeStructureSource(t, root, target, badSubject)
+	inspection := inspectShellNativeValidationChecks(root, refs, checks)
+	if inspection.Code != "native_check_trimpath_caller_path" || len(inspection.TargetRefs) != 1 || inspection.TargetRefs[0] != target {
+		t.Fatalf("unexpected caller-path inspection: %+v", inspection)
+	}
+	maintenance := shellValidationInputMaintenance(root, refs, inspection, r, recipe, checks)
+	if maintenance == nil || maintenance.Validate(r, recipe.ID) != nil || len(maintenance.TargetRefs) != 1 || maintenance.TargetRefs[0] != target {
+		t.Fatalf("caller-path defect did not produce exact maintenance: %+v", maintenance)
+	}
+	manifest := shellTestWorkspaceManifestBinding("trimpath-caller", refs)
+	surfaces := shellValidationSurfaces([]rc.RuntimeValidationRecipe{recipe}, []rc.RuntimeValidationRecipe{recipe}, []rc.RuntimeValidationRecipe{recipe}, []rc.RuntimeValidationProofRequirement{r}, manifest, "tree", root)
+	catalog := rc.RuntimeOperationAdmissibility{PrerequisiteID: "catalog", OwnerModuleID: ModuleID, ObservedRevision: "tree", OperationKinds: []string{rc.RuntimeBlockKindManagedValidationSession}, ValidationSurfaces: surfaces}
+	catalog.SnapshotID = rc.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	observation := rc.RuntimePrerequisiteObservation{PrerequisiteID: "catalog", Kind: rc.PrerequisiteKindOperationAdmissibility, OwnerModuleID: ModuleID, ContentHash: catalog.SnapshotID, Dependencies: []rc.RuntimeFreshnessDependency{{Domain: rc.RuntimeResourceWorkspaceTree, OwnerModuleID: rc.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: "tree"}}}
+	observation.ObservationID = rc.StableRuntimePrerequisiteObservationID(observation)
+	facts := rc.RuntimeFacts{WorkspaceID: "ws-trimpath", RunID: "run-trimpath", DefinitionSeed: rc.RuntimeDefinitionSeed{Hash: "seed"}, Focus: rc.CoverageFocus{CoverageWorkItemIDs: []common.CoverageWorkItemID{r.CoverageWorkItemID}}, Resources: rc.RuntimeResourceFacts{OperationAdmissibilities: []rc.RuntimeOperationAdmissibility{catalog}, PrerequisiteObservations: []rc.RuntimePrerequisiteObservation{observation}}}
+	revision, err := rc.CompileRuntimeOwnerInputRevision(facts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Pre-write postimage check rejects unfixed runtime.Caller and accepts os.Getwd.
+	for _, postCase := range []struct {
+		name, body, wantCode string
+	}{
+		{"still uses Caller", badSubject + "// retry\n", "native_check_trimpath_caller_path"},
+		{"fixed to Getwd", validSubject, ""},
+	} {
+		post := rc.RuntimeValidationInputReviewFile{TargetRef: target, Content: postCase.body, ContentHash: rc.RuntimeValidationInputContentHash(postCase.body)}
+		proof := rc.RuntimeOperationReplayProof{OwnerModuleID: rc.RuntimeModuleFile, OperationID: "edit", TargetRefs: []string{target}, BeforeHash: rc.RuntimeValidationInputContentHash(badSubject), AfterHash: post.ContentHash, AdmissibilitySnapshotID: "file-catalog", AcquisitionBinding: "acquisition"}
+		req := rc.RuntimeInputStructureRequest(string(facts.WorkspaceID), string(facts.RunID), rc.AuthorityTransaction{AuthoritySnapshotID: "authority"}, "manifest", rc.RuntimeOperation{ID: "edit", Kind: rc.StepKindFileEdit, TargetRefs: []string{target}}, revision, proof, post)
+		obs, obsErr := inspectShellValidationInputPostimage(req)
+		if obsErr != nil || obs.Code != postCase.wantCode {
+			t.Fatalf("%s: got code=%q err=%v, want %q", postCase.name, obs.Code, obsErr, postCase.wantCode)
 		}
 	}
 }

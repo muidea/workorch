@@ -78,6 +78,15 @@ func TestFailureInputReviewProviderRetainsExactInputsAndReceiptBody(t *testing.T
 			t.Fatalf("failure body leaked into C%d", i)
 		}
 	}
+	instruction := runtimeSemanticBaseOutputInstruction(request.SemanticContext, request.SemanticManifest)
+	if !strings.Contains(instruction, "incompatible with the owner's declared execution environment") || !strings.Contains(instruction, "behavior_unobserved") {
+		t.Fatalf("failure input review instruction lost setup-incompatibility conflict guidance: %s", instruction)
+	}
+	for _, domainToken := range []string{"trimpath", "GOFLAGS", "GOWORK", "runtime.Caller", "os.Getwd", "dod-005"} {
+		if strings.Contains(instruction, domainToken) {
+			t.Fatalf("LLM instruction violated core domain neutrality with %q", domainToken)
+		}
+	}
 	// Frozen detached request replay must retain every native byte and identity.
 	raw, _ := json.Marshal(request)
 	var frozen llmmodels.RuntimeCandidateRequest

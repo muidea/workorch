@@ -420,7 +420,7 @@ func TestBuiltinSoftwareDevCompiledTemplateMixedBehaviorAndArtifactProofPipeline
 	if err != nil {
 		t.Fatal(err)
 	}
-	var reqBehavior, reqArtifact *runtimecontract.RuntimeValidationProofRequirement
+	var reqBehavior, reqArtifact, reqBuildTest *runtimecontract.RuntimeValidationProofRequirement
 	for i := range allRequirements {
 		r := &allRequirements[i]
 		switch {
@@ -428,13 +428,15 @@ func TestBuiltinSoftwareDevCompiledTemplateMixedBehaviorAndArtifactProofPipeline
 			reqBehavior = r
 		case r.SourceScope == "dodItem" && r.SourceID == "dod-002":
 			reqArtifact = r
+		case r.SourceScope == "dodItem" && r.SourceID == "dod-005":
+			reqBuildTest = r
 		}
 	}
-	if reqBehavior == nil || reqArtifact == nil {
-		t.Fatalf("missing compiled dod-001 or dod-002 requirements in %+v", allRequirements)
+	if reqBehavior == nil || reqArtifact == nil || reqBuildTest == nil {
+		t.Fatalf("missing compiled dod-001, dod-002 or dod-005 requirements in %+v", allRequirements)
 	}
-	if reqBehavior.ValidationRecipeID != "" || reqArtifact.ValidationRecipeID != "software-dev-artifact-validation-evidence" {
-		t.Fatalf("unexpected compiled recipe bindings: dod-001=%q dod-002=%q", reqBehavior.ValidationRecipeID, reqArtifact.ValidationRecipeID)
+	if reqBehavior.ValidationRecipeID != "" || reqArtifact.ValidationRecipeID != "software-dev-artifact-validation-evidence" || reqBuildTest.ValidationRecipeID != "software-dev-artifact-validation-evidence" {
+		t.Fatalf("unexpected compiled recipe bindings: dod-001=%q dod-002=%q dod-005=%q", reqBehavior.ValidationRecipeID, reqArtifact.ValidationRecipeID, reqBuildTest.ValidationRecipeID)
 	}
 	requirements := []runtimecontract.RuntimeValidationProofRequirement{*reqBehavior, *reqArtifact}
 
@@ -1054,4 +1056,231 @@ func registerDefaultNativeProofReceiptOwner(t *testing.T, hub magicevent.Hub) {
 		observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
 		observer.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt)
 	})
+}
+
+func TestShellTrimpathCallerPathNeighborMaintenanceUnblocksAbsentArtifactCWI(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go is not available")
+	}
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	registerDefaultNativeProofReceiptOwner(t, hub)
+
+	fileOwner, err := filebiz.New(hub, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fileOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { fileOwner.Teardown(ctx) })
+	shellOwner, err := shellbiz.New(hub, nil, shellbiz.Dependencies{RuntimeAdapter: shellbiz.NewRuntimeAdapter()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := shellOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { shellOwner.Teardown(ctx) })
+
+	bootstrap := builtinSoftwareDevCompiledNativeProofBootstrap(t, "workspace-trimpath-neighbor")
+	workspaceID := common.WorkspaceID("workspace-trimpath-neighbor")
+	runID := common.RunID("run-trimpath-neighbor")
+	facts, err := bootstrap.InitialFacts(workspaceID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allRequirements, err := runtimecontract.CompileRuntimeValidationProofRequirements(
+		bootstrap.Definition.Revision,
+		bootstrap.DefinitionSeed.CoverageItems,
+		bootstrap.DefinitionFocuses,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reqBuildTest *runtimecontract.RuntimeValidationProofRequirement
+	for i := range allRequirements {
+		r := &allRequirements[i]
+		if r.SourceScope == "dodItem" && r.SourceID == "dod-005" {
+			reqBuildTest = r
+			break
+		}
+	}
+	if reqBuildTest == nil || reqBuildTest.ValidationRecipeID != "software-dev-artifact-validation-evidence" {
+		t.Fatalf("dod-005 missing artifact recipe binding: %+v", reqBuildTest)
+	}
+
+	aggregate := RuntimeAggregate{
+		StateRevision:         1,
+		ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent,
+		Definition:            bootstrap.Definition,
+		Facts:                 facts,
+		Decision: runtimecontract.RuntimeDecision{AuthoritySnapshot: runtimecontract.AuthoritySnapshot{
+			ID: "authority-trimpath-neighbor",
+		}},
+		SemanticPlanning: runtimecontract.RuntimeSemanticPlanningLedger{
+			SchemaVersion:      runtimecontract.RuntimeSemanticPlanningLedgerSchemaCurrent,
+			Phase:              runtimecontract.RuntimeSemanticPlanningRequired,
+			DefinitionSeedHash: facts.DefinitionSeed.Hash,
+		},
+	}
+	aggregate.Facts.Prerequisites.Pending = nil
+	aggregate.Facts.Focus = runtimecontract.CoverageFocus{CoverageWorkItemIDs: []common.CoverageWorkItemID{reqBuildTest.CoverageWorkItemID}}
+	for i := range aggregate.Facts.Coverage {
+		if aggregate.Facts.Coverage[i].ID == reqBuildTest.CoverageWorkItemID {
+			aggregate.Facts.Coverage[i].CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStateUnbound
+		}
+	}
+
+	workspaceDirectory := t.TempDir()
+	manifestPrerequisite := runtimecontract.RuntimePrerequisite{ID: "manifest:trimpath", Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile}
+	shellPrerequisite := runtimecontract.RuntimePrerequisite{ID: "operation_admissibility:trimpath", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}}
+	requirements := []runtimecontract.RuntimeValidationProofRequirement{*reqBuildTest}
+
+	writeFile := func(id, target, content string) runtimecontract.RuntimeOperationReceipt {
+		op := runtimecontract.RuntimeOperation{
+			ID: id, Kind: runtimecontract.StepKindFileWrite, TargetRefs: []string{target},
+			Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &content}},
+		}
+		sealed, sealErr := fileevents.SealRuntimeOperation(op)
+		if sealErr != nil {
+			t.Fatal(sealErr)
+		}
+		resp := sendDefaultNativeProofFileWrite(t, ctx, hub, fileevents.ExecuteFileWriteOperationCommand{
+			RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+				Execution:   defaultNativeProofExecutionEnvelope(workspaceID, runID, "dispatch-"+id, op, nil),
+				WorkspaceID: workspaceID, RunID: runID, DispatchID: "dispatch-" + id,
+				Transaction:                   runtimecontract.AuthorityTransaction{AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DefinitionRevision: aggregate.Facts.DefinitionRevision, RequiredOutputHash: "required-" + id},
+				OperationID:                   op.ID,
+				TargetRefs:                    []string{target},
+				EvidenceKind:                  runtimecontract.EvidenceKindStateChange,
+				WorkspaceDeliverableDirectory: workspaceDirectory,
+			},
+			SealedOperation: sealed,
+		})
+		if resp.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted {
+			t.Fatalf("write %s failed: %+v", target, resp.Receipt)
+		}
+		return resp.Receipt
+	}
+
+	writeFile("go-mod", "go.mod", "module fixture\ngo 1.26\n")
+	neighborTarget := "workorch_validation/project/2d63f640cf1d727b6bceef65dab88c74e2cb579c53f3ca7189917f62b3f8f572/input_test.go"
+	badNeighbor := "package project_test\nimport (\"runtime\";\"testing\")\nfunc TestOld(t *testing.T){_,_,_,ok:=runtime.Caller(0);if !ok{t.Fatal(\"no\")}}\n"
+	writeFile("bad-neighbor", neighborTarget, badNeighbor)
+
+	// Observe real File manifest + real Shell admissibility while dod-005's own artifact input is absent.
+	m1 := sendObservedManifest(t, ctx, hub, aggregate, manifestPrerequisite, workspaceDirectory)
+	c1 := acquireObservedShellValidationCatalog(t, ctx, hub, aggregate, shellPrerequisite, workspaceDirectory, m1, nil, requirements)
+	aggregate.Facts.Resources.Manifest = &m1.Manifest
+	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{c1.Acquisition.Admissibility}
+	aggregate.Facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{m1.Observation, c1.Acquisition.Observation}
+
+	surface, found := runtimecontract.RuntimeValidationSurfaceForID(c1.Acquisition.Admissibility.ValidationSurfaces, "software-dev-artifact-validation-evidence")
+	if !found || len(surface.ProofRequirementUnavailabilities) != 1 || surface.ProofRequirementUnavailabilities[0].OriginalDiagnostic.OriginalCode != "native_check_trimpath_caller_path" {
+		t.Fatalf("expected native_check_trimpath_caller_path unavailability on artifact surface, got %+v", surface)
+	}
+	retained, changed, err := retainRuntimeOwnerInputRevision(aggregate)
+	if err != nil || !changed || !pendingRuntimeOwnerInputRevision(&retained, retained.Facts) {
+		t.Fatalf("retainRuntimeOwnerInputRevision failed for absent-subject neighbor defect: changed=%v err=%v", changed, err)
+	}
+	rev := retained.SemanticPlanning.History[0].OwnerInputRevision
+	if !slices.Equal(rev.InputTargetRefs, []string{neighborTarget}) {
+		t.Fatalf("unexpected OwnerInputRevision targets: %v", rev.InputTargetRefs)
+	}
+
+	// Verify Shell pre-write structure check rejects bad postimage and accepts os.Getwd fix.
+	fixedNeighbor := "package project_test\nimport (\"os\";\"testing\")\nfunc TestOld(t *testing.T){if _,err:=os.Getwd();err!=nil{t.Fatal(err)}}\n"
+	for _, tc := range []struct {
+		content, wantCode string
+	}{
+		{badNeighbor + "// still broken\n", "native_check_trimpath_caller_path"},
+		{fixedNeighbor, ""},
+	} {
+		post := runtimecontract.RuntimeValidationInputReviewFile{TargetRef: neighborTarget, Content: tc.content, ContentHash: runtimecontract.RuntimeValidationInputContentHash(tc.content)}
+		proof := runtimecontract.RuntimeOperationReplayProof{OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationID: "fix-neighbor", TargetRefs: []string{neighborTarget}, BeforeHash: runtimecontract.RuntimeValidationInputContentHash(badNeighbor), AfterHash: post.ContentHash, AdmissibilitySnapshotID: "file-catalog", AcquisitionBinding: "acq"}
+		cmd := shellevents.InspectRuntimeValidationInputStructureCommand(runtimecontract.RuntimeInputStructureRequest(string(workspaceID), string(runID), runtimecontract.AuthorityTransaction{AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DefinitionRevision: aggregate.Facts.DefinitionRevision}, "manifest", runtimecontract.RuntimeOperation{ID: "fix-neighbor", Kind: runtimecontract.StepKindFileWrite, TargetRefs: []string{neighborTarget}}, rev, proof, post))
+		res := hub.Send(magicevent.NewEventWithContext(shellevents.TopicInspectRuntimeValidationInputStructure, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleShell, magicevent.NewHeader(), ctx, cmd))
+		data, getErr := res.Get()
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		obs := data.(shellevents.InspectRuntimeValidationInputStructureResult).Observation
+		if obs.Code != tc.wantCode {
+			t.Fatalf("Shell postimage structure check got %q, want %q", obs.Code, tc.wantCode)
+		}
+	}
+
+	// Apply the valid fix through File patch/apply, refresh manifest & Shell catalog, and verify dod-005 now gets create-only Preparation and zero Extra InputReview block!
+	patchType := "file_write"
+	badHash := runtimecontract.RuntimeValidationInputContentHash(badNeighbor)
+	fixOp := runtimecontract.RuntimeOperation{
+		ID: "fix-neighbor", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{neighborTarget},
+		Parameters: []runtimecontract.OperationParameter{
+			{Name: "patchType", String: &patchType},
+			{Name: "content", String: &fixedNeighbor},
+			{Name: "baseHash", String: &badHash},
+		},
+	}
+	sealedFix, sealErr := fileevents.SealRuntimeOperation(fixOp)
+	if sealErr != nil {
+		t.Fatal(sealErr)
+	}
+	fixRes, fixErr := hub.Send(magicevent.NewEventWithContext(
+		fileevents.TopicExecutePatchApplyOperation,
+		runtimecontract.RuntimeModuleOrchestrator,
+		runtimecontract.RuntimeModuleFile,
+		magicevent.NewHeader(), ctx,
+		fileevents.ExecutePatchApplyOperationCommand{
+			RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+				Execution:                     defaultNativeProofExecutionEnvelope(workspaceID, runID, "dispatch-fix-neighbor", fixOp, nil),
+				WorkspaceID:                   workspaceID,
+				RunID:                         runID,
+				DispatchID:                    "dispatch-fix-neighbor",
+				Transaction:                   runtimecontract.AuthorityTransaction{AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DefinitionRevision: aggregate.Facts.DefinitionRevision, RequiredOutputHash: "required-fix-neighbor"},
+				OperationID:                   fixOp.ID,
+				TargetRefs:                    []string{neighborTarget},
+				EvidenceKind:                  runtimecontract.EvidenceKindStateChange,
+				WorkspaceDeliverableDirectory: workspaceDirectory,
+			},
+			SealedOperation: sealedFix,
+		},
+	)).Get()
+	if fixErr != nil {
+		t.Fatal(fixErr)
+	}
+	receipt := fixRes.(fileevents.ExecuteOperationResult).Receipt
+	if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || !receipt.Changed {
+		t.Fatalf("patch/apply %s failed: %+v", neighborTarget, receipt)
+	}
+	retained.ImplementationWork.Rounds = []runtimecontract.RuntimeImplementationWorkRound{{
+		CoverageWorkItemID:      reqBuildTest.CoverageWorkItemID,
+		ScopeRequest:            runtimecontract.RuntimeImplementationWorkScopeRequest{InputRevision: rev.Clone()},
+		DispatchID:              "dispatch-fix-neighbor",
+		CompletedReceiptSetHash: runtimecontract.StableRuntimeOperationReceiptHash(receipt),
+	}}
+	retained.PrerequisiteInvalidations = []runtimecontract.RuntimePrerequisiteInvalidationRecord{{
+		DispatchID: "dispatch-fix-neighbor",
+		ResourceChanges: []runtimecontract.RuntimeResourceChange{{
+			OwnerModuleID:  runtimecontract.RuntimeModuleFile,
+			SubjectRef:     neighborTarget,
+			BeforeRevision: badHash,
+			AfterRevision:  runtimecontract.RuntimeValidationInputContentHash(fixedNeighbor),
+		}},
+	}}
+
+	m2 := sendObservedManifest(t, ctx, hub, retained, manifestPrerequisite, workspaceDirectory)
+	c2 := acquireObservedShellValidationCatalog(t, ctx, hub, retained, shellPrerequisite, workspaceDirectory, m2, nil, requirements)
+	retained.Facts.Resources.Manifest = &m2.Manifest
+	retained.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{c2.Acquisition.Admissibility}
+	retained.Facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{m2.Observation, c2.Acquisition.Observation}
+
+	surface2, found2 := runtimecontract.RuntimeValidationSurfaceForID(c2.Acquisition.Admissibility.ValidationSurfaces, "software-dev-artifact-validation-evidence")
+	if !found2 || len(surface2.ProofRequirementUnavailabilities) != 0 || len(surface2.ProofRequirementPreparations) != 1 || surface2.ProofRequirementPreparations[0].RequirementHash != reqBuildTest.Hash {
+		t.Fatalf("after neighbor repair, expected clean create-only Preparation for dod-005, got %+v", surface2)
+	}
+	if need, err := currentImplementationInputReview(retained); err != nil || need != nil {
+		t.Fatalf("after out-of-subject neighbor repair cleared, dod-005 still blocked by currentImplementationInputReview: need=%v err=%v", need, err)
+	}
 }

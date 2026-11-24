@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -488,6 +489,11 @@ func TestProjectMultiFailureArtifactAdapterFailClosedPassAndFail(t *testing.T) {
 	if plan := binding.InputReview.ExecutionPlan; plan == nil || len(plan.Stages) != 4 || plan.Stages[3].Identity.ID != "reviewed-cwi-execution" || plan.Stages[3].Identity.RequireBehavior {
 		t.Fatalf("unexpected artifact execution plan: %+v", plan)
 	} else {
+		for idx, stage := range plan.Stages {
+			if !slices.Contains(stage.Instrumentation, "gowork_off") || !slices.Contains(stage.Instrumentation, "trimpath") {
+				t.Fatalf("stage %d execution plan omitted gowork_off/trimpath: %+v", idx, stage.Instrumentation)
+			}
+		}
 		for _, inst := range plan.Stages[3].Instrumentation {
 			if inst == "coverage_behavior" || inst == "process_behavior" {
 				t.Fatalf("artifact plan should not declare coverage/process instrumentation: %+v", plan.Stages[3].Instrumentation)

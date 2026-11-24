@@ -336,9 +336,11 @@ preparation/supplement 使用实际选中协议的容量和期限说明：multi-
 单个 operation 的准备、全部执行阶段与 cleanup 共用本次封存的 deadline（显式声明范围 1000–600000ms，默认不变），不能重置期限、减样本或跳过原准则。
 普通 mutation 排除全部原 project test 与 validation namespace；来源评审不开放输入维护授权。
 
-Shell 通过同一固定阶段与 native-selector compiler 发布 `InputReview.ExecutionPlan`，绑定每阶段的身份、命令、参数、插桩、
+Shell 通过同一固定阶段与 native-selector compiler 发布 `InputReview.ExecutionPlan`，绑定每阶段的身份、命令、参数、插桩（包含全局注入的 `gowork_off`、`trimpath` 及各阶段对应的 `race`/`coverage_behavior`/`process_behavior`/`native_source_channel`）、
 required checks 和原总期限；仅实际准备时加入私有 scratch 路径。该计划进入 subject hash 和 C3 精确投影，
 供独立评审判断嵌套 suite 与方法是否满足原义务；它不是已执行证据或耗时保证。
+
+受控验证均以 `GOFLAGS=-trimpath`、`GOWORK=off` 在测试包目录（cwd）下运行；`workorch_validation/` 下输入须通过 `os.Getwd()` 向上定位 `go.mod`，构建与临时产物须写进 `t.TempDir()`（禁止向隔离工作区写入构建产物以免 `source drift`）。若 `workorch_validation/` 文件直接调用 `runtime.Caller` 或 `runtime.CallersFrames`（含别名及点导入），结构检查与写前 postimage 检查返回 `native_check_trimpath_caller_path`，经既有 `OwnerInputRevision` 受保护维护（包括当前 CWI 尚未建包时对相邻 `workorch_validation/` 文件的维护）修复，不误伤用户自有 `*_test.go`。
 
 原生测试需要独立子执行时，当前生成与完整来源评审统一声明 owner source channel 方法。
 同包 helper 在 `WORKORCH_NATIVE_SOURCE_CHILD == t.Name()` 时执行完整原断言；否则以 `t.Parallel()`
@@ -580,11 +582,11 @@ before/after SHA-256 和有限 corrections。只读解析上限 256 KiB；函数
 `biz/validation_input_repair_test.go` 校准真实三处大小写编译错误、诊断完整反馈，以及歧义/shadow/旧协议/截断/源码变化负例。
 
 Shell 在同一个 managed scratch/session 内生成固定 test-exec wrapper，恢复被 go test 覆盖的 owner GOCOVERDIR；
-GOFLAGS 为 Go-built 子进程启用覆盖插桩，真实执行数据由 Go covdata 转换，不从 stdout 自报或 caller 路径导入。转换共用
+GOFLAGS（含 `-trimpath`）为 Go-built 子进程启用覆盖插桩，真实执行数据由 Go covdata 转换，不从 stdout 自报或 caller 路径导入。owner `GOCOVERDIR` 仅观测同进程生产包调用与实际运行的新 `go build` 交付二进制；纯 `go build` 或嵌套 `go test` 子进程均不会写入 `WORKORCH_PROCESS_COVERDIR`。转换共用
 operation deadline，并额外限时 10 秒；最多 128 个 artifact、8 MiB 输入以及既有 coverage record 上界，非 regular-file、
 不完整/未知数据、converter warning/truncation 均 fail closed。只构建未运行不产生证明，Go delivery 外的依赖、非 Go 后端、
 测试/harness 文件和零执行记录不计入实现执行。观测路径归一去重，防止多个 coverage block 放大 File repair scope。
-执行前后核对隔离副本中的 Go 源码、模块与验证输入；发生改变则证据不可验证。测试临时项目/数据应使用独立临时目录。
+执行前后核对隔离副本中的 Go 源码、模块与验证输入；发生改变则证据不可验证。测试临时项目/数据应使用 `t.TempDir()` 等独立临时目录。
 这不是防恶意代码的 OS sandbox，也不是语义 grader；具体协议响应、各语言后端与性能验收仍需独立对应的原始断言。
 
 这些变化只发生在能力 owner 的事实生产中：SM-1 不变，SM-2/3/4 沿用原有 private-event、sealed dispatch、receipt 和
@@ -624,7 +626,7 @@ catalog 将全部原检查与该补充检查绑定为 all-of，并沿用最多 3
 既有补充输入无效时，fresh catalog 只发布该 CWI 的 unavailability 和 exact 原因；pure prospective query 没有可解析的 preparation，不能宣称另建文件会满足它。Shell policy revision 绑定这份合同，旧 snapshot 按 typed stale 重获；历史 binding/receipt 不升级或改写。
 补充仍未观测实现时返回 `validation_workspace_behavior_supplement_unobserved`，不再提供补充合同（严格 1 轮补充上限）；补充的编译错误也不能把测试/owner harness 文件交给普通实现修复。具体 CWI 的真实交付入口断言仍不可由“任意函数被覆盖”替代。
 
-对于通过 `templateProofBindings` 精确绑定 `validationRecipeId` 的非 Go 运行时内置模板 DoD，`shell/project-multi-failure-artifact-validation` adapter（协议 `shell/go-test-json/project-multi-failure-artifact`）与通用严格行为 recipe 分工明确：
+对于通过 `templateProofBindings` 精确绑定 `validationRecipeId` 的非运行态或构建测试校验类内置模板 DoD，`shell/project-multi-failure-artifact-validation` adapter（协议 `shell/go-test-json/project-multi-failure-artifact`）与通用严格行为 recipe 分工明确：
 - Fail-Closed 绑定门槛：仅当 `requirement.ValidationRecipeID == recipe.ID` 精确匹配时才绑定/准备/执行；通配或空 `ValidationRecipeID` 的普通交付 DoD 绝不进入该协议，继续强制 `workspace_behavior_observed` 与 `RuntimeValidationProofBehavioral`。同时 Shell 在该 surface 上发布 `RequireExactRecipeSelection: true`，使仅含无绑定需求或混合需求的 catalog 在 `ValidateRuntimeValidationProofRequirementCatalogApplicability` 保持严格隔离并拒绝任何非精确绑定记录。
 - 四阶段全项目执行与诚实分级：Stage 1–3 与 `shell/project-multi-failure-validation` 完全一致执行根 module `go build ./...`、`go test -json -count=1 ./...`、`go test -race -json -count=1 ./...`；Stage 4（`reviewed-cwi-execution`，`RequireBehavior=false`）在隔离同包内执行全部 reviewed exact checks，强制全部通过、零 skip、完整 JSON transcript、source 前后 hash 一致、单一 deadline、原文持久化及多失败诊断，最终诚实产出 `RuntimeValidationProofExecuted`（不发出 `workspace_behavior_observed` 标签）。
 - 审查范围沿用 64 files / 256 KiB（含 `project/` 包、共享文档/配置与根定义）与 `RuntimeValidationDiagnosticSourceReviewV1`，引导模型对真实文档/计划/配置/静态检查或 owner 证据断言，不得伪造回执、读取私有存储或塞入无关 Go 调用制造覆盖率。

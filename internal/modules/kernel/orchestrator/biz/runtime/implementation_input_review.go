@@ -1,9 +1,15 @@
 package runtime
 
 import (
+	"strings"
+
 	"github.com/muidea/workorch/internal/pkg/common"
 	rc "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+type implementationInputTarget struct {
+	owner, target string
+}
 
 // implementationInputReview projects formal work and its original input source.
 // It is not a second pending queue or a write permission.
@@ -20,9 +26,10 @@ func currentImplementationInputReview(a RuntimeAggregate) (*implementationInputR
 		return nil, nil
 	}
 	cwi := a.Facts.Focus.CoverageWorkItemIDs[0]
-	type inputTarget struct{ owner, target string }
-	targets := map[inputTarget]struct{}{}
-	changed := map[inputTarget]string{}
+	targets := map[implementationInputTarget]struct{}{}
+	ownerMaintenanceTargets := map[implementationInputTarget]struct{}{}
+	semanticTargets := map[implementationInputTarget]struct{}{}
+	changed := map[implementationInputTarget]string{}
 	for i := range a.ImplementationWork.Rounds {
 		r := &a.ImplementationWork.Rounds[i]
 		if r.CoverageWorkItemID != cwi {
@@ -33,11 +40,19 @@ func currentImplementationInputReview(a RuntimeAggregate) (*implementationInputR
 		}
 		if v := r.ScopeRequest.InputRevision; v != nil {
 			for _, input := range v.InputFiles() {
-				targets[inputTarget{v.OwnerModuleID, input.TargetRef}] = struct{}{}
+				key := implementationInputTarget{v.OwnerModuleID, input.TargetRef}
+				targets[key] = struct{}{}
+				if v.OwnerObservation != nil {
+					ownerMaintenanceTargets[key] = struct{}{}
+				} else {
+					semanticTargets[key] = struct{}{}
+				}
 			}
 			for _, check := range v.Report.Checks {
 				for _, target := range check.DependencyTargetRefs {
-					targets[inputTarget{v.OwnerModuleID, target}] = struct{}{}
+					key := implementationInputTarget{v.OwnerModuleID, target}
+					targets[key] = struct{}{}
+					semanticTargets[key] = struct{}{}
 				}
 			}
 		}
@@ -49,14 +64,33 @@ func currentImplementationInputReview(a RuntimeAggregate) (*implementationInputR
 				continue
 			}
 			for _, change := range invalidation.ResourceChanges {
-				if _, intersects := targets[inputTarget{change.OwnerModuleID, change.SubjectRef}]; intersects && change.BeforeRevision != change.AfterRevision {
-					changed[inputTarget{change.OwnerModuleID, change.SubjectRef}] = change.AfterRevision
+				if _, intersects := targets[implementationInputTarget{change.OwnerModuleID, change.SubjectRef}]; intersects && change.BeforeRevision != change.AfterRevision {
+					changed[implementationInputTarget{change.OwnerModuleID, change.SubjectRef}] = change.AfterRevision
 				}
 			}
 		}
 	}
 	if len(changed) == 0 {
 		return nil, nil
+	}
+	// Structural maintenance may repair an already-observed input outside the
+	// current CWI's independent review subject (for example before this CWI has
+	// a ready binding or created package). Once fresh owner catalogs resolve the
+	// CWI cleanly with zero unavailability, ignore changes that exist solely on
+	// such non-subject owner-maintenance files while failing closed otherwise.
+	if subjectTargets, resolved := currentValidationInputReviewSubjectTargets(a.Facts, cwi); resolved {
+		for target := range changed {
+			_, isMaint := ownerMaintenanceTargets[target]
+			_, isSem := semanticTargets[target]
+			if isMaint && !isSem {
+				if _, inSubject := subjectTargets[target]; !inSubject {
+					delete(changed, target)
+				}
+			}
+		}
+		if len(changed) == 0 {
+			return nil, nil
+		}
 	}
 	// A retired ordinary generation may already have settled these exact
 	// postimages. Consume its formal consistent report within that scope;
@@ -114,4 +148,61 @@ func currentImplementationInputReview(a RuntimeAggregate) (*implementationInputR
 	// that same transaction to fresh all-of; it is not retired to ask another
 	// purpose request to judge the identical input a second time.
 	return &implementationInputReview{coverageID: cwi}, nil
+}
+
+// currentValidationInputReviewSubjectTargets resolves the current CWI's active
+// validation review subject files from quiescent fresh owner catalogs. It
+// fails closed when prerequisites are pending, any validation requirement is
+// still structurally unavailable, or the catalog neither binds nor prepares the
+// requirement.
+func currentValidationInputReviewSubjectTargets(f rc.RuntimeFacts, cwi common.CoverageWorkItemID) (map[implementationInputTarget]struct{}, bool) {
+	if len(f.Prerequisites.Pending) != 0 {
+		return nil, false
+	}
+	var validationReqs []rc.RuntimeOwnerFactRequirement
+	for _, raw := range currentFocusOwnerFactRequirements(f) {
+		req := raw.Normalized()
+		if req.FactKind == rc.RuntimeOwnerFactSelectableValidationSurface && req.ValidationProofRequirementHash != "" {
+			validationReqs = append(validationReqs, req)
+		}
+	}
+	if len(validationReqs) == 0 {
+		return nil, false
+	}
+	subjectTargets := map[implementationInputTarget]struct{}{}
+	for _, req := range validationReqs {
+		if rc.RuntimeOwnerFactHasUnavailableValidationProof(req, f.Resources.OperationAdmissibilities) {
+			return nil, false
+		}
+		resolvedReq := false
+		for _, catalog := range f.Resources.OperationAdmissibilities {
+			if strings.TrimSpace(catalog.OwnerModuleID) != req.OwnerModuleID {
+				continue
+			}
+			for _, surface := range catalog.ValidationSurfaces {
+				if strings.TrimSpace(surface.OwnerModuleID) != req.OwnerModuleID || rc.CanonicalRuntimeBlockKind(surface.OperationKind) != req.OperationKind {
+					continue
+				}
+				for _, binding := range surface.ProofRequirementBindings {
+					if binding.RequirementHash == req.ValidationProofRequirementHash && binding.CoverageWorkItemID == cwi {
+						resolvedReq = true
+						if binding.InputReview != nil {
+							for _, file := range binding.InputReview.Files {
+								subjectTargets[implementationInputTarget{surface.InputTargetOwnerModuleID, file.TargetRef}] = struct{}{}
+							}
+						}
+					}
+				}
+				for _, prep := range surface.ProofRequirementPreparations {
+					if prep.RequirementHash == req.ValidationProofRequirementHash && prep.CoverageWorkItemID == cwi {
+						resolvedReq = true
+					}
+				}
+			}
+		}
+		if !resolvedReq {
+			return nil, false
+		}
+	}
+	return subjectTargets, true
 }

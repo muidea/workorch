@@ -128,3 +128,142 @@ func TestImplementationInputPostimageReusesFormalCoveredStateOnly(t *testing.T) 
 		})
 	}
 }
+
+func TestImplementationInputPostimageReviewSkipsOutOfSubjectNeighborMaintenanceOnceCleared(t *testing.T) {
+	base := implementationInputPostimageFixture(t)
+	neighbor := "workorch_validation/project/2d63f640cf1d727b6bceef65dab88c74e2cb579c53f3ca7189917f62b3f8f572/input_test.go"
+	v := base.SemanticPlanning.History[0].OwnerInputRevision.Clone()
+	v.InputTargetRefs = []string{neighbor}
+	neighborFile := rc.RuntimeValidationInputReviewFile{TargetRef: neighbor, Content: "package other\n"}
+	neighborFile.ContentHash = rc.RuntimeValidationInputContentHash(neighborFile.Content)
+	v.OwnerObservation.Catalog.ValidationSurfaces[0].InputTargetRefs = []string{neighbor}
+	u := &v.OwnerObservation.Catalog.ValidationSurfaces[0].ProofRequirementUnavailabilities[0]
+	u.Maintenance.TargetRefs = []string{neighbor}
+	u.Maintenance.Files = []rc.RuntimeValidationInputReviewFile{neighborFile}
+	v.OwnerObservation.Catalog.SnapshotID = rc.StableRuntimeOperationAdmissibilitySnapshotID(v.OwnerObservation.Catalog)
+	v.OwnerObservation.Observation.ContentHash = v.OwnerObservation.Catalog.SnapshotID
+	v.OwnerObservation.Observation.ObservationID = rc.StableRuntimePrerequisiteObservationID(v.OwnerObservation.Observation)
+	base.SemanticPlanning.History[0].OwnerInputRevision = v
+	base.ImplementationWork.Rounds[0].ScopeRequest.InputRevision = v.Clone()
+	base.PrerequisiteInvalidations[0].ResourceChanges[0] = rc.RuntimeResourceChange{
+		OwnerModuleID:  v.OwnerModuleID,
+		SubjectRef:     neighbor,
+		BeforeRevision: neighborFile.ContentHash,
+		AfterRevision:  "actual-fixed-neighbor",
+	}
+
+	reqHash := base.Facts.DefinitionFocuses[0].RequiredOwnerFacts[0].ValidationProofRequirementHash
+
+	for _, scenario := range []struct {
+		name     string
+		setup    func(*RuntimeAggregate)
+		wantNeed bool
+	}{
+		{
+			name: "cleared with fresh preparation skips extra input review",
+			setup: func(a *RuntimeAggregate) {
+				s := &a.Facts.Resources.OperationAdmissibilities[0].ValidationSurfaces[0]
+				s.ProofRequirementUnavailabilities = nil
+				s.ProofRequirementPreparations = []rc.RuntimeValidationProofPreparation{{
+					RequirementHash:    reqHash,
+					CoverageWorkItemID: v.Binding.CoverageWorkItemID,
+					DeclarationRef:     v.Binding.DeclarationRef,
+					ValidationRecipeID: v.Binding.ValidationRecipeID,
+					TargetRef:          "workorch_validation/project/own/input_test.go",
+				}}
+			},
+			wantNeed: false,
+		},
+		{
+			name: "cleared with ready binding omitting neighbor skips extra input review",
+			setup: func(a *RuntimeAggregate) {
+				s := &a.Facts.Resources.OperationAdmissibilities[0].ValidationSurfaces[0]
+				s.ProofRequirementUnavailabilities = nil
+				ownBinding := v.Binding.Clone()
+				ownFile := rc.RuntimeValidationInputReviewFile{TargetRef: "workorch_validation/project/own/input_test.go", Content: "package own\n"}
+				ownFile.ContentHash = rc.RuntimeValidationInputContentHash(ownFile.Content)
+				ownBinding.InputReview = &rc.RuntimeValidationInputReviewSubject{
+					ProtocolRef: rc.RuntimeValidationInputReviewProtocol,
+					Files:       []rc.RuntimeValidationInputReviewFile{ownFile},
+				}
+				s.ProofRequirementBindings = []rc.RuntimeValidationProofRequirementBinding{ownBinding}
+			},
+			wantNeed: false,
+		},
+		{
+			name: "fail closed when edited target is inside ready binding subject",
+			setup: func(a *RuntimeAggregate) {
+				s := &a.Facts.Resources.OperationAdmissibilities[0].ValidationSurfaces[0]
+				s.ProofRequirementUnavailabilities = nil
+				ownBinding := v.Binding.Clone()
+				ownBinding.InputReview = &rc.RuntimeValidationInputReviewSubject{
+					ProtocolRef: rc.RuntimeValidationInputReviewProtocol,
+					Files:       []rc.RuntimeValidationInputReviewFile{neighborFile},
+				}
+				s.ProofRequirementBindings = []rc.RuntimeValidationProofRequirementBinding{ownBinding}
+			},
+			wantNeed: true,
+		},
+		{
+			name: "fail closed when unavailability still exists",
+			setup: func(a *RuntimeAggregate) {
+				// Unchanged fixture keeps ProofRequirementUnavailabilities non-empty.
+			},
+			wantNeed: true,
+		},
+		{
+			name: "fail closed when prerequisites are pending",
+			setup: func(a *RuntimeAggregate) {
+				s := &a.Facts.Resources.OperationAdmissibilities[0].ValidationSurfaces[0]
+				s.ProofRequirementUnavailabilities = nil
+				s.ProofRequirementPreparations = []rc.RuntimeValidationProofPreparation{{
+					RequirementHash:    reqHash,
+					CoverageWorkItemID: v.Binding.CoverageWorkItemID,
+					DeclarationRef:     v.Binding.DeclarationRef,
+					ValidationRecipeID: v.Binding.ValidationRecipeID,
+					TargetRef:          "workorch_validation/project/own/input_test.go",
+				}}
+				a.Facts.Prerequisites.Pending = []rc.RuntimePrerequisite{{ID: "catalog-refresh", Kind: rc.PrerequisiteKindOperationAdmissibility, OwnerModuleID: rc.RuntimeModuleShell}}
+			},
+			wantNeed: true,
+		},
+		{
+			name: "fail closed for semantic input conflict round",
+			setup: func(a *RuntimeAggregate) {
+				s := &a.Facts.Resources.OperationAdmissibilities[0].ValidationSurfaces[0]
+				s.ProofRequirementUnavailabilities = nil
+				s.ProofRequirementPreparations = []rc.RuntimeValidationProofPreparation{{
+					RequirementHash:    reqHash,
+					CoverageWorkItemID: v.Binding.CoverageWorkItemID,
+					DeclarationRef:     v.Binding.DeclarationRef,
+					ValidationRecipeID: v.Binding.ValidationRecipeID,
+					TargetRef:          "workorch_validation/project/own/input_test.go",
+				}}
+				for _, rev := range []*rc.RuntimeValidationInputRevision{
+					a.SemanticPlanning.History[0].OwnerInputRevision,
+					a.ImplementationWork.Rounds[0].ScopeRequest.InputRevision,
+				} {
+					rev.OwnerObservation = nil
+					rev.Binding.InputReview = &rc.RuntimeValidationInputReviewSubject{
+						ProtocolRef: rc.RuntimeValidationInputReviewProtocol,
+						Files:       []rc.RuntimeValidationInputReviewFile{neighborFile},
+					}
+				}
+			},
+			wantNeed: true,
+		},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			a := base.CloneRaw()
+			scenario.setup(&a)
+			before := a.CloneRaw()
+			need, err := currentImplementationInputReview(a)
+			if err != nil || (need != nil) != scenario.wantNeed {
+				t.Fatalf("need=%v err=%v, wantNeed=%v", need, err, scenario.wantNeed)
+			}
+			if !reflect.DeepEqual(a, before) {
+				t.Fatal("read projection mutated aggregate")
+			}
+		})
+	}
+}

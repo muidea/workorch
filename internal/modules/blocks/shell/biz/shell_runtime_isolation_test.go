@@ -146,11 +146,19 @@ func TestShellKillsBackgroundProcessGroupAfterNormalCompletion(t *testing.T) {
 	if parseErr != nil || pid <= 0 {
 		t.Fatalf("background process PID = %q err=%v", lines[len(lines)-1], parseErr)
 	}
+	stopped := false
 	deadline := time.Now().Add(3 * time.Second)
-	for shellTestProcessRunning(pid) && time.Now().Before(deadline) {
+	for {
+		if !shellTestProcessRunning(pid) {
+			stopped = true
+			break
+		}
+		if !time.Now().Before(deadline) {
+			break
+		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if shellTestProcessRunning(pid) {
+	if !stopped {
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 		t.Fatalf("background process %d survived normal Shell completion", pid)
 	}
@@ -165,9 +173,12 @@ func shellTestProcessRunning(pid int) bool {
 		return true
 	}
 	stat, readErr := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
-	if readErr == nil {
-		fields := strings.Fields(string(stat))
-		if len(fields) > 2 && fields[2] == "Z" {
+	if readErr != nil {
+		return !errors.Is(readErr, os.ErrNotExist)
+	}
+	if idx := strings.LastIndexByte(string(stat), ')'); idx >= 0 && idx+2 < len(stat) {
+		state := stat[idx+2]
+		if state == 'Z' || state == 'X' || state == 'x' {
 			return false
 		}
 	}

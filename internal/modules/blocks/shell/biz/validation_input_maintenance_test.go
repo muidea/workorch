@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/common"
 	rc "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -193,6 +194,72 @@ func TestProjectMethodMaintenanceProtectionCoversEachProjectRecipe(t *testing.T)
 			m := surfaces[0].ProofRequirementUnavailabilities[0].Maintenance
 			if m == nil || !slices.Contains(surfaces[0].InputTargetRefs, neighbor) || !slices.Equal(m.TargetRefs, []string{neighbor}) {
 				t.Fatal("maintenance escaped protected actual execution inputs")
+			}
+		})
+	}
+}
+
+func TestProjectNeighborMethodMaintenanceAllowsAbsentCurrentSubjectPackage(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, fixed, wantCode string
+	}{
+		{
+			name:     "neighbor uses runtime.Caller under trimpath",
+			body:     "package other\nimport (\"os\";\"runtime\";\"testing\")\nfunc TestOther(t *testing.T){_,_,_,ok:=runtime.Caller(0);if !ok{_,_=os.Getwd();t.Fatal(\"fail\")}}\n",
+			fixed:    "package other\nimport (\"os\";\"testing\")\nfunc TestOther(t *testing.T){if _,err:=os.Getwd();err!=nil{t.Fatal(err)}}\n",
+			wantCode: "native_check_trimpath_caller_path",
+		},
+		{
+			name:     "neighbor uses os.Executable",
+			body:     "package other\nimport (\"os\";\"testing\")\nfunc TestOther(t *testing.T){if _,err:=os.Executable();err!=nil{t.Fatal(err)}}\n",
+			fixed:    "package other\nimport \"testing\"\nfunc TestOther(t *testing.T){if false{t.Fatal(\"original\")}}\n",
+			wantCode: "native_check_unmanaged_self_execution",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recipe, requirement, _ := conjunctiveSourceRequirement(t)
+			recipe.AdapterRef = modulecommon.ValidationRecipeAdapterProjectMultiFailureArtifact
+			requirement.ValidationRecipeID = recipe.ID
+			requirement.Hash = rc.StableRuntimeValidationProofRequirementHash(requirement)
+			root := t.TempDir()
+			neighbor := "workorch_validation/project/2d63f640cf1d727b6bceef65dab88c74e2cb579c53f3ca7189917f62b3f8f572/input_test.go"
+			writeNativeStructureSource(t, root, "go.mod", "module fixture\ngo 1.26\n")
+			writeNativeStructureSource(t, root, neighbor, tc.body)
+			// Note: current CWI's own package file does NOT exist on disk yet!
+			refs := []string{"go.mod", neighbor}
+			binding := shellTestWorkspaceManifestBinding("absent-subject-neighbor", refs)
+			surfaces := shellValidationSurfaces([]rc.RuntimeValidationRecipe{recipe}, []rc.RuntimeValidationRecipe{recipe}, []rc.RuntimeValidationRecipe{recipe}, []rc.RuntimeValidationProofRequirement{requirement}, binding, "tree", root)
+			if len(surfaces) != 1 || len(surfaces[0].ProofRequirementPreparations) != 0 || len(surfaces[0].ProofRequirementUnavailabilities) != 1 {
+				t.Fatalf("unexpected surface state when neighbor method defect blocks uncreated CWI: %+v", surfaces)
+			}
+			u := surfaces[0].ProofRequirementUnavailabilities[0]
+			if u.OriginalDiagnostic == nil || u.OriginalDiagnostic.OriginalCode != tc.wantCode {
+				t.Fatalf("unexpected unavailability code: %+v", u.OriginalDiagnostic)
+			}
+			if u.Maintenance == nil || u.Maintenance.Validate(requirement, recipe.ID) != nil || !slices.Equal(u.Maintenance.TargetRefs, []string{neighbor}) {
+				t.Fatalf("neighbor maintenance unavailable when current CWI subject is absent: %+v", u.Maintenance)
+			}
+			catalog := rc.RuntimeOperationAdmissibility{PrerequisiteID: "catalog", OwnerModuleID: ModuleID, ObservedRevision: "tree", OperationKinds: []string{rc.RuntimeBlockKindManagedValidationSession}, ValidationSurfaces: surfaces}
+			catalog.SnapshotID = rc.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+			observation := rc.RuntimePrerequisiteObservation{PrerequisiteID: "catalog", Kind: rc.PrerequisiteKindOperationAdmissibility, OwnerModuleID: ModuleID, ContentHash: catalog.SnapshotID, Dependencies: []rc.RuntimeFreshnessDependency{{Domain: rc.RuntimeResourceWorkspaceTree, OwnerModuleID: rc.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: "tree"}}}
+			observation.ObservationID = rc.StableRuntimePrerequisiteObservationID(observation)
+			facts := rc.RuntimeFacts{WorkspaceID: "ws-absent", RunID: "run-absent", DefinitionSeed: rc.RuntimeDefinitionSeed{Hash: "seed"}, Focus: rc.CoverageFocus{CoverageWorkItemIDs: []common.CoverageWorkItemID{requirement.CoverageWorkItemID}}, Resources: rc.RuntimeResourceFacts{OperationAdmissibilities: []rc.RuntimeOperationAdmissibility{catalog}, PrerequisiteObservations: []rc.RuntimePrerequisiteObservation{observation}}}
+			revision, err := rc.CompileRuntimeOwnerInputRevision(facts)
+			if err != nil {
+				t.Fatalf("CompileRuntimeOwnerInputRevision failed for absent-subject neighbor maintenance: %v", err)
+			}
+			badPost := rc.RuntimeValidationInputReviewFile{TargetRef: neighbor, Content: tc.body + "// unfixed\n"}
+			badPost.ContentHash = rc.RuntimeValidationInputContentHash(badPost.Content)
+			badProof := rc.RuntimeOperationReplayProof{OwnerModuleID: rc.RuntimeModuleFile, OperationID: "edit", TargetRefs: []string{neighbor}, BeforeHash: rc.RuntimeValidationInputContentHash(tc.body), AfterHash: badPost.ContentHash, AdmissibilitySnapshotID: "file-catalog", AcquisitionBinding: "acquisition"}
+			badReq := rc.RuntimeInputStructureRequest(string(facts.WorkspaceID), string(facts.RunID), rc.AuthorityTransaction{AuthoritySnapshotID: "authority"}, "manifest", rc.RuntimeOperation{ID: "edit", Kind: rc.StepKindFileEdit, TargetRefs: []string{neighbor}}, revision, badProof, badPost)
+			if obs, err := inspectShellValidationInputPostimage(badReq); err != nil || obs.Code != tc.wantCode {
+				t.Fatalf("unfixed neighbor postimage not rejected: %+v err=%v", obs, err)
+			}
+			goodPost := rc.RuntimeValidationInputReviewFile{TargetRef: neighbor, Content: tc.fixed, ContentHash: rc.RuntimeValidationInputContentHash(tc.fixed)}
+			goodProof := rc.RuntimeOperationReplayProof{OwnerModuleID: rc.RuntimeModuleFile, OperationID: "edit", TargetRefs: []string{neighbor}, BeforeHash: rc.RuntimeValidationInputContentHash(tc.body), AfterHash: goodPost.ContentHash, AdmissibilitySnapshotID: "file-catalog", AcquisitionBinding: "acquisition"}
+			goodReq := rc.RuntimeInputStructureRequest(string(facts.WorkspaceID), string(facts.RunID), rc.AuthorityTransaction{AuthoritySnapshotID: "authority"}, "manifest", rc.RuntimeOperation{ID: "edit", Kind: rc.StepKindFileEdit, TargetRefs: []string{neighbor}}, revision, goodProof, goodPost)
+			if obs, err := inspectShellValidationInputPostimage(goodReq); err != nil || obs.Code != "" {
+				t.Fatalf("fixed neighbor postimage rejected: %+v err=%v", obs, err)
 			}
 		})
 	}

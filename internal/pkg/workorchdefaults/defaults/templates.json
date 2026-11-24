@@ -1411,6 +1411,12 @@
             ]
           },
           {
+            "candidateItemRef": "derived-dod:template:000005",
+            "text": "相关 build/test 验证已执行并通过；无法执行时记录跳过原因和影响评估",
+            "profileId": "software-dev",
+            "validationRecipeId": "software-dev-artifact-validation-evidence"
+          },
+          {
             "candidateItemRef": "derived-dod:template:000011",
             "text": "lint/静态检查按项目约定执行；缺失命令时记录替代检查或跳过原因",
             "profileId": "software-dev",

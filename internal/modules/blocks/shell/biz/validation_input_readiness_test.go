@@ -55,6 +55,46 @@ func TestProjectSupplementCompleteDeclarationFitsOriginalEnvelope(t *testing.T) 
 	if len(shellProjectMultiFailureArtifactReviewRequirements) > runtimecontract.RuntimeValidationInputReviewMaxScopeBytes {
 		t.Fatalf("artifact review scope (%d bytes) exceeds max %d", len(shellProjectMultiFailureArtifactReviewRequirements), runtimecontract.RuntimeValidationInputReviewMaxScopeBytes)
 	}
+	for _, scope := range []struct{ name, text string }{
+		{"isolated", shellIsolatedReviewScopeRequirements},
+		{"conjunctive", shellConjunctiveReviewScopeRequirements},
+		{"project", shellProjectReviewScopeRequirements},
+		{"multi-failure", shellProjectMultiFailureRequirements},
+		{"artifact", shellProjectMultiFailureArtifactReviewRequirements},
+	} {
+		if len(scope.text) > runtimecontract.RuntimeValidationInputReviewMaxScopeBytes {
+			t.Fatalf("%s review scope (%d bytes) exceeds %d", scope.name, len(scope.text), runtimecontract.RuntimeValidationInputReviewMaxScopeBytes)
+		}
+		for _, token := range []string{"-trimpath", "os.Getwd()", "t.TempDir()"} {
+			if !strings.Contains(scope.text, token) {
+				t.Fatalf("%s review scope omits %q", scope.name, token)
+			}
+		}
+	}
+	for _, content := range []struct {
+		name, ref, text string
+		behavioral      bool
+	}{
+		{"isolated", shellIsolatedInputContentContractRef, shellIsolatedInputContentRequirements + shellAssertionFeedbackRequirements, true},
+		{"conjunctive", shellConjunctiveInputContentContractRef, shellConjunctiveInputContentRequirements + shellAssertionFeedbackRequirements, true},
+		{"project", shellProjectInputContentContractRef, shellProjectInputContentRequirements + shellValidationDeclaredDeadlineRequirement(300000) + shellAssertionFeedbackRequirements, true},
+		{"multi-failure", shellProjectInputContentContractRef, shellProjectMultiFailureInputContentRequirements + shellValidationDeclaredDeadlineRequirement(300000) + shellAssertionFeedbackRequirements, true},
+		{"artifact", shellProjectMultiFailureArtifactContentContractRef, shellProjectMultiFailureArtifactInputContentRequirements + shellValidationDeclaredDeadlineRequirement(300000) + shellAssertionFeedbackRequirements, false},
+		{"supplement", shellProjectSupplementContentContractRef, shellProjectSupplementContentRequirements + shellNativeSourceExecutionRequirements + shellValidationDeclaredDeadlineRequirement(300000) + shellAssertionFeedbackRequirements, true},
+	} {
+		contract := runtimecontract.RuntimeValidationContentContract{Ref: content.ref, Requirements: strings.TrimSpace(content.text)}.Normalized()
+		if err := contract.Validate(); err != nil {
+			t.Fatalf("%s content contract (%d bytes) invalid: %v", content.name, len(contract.Requirements), err)
+		}
+		for _, token := range []string{"-trimpath", "os.Getwd()", "t.TempDir()", "Caller/CallersFrames"} {
+			if !strings.Contains(contract.Requirements, token) {
+				t.Fatalf("%s content contract omits %q", content.name, token)
+			}
+		}
+		if content.behavioral && !strings.Contains(contract.Requirements, "GOCOVERDIR") {
+			t.Fatalf("%s behavioral contract omits GOCOVERDIR clarification", content.name)
+		}
+	}
 }
 
 func TestSupplementContentContractAndFreshReadinessAgreeWithoutReplacementPreparation(t *testing.T) {

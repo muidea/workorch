@@ -171,6 +171,10 @@ func inspectShellNativeValidationSources(targetRefs []string, attestations []run
 			if shellProjectObservationProtocol(check.ObservationProtocolRef) && shellNativeUnmanagedSelfExecution(file) {
 				return shellNativeCheckInspection{Code: "native_check_unmanaged_self_execution", CheckRef: check.NativeCheckRef, TargetRefs: []string{ref}}
 			}
+			if (shellEntrypointObservationProtocol(check.ObservationProtocolRef) || check.ObservationProtocolRef == shellGoBehaviorObservationProtocolRef || check.ObservationProtocolRef == shellGoSupplementObservationProtocolRef) &&
+				strings.HasPrefix(ref, "workorch_validation/") && shellNativeTrimpathCallerPath(file) {
+				return shellNativeCheckInspection{Code: "native_check_trimpath_caller_path", CheckRef: check.NativeCheckRef, TargetRefs: []string{ref}}
+			}
 			if check.SupplementalNativeCheckRef == "" || ref != shellSupplementTargetRef(check.NativeCheckRef) {
 				continue
 			}
@@ -381,6 +385,9 @@ func shellProjectInputMethodCode(ref string, file *ast.File) string {
 	}
 	if shellNativeUnmanagedSelfExecution(file) {
 		return "native_check_unmanaged_self_execution"
+	}
+	if strings.HasPrefix(ref, "workorch_validation/") && shellNativeTrimpathCallerPath(file) {
+		return "native_check_trimpath_caller_path"
 	}
 	return ""
 }

@@ -98,12 +98,27 @@ func shellReadValidationInputSubject(directory string, targets []string, binding
 		remaining -= int64(len(content))
 		subject.Files = append(subject.Files, runtimecontract.RuntimeValidationInputReviewFile{TargetRef: ref, Content: string(content), ContentHash: runtimecontract.RuntimeValidationInputContentHash(string(content))})
 	}
-	for _, check := range binding.CheckAttestations {
-		if !slices.Contains(refs, shellReviewedNativeCheckTarget(check.NativeCheckRef)) {
-			return nil, "validation_input_review_source_unavailable"
+	neighborMaintenance := !review && pkg != "" && len(maintenanceTargets) > 0
+	for _, target := range maintenanceTargets {
+		if strings.HasPrefix(target, pkg+"/") {
+			neighborMaintenance = false
+			break
 		}
-		if pkg != "" && check.SupplementalNativeCheckRef != "" && !slices.Contains(refs, shellSupplementTargetRef(check.NativeCheckRef)) {
-			return nil, "validation_input_review_source_unavailable"
+	}
+	if neighborMaintenance {
+		for _, target := range maintenanceTargets {
+			if !slices.Contains(refs, target) {
+				return nil, "validation_input_review_source_unavailable"
+			}
+		}
+	} else {
+		for _, check := range binding.CheckAttestations {
+			if !slices.Contains(refs, shellReviewedNativeCheckTarget(check.NativeCheckRef)) {
+				return nil, "validation_input_review_source_unavailable"
+			}
+			if pkg != "" && check.SupplementalNativeCheckRef != "" && !slices.Contains(refs, shellSupplementTargetRef(check.NativeCheckRef)) {
+				return nil, "validation_input_review_source_unavailable"
+			}
 		}
 	}
 	if !review {

@@ -127,7 +127,7 @@ func (a *RuntimeAdapter) runtimeAdmissibilityPolicyRevision() string {
 	_, _ = fmt.Fprintf(h, "project-multi-input=%s;input-maintenance=exact-owner-observation-with-recipe;deadline-requirement=%s;%s;", shellProjectMultiFailureInputContentRequirements, shellValidationDeclaredDeadlineRequirement(0), shellValidationDeclaredDeadlineRequirement(1000))
 	_, _ = fmt.Fprintf(h, "project-supplement=%s;requirements=%s;", shellProjectSupplementContentContractRef, shellProjectSupplementContentRequirements)
 	_, _ = fmt.Fprintf(h, "project-artifact=%s;protocol=%s;contract=%s;requirements=%s;scope=%s;scope-requirements=%s;stages=%s;", modulecommon.ValidationRecipeAdapterProjectMultiFailureArtifact, shellProjectMultiFailureArtifactProtocolRef, shellProjectMultiFailureArtifactContentContractRef, shellProjectMultiFailureArtifactInputContentRequirements, shellProjectMultiFailureArtifactReviewScopeRef, shellProjectMultiFailureArtifactReviewRequirements, runtimemodel.StableRuntimeValidationExecutionStagesHash(shellProjectExecutionStageIdentitiesForProtocol("owner-exact-package", shellProjectMultiFailureArtifactProtocolRef)))
-	_, _ = fmt.Fprint(h, "input-protection=shell/native-input-targets/v1;generation-context=shell/go-validation-generation-context/v1;")
+	_, _ = fmt.Fprint(h, "input-protection=shell/native-input-targets/v1;generation-context=shell/go-validation-generation-context/v1;trimpath-caller-path=reject;neighbor-method-maintenance=absent-subject-ok;")
 	_, _ = fmt.Fprintf(h, "input-review=%s;files=%d;bytes=%d;", runtimemodel.RuntimeValidationInputReviewProtocol, runtimemodel.RuntimeValidationInputReviewMaxFiles, runtimemodel.RuntimeValidationInputReviewMaxBytes)
 	for _, key := range keys {
 		_, _ = fmt.Fprintf(h, "env=%s;", key)

@@ -31,19 +31,20 @@ func shellProjectReviewExecutionPlan(subject *rc.RuntimeValidationInputReviewSub
 	requireBehavior := shellProjectRequiresBehavior(protocol)
 	identities := shellProjectExecutionStageIdentitiesForProtocol(pkg, protocol)
 	for i, spec := range shellProjectFixedStages(request.Args, pkg, requireBehavior) {
-		stage := rc.RuntimeValidationPlannedStage{Identity: identities[i], Command: "go", Args: slices.Clone(spec.Args)}
+		instrumentation := []string{"gowork_off", "trimpath"}
 		if i == 2 {
-			stage.Instrumentation = []string{"race"}
+			instrumentation = append(instrumentation, "race")
 		}
-		if i == 3 {
-			if requireBehavior {
-				stage.Instrumentation = []string{"coverage_behavior", "process_behavior"}
-			}
-			stage.RequiredCheckRefs = normalizeShellStrings(binding.RequiredCheckRefs)
+		if i == 3 && requireBehavior {
+			instrumentation = append(instrumentation, "coverage_behavior", "process_behavior")
 		}
 		if spec.JSON && (shellProjectMultiFailureProtocol(protocol) || shellNativeChannelMethodRequired(subject.Files)) {
-			stage.Instrumentation = append(stage.Instrumentation, "native_source_channel")
-			slices.Sort(stage.Instrumentation)
+			instrumentation = append(instrumentation, "native_source_channel")
+		}
+		slices.Sort(instrumentation)
+		stage := rc.RuntimeValidationPlannedStage{Identity: identities[i], Command: "go", Args: slices.Clone(spec.Args), Instrumentation: instrumentation}
+		if i == 3 {
+			stage.RequiredCheckRefs = normalizeShellStrings(binding.RequiredCheckRefs)
 		}
 		plan.Stages = append(plan.Stages, stage)
 	}

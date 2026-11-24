@@ -80,6 +80,7 @@ func TestTemplateProofSourcesResolveExactOriginalItemsAcrossUserOffsets(t *testi
 				fmt.Sprintf("dod-%03d", users+2):  true,
 				fmt.Sprintf("dod-%03d", users+3):  true,
 				fmt.Sprintf("dod-%03d", users+4):  true,
+				fmt.Sprintf("dod-%03d", users+5):  true,
 				fmt.Sprintf("dod-%03d", users+11): true,
 				fmt.Sprintf("dod-%03d", users+12): true,
 				fmt.Sprintf("dod-%03d", users+13): true,
@@ -245,7 +246,7 @@ func TestSealedWorkspaceTemplateUpdateRefreshesArtifactRecipesWithoutChangingSta
 	artifactCount := 0
 	for _, r := range compiled.ProfileContracts[0].EvidenceRequirements {
 		switch r.ID {
-		case "dod-004", "dod-005", "dod-006", "dod-013", "dod-014", "dod-015":
+		case "dod-004", "dod-005", "dod-006", "dod-007", "dod-013", "dod-014", "dod-015":
 			if r.ValidationRecipeID != "software-dev-artifact-validation-evidence" {
 				t.Fatalf("expected artifact recipe on %s after restart, got %q", r.ID, r.ValidationRecipeID)
 			}
@@ -256,7 +257,7 @@ func TestSealedWorkspaceTemplateUpdateRefreshesArtifactRecipesWithoutChangingSta
 			}
 		}
 	}
-	if artifactCount != 6 {
-		t.Fatalf("artifactCount=%d, want 6", artifactCount)
+	if artifactCount != 7 {
+		t.Fatalf("artifactCount=%d, want 7", artifactCount)
 	}
 }

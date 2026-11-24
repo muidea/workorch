@@ -37,6 +37,52 @@ func shellNativeUnmanagedSelfExecution(file *ast.File) bool {
 	return found
 }
 
+// Shell executes managed Go checks with GOFLAGS=-trimpath from the package
+// working directory; runtime.Caller/CallersFrames resolve module-relative paths
+// rather than workspace filesystem locations. This guards validation harness
+// inputs only and is not a semantic judgment about user assertions or failures.
+func shellNativeTrimpathCallerPath(file *ast.File) bool {
+	aliases := map[string]bool{}
+	dotImport := false
+	for _, im := range file.Imports {
+		p, _ := strconv.Unquote(im.Path.Value)
+		if p != "runtime" {
+			continue
+		}
+		if im.Name == nil {
+			aliases["runtime"] = true
+		} else if im.Name.Name == "." {
+			dotImport = true
+		} else if im.Name.Name != "_" {
+			aliases[im.Name.Name] = true
+		}
+	}
+	if len(aliases) == 0 && !dotImport {
+		return false
+	}
+	found := false
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return !found
+		}
+		switch fn := call.Fun.(type) {
+		case *ast.SelectorExpr:
+			if fn.Sel.Name == "Caller" || fn.Sel.Name == "CallersFrames" {
+				if base, ok := fn.X.(*ast.Ident); ok && base.Obj == nil && aliases[base.Name] {
+					found = true
+				}
+			}
+		case *ast.Ident:
+			if dotImport && fn.Obj == nil && (fn.Name == "Caller" || fn.Name == "CallersFrames") {
+				found = true
+			}
+		}
+		return !found
+	})
+	return found
+}
+
 // Entrypoint review observes existing input bytes under the declared scope;
 // it does not rewrite them or infer assertion semantics.
 // Reachable testing.T assertions still use the shared bounded native walker.
