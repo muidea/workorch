@@ -2013,6 +2013,9 @@ func (m *AppModel) syncActiveWorkspaceOverview() tea.Cmd {
 	if ws == nil {
 		return nil
 	}
+	previousRunID := m.activeRunID
+	previousRunning := m.running
+	previousProgressText := strings.TrimSpace(m.progressText)
 	if ws.ActiveRunID != "" {
 		m.activeRunID = string(ws.ActiveRunID)
 	} else if !workspaceStateIsLive(common.WorkspaceState(ws.State)) && ws.State != string(common.WorkspaceStateActive) && ws.State != string(common.WorkspaceStateBlockedOnApproval) {
@@ -2033,7 +2036,11 @@ func (m *AppModel) syncActiveWorkspaceOverview() tea.Cmd {
 		m.clearBlockingInputState()
 		m.running = true
 		m.progress = progressRunning
-		m.progressText = "Running"
+		if previousRunning && previousRunID == string(ws.ActiveRunID) && previousProgressText != "" {
+			m.progressText = previousProgressText
+		} else {
+			m.progressText = "Running"
+		}
 	} else if !workspaceStateIsLive(common.WorkspaceState(ws.State)) {
 		m.clearCanonicalBlockingTargets()
 	}

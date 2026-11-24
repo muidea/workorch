@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
@@ -1311,5 +1314,155 @@ func TestRuntimeViewNewStreamGenerationSupersedesOldRevisionDomain(t *testing.T)
 	}
 	if m.runtime == nil || m.runtime.CurrentFocusID != "new-focus" {
 		t.Fatalf("new generation runtime progress was not applied: %+v", m.runtime)
+	}
+}
+
+func TestWorkspaceListMsgPreservesDetailedRuntimeProgressTextForSameRun(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-run", "")
+	m.width = 120
+	m.height = 30
+	m.activeWorkspaceID = "ws-run"
+	m.activeRunID = "run-1"
+	m.running = true
+	m.progress = progressRunning
+
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
+		WorkspaceID:  "ws-run",
+		ActiveRunID:  "run-1",
+		DisplayRunID: "run-1",
+		RunState:     string(common.RunStateActive),
+		Revision:     projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 5, RuntimeStateRevision: 50, ActivityRevision: 5},
+		TaskProgress: projectioncontract.TaskProgress{
+			WorkspaceID: "ws-run",
+			RunID:       "run-1",
+			State:       string(common.RunStateActive),
+			Summary:     "revision 50 | evidence 4 | focus focus-005",
+			Runtime:     &projectioncontract.RuntimeProgress{StateRevision: 50, EvidenceSequence: 4, CurrentFocusID: "focus-005"},
+		},
+	}, false)
+	if !strings.Contains(m.progressText, "revision 50") {
+		t.Fatalf("progressText = %q, want detailed runtime summary", m.progressText)
+	}
+
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []projectioncontract.Workspace{
+		{ID: "ws-run", Title: "Run", State: string(common.WorkspaceStateActive), ActiveRunID: "run-1"},
+	}})
+	m = asModel(next)
+	if !strings.Contains(m.progressText, "revision 50") {
+		t.Fatalf("WorkspaceListMsg clobbered detailed progressText to %q", m.progressText)
+	}
+
+	// Switching to a new active run resets the stale run's detailed text.
+	next, _ = m.Update(WorkspaceListMsg{Workspaces: []projectioncontract.Workspace{
+		{ID: "ws-run", Title: "Run", State: string(common.WorkspaceStateActive), ActiveRunID: "run-2"},
+	}})
+	m = asModel(next)
+	if m.activeRunID != "run-2" || m.progressText != "Running" {
+		t.Fatalf("new run activeRunID=%q progressText=%q, want run-2 / Running", m.activeRunID, m.progressText)
+	}
+}
+
+func TestActiveRunningWorkspaceSwitchAndResizeFollowExecutionTail(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-scroll", "")
+	m.width = 100
+	m.height = 18
+	m.activeWorkspaceID = "ws-scroll"
+
+	items := make([]projectioncontract.WorkspaceActivityItem, 0, 20)
+	for i := 1; i <= 20; i++ {
+		items = append(items, projectioncontract.WorkspaceActivityItem{
+			ID:         fmt.Sprintf("act-%02d", i),
+			RunID:      "run-scroll",
+			Kind:       projectioncontract.WorkspaceActivityRuntimeTransition,
+			Title:      "runtime focus",
+			Summary:    fmt.Sprintf("step %02d executing", i),
+			OccurredAt: fmt.Sprintf("2026-11-24T08:00:%02dZ", i),
+		})
+	}
+
+	next, _ := m.Update(WorkspaceContextMsg{
+		WorkspaceID:       "ws-scroll",
+		ResetMainViewport: true,
+		WorkspaceHasLive:  true,
+		Workspace:         &projectioncontract.Workspace{ID: "ws-scroll", Title: "Scroll", State: string(common.WorkspaceStateActive), ActiveRunID: "run-scroll"},
+		ActiveRun:         &projectioncontract.Run{ID: "run-scroll", WorkspaceID: "ws-scroll", State: string(common.RunStateActive)},
+		RuntimeView: &projectioncontract.WorkspaceRuntimeView{
+			WorkspaceID:  "ws-scroll",
+			ActiveRunID:  "run-scroll",
+			DisplayRunID: "run-scroll",
+			RunState:     string(common.RunStateActive),
+			Revision:     projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 20, RuntimeStateRevision: 20, ActivityRevision: 20},
+			TaskProgress: projectioncontract.TaskProgress{
+				WorkspaceID: "ws-scroll",
+				RunID:       "run-scroll",
+				State:       string(common.RunStateActive),
+				Summary:     "revision 20 | focus focus-20",
+				Runtime:     &projectioncontract.RuntimeProgress{StateRevision: 20, CurrentFocusID: "focus-20"},
+			},
+			Activity: projectioncontract.WorkspaceActivityFeed{
+				WorkspaceID:      "ws-scroll",
+				DisplayRunID:     "run-scroll",
+				ActivityRevision: 20,
+				Items:            items,
+			},
+		},
+	})
+	m = asModel(next)
+	_ = m.View()
+	if m.mainViewport == nil || !m.mainViewport.AtBottom() {
+		t.Fatalf("active running workspace switch did not follow tail: atBottom=%v yOffset=%d", m.mainViewport != nil && m.mainViewport.AtBottom(), m.mainViewport.YOffset)
+	}
+
+	// Growing activity feed continues auto-scrolling to the tail.
+	items = append(items, projectioncontract.WorkspaceActivityItem{
+		ID:         "act-21",
+		RunID:      "run-scroll",
+		Kind:       projectioncontract.WorkspaceActivityRuntimeTransition,
+		Title:      "runtime focus",
+		Summary:    "step 21 newest event",
+		OccurredAt: "2026-11-24T08:00:21Z",
+	})
+	m.applyWorkspaceRuntimeView(projectioncontract.WorkspaceRuntimeView{
+		WorkspaceID:  "ws-scroll",
+		ActiveRunID:  "run-scroll",
+		DisplayRunID: "run-scroll",
+		RunState:     string(common.RunStateActive),
+		Revision:     projectioncontract.WorkspaceRefreshRevision{WorkspaceRevision: 21, RuntimeStateRevision: 21, ActivityRevision: 21},
+		TaskProgress: projectioncontract.TaskProgress{
+			WorkspaceID: "ws-scroll",
+			RunID:       "run-scroll",
+			State:       string(common.RunStateActive),
+			Summary:     "revision 21 | focus focus-21",
+			Runtime:     &projectioncontract.RuntimeProgress{StateRevision: 21, CurrentFocusID: "focus-21"},
+		},
+		Activity: projectioncontract.WorkspaceActivityFeed{
+			WorkspaceID:      "ws-scroll",
+			DisplayRunID:     "run-scroll",
+			ActivityRevision: 21,
+			Items:            items,
+		},
+	}, false)
+	screen := stripANSI(m.View())
+	if !strings.Contains(screen, "step 21 newest event") || !m.mainViewport.AtBottom() {
+		t.Fatalf("updated execution stream did not scroll to newest event: atBottom=%v view=\n%s", m.mainViewport.AtBottom(), screen)
+	}
+
+	// Terminal resize while follow-tail is active keeps viewport anchored at bottom.
+	next, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 14})
+	m = asModel(next)
+	_ = m.View()
+	if !m.mainViewport.AtBottom() {
+		t.Fatalf("window resize broke tail anchoring while follow-tail enabled: yOffset=%d", m.mainViewport.YOffset)
+	}
+
+	// User scrolls up manually: resize must NOT snap back to bottom.
+	m.scrollMain(-3)
+	if !m.mainViewportUserScrolled || m.mainViewport.AtBottom() {
+		t.Fatalf("expected manual scroll up to pause follow-tail: userScrolled=%v atBottom=%v", m.mainViewportUserScrolled, m.mainViewport.AtBottom())
+	}
+	next, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 16})
+	m = asModel(next)
+	if !m.mainViewportUserScrolled || m.activeWorkspaceFollowTail() {
+		t.Fatalf("window resize cleared user scroll pause: userScrolled=%v followTail=%v", m.mainViewportUserScrolled, m.activeWorkspaceFollowTail())
 	}
 }

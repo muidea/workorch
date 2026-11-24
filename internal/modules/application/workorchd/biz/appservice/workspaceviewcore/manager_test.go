@@ -2479,3 +2479,109 @@ func (l failOnIdentityProjectionLoader) ReadWorkspaceSnapshot(context.Context, s
 	l.t.Fatal("readiness loaded workspace snapshot")
 	return readmodelcore.WorkspaceSnapshotState{}, nil
 }
+
+func TestStoreUpsertSnapshotAccumulatesRuntimeActivityAndSummaryStaysCompact(t *testing.T) {
+	store := NewStore()
+	workspaceID := "ws-activity-accumulate"
+	snap1 := readmodelcore.WorkspaceSnapshotState{
+		Workspace: appmodelcore.Workspace{ID: workspaceID, Title: "accumulate", State: "active", ActiveRunID: "run-1"},
+		Results:   []projectioncontract.Result{{ID: "res-1", WorkspaceID: workspaceID, RunID: "run-1", State: "accepted", Summary: "ok"}},
+		Artifacts: []projectioncontract.Artifact{{ID: "art-1", WorkspaceID: workspaceID, RunID: "run-1", Name: "report.md", State: "ready"}},
+		EventRecords: []projectioncontract.EventRecord{{
+			ID: "evt-1", WorkspaceID: workspaceID, RunID: "run-1", Topic: "/run/state/changed", OccurredAt: "2026-11-24T08:00:00Z", Revision: 1,
+		}},
+		TaskProgress: projectioncontract.TaskProgress{
+			WorkspaceID: workspaceID,
+			RunID:       "run-1",
+			State:       "active",
+			Summary:     "revision 10 | focus focus-1",
+			Runtime: &projectioncontract.RuntimeProgress{
+				StateRevision:            10,
+				EvidenceSequence:         2,
+				CurrentFocusID:           "focus-1",
+				ConvergenceState:         "need_state_change",
+				LatestAcceptedEvidenceAt: "2026-11-24T08:00:05Z",
+				ImplementationWork: &projectioncontract.RuntimeImplementationProgress{
+					CurrentWorkItemID:   "cwi-001",
+					ReservedRounds:      3,
+					CompletedRounds:     1,
+					CommittedReceipts:   1,
+					SemanticGenerations: 1,
+				},
+			},
+		},
+	}
+	store.UpsertSnapshot(snap1)
+	feed1, ok := store.GetActivity(workspaceID)
+	if !ok || feed1.ActivityRevision == 0 {
+		t.Fatalf("first GetActivity = (%+v, %v), want populated activity", feed1, ok)
+	}
+
+	snap2 := snap1
+	snap2.TaskProgress = projectioncontract.TaskProgress{
+		WorkspaceID: workspaceID,
+		RunID:       "run-1",
+		State:       "active",
+		Summary:     "revision 11 | focus focus-2",
+		Runtime: &projectioncontract.RuntimeProgress{
+			StateRevision:          11,
+			EvidenceSequence:       3,
+			CurrentFocusID:         "focus-2",
+			ConvergenceState:       "need_validation",
+			CompletedDispatchCount: 1,
+			LatestDurableEffectAt:  "2026-11-24T08:00:10Z",
+			ImplementationWork: &projectioncontract.RuntimeImplementationProgress{
+				CurrentWorkItemID:   "cwi-002",
+				ReservedRounds:      3,
+				CompletedRounds:     2,
+				CommittedReceipts:   2,
+				SemanticGenerations: 1,
+			},
+		},
+	}
+	store.UpsertSnapshot(snap2)
+	feed2, ok := store.GetActivity(workspaceID)
+	if !ok {
+		t.Fatal("expected second activity feed")
+	}
+	if feed2.ActivityRevision <= feed1.ActivityRevision {
+		t.Fatalf("ActivityRevision did not advance: first=%d second=%d", feed1.ActivityRevision, feed2.ActivityRevision)
+	}
+	if len(feed2.Items) <= len(feed1.Items) {
+		t.Fatalf("activity feed did not accumulate transitions: first=%d second=%d", len(feed1.Items), len(feed2.Items))
+	}
+	var sawFocus1, sawFocus2, sawImpl1, sawImpl2 bool
+	for _, item := range feed2.Items {
+		if strings.Contains(item.Summary, "runtime focus focus-1 activated") {
+			sawFocus1 = true
+		}
+		if strings.Contains(item.Summary, "runtime focus focus-2 activated") {
+			sawFocus2 = true
+		}
+		if strings.Contains(item.Summary, "CWI cwi-001") {
+			sawImpl1 = true
+		}
+		if strings.Contains(item.Summary, "CWI cwi-002") {
+			sawImpl2 = true
+		}
+	}
+	if !sawFocus1 || !sawFocus2 || !sawImpl1 || !sawImpl2 {
+		t.Fatalf("missing accumulated items: f1=%v f2=%v i1=%v i2=%v items=%+v", sawFocus1, sawFocus2, sawImpl1, sawImpl2, feed2.Items)
+	}
+
+	stored, _, err := store.GetSnapshot(workspaceID)
+	if err != nil {
+		t.Fatalf("GetSnapshot: %v", err)
+	}
+	if stored.TaskProgress.Runtime == nil || stored.TaskProgress.Runtime.StateRevision != 11 {
+		t.Fatalf("stored snapshot Runtime = %+v, want rev 11", stored.TaskProgress.Runtime)
+	}
+
+	summary, _, err := store.GetSummarySnapshot(workspaceID)
+	if err != nil {
+		t.Fatalf("GetSummarySnapshot: %v", err)
+	}
+	if len(summary.Results) != 0 || len(summary.Artifacts) != 0 || len(summary.EventRecords) != 0 {
+		t.Fatalf("summary snapshot unexpectedly exposed detail collections: %+v", summary)
+	}
+}

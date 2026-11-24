@@ -2,9 +2,11 @@ package readmodelports
 
 import (
 	"context"
+	"errors"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -13,7 +15,11 @@ func WorkspaceSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, wo
 }
 
 func WorkspaceProjectionSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshotState) (readmodelcore.WorkspaceSnapshotState, error) {
-	return WorkspaceSummarySnapshot(ctx, readers, workspaceID, cachedRunSnapshot)
+	snapshot, err := workspaceSnapshot(ctx, readers, workspaceID, cachedRunSnapshot, workspaceSnapshotSummaryLoadOptions())
+	if err != nil {
+		return readmodelcore.WorkspaceSnapshotState{}, err
+	}
+	return readmodelprojection.WorkspaceProjection().Detail(snapshot), nil
 }
 
 func WorkspaceDetailSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshotState) (readmodelcore.WorkspaceSnapshotState, error) {
@@ -40,6 +46,12 @@ func workspaceSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, wo
 	}
 
 	projectionRun := models.selectProjectionRun()
+	if !options.includeProjectionRunSnapshot {
+		projectionRun, err = hydrateProjectionRunRuntime(ctx, readers.Runs, projectionRun, models)
+		if err != nil {
+			return readmodelcore.WorkspaceSnapshotState{}, err
+		}
+	}
 	ret := readmodelprojection.WorkspaceProjection().SnapshotFromModels(models.projectionInput(projectionRun))
 	if projectionRun == nil {
 		return ret, nil
@@ -66,4 +78,21 @@ func workspaceSnapshot(ctx context.Context, readers WorkspaceSnapshotReaders, wo
 		ret.TaskProgress = cachedRunSnapshot.TaskProgress
 	}
 	return ret, nil
+}
+
+func hydrateProjectionRunRuntime(ctx context.Context, runs readmodelcore.RunReader, projectionRun *runmodel.Run, models workspaceSnapshotModels) (*runmodel.Run, error) {
+	if projectionRun == nil || projectionRun.RuntimeState != nil || runs == nil || !models.runHasRuntimeState(projectionRun.ID) {
+		return projectionRun, nil
+	}
+	loaded, err := readmodelcore.GetRunFromReader(ctx, runs, projectionRun.ID)
+	if err != nil {
+		if errors.Is(err, common.ErrNotFound) {
+			return projectionRun, nil
+		}
+		return nil, err
+	}
+	if loaded != nil {
+		return loaded, nil
+	}
+	return projectionRun, nil
 }

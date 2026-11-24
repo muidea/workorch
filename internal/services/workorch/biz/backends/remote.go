@@ -612,7 +612,7 @@ func (b *remoteEventsBackend) streamEventsOnce(ctx context.Context, handler port
 		query.Set("view", streamView)
 	}
 	if lastEventID := b.lastEventIDSnapshot(); lastEventID != "" {
-		req.Header.Set("Last-port.Event-ID", lastEventID)
+		req.Header.Set("Last-Event-ID", lastEventID)
 		query.Set("lastEventId", lastEventID)
 	}
 	req.URL.RawQuery = query.Encode()
@@ -782,7 +782,7 @@ func (b *remoteProjectionEventsBackend) streamProjectionEventsOnce(
 	query := req.URL.Query()
 	query.Set("view", "projection")
 	if lastEventID := b.lastEventIDSnapshot(); lastEventID != "" {
-		req.Header.Set("Last-port.Event-ID", lastEventID)
+		req.Header.Set("Last-Event-ID", lastEventID)
 		query.Set("lastEventId", lastEventID)
 	}
 	req.URL.RawQuery = query.Encode()

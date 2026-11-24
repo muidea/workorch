@@ -9,6 +9,7 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -16,6 +17,7 @@ import (
 type workspaceSnapshotModels struct {
 	Workspace             *workspacemodel.Workspace
 	Runs                  []*runmodel.Run
+	RunInventory          []runmodel.RunInventoryItem
 	Goals                 []*workspacemodel.Goal
 	DoDs                  []*workspacemodel.DoD
 	Results               []*resultmodel.Result
@@ -34,6 +36,18 @@ type workspaceSnapshotModels struct {
 
 func (models workspaceSnapshotModels) selectProjectionRun() *runmodel.Run {
 	return readmodelprojection.WorkspaceProjection().SelectProjectionRun(models.Workspace, models.Runs, models.Results, models.EventRecords)
+}
+
+func (models workspaceSnapshotModels) runHasRuntimeState(runID common.RunID) bool {
+	if runID == "" {
+		return false
+	}
+	for _, item := range models.RunInventory {
+		if item.ID == runID {
+			return item.HasRuntimeState
+		}
+	}
+	return false
 }
 
 func (models workspaceSnapshotModels) projectionInput(projectionRun *runmodel.Run) readmodelprojection.WorkspaceSnapshotModelInput {

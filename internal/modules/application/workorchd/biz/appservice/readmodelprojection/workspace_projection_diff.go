@@ -124,7 +124,41 @@ func workspaceRuntimeProjectionChanged(previous, candidate readmodelcore.Workspa
 		left.CompletedDispatchCount != right.CompletedDispatchCount ||
 		left.CandidateAttemptCount != right.CandidateAttemptCount ||
 		left.AcceptedEvidenceCount != right.AcceptedEvidenceCount ||
-		left.RejectedEvidenceCount != right.RejectedEvidenceCount
+		left.RejectedEvidenceCount != right.RejectedEvidenceCount ||
+		left.ActiveDispatchID != right.ActiveDispatchID ||
+		left.DurableEffectCount != right.DurableEffectCount ||
+		left.SatisfiedCWICount != right.SatisfiedCWICount ||
+		left.PrerequisiteRefreshState != right.PrerequisiteRefreshState ||
+		left.FailureClass != right.FailureClass ||
+		left.FailureCode != right.FailureCode ||
+		left.FailureMessage != right.FailureMessage ||
+		!runtimeImplementationProgressEqual(left.ImplementationWork, right.ImplementationWork)
+}
+
+func runtimeImplementationProgressEqual(left, right *projectioncontract.RuntimeImplementationProgress) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	if left.CurrentWorkItemID != right.CurrentWorkItemID ||
+		left.CurrentIntent != right.CurrentIntent ||
+		left.WorkRoundsUsed != right.WorkRoundsUsed ||
+		left.RepeatedWorkStates != right.RepeatedWorkStates ||
+		left.InputRevisionsUsed != right.InputRevisionsUsed ||
+		left.InputRevisionEnabled != right.InputRevisionEnabled ||
+		left.RepeatedStateLimit != right.RepeatedStateLimit ||
+		left.ReservedRounds != right.ReservedRounds ||
+		left.CompletedRounds != right.CompletedRounds ||
+		left.CommittedReceipts != right.CommittedReceipts ||
+		left.UnknownExecutions != right.UnknownExecutions ||
+		left.SemanticGenerations != right.SemanticGenerations ||
+		left.ArchivedSegments != right.ArchivedSegments {
+		return false
+	}
+	if left.LastIntentReview == nil || right.LastIntentReview == nil {
+		return left.LastIntentReview == right.LastIntentReview
+	}
+	return left.LastIntentReview.Outcome == right.LastIntentReview.Outcome &&
+		left.LastIntentReview.Reason == right.LastIntentReview.Reason
 }
 
 func appendWorkspaceActivityDiff(sections *workspaceProjectionSections, previous, candidate readmodelcore.WorkspaceSnapshotState) {

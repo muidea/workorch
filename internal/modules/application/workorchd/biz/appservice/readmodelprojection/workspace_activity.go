@@ -226,8 +226,13 @@ func collectWorkspaceActivityItems(snapshot readmodelcore.WorkspaceSnapshotState
 }
 
 func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime projectioncontract.RuntimeProgress, snapshot readmodelcore.WorkspaceSnapshotState) []projectioncontract.WorkspaceActivityItem {
-	occurredAt := firstNonEmptyTimelineString(snapshot.RunHeartbeat.LatestEventAt, snapshot.ViewModel.UpdatedAt, snapshot.ViewModel.RebuiltAt)
-	items := make([]projectioncontract.WorkspaceActivityItem, 0, 4)
+	ownerOccurredAt := latestTimelineTimestamp(
+		snapshot.RunHeartbeat.LatestEventAt,
+		runtime.LatestAcceptedEvidenceAt,
+		runtime.LatestDurableEffectAt,
+	)
+	occurredAt := firstNonEmptyTimelineString(ownerOccurredAt, snapshot.ViewModel.UpdatedAt, snapshot.ViewModel.RebuiltAt)
+	items := make([]projectioncontract.WorkspaceActivityItem, 0, 5)
 	if focusID := strings.TrimSpace(runtime.CurrentFocusID); focusID != "" {
 		items = append(items, projectioncontract.WorkspaceActivityItem{
 			ID:                   activityID("runtime", displayRunID, "focus", focusID, strconv.FormatUint(runtime.StateRevision, 10)),
@@ -266,6 +271,40 @@ func runtimeProgressActivityItems(workspaceID, displayRunID string, runtime proj
 			State:                firstNonEmptyTimelineString(runtime.ConvergenceState, "dispatch"),
 			Title:                "dispatch",
 			Summary:              fmt.Sprintf("dispatch %s | completed %d | attempts %d", firstNonEmptyTimelineString(runtime.ActiveDispatchID, "none"), runtime.CompletedDispatchCount, runtime.CandidateAttemptCount),
+			OccurredAt:           occurredAt,
+			RuntimeStateRevision: runtime.StateRevision,
+			EvidenceSequence:     runtime.EvidenceSequence,
+		})
+	}
+	if work := runtime.ImplementationWork; work != nil &&
+		(strings.TrimSpace(work.CurrentWorkItemID) != "" || work.CompletedRounds > 0 || work.CommittedReceipts > 0 || work.SemanticGenerations > 0) {
+		parts := []string{
+			fmt.Sprintf("rounds %d/%d", work.CompletedRounds, work.ReservedRounds),
+			fmt.Sprintf("receipts %d", work.CommittedReceipts),
+			fmt.Sprintf("semantic %d", work.SemanticGenerations),
+		}
+		if cwi := strings.TrimSpace(work.CurrentWorkItemID); cwi != "" {
+			parts = append(parts, fmt.Sprintf("CWI %s (used %d)", cwi, work.WorkRoundsUsed))
+		}
+		if work.LastIntentReview != nil && strings.TrimSpace(string(work.LastIntentReview.Outcome)) != "" {
+			parts = append(parts, "review "+strings.TrimSpace(string(work.LastIntentReview.Outcome)))
+		}
+		items = append(items, projectioncontract.WorkspaceActivityItem{
+			ID: activityID(
+				"implementation",
+				displayRunID,
+				work.CurrentWorkItemID,
+				strconv.Itoa(work.CompletedRounds),
+				strconv.Itoa(work.CommittedReceipts),
+				strconv.Itoa(work.SemanticGenerations),
+				strconv.FormatUint(runtime.StateRevision, 10),
+			),
+			WorkspaceID:          workspaceID,
+			RunID:                displayRunID,
+			Kind:                 projectioncontract.WorkspaceActivityRuntimeTransition,
+			State:                firstNonEmptyTimelineString(runtime.ConvergenceState, snapshot.TaskProgress.State, "running"),
+			Title:                "implementation",
+			Summary:              "implementation " + strings.Join(parts, " | "),
 			OccurredAt:           occurredAt,
 			RuntimeStateRevision: runtime.StateRevision,
 			EvidenceSequence:     runtime.EvidenceSequence,
@@ -614,4 +653,18 @@ func activityID(parts ...string) string {
 		return "activity"
 	}
 	return strings.Join(cleaned, ":")
+}
+
+func latestTimelineTimestamp(values ...string) string {
+	latest := ""
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if latest == "" || trimmed > latest {
+			latest = trimmed
+		}
+	}
+	return latest
 }

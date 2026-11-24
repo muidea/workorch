@@ -322,6 +322,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		if !m.mainViewportUserScrolled && m.activeWorkspaceFollowTail() &&
+			(m.running || m.progress == progressRunning || len(m.activityFeed.Items) > 0 || m.activeBlockingDecision() != nil || m.activeBlockingApproval() != nil) {
+			m.followMainViewportTail()
+		}
 		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -389,7 +393,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyWorkspaceContext(msg)
 		m.clearProjectionRefreshError()
 		if msg.ResetMainViewport {
-			if m.activeBlockingDecision() != nil || m.activeBlockingApproval() != nil {
+			if m.activeBlockingDecision() != nil || m.activeBlockingApproval() != nil || m.running || m.progress == progressRunning {
 				m.followMainViewportTail()
 			} else {
 				m.syncMainViewportToCurrentContent()

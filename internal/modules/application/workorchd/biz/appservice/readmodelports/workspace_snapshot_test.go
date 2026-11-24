@@ -455,3 +455,181 @@ func llmUsageBreakdownContains(items []projectioncontract.LLMUsageProviderModelB
 	}
 	return false
 }
+
+type projectionRunHydrationReader struct {
+	fakeRunStatusRunReader
+	mu        sync.Mutex
+	getByWS   []common.RunID
+	getDirect []common.RunID
+}
+
+func (r *projectionRunHydrationReader) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
+	r.mu.Lock()
+	r.getDirect = append(r.getDirect, id)
+	r.mu.Unlock()
+	return r.fakeRunStatusRunReader.Get(ctx, id)
+}
+
+func (r *projectionRunHydrationReader) GetByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID, id common.RunID) (*runmodel.Run, error) {
+	r.mu.Lock()
+	r.getByWS = append(r.getByWS, id)
+	r.mu.Unlock()
+	return r.fakeRunStatusRunReader.GetByWorkspaceID(ctx, workspaceID, id)
+}
+
+func (r *projectionRunHydrationReader) ListByWorkspaceID(context.Context, common.WorkspaceID) ([]*runmodel.Run, error) {
+	panic("projection snapshot must not load full runs for workspace")
+}
+
+type fakeWorkspaceSnapshotArtifactReader struct {
+	items []*resultmodel.Artifact
+}
+
+func (f fakeWorkspaceSnapshotArtifactReader) ListByWorkspace(_ context.Context, workspaceID common.WorkspaceID) ([]*resultmodel.Artifact, error) {
+	ret := make([]*resultmodel.Artifact, 0, len(f.items))
+	for _, item := range f.items {
+		if item != nil && item.WorkspaceID == workspaceID {
+			ret = append(ret, item)
+		}
+	}
+	return ret, nil
+}
+
+func (f fakeWorkspaceSnapshotArtifactReader) ListByRun(_ context.Context, runID common.RunID) ([]*resultmodel.Artifact, error) {
+	ret := make([]*resultmodel.Artifact, 0, len(f.items))
+	for _, item := range f.items {
+		if item != nil && item.RunID == runID {
+			ret = append(ret, item)
+		}
+	}
+	return ret, nil
+}
+
+func (f fakeWorkspaceSnapshotArtifactReader) ListByResult(_ context.Context, resultID common.ResultID) ([]*resultmodel.Artifact, error) {
+	ret := make([]*resultmodel.Artifact, 0, len(f.items))
+	for _, item := range f.items {
+		if item != nil && item.ResultID == resultID {
+			ret = append(ret, item)
+		}
+	}
+	return ret, nil
+}
+
+func TestWorkspaceProjectionSnapshotHydratesSelectedProjectionRunRuntimeOnly(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := common.WorkspaceID("ws-workspace-projection-hydrate")
+	historicalRunID := common.RunID("run-projection-history")
+	activeRunID := common.RunID("run-projection-active")
+	historicalRun := &runmodel.Run{
+		ID:                     historicalRunID,
+		WorkspaceID:            workspaceID,
+		WorkspaceRunGeneration: 1,
+		State:                  common.RunStateCompleted,
+		RuntimeState: &orchestratormodel.RuntimeStateRecord{
+			StateRevision: 10,
+		},
+	}
+	activeRun := &runmodel.Run{
+		ID:                     activeRunID,
+		WorkspaceID:            workspaceID,
+		WorkspaceRunGeneration: 2,
+		State:                  common.RunStateActive,
+		RuntimeState: &orchestratormodel.RuntimeStateRecord{
+			StateRevision:       42,
+			EvidenceSequence:    7,
+			CompletedDispatches: []orchestratormodel.RuntimeDispatchRecord{{ID: "disp-42"}},
+			Decision: orchestratormodel.RuntimeDecision{
+				State: orchestratormodel.ConvergenceStateNeedStateChange,
+			},
+			Facts: orchestratormodel.RuntimeFacts{
+				Focus: orchestratormodel.CoverageFocus{ID: "focus-003"},
+			},
+		},
+	}
+	runReader := &projectionRunHydrationReader{
+		fakeRunStatusRunReader: fakeRunStatusRunReader{items: []*runmodel.Run{historicalRun, activeRun}},
+	}
+	eventReader := &fakeRunSnapshotEventReader{
+		records: []*eventstreammodel.EventRecord{{
+			ID:          "evt-active-1",
+			WorkspaceID: workspaceID,
+			RunID:       activeRunID,
+			Topic:       "/run/state/changed",
+			OccurredAt:  "2026-11-24T08:00:00Z",
+		}},
+	}
+	patches := &recordingWorkspacePatchReader{}
+	continuations := &recordingWorkspaceArtifactContinuationReader{}
+	readers := WorkspaceSnapshotReaders{
+		Workspaces: fakeRunSnapshotWorkspaceReader{items: []*workspacemodel.Workspace{{
+			ID:          workspaceID,
+			Title:       "projection hydrate",
+			State:       common.WorkspaceStateActive,
+			ActiveRunID: activeRunID,
+		}}},
+		Runs: runReader,
+		Results: fakeWorkspaceSnapshotResultReader{items: []*resultmodel.Result{{
+			ID:          "res-history-1",
+			WorkspaceID: workspaceID,
+			RunID:       historicalRunID,
+			State:       common.ResultStateAccepted,
+			Summary:     "historical result",
+		}}},
+		Artifacts: fakeWorkspaceSnapshotArtifactReader{items: []*resultmodel.Artifact{{
+			ID:          "art-active-1",
+			WorkspaceID: workspaceID,
+			RunID:       activeRunID,
+			Name:        "build.log",
+			State:       common.ArtifactStateAvailable,
+		}}},
+		ArtifactContinuations: continuations,
+		EventRecords:          eventReader,
+		Patches:               patches,
+		Tickets:               fakeTicketReader{},
+		Resolutions:           fakeResolutionReader{},
+		Approvals:             fakeApprovalListReader{},
+	}
+
+	got, err := WorkspaceProjectionSnapshot(context.Background(), readers, workspaceID, nil)
+	if err != nil {
+		t.Fatalf("WorkspaceProjectionSnapshot: %v", err)
+	}
+	if len(runReader.getByWS) != 1 || runReader.getByWS[0] != activeRunID {
+		t.Fatalf("GetByWorkspaceID calls = %+v, want single hydration for %s only", runReader.getByWS, activeRunID)
+	}
+	if len(runReader.getDirect) != 0 {
+		t.Fatalf("unexpected direct Get calls = %+v, want scoped GetByWorkspaceID only", runReader.getDirect)
+	}
+	if got.TaskProgress.Runtime == nil {
+		t.Fatal("expected TaskProgress.Runtime to be hydrated on WorkspaceProjectionSnapshot")
+	}
+	if got.TaskProgress.Runtime.StateRevision != 42 ||
+		got.TaskProgress.Runtime.EvidenceSequence != 7 ||
+		got.TaskProgress.Runtime.CurrentFocusID != "focus-003" ||
+		got.TaskProgress.Runtime.CompletedDispatchCount != 1 {
+		t.Fatalf("hydrated RuntimeProgress = %+v, want rev=42 seq=7 focus=focus-003 dispatch=1", got.TaskProgress.Runtime)
+	}
+	if len(got.EventRecords) != 1 || len(got.Results) != 1 || len(got.Artifacts) != 1 {
+		t.Fatalf("projection snapshot stripped detail collections: events=%d results=%d artifacts=%d", len(got.EventRecords), len(got.Results), len(got.Artifacts))
+	}
+	for _, query := range eventReader.queries {
+		if query.Topic == "/llm/usage/recorded" || query.IncludePayload {
+			t.Fatalf("projection snapshot unexpectedly queried LLM usage payload: %+v", query)
+		}
+	}
+	if len(patches.runIDs) != 0 || len(continuations.runIDs) != 0 {
+		t.Fatalf("projection snapshot unexpectedly queried run-derived collections: patches=%+v continuations=%+v", patches.runIDs, continuations.runIDs)
+	}
+
+	summary, err := WorkspaceSummarySnapshot(context.Background(), readers, workspaceID, nil)
+	if err != nil {
+		t.Fatalf("WorkspaceSummarySnapshot: %v", err)
+	}
+	if summary.TaskProgress.Runtime == nil {
+		t.Fatal("expected summary snapshot to retain compact TaskProgress.Runtime")
+	}
+	if len(summary.EventRecords) != 0 || len(summary.Results) != 0 || len(summary.Artifacts) != 0 {
+		t.Fatalf("summary snapshot unexpectedly kept polling-heavy collections: events=%d results=%d artifacts=%d", len(summary.EventRecords), len(summary.Results), len(summary.Artifacts))
+	}
+}

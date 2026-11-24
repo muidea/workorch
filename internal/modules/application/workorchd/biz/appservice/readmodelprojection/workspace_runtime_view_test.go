@@ -10,6 +10,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestSelectDisplayRunIDPriority(t *testing.T) {
@@ -701,5 +702,102 @@ func TestActivityFeedContentEqualIncludesTruncationBoundary(t *testing.T) {
 	capped.NextCursor = ""
 	if activityFeedContentEqual(base, capped) {
 		t.Fatal("Truncated=true with empty cursor must still differ")
+	}
+}
+
+func TestRuntimeProgressActivityIncludesImplementationWorkAndOwnerTimestamp(t *testing.T) {
+	t.Parallel()
+
+	snapshot := readmodelcore.WorkspaceSnapshotState{
+		Workspace: appmodelcore.Workspace{ID: "ws-impl", State: "active", ActiveRunID: "run-impl"},
+		RunHeartbeat: projectioncontract.RunHeartbeat{
+			WorkspaceID:   "ws-impl",
+			RunID:         "run-impl",
+			LatestEventAt: "2026-11-24T08:00:05Z",
+		},
+		ViewModel: projectioncontract.WorkspaceViewModel{
+			WorkspaceID: "ws-impl",
+			UpdatedAt:   "2026-11-24T09:59:59Z",
+			RebuiltAt:   "2026-11-24T10:00:00Z",
+		},
+		TaskProgress: projectioncontract.TaskProgress{
+			WorkspaceID: "ws-impl",
+			RunID:       "run-impl",
+			State:       "active",
+			Runtime: &projectioncontract.RuntimeProgress{
+				StateRevision:            18,
+				EvidenceSequence:         4,
+				CurrentFocusID:           "focus-impl",
+				ConvergenceState:         "need_state_change",
+				LatestAcceptedEvidenceAt: "2026-11-24T08:00:12Z",
+				LatestDurableEffectAt:    "2026-11-24T08:00:15Z",
+				ImplementationWork: &projectioncontract.RuntimeImplementationProgress{
+					CurrentWorkItemID:   "cwi-005",
+					CurrentIntent:       "update handler",
+					WorkRoundsUsed:      2,
+					ReservedRounds:      4,
+					CompletedRounds:     1,
+					CommittedReceipts:   1,
+					SemanticGenerations: 2,
+					LastIntentReview: &runtimecontract.RuntimeImplementationRoundReview{
+						Outcome: runtimecontract.RuntimeImplementationRoundPartial,
+						Reason:  "missing test coverage",
+					},
+				},
+			},
+		},
+	}
+
+	feed := buildWorkspaceActivityFeedContent(snapshot)
+	var implItem *projectioncontract.WorkspaceActivityItem
+	for idx := range feed.Items {
+		item := &feed.Items[idx]
+		if item.Title == "implementation" {
+			implItem = item
+		}
+		if item.RuntimeStateRevision == 18 && item.OccurredAt != "2026-11-24T08:00:15Z" {
+			t.Fatalf("item %s OccurredAt = %q, want latest owner timestamp 2026-11-24T08:00:15Z (not ViewModel wall-clock)", item.ID, item.OccurredAt)
+		}
+	}
+	if implItem == nil {
+		t.Fatalf("expected implementation activity item in feed: %+v", feed.Items)
+	}
+	for _, want := range []string{"rounds 1/4", "receipts 1", "semantic 2", "CWI cwi-005 (used 2)", "review partial"} {
+		if !strings.Contains(implItem.Summary, want) {
+			t.Fatalf("implementation item summary = %q, missing %q", implItem.Summary, want)
+		}
+	}
+
+	candidate := snapshot
+	runtimeCopy := *snapshot.TaskProgress.Runtime
+	implCopy := *snapshot.TaskProgress.Runtime.ImplementationWork
+	implCopy.CompletedRounds = 2
+	runtimeCopy.ImplementationWork = &implCopy
+	candidate.TaskProgress.Runtime = &runtimeCopy
+
+	sections := diffWorkspaceProjectionSections(snapshot, candidate, "detail")
+	hasRuntimeProgress := false
+	for _, section := range sections {
+		if section == "runtime_progress" {
+			hasRuntimeProgress = true
+		}
+	}
+	if !hasRuntimeProgress {
+		t.Fatalf("diff sections = %v, want runtime_progress on ImplementationWork mutation", sections)
+	}
+
+	dispatchCandidate := snapshot
+	dispatchRuntimeCopy := *snapshot.TaskProgress.Runtime
+	dispatchRuntimeCopy.ActiveDispatchID = "dispatch-99"
+	dispatchCandidate.TaskProgress.Runtime = &dispatchRuntimeCopy
+	dispatchSections := diffWorkspaceProjectionSections(snapshot, dispatchCandidate, "detail")
+	hasRuntimeDispatch := false
+	for _, section := range dispatchSections {
+		if section == "runtime_progress" {
+			hasRuntimeDispatch = true
+		}
+	}
+	if !hasRuntimeDispatch {
+		t.Fatalf("diff sections = %v, want runtime_progress on ActiveDispatchID mutation", dispatchSections)
 	}
 }

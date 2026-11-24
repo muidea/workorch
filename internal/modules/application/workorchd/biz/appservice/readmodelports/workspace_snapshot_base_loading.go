@@ -13,10 +13,10 @@ import (
 func workspaceSnapshotBaseLoadTasks(ctx context.Context, readers WorkspaceSnapshotReaders, workspaceID common.WorkspaceID, cachedRunSnapshot *readmodelcore.RunSnapshotState, options workspaceSnapshotLoadOptions, models *workspaceSnapshotModels) []func() error {
 	tasks := []func() error{
 		namedLoadTask("workspaceSnapshot.runs", func() error {
-			var err error
 			inventory, readErr := readers.Runs.ListCompactByWorkspaceID(ctx, workspaceID)
-			models.Runs, err = runmodel.InventoryListItems(inventory), readErr
-			return err
+			models.RunInventory = inventory
+			models.Runs = runmodel.InventoryListItems(inventory)
+			return readErr
 		}),
 		namedLoadTask("workspaceSnapshot.results", func() error {
 			var err error

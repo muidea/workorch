@@ -350,7 +350,7 @@ func TestRemoteEventsBackendReconnectsWithLastEventID(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		lastID := r.Header.Get("Last-port.Event-ID")
+		lastID := r.Header.Get("Last-Event-ID")
 		if lastID == "" {
 			lastID = r.URL.Query().Get("lastEventId")
 		}
@@ -820,7 +820,7 @@ func llmTargetMatches(raw any, providerID string, modelID string) bool {
 }
 
 // TC10: typed projection SSE publishes connecting → live only after HTTP 2xx,
-// then reconnecting on disconnect, and restores live with Last-port.Event-ID.
+// then reconnecting on disconnect, and restores live with Last-Event-ID.
 func TestRemoteProjectionEventsHealthAndReconnectWithLastEventID(t *testing.T) {
 	var requests atomic.Int32
 	seenLastEventID := make(chan string, 4)
@@ -869,7 +869,7 @@ func TestRemoteProjectionEventsHealthAndReconnectWithLastEventID(t *testing.T) {
 			http.Error(w, "want projection view", http.StatusBadRequest)
 			return
 		}
-		lastID := r.Header.Get("Last-port.Event-ID")
+		lastID := r.Header.Get("Last-Event-ID")
 		if lastID == "" {
 			lastID = r.URL.Query().Get("lastEventId")
 		}
@@ -974,10 +974,10 @@ func TestRemoteProjectionEventsHealthAndReconnectWithLastEventID(t *testing.T) {
 	firstLastID := <-seenLastEventID
 	secondLastID := <-seenLastEventID
 	if firstLastID != "" {
-		t.Fatalf("first stream Last-port.Event-ID = %q, want empty", firstLastID)
+		t.Fatalf("first stream Last-Event-ID = %q, want empty", firstLastID)
 	}
 	if secondLastID != "proj-evt-1" {
-		t.Fatalf("reconnect Last-port.Event-ID = %q, want proj-evt-1", secondLastID)
+		t.Fatalf("reconnect Last-Event-ID = %q, want proj-evt-1", secondLastID)
 	}
 }
 
