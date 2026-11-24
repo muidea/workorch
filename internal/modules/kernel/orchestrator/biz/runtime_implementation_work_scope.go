@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -57,7 +58,7 @@ func (m *Biz) driveRuntimeImplementationWorkScope(ctx context.Context, aggregate
 		aggregate.Facts.Resources.OperationAdmissibilities,
 		request.InputRevision,
 	)
-	observation, err := acquireRuntimeImplementationWorkScopeWithExclusions(ctx, m.EventHub(), workspace.DeliverableDirectory, request, sources, excludedTargets)
+	observation, err := acquireRuntimeImplementationWorkScopeWithTargets(ctx, m.EventHub(), workspace.DeliverableDirectory, request, sources, excludedTargets, aggregate.ImplementationWork.Rounds)
 	if err != nil {
 		return runtime.RuntimeAggregate{}, true, err
 	}
@@ -73,10 +74,14 @@ func (m *Biz) driveRuntimeImplementationWorkScope(ctx context.Context, aggregate
 // not commit terminal-proof TargetSelection, select work, or bypass activation.
 // The working-binding private event/consumer remains a separate requirement.
 func acquireRuntimeImplementationWorkScope(ctx context.Context, hub magicevent.Hub, directory string, request runtimecontract.RuntimeImplementationWorkScopeRequest, sources runtimecontract.RuntimeImplementationWorkScopeSources) (runtimecontract.RuntimeImplementationWorkScopeObservation, error) {
-	return acquireRuntimeImplementationWorkScopeWithExclusions(ctx, hub, directory, request, sources, nil)
+	return acquireRuntimeImplementationWorkScopeWithTargets(ctx, hub, directory, request, sources, nil, nil)
 }
 
 func acquireRuntimeImplementationWorkScopeWithExclusions(ctx context.Context, hub magicevent.Hub, directory string, request runtimecontract.RuntimeImplementationWorkScopeRequest, sources runtimecontract.RuntimeImplementationWorkScopeSources, excludedTargets []string) (runtimecontract.RuntimeImplementationWorkScopeObservation, error) {
+	return acquireRuntimeImplementationWorkScopeWithTargets(ctx, hub, directory, request, sources, excludedTargets, nil)
+}
+
+func acquireRuntimeImplementationWorkScopeWithTargets(ctx context.Context, hub magicevent.Hub, directory string, request runtimecontract.RuntimeImplementationWorkScopeRequest, sources runtimecontract.RuntimeImplementationWorkScopeSources, excludedTargets []string, rounds []runtimecontract.RuntimeImplementationWorkRound) (runtimecontract.RuntimeImplementationWorkScopeObservation, error) {
 	if err := request.ValidateForSources(sources); err != nil {
 		return runtimecontract.RuntimeImplementationWorkScopeObservation{}, err
 	}
@@ -109,6 +114,13 @@ func acquireRuntimeImplementationWorkScopeWithExclusions(ctx context.Context, hu
 	// manifest. No partial/truncated body may be labelled complete. The private
 	// scope CAS freezes this same input for attempt 1 and process recovery.
 	if result.Selection.Disposition == runtimecontract.RuntimeTargetSelectionSelected || result.Selection.Disposition == runtimecontract.RuntimeTargetSelectionScope {
+		reviewTargets := runtimecontract.RuntimeImplementationWorkContentReviewTargets(
+			result.Selection.TargetRefs,
+			excludedTargets,
+			rounds,
+			request.CoverageWorkItemID,
+			request.RequestID,
+		)
 		content := &runtimecontract.RuntimeImplementationWorkContent{
 			ProtocolRef:        runtimecontract.RuntimeImplementationWorkContentV1,
 			ManifestRevision:   result.Selection.ObservedRevision,
@@ -116,6 +128,13 @@ func acquireRuntimeImplementationWorkScopeWithExclusions(ctx context.Context, hu
 		}
 		for _, target := range result.Selection.TargetRefs {
 			if slices.Contains(excludedTargets, target) {
+				if slices.Contains(reviewTargets, target) {
+					snapshot, err := AcquireTargetSnapshotPrerequisite(ctx, hub, fileevents.AcquireTargetSnapshotCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.AuthoritySnapshotID, PrerequisiteID: request.RequestID, WorkspaceDeliverableDirectory: directory, TargetRef: target, MaxBytes: fileevents.DefaultTargetSnapshotBytes})
+					if err != nil {
+						return observation, fmt.Errorf("implementation_work_content_unavailable: %w", err)
+					}
+					content.ReviewSnapshots = append(content.ReviewSnapshots, snapshot.Snapshot)
+				}
 				continue
 			}
 			snapshot, err := AcquireTargetSnapshotPrerequisite(ctx, hub, fileevents.AcquireTargetSnapshotCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.AuthoritySnapshotID, PrerequisiteID: request.RequestID, WorkspaceDeliverableDirectory: directory, TargetRef: target, MaxBytes: fileevents.DefaultTargetSnapshotBytes})
@@ -123,6 +142,11 @@ func acquireRuntimeImplementationWorkScopeWithExclusions(ctx context.Context, hu
 				return observation, fmt.Errorf("implementation_work_content_unavailable: %w", err)
 			}
 			content.Snapshots = append(content.Snapshots, snapshot.Snapshot)
+		}
+		if len(content.ReviewSnapshots) > 1 {
+			slices.SortFunc(content.ReviewSnapshots, func(a, b runtimecontract.TargetSnapshot) int {
+				return cmp.Compare(a.TargetRef, b.TargetRef)
+			})
 		}
 		fresh, err := AcquireWorkspaceManifestPrerequisite(ctx, hub, fileevents.AcquireWorkspaceManifestCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.AuthoritySnapshotID, PrerequisiteID: request.RequestID, WorkspaceDeliverableDirectory: directory})
 		if err != nil {

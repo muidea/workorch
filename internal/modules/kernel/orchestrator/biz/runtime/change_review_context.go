@@ -242,6 +242,9 @@ func SemanticChangeReviewContext(a RuntimeAggregate, c rc.RuntimeSemanticPlanReq
 		for _, f := range c.WorkContext.Content.Snapshots {
 			files = append(files, rc.RuntimeValidationInputReviewFile{TargetRef: f.TargetRef, ContentHash: f.ContentHash, Content: f.Content})
 		}
+		for _, f := range c.WorkContext.Content.ReviewSnapshots {
+			files = append(files, rc.RuntimeValidationInputReviewFile{TargetRef: f.TargetRef, ContentHash: f.ContentHash, Content: f.Content})
+		}
 	} else {
 		for _, o := range m.ProofObligations {
 			if len(c.BatchCoverageWorkItemIDs) != 0 && !slices.Contains(c.BatchCoverageWorkItemIDs, o.CoverageWorkItemID) {

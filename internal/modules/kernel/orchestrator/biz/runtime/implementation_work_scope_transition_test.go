@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -307,11 +308,19 @@ func (f *implementationWorkRealFileFixture) scope(t *testing.T, request runtimec
 	scope := runtimecontract.RuntimeImplementationWorkScopeObservation{Request: request, Selection: response.Selection, Observation: response.Observation}
 	{
 		var excluded []string
+		var reviewTargets []string
 		if f.repository != nil && f.repository.aggregate != nil {
 			excluded = runtimecontract.RuntimeImplementationWorkContentExcludedTargets(
 				request.Policy.OwnerModuleID,
 				f.repository.aggregate.Facts.Resources.OperationAdmissibilities,
 				request.InputRevision,
+			)
+			reviewTargets = runtimecontract.RuntimeImplementationWorkContentReviewTargets(
+				response.Selection.TargetRefs,
+				excluded,
+				f.repository.aggregate.ImplementationWork.Rounds,
+				request.CoverageWorkItemID,
+				request.RequestID,
 			)
 		}
 		scope.Content = &runtimecontract.RuntimeImplementationWorkContent{
@@ -321,6 +330,14 @@ func (f *implementationWorkRealFileFixture) scope(t *testing.T, request runtimec
 		}
 		for _, target := range scope.Selection.TargetRefs {
 			if slices.Contains(excluded, target) {
+				if slices.Contains(reviewTargets, target) {
+					body, err := os.ReadFile(filepath.Join(f.directory, target))
+					if err != nil {
+						t.Fatal(err)
+					}
+					h := sha256.Sum256(body)
+					scope.Content.ReviewSnapshots = append(scope.Content.ReviewSnapshots, runtimecontract.TargetSnapshot{TargetRef: target, Content: string(body), ContentHash: hex.EncodeToString(h[:]), ContentState: runtimecontract.SnapshotContentStateComplete, Size: int64(len(body))})
+				}
 				continue
 			}
 			body, err := os.ReadFile(filepath.Join(f.directory, target))
@@ -329,6 +346,11 @@ func (f *implementationWorkRealFileFixture) scope(t *testing.T, request runtimec
 			}
 			h := sha256.Sum256(body)
 			scope.Content.Snapshots = append(scope.Content.Snapshots, runtimecontract.TargetSnapshot{TargetRef: target, Content: string(body), ContentHash: hex.EncodeToString(h[:]), ContentState: runtimecontract.SnapshotContentStateComplete, Size: int64(len(body))})
+		}
+		if len(scope.Content.ReviewSnapshots) > 1 {
+			slices.SortFunc(scope.Content.ReviewSnapshots, func(a, b runtimecontract.TargetSnapshot) int {
+				return cmp.Compare(a.TargetRef, b.TargetRef)
+			})
 		}
 	}
 	return scope
@@ -1240,5 +1262,171 @@ func TestObserveImplementationWorkScopeRejectsMismatchedExcludedTargetRefs(t *te
 		Authority: &RuntimeInternalAuthorityPayload{ImplementationWorkScopeObservation: &validObs},
 	}); err != nil {
 		t.Fatalf("valid excluded observation rejected: %v", err)
+	}
+}
+
+func TestObserveImplementationWorkScopeRequiresReviewSnapshotsAfterInputRevisionRound(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	file, err := filebiz.New(hub, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { file.Teardown(ctx) })
+	directory := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(directory, "checks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "target.txt"), []byte("implementation target\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "checks/input_test.go"), []byte("package checks\n// updated in round 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "checks/other_test.go"), []byte("package checks\n// unrelated excluded\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, initial := implementationWorkPurposeController(t, []string{"target.txt", "checks/input_test.go", "checks/other_test.go"})
+	owner := &implementationWorkRealFileFixture{hub: hub, directory: directory}
+	controller, repository, base := owner.current(t, initial)
+
+	shellCatalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID:   "work-shell-input-protection",
+		OwnerModuleID:    runtimecontract.RuntimeModuleShell,
+		ObservedRevision: "shell-rev-1",
+		OperationKinds:   []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
+			ID:                       "recipe-work-input",
+			OwnerModuleID:            runtimecontract.RuntimeModuleShell,
+			OperationKind:            runtimecontract.RuntimeBlockKindManagedValidationSession,
+			Readiness:                runtimecontract.RuntimeValidationSurfaceReady,
+			InputSchemaHash:          "schema-1",
+			InputBindingRef:          "input-1",
+			ProofApplicability:       runtimecontract.RuntimeValidationProofNotDeclared,
+			EffectScope:              runtimecontract.RuntimeEffectEphemeralSession,
+			IdempotencyClass:         runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+			InputTargetOwnerModuleID: runtimecontract.RuntimeModuleFile,
+			InputTargetRefs:          []string{"checks/input_test.go", "checks/other_test.go"},
+		}},
+	}
+	shellCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(shellCatalog)
+	shellObs := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: shellCatalog.PrerequisiteID,
+		Kind:           runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID:  runtimecontract.RuntimeModuleShell,
+		ContentHash:    shellCatalog.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain:        runtimecontract.RuntimeResourceOwnerCatalog,
+			OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			SubjectRef:    "recipe-work-input",
+			Revision:      shellCatalog.ObservedRevision,
+		}},
+	}
+	shellObs.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(shellObs)
+	shellPrereq := runtimecontract.RuntimePrerequisite{
+		ID:                   shellCatalog.PrerequisiteID,
+		Kind:                 runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID:        runtimecontract.RuntimeModuleShell,
+		RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		Reason:               "test shell validation input exclusion",
+	}
+	base.Facts.Resources.OperationAdmissibilities = append(base.Facts.Resources.OperationAdmissibilities, shellCatalog)
+	base.Facts.Resources.PrerequisiteObservations = append(base.Facts.Resources.PrerequisiteObservations, shellObs)
+	base.Facts.Prerequisites.Satisfied = append(base.Facts.Prerequisites.Satisfied, shellPrereq)
+
+	cwi := base.Facts.Focus.CoverageWorkItemIDs[0]
+	priorSources, err := RuntimeImplementationWorkScopeForCurrentSources(base, cwi)
+	if err != nil {
+		t.Fatal(err)
+	}
+	priorSources.AuthoritySnapshotID = "prior-authority"
+	priorRequest, err := priorSources.Compile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	priorRound := runtimecontract.RuntimeImplementationWorkRound{
+		WorkspaceID:             base.Facts.WorkspaceID,
+		RunID:                   base.Facts.RunID,
+		StartupInputHash:        base.Definition.StartupInputHash,
+		DefinitionSeedHash:      base.Facts.DefinitionSeed.Hash,
+		CoverageWorkItemID:      cwi,
+		PolicyHash:              runtimecontract.StableRuntimeImplementationWorkPolicyHash(priorRequest.Policy),
+		Ordinal:                 1,
+		ScopeRequest:            priorRequest,
+		DispatchID:              "dispatch-round-1",
+		DispatchAuthorityHash:   "auth-round-1",
+		CompletedReceiptSetHash: "receipts-round-1",
+		WorkingBinding: &runtimecontract.RuntimeImplementationWorkingBinding{
+			Proposals: []runtimecontract.RuntimeSemanticProofProposal{{
+				CoverageWorkItemID: cwi,
+				Target: runtimecontract.RuntimeOperationTargetAuthorization{
+					Policy:               runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+					OwnerScopeTargetRefs: []string{"checks/input_test.go"},
+				},
+			}},
+		},
+	}
+	base.ImplementationWork.Rounds = []runtimecontract.RuntimeImplementationWorkRound{priorRound}
+	*repository.aggregate = base.CloneRaw()
+
+	request, err := NextRuntimeImplementationWorkScopeRequest(base)
+	if err != nil || request == nil {
+		t.Fatalf("NextRuntimeImplementationWorkScopeRequest = %+v err=%v", request, err)
+	}
+	scope := RuntimeInternalEventScope{WorkspaceID: base.Facts.WorkspaceID, RunID: base.Facts.RunID}
+	if _, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind:      RuntimeInternalEventImplementationWorkScopeRequired,
+		Scope:     scope,
+		Authority: &RuntimeInternalAuthorityPayload{ImplementationWorkScopeRequest: request},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	validObs := owner.scope(t, *request)
+	if validObs.Content == nil ||
+		!slices.Equal(validObs.Content.ExcludedTargetRefs, []string{"checks/input_test.go", "checks/other_test.go"}) ||
+		!slices.Equal(runtimecontract.RuntimeImplementationWorkSnapshotTargets(validObs.Content.Snapshots), []string{"target.txt"}) ||
+		!slices.Equal(runtimecontract.RuntimeImplementationWorkSnapshotTargets(validObs.Content.ReviewSnapshots), []string{"checks/input_test.go"}) {
+		t.Fatalf("expected validObs to isolate writable Snapshots and read-only ReviewSnapshots, got %+v", validObs.Content)
+	}
+
+	missingReview := validObs.Clone()
+	missingReview.Content.ReviewSnapshots = nil
+	beforeSaves := repository.saves
+	if _, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind:      RuntimeInternalEventImplementationWorkScopeObserved,
+		Scope:     scope,
+		Authority: &RuntimeInternalAuthorityPayload{ImplementationWorkScopeObservation: &missingReview},
+	}); !errors.Is(err, common.ErrConflict) || repository.saves != beforeSaves {
+		t.Fatalf("expected conflict rejecting missing ReviewSnapshots, got err=%v saves=%d->%d", err, beforeSaves, repository.saves)
+	}
+
+	extraReview := validObs.Clone()
+	otherBody, err := os.ReadFile(filepath.Join(directory, "checks/other_test.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherHash := sha256.Sum256(otherBody)
+	extraReview.Content.ReviewSnapshots = append(extraReview.Content.ReviewSnapshots, runtimecontract.TargetSnapshot{
+		TargetRef: "checks/other_test.go", Content: string(otherBody), ContentHash: hex.EncodeToString(otherHash[:]),
+		ContentState: runtimecontract.SnapshotContentStateComplete, Size: int64(len(otherBody)),
+	})
+	if _, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind:      RuntimeInternalEventImplementationWorkScopeObserved,
+		Scope:     scope,
+		Authority: &RuntimeInternalAuthorityPayload{ImplementationWorkScopeObservation: &extraReview},
+	}); !errors.Is(err, common.ErrConflict) || repository.saves != beforeSaves {
+		t.Fatalf("expected conflict rejecting extra unrelated ReviewSnapshots, got err=%v saves=%d->%d", err, beforeSaves, repository.saves)
+	}
+
+	if _, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind:      RuntimeInternalEventImplementationWorkScopeObserved,
+		Scope:     scope,
+		Authority: &RuntimeInternalAuthorityPayload{ImplementationWorkScopeObservation: &validObs},
+	}); err != nil {
+		t.Fatalf("valid ReviewSnapshots observation rejected: %v", err)
 	}
 }

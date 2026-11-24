@@ -13,12 +13,16 @@ import (
 const RuntimeImplementationWorkContentV1 = "implementation-work-content/v1"
 
 // These are exact, detached read-only inputs, sealed with the scope observation.
+// ReviewSnapshots holds read-only owner snapshots of excluded targets modified
+// by the immediately preceding round for PreviousRoundReview and ChangeReview,
+// never unlocking write permission.
 // They never become receipt, readiness, evidence, or completion authority.
 type RuntimeImplementationWorkContent struct {
 	ProtocolRef        string
 	ManifestRevision   string
 	ExcludedTargetRefs []string `json:",omitempty"`
 	Snapshots          []TargetSnapshot
+	ReviewSnapshots    []TargetSnapshot `json:",omitempty"`
 }
 
 func (c *RuntimeImplementationWorkContent) Clone() *RuntimeImplementationWorkContent {
@@ -28,11 +32,28 @@ func (c *RuntimeImplementationWorkContent) Clone() *RuntimeImplementationWorkCon
 	v := *c
 	v.ExcludedTargetRefs = slices.Clone(c.ExcludedTargetRefs)
 	v.Snapshots = slices.Clone(c.Snapshots)
+	v.ReviewSnapshots = slices.Clone(c.ReviewSnapshots)
 	return &v
 }
 func (c RuntimeImplementationWorkContent) Hash() string {
 	return implementationWorkRawHash("implementation-work-content:", c)
 }
+func targetSnapshotBytesValid(s TargetSnapshot) bool {
+	h := sha256.Sum256([]byte(s.Content))
+	return s.Complete() && s.Size == int64(len(s.Content)) && s.ContentHash == hex.EncodeToString(h[:]) && utf8.ValidString(s.Content)
+}
+
+func RuntimeImplementationWorkSnapshotTargets(snapshots []TargetSnapshot) []string {
+	if len(snapshots) == 0 {
+		return nil
+	}
+	targets := make([]string, len(snapshots))
+	for i, s := range snapshots {
+		targets[i] = s.TargetRef
+	}
+	return targets
+}
+
 func (c RuntimeImplementationWorkContent) Validate(scope RuntimeImplementationWorkScopeObservation) error {
 	if c.ExcludedTargetRefs != nil && (len(c.ExcludedTargetRefs) == 0 || !slices.Equal(c.ExcludedTargetRefs, normalizeStrings(c.ExcludedTargetRefs))) {
 		return fmt.Errorf("implementation work content exclusions must be canonical non-empty exact targets")
@@ -47,9 +68,25 @@ func (c RuntimeImplementationWorkContent) Validate(scope RuntimeImplementationWo
 		return fmt.Errorf("implementation work content requires exact complete scope revision and targets")
 	}
 	for i, s := range c.Snapshots {
-		h := sha256.Sum256([]byte(s.Content))
-		if s.TargetRef != expectedTargets[i] || !s.Complete() || s.Size != int64(len(s.Content)) || s.ContentHash != hex.EncodeToString(h[:]) || !utf8.ValidString(s.Content) {
+		if s.TargetRef != expectedTargets[i] || !targetSnapshotBytesValid(s) {
 			return fmt.Errorf("implementation work content missing, altered or incomplete for target %q", s.TargetRef)
+		}
+	}
+	if c.ReviewSnapshots != nil && len(c.ReviewSnapshots) == 0 {
+		return fmt.Errorf("implementation work review snapshots must be omitted when empty")
+	}
+	for i, s := range c.ReviewSnapshots {
+		if !implementationWorkExactRef(s.TargetRef) || (i > 0 && s.TargetRef <= c.ReviewSnapshots[i-1].TargetRef) {
+			return fmt.Errorf("implementation work review snapshots must be canonical unique exact targets")
+		}
+		if !slices.Contains(c.ExcludedTargetRefs, s.TargetRef) {
+			return fmt.Errorf("implementation work review snapshot target %q must remain write-excluded", s.TargetRef)
+		}
+		if !slices.Contains(scope.Selection.TargetRefs, s.TargetRef) {
+			return fmt.Errorf("implementation work review snapshot target %q is outside current scope", s.TargetRef)
+		}
+		if !targetSnapshotBytesValid(s) {
+			return fmt.Errorf("implementation work review snapshot missing, altered or incomplete for target %q", s.TargetRef)
 		}
 	}
 	return nil

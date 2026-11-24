@@ -108,8 +108,8 @@ func cacheLayoutOrder(path string) (first, last []string) {
 	case "semantic-shared":
 		return []string{"workspaceId", "runId", "soul", "definitionSeed", "contextEncoding", "workContext"}, []string{"planStep", "outputInstruction", "schema", "manifest", "batchId", "batchSequence", "batchCoverageWorkItemIds"}
 	case "semantic-shared/workContext/content":
-		return []string{"ProtocolRef", "Snapshots"}, []string{"SnapshotObservations", "ManifestRevision"}
-	case "semantic-shared/workContext/content/Snapshots/[]":
+		return []string{"ProtocolRef", "Snapshots", "reviewSnapshots"}, []string{"SnapshotObservations", "reviewSnapshotObservations", "ManifestRevision"}
+	case "semantic-shared/workContext/content/Snapshots/[]", "semantic-shared/workContext/content/reviewSnapshots/[]":
 		return []string{"TargetRef", "Content"}, []string{"ContentHash"}
 	case "semantic":
 		return []string{"workspaceId", "runId", "soul", "definitionSeed", "planStep", "outputInstruction", "schema"}, []string{"manifest", "batchId", "batchSequence", "batchCoverageWorkItemIds"}

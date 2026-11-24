@@ -84,3 +84,26 @@ func TestImplementationProofRequestRetainsSemanticGapsWithoutCredit(t *testing.T
 		t.Fatal("early check became failure before real validation")
 	}
 }
+
+func TestImplementationRepetitionComparesReviewSnapshots(t *testing.T) {
+	m, _ := progressPurposeFixture(t)
+	w := m.ProofObligations[0].ImplementationWork
+	w.Scope.Content.ExcludedTargetRefs = []string{"checks/input_test.go"}
+	w.Scope.Content.ReviewSnapshots = []TargetSnapshot{workContentSnapshot("checks/input_test.go", "package checks // round 1\n")}
+	preview := RuntimeImplementationWorkScopePreview{Request: w.Scope.Request, Observation: &w.Scope}
+	round := RuntimeImplementationWorkRound{
+		WorkspaceID: m.WorkspaceID, RunID: m.RunID,
+		CoverageWorkItemID: w.Scope.Request.CoverageWorkItemID, PolicyHash: w.PolicyHash,
+		ScopeRequest: w.Scope.Request, ScopeObservation: &w.Scope,
+		CompletedReceiptSetHash: "trusted-original-set",
+	}
+	rounds := []RuntimeImplementationWorkRound{round}
+	if got := RuntimeImplementationRepeatedWorkStates(preview, rounds); got != 1 {
+		t.Fatalf("identical ReviewSnapshots count = %d, want 1", got)
+	}
+	changed := preview.Clone()
+	changed.Observation.Content.ReviewSnapshots[0] = workContentSnapshot("checks/input_test.go", "package checks // round 2\n")
+	if got := RuntimeImplementationRepeatedWorkStates(changed, rounds); got != 0 {
+		t.Fatalf("changed ReviewSnapshots count = %d, want 0", got)
+	}
+}

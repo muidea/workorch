@@ -25,6 +25,9 @@ func changeReviewBodySources(work *rc.RuntimeImplementationWorkContent, workPath
 		for i, s := range work.Snapshots {
 			ret = append(ret, runtimeChangeReviewBodySource{fmt.Sprintf("%s.snapshots[%d].Content", workPath, i), rc.RuntimeValidationInputReviewFile{TargetRef: s.TargetRef, ContentHash: s.ContentHash, Content: s.Content}})
 		}
+		for i, s := range work.ReviewSnapshots {
+			ret = append(ret, runtimeChangeReviewBodySource{fmt.Sprintf("%s.reviewSnapshots[%d].Content", workPath, i), rc.RuntimeValidationInputReviewFile{TargetRef: s.TargetRef, ContentHash: s.ContentHash, Content: s.Content}})
+		}
 	}
 	for gi, g := range contexts {
 		if g.Context == nil {

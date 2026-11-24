@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/muidea/workorch/internal/pkg/common"
 	rc "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -143,5 +144,341 @@ func TestChangeReviewRenderedIntegrityAndFrozenRecovery(t *testing.T) {
 	actual, _ := json.Marshal(sectionMessages(replay, false))
 	if !bytes.Equal(original, actual) {
 		t.Fatal("recovery rewrote frozen source or requested fresh model sampling")
+	}
+}
+
+func TestChangeReviewCompactsAndValidatesExcludedReviewSnapshots(t *testing.T) {
+	r := runtimeSemanticProviderTestRequest(t)
+	ctx := &r.SemanticContext
+	target := "checks/input_test.go"
+	mainTarget := "main.go"
+	manifestTargets := []string{target, mainTarget}
+	beforeBody := strings.Repeat("before input body\r\n", 40)
+	afterBody := strings.Repeat("after input body\r\n", 40)
+	mainBody := "original work bytes"
+	snap := func(ref, body string) rc.TargetSnapshot {
+		return rc.TargetSnapshot{
+			TargetRef:    ref,
+			Content:      body,
+			ContentHash:  rc.RuntimeValidationInputContentHash(body),
+			ContentState: rc.SnapshotContentStateComplete,
+			Size:         int64(len(body)),
+		}
+	}
+
+	policy := rc.RuntimeImplementationWorkPolicy{
+		ProtocolRef:                 rc.RuntimeImplementationWorkProtocolV1,
+		OwnerModuleID:               rc.RuntimeModuleFile,
+		AllowedOperations:           []rc.RuntimeOperationVariantRef{{Kind: rc.StepKindFileWrite}},
+		AllowedTargetPolicies:       []rc.RuntimeOperationTargetPolicy{rc.RuntimeOperationTargetPolicyExistingOwnerScope},
+		TargetSelectorRef:           "work-scope",
+		TargetSelectorOwnerRef:      "profile/work",
+		TargetSelectorSubjectRef:    "implementation",
+		TargetSelectorCandidateRefs: manifestTargets,
+		MaxRepeatedWorkStates:       2,
+		MaxTargetsPerRound:          1,
+		RequireFreshObservation:     true,
+		RequireFreshValidation:      true,
+		ProtectValidationInputs:     true,
+	}
+	ctx.Activation.ExecutionContract.ProfileContracts = []rc.RuntimeProfileContract{{
+		ID: "work",
+		EvidenceRequirements: []rc.RuntimeProfileEvidenceRequirement{{
+			ID:                       "*",
+			Scope:                    "dodItem",
+			RequiredEvidenceKinds:    []string{rc.EvidenceKindValidation},
+			AcceptedStepKinds:        []string{rc.RuntimeBlockKindManagedValidationSession},
+			ImplementationWorkPolicy: &policy,
+		}},
+	}}
+	item := ctx.DefinitionSeed.CoverageItems[0]
+	focus := rc.RuntimeDefinitionFocus{
+		ID:                       "focus-work",
+		SliceID:                  item.SliceID,
+		AssessmentScope:          item.SourceScope,
+		AssessmentID:             item.SourceID,
+		AssessmentText:           item.TargetText,
+		CoverageWorkItemIDs:      []common.CoverageWorkItemID{item.ID},
+		EvidenceDeclarationRef:   "definition/dodItem/" + item.SourceID,
+		RequiredEvidenceKinds:    []string{rc.EvidenceKindValidation},
+		AcceptedStepKinds:        []string{rc.RuntimeBlockKindManagedValidationSession},
+		ImplementationWorkPolicy: &policy,
+	}
+
+	fileCatalog := r.SemanticManifest.OwnerCatalogs[0].Clone()
+	fileCatalog.SelectorRefs = []string{"work-scope"}
+	fileCatalog.SnapshotID = rc.StableRuntimeOperationAdmissibilitySnapshotID(fileCatalog)
+	shellCatalog := inputProtectionProviderCatalog()
+	shellCatalog.ValidationSurfaces[0].InputTargetRefs = []string{target}
+	shellCatalog.SnapshotID = rc.StableRuntimeOperationAdmissibilitySnapshotID(shellCatalog)
+
+	manifestObs := rc.RuntimePrerequisiteObservation{
+		PrerequisiteID: "manifest-work",
+		Kind:           rc.PrerequisiteKindManifest,
+		OwnerModuleID:  rc.RuntimeModuleFile,
+		ContentHash:    fileCatalog.ObservedRevision,
+		Dependencies: []rc.RuntimeFreshnessDependency{{
+			OwnerModuleID: rc.RuntimeModuleFile,
+			Domain:        rc.RuntimeResourceWorkspaceTree,
+			SubjectRef:    "workspace_deliverable",
+			Revision:      fileCatalog.ObservedRevision,
+		}},
+	}
+	manifestObs.ObservationID = rc.StableRuntimePrerequisiteObservationID(manifestObs)
+	scopeRequest, err := rc.CompileRuntimeImplementationWorkScopeRequest(
+		ctx.WorkspaceID,
+		ctx.RunID,
+		"authority-work",
+		ctx.DefinitionSeed,
+		[]rc.RuntimeDefinitionFocus{focus},
+		ctx.Activation.ExecutionContract.ProfileContracts,
+		item.ID,
+		rc.RuntimeWorkspaceManifestBinding{
+			Manifest:    rc.WorkspaceManifest{Revision: fileCatalog.ObservedRevision, TargetRefs: manifestTargets},
+			Observation: manifestObs,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection := rc.RuntimeTargetSelection{
+		PrerequisiteID:        scopeRequest.RequestID,
+		OwnerModuleID:         policy.OwnerModuleID,
+		TargetRole:            "implementation_work",
+		SelectorRef:           policy.TargetSelectorRef,
+		SelectorOwnerRef:      policy.TargetSelectorOwnerRef,
+		SelectorSubjectRef:    policy.TargetSelectorSubjectRef,
+		SelectorCandidateRefs: policy.TargetSelectorCandidateRefs,
+		Disposition:           rc.RuntimeTargetSelectionScope,
+		TargetRefs:            manifestTargets,
+		CandidateTargetRefs:   manifestTargets,
+		CandidateCount:        len(manifestTargets),
+		ObservedRevision:      fileCatalog.ObservedRevision,
+	}
+	selection.SnapshotID = rc.StableRuntimeTargetSelectionSnapshotID(selection)
+	selectionObs := manifestObs
+	selectionObs.PrerequisiteID = scopeRequest.RequestID
+	selectionObs.Kind = rc.PrerequisiteKindTargetSelection
+	selectionObs.ContentHash = selection.SnapshotID
+	selectionObs.ObservationID = rc.StableRuntimePrerequisiteObservationID(selectionObs)
+
+	priorScope := rc.RuntimeImplementationWorkScopeObservation{
+		Request:     scopeRequest,
+		Selection:   selection,
+		Observation: selectionObs,
+		Content: &rc.RuntimeImplementationWorkContent{
+			ProtocolRef:      rc.RuntimeImplementationWorkContentV1,
+			ManifestRevision: selection.ObservedRevision,
+			Snapshots:        []rc.TargetSnapshot{snap(target, beforeBody), snap(mainTarget, mainBody)},
+		},
+	}
+	priorRound := rc.RuntimeImplementationWorkRound{
+		WorkspaceID:             ctx.WorkspaceID,
+		RunID:                   ctx.RunID,
+		StartupInputHash:        ctx.Definition.StartupInputHash,
+		DefinitionSeedHash:      ctx.DefinitionSeed.Hash,
+		CoverageWorkItemID:      item.ID,
+		PolicyHash:              rc.StableRuntimeImplementationWorkPolicyHash(policy),
+		Ordinal:                 1,
+		DispatchID:              "dispatch-1",
+		CompletedReceiptSetHash: "receipt-set-1",
+		ScopeRequest:            scopeRequest,
+		ScopeObservation:        &priorScope,
+	}
+	priorRound.Hash = rc.StableRuntimeImplementationWorkRoundHash(priorRound)
+	priorIntent := &rc.RuntimeImplementationIntent{
+		DeclarationRef:          focus.EvidenceDeclarationRef,
+		ContentHash:             priorScope.Content.Hash(),
+		SelectedRequirementRefs: []string{"req-1"},
+	}
+	priorRound.WorkingBinding = &rc.RuntimeImplementationWorkingBinding{
+		IntentBinding: &rc.RuntimeImplementationWorkIntentBinding{
+			Source: rc.RuntimeImplementationWorkPurposeChoice{
+				CoverageWorkItemID:   item.ID,
+				ScopeRequestID:       scopeRequest.RequestID,
+				SemanticManifestHash: "prior-manifest-hash",
+				LogicalRequestID:     "prior-logical-req",
+				DocumentHash:         "prior-doc-hash",
+				Purpose:              rc.RuntimeImplementationWorkPurposeEffect,
+			},
+			Intent: priorIntent,
+		},
+		Proposals: []rc.RuntimeSemanticProofProposal{{
+			CoverageWorkItemID: item.ID,
+			Target: rc.RuntimeOperationTargetAuthorization{
+				Policy:               rc.RuntimeOperationTargetPolicyExistingOwnerScope,
+				OwnerScopeTargetRefs: []string{target},
+			},
+		}},
+	}
+
+	scope := rc.RuntimeImplementationWorkScopeObservation{
+		Request:     scopeRequest,
+		Selection:   selection,
+		Observation: selectionObs,
+		Content: &rc.RuntimeImplementationWorkContent{
+			ProtocolRef:        rc.RuntimeImplementationWorkContentV1,
+			ManifestRevision:   selection.ObservedRevision,
+			ExcludedTargetRefs: []string{target},
+			Snapshots:          []rc.TargetSnapshot{snap(mainTarget, mainBody)},
+			ReviewSnapshots:    []rc.TargetSnapshot{snap(target, afterBody)},
+		},
+	}
+	manifest, err := rc.CompileRuntimeSemanticImplementationPurposeManifest(
+		ctx.WorkspaceID,
+		ctx.RunID,
+		ctx.Definition,
+		ctx.DefinitionSeed,
+		[]rc.RuntimeDefinitionFocus{focus},
+		ctx.Activation.ExecutionContract,
+		[]rc.RuntimeOperationAdmissibility{fileCatalog, shellCatalog},
+		rc.RuntimeImplementationWorkScopePreview{Request: scopeRequest, Observation: &scope},
+		[]rc.RuntimeImplementationWorkRound{priorRound},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.SemanticManifest = manifest
+	ctx.PlanStep = rc.RuntimeSemanticPlanStepCoverageOrder
+	ctx.BatchID = ""
+	ctx.BatchSequence = 0
+	ctx.BatchCoverageWorkItemIDs = nil
+
+	beforeHash := rc.RuntimeValidationInputContentHash(beforeBody)
+	afterHash := rc.RuntimeValidationInputContentHash(afterBody)
+	mainHash := rc.RuntimeValidationInputContentHash(mainBody)
+	op := rc.RuntimeOperation{
+		ID:         "edit-input-round-1",
+		Kind:       rc.StepKindFileEdit,
+		TargetRefs: []string{target},
+		Parameters: []rc.OperationParameter{
+			{Name: "oldText", String: &beforeBody},
+			{Name: "newText", String: &afterBody},
+		},
+	}
+	ctx.WorkContext = &rc.RuntimeSemanticWorkContext{
+		Content: scope.Content.Clone(),
+		PriorRounds: []rc.RuntimeSemanticWorkRound{{
+			Ordinal:        1,
+			DispatchID:     priorRound.DispatchID,
+			ReceiptSetHash: priorRound.CompletedReceiptSetHash,
+			Intent:         priorIntent.Clone(),
+			Targets: []rc.RuntimeSemanticWorkTarget{{
+				OperationID: op.ID,
+				TargetRefs:  []string{target},
+				ReceiptRef:  "runtime-receipt/exec-round-1",
+				ReceiptHash: "receipt-hash-1",
+			}},
+		}},
+	}
+	ctx.CoverageProgress, err = rc.BuildRuntimeSemanticCoverageProgress(
+		*ctx,
+		manifest,
+		rc.RuntimeFacts{
+			WorkspaceID:        ctx.WorkspaceID,
+			RunID:              ctx.RunID,
+			DefinitionRevision: ctx.Definition.Revision,
+			DefinitionSeed:     ctx.DefinitionSeed,
+			EvidenceRevision:   "evidence-1",
+			Coverage:           rc.InitialRuntimeCoverageFacts(ctx.DefinitionSeed.CoverageItems),
+		},
+		1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx.ExecutionHistory, err = rc.BuildRuntimeSemanticExecutionHistory(*ctx, manifest, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	budget, err := rc.BuildRuntimeExecutionBudgetView(ctx.WorkspaceID, ctx.RunID, 1, rc.RuntimeExecutionBudgetLedger{Policy: rc.DefaultRuntimeExecutionBudgetPolicy()}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx.ExecutionBudget, err = rc.BuildRuntimeSemanticExecutionBudget(*ctx, manifest, budget, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.StablePrefixHash = rc.StableRuntimeCandidatePrefixHashWithExecutionContract(ctx.Definition, ctx.Activation.ExecutionContract)
+	if r.RequestIdentity.LogicalRequestID == "" {
+		r.RequestIdentity.LogicalRequestID = "frozen-logical"
+	}
+	expectedDoc := rc.RuntimeExpectedDocumentContract{
+		SchemaVersion:           rc.RuntimeExpectedDocumentSchemaCurrent,
+		DocumentKind:            r.DocumentKind,
+		PlanStep:                ctx.PlanStep,
+		SemanticContextEncoding: rc.RuntimeSemanticContextEncoding,
+		ManifestHash:            manifest.Hash,
+		DefinitionSeedHash:      manifest.DefinitionSeedHash,
+		LogicalRequestID:        r.RequestIdentity.LogicalRequestID,
+		StablePrefixHash:        r.StablePrefixHash,
+		MaxOutputTokens:         ctx.ProviderCeiling.EffectiveMaxOutputTokens,
+		MaxRecoveryAttempts:     1,
+	}
+	expectedDoc.Hash = rc.StableRuntimeExpectedDocumentHash(expectedDoc)
+	r.ExpectedDocument = &expectedDoc
+
+	preimage := rc.RuntimeValidationInputReviewFile{TargetRef: target, ContentHash: beforeHash, Content: beforeBody}
+	ctx.ChangeReview = &rc.RuntimeChangeReviewContext{
+		WorkspaceID:        ctx.WorkspaceID,
+		RunID:              ctx.RunID,
+		DefinitionRevision: ctx.Definition.Revision,
+		Current: []rc.RuntimeValidationInputReviewFile{
+			{TargetRef: mainTarget, ContentHash: mainHash, Content: mainBody},
+			{TargetRef: target, ContentHash: afterHash, Content: afterBody},
+		},
+		Changes: []rc.RuntimeChangeReviewOperation{{
+			Operation:     op,
+			OperationHash: rc.StableRuntimeOperationHash(op),
+			ExecutionKey:  "exec-round-1",
+			Fence:         1,
+			DispatchID:    priorRound.DispatchID,
+			OperationID:   op.ID,
+			OwnerModuleID: rc.RuntimeModuleFile,
+			ReceiptRef:    "runtime-receipt/exec-round-1",
+			ReceiptHash:   "receipt-hash-1",
+			TargetRef:     target,
+			BeforeHash:    beforeHash,
+			AfterHash:     afterHash,
+			Baseline:      &preimage,
+		}},
+	}
+
+	p, err := runtimeProviderRequest(r)
+	if err != nil {
+		t.Fatalf("runtimeProviderRequest with ReviewSnapshots: %v", err)
+	}
+	if !strings.Contains(p.PromptContext.Sections[3].Content, `"reviewSnapshots":`) || !strings.Contains(p.PromptContext.Sections[3].Content, `"reviewSnapshotObservations":`) {
+		t.Fatalf("C3 missing reviewSnapshots/reviewSnapshotObservations: %s", p.PromptContext.Sections[3].Content)
+	}
+	var tail runtimeSemanticTailProjection
+	if err := json.Unmarshal([]byte(p.PromptContext.Sections[4].Content), &tail); err != nil {
+		t.Fatal(err)
+	}
+	foundReviewRef := false
+	for _, ref := range tail.ChangeReviewFileRefs {
+		if ref.Source == "C3.workContext.content.reviewSnapshots[0].Content" {
+			foundReviewRef = true
+		}
+	}
+	if !foundReviewRef {
+		t.Fatalf("C4 ChangeReviewFileRefs = %+v, want ref to C3.workContext.content.reviewSnapshots[0].Content", tail.ChangeReviewFileRefs)
+	}
+	if err := validateRuntimeSemanticContextIntegrity(r.SemanticContext, r.SemanticManifest, 0, nil, nil, p.ContextBudget, p.PromptContext); err != nil {
+		t.Fatalf("validateRuntimeSemanticContextIntegrity rejected ReviewSnapshots ChangeReview: %v", err)
+	}
+	frozen, ref, err := freezeRuntimeProviderInput(r, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.FrozenInput, r.FrozenInputRef = frozen, ref
+	original, _ := json.Marshal(sectionMessages(p, false))
+	replay, err := runtimeProviderRequestForSubmission(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual, _ := json.Marshal(sectionMessages(replay, false))
+	if !bytes.Equal(original, actual) {
+		t.Fatal("freeze/replay altered frozen ReviewSnapshots ChangeReview provider messages")
 	}
 }

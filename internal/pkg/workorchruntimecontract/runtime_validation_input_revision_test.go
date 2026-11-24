@@ -381,3 +381,96 @@ func TestRuntimeImplementationWorkTerminalPurposeSelectedSkipsInputRevisionRound
 		t.Fatal("unrelated CWI inherited terminal_proof")
 	}
 }
+
+func TestRuntimeImplementationWorkContentReviewTargetsAndSemanticValidation(t *testing.T) {
+	v, l := inputRevisionFixture(t)
+	cwi := v.Binding.CoverageWorkItemID
+	protected := v.InputTargetRefs[0]
+	selection := []string{"app.go", protected, "other_input_test.go"}
+	excluded := []string{protected, "other_input_test.go"}
+
+	rounds := []RuntimeImplementationWorkRound{{
+		CoverageWorkItemID:      cwi,
+		Ordinal:                 1,
+		ScopeRequest:            RuntimeImplementationWorkScopeRequest{RequestID: "req-1", CoverageWorkItemID: cwi, InputRevision: v},
+		CompletedReceiptSetHash: "receipt-set-1",
+		WorkingBinding: &RuntimeImplementationWorkingBinding{
+			Proposals: []RuntimeSemanticProofProposal{{
+				CoverageWorkItemID: cwi,
+				Target: RuntimeOperationTargetAuthorization{
+					Policy:               RuntimeOperationTargetPolicyExistingOwnerScope,
+					OwnerScopeTargetRefs: []string{protected},
+				},
+			}},
+		},
+	}}
+
+	got := RuntimeImplementationWorkContentReviewTargets(selection, excluded, rounds, cwi, "")
+	if !reflect.DeepEqual(got, []string{protected}) {
+		t.Fatalf("review targets = %v, want [%s]", got, protected)
+	}
+	// Passing scopeRequestID == "req-1" (validating Round 1 itself) yields no prior round.
+	if selfGot := RuntimeImplementationWorkContentReviewTargets(selection, excluded, rounds, cwi, "req-1"); selfGot != nil {
+		t.Fatalf("round 1 self review targets = %v, want nil", selfGot)
+	}
+	// If prior round only edited ordinary non-excluded file, review targets must be nil.
+	ordinaryRounds := []RuntimeImplementationWorkRound{{
+		CoverageWorkItemID:      cwi,
+		Ordinal:                 1,
+		ScopeRequest:            RuntimeImplementationWorkScopeRequest{RequestID: "req-ord-1", CoverageWorkItemID: cwi},
+		CompletedReceiptSetHash: "receipt-set-ord-1",
+		WorkingBinding: &RuntimeImplementationWorkingBinding{
+			Proposals: []RuntimeSemanticProofProposal{{
+				CoverageWorkItemID: cwi,
+				Target: RuntimeOperationTargetAuthorization{
+					Policy:               RuntimeOperationTargetPolicyExistingOwnerScope,
+					OwnerScopeTargetRefs: []string{"app.go"},
+				},
+			}},
+		},
+	}}
+	if ordGot := RuntimeImplementationWorkContentReviewTargets(selection, excluded, ordinaryRounds, cwi, ""); ordGot != nil {
+		t.Fatalf("ordinary prior round review targets = %v, want nil", ordGot)
+	}
+
+	// Verify PurposeChoiceOnly semantic work validation requires ReviewSnapshots when PreviousRound touched an excluded target.
+	m, _ := progressPurposeFixture(t)
+	w := m.ProofObligations[0].ImplementationWork
+	shellCatalog := l.Manifest.OwnerCatalogs[1].Clone()
+	w.MutationInputCatalogs = []RuntimeOperationAdmissibility{shellCatalog}
+	w.ExcludedTargetRefs = []string{protected}
+	w.Scope.Selection.Disposition = RuntimeTargetSelectionScope
+	w.Scope.Selection.TargetRefs = normalizeStrings(append(w.Scope.Selection.TargetRefs, protected))
+	w.Scope.Selection.CandidateTargetRefs = normalizeStrings(append([]string(nil), w.Scope.Selection.TargetRefs...))
+	w.Scope.Selection.CandidateCount = len(w.Scope.Selection.TargetRefs)
+	w.Scope.Request.ManifestBinding.Manifest.TargetRefs = normalizeStrings(append(w.Scope.Request.ManifestBinding.Manifest.TargetRefs, protected))
+	w.Scope.Request.RequestID = implementationWorkScopeRequestID(w.Scope.Request)
+	w.Scope.Selection.PrerequisiteID = w.Scope.Request.RequestID
+	w.Scope.Selection.SnapshotID = StableRuntimeTargetSelectionSnapshotID(w.Scope.Selection)
+	w.Scope.Observation.PrerequisiteID = w.Scope.Request.RequestID
+	w.Scope.Observation.ContentHash = w.Scope.Selection.SnapshotID
+	w.Scope.Observation.ObservationID = StableRuntimePrerequisiteObservationID(w.Scope.Observation)
+	w.Scope.Content.ExcludedTargetRefs = []string{protected}
+	w.Ordinal = 2
+	w.PrecedingReceiptSetHash = "receipt-set-1"
+	w.PreviousRound = &RuntimeImplementationRoundReviewSource{
+		Ordinal:        1,
+		DispatchID:     "dispatch-1",
+		ReceiptSetHash: "receipt-set-1",
+		IntentBinding: &RuntimeImplementationWorkIntentBinding{
+			Source: RuntimeImplementationWorkPurposeChoice{CoverageWorkItemID: w.Scope.Request.CoverageWorkItemID},
+			Intent: &RuntimeImplementationIntent{SelectedRequirementRefs: []string{"req-1"}},
+		},
+		Before: []TargetSnapshot{workContentSnapshot(protected, "package checks\n")},
+	}
+
+	missingReview := w.Clone()
+	if err := missingReview.Validate(); err == nil {
+		t.Fatal("accepted PurposeChoiceOnly work missing ReviewSnapshots for previous round excluded target")
+	}
+
+	w.Scope.Content.ReviewSnapshots = []TargetSnapshot{workContentSnapshot(protected, "package checks // revised\n")}
+	if err := w.Validate(); err != nil {
+		t.Fatalf("rejected valid PurposeChoiceOnly work with ReviewSnapshots: %v", err)
+	}
+}

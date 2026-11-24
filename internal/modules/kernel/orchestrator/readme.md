@@ -982,7 +982,7 @@ validation-only ordinary 消费者各自保留 exact reopen 来源、fresh valid
   `MutationInputCatalogs` 前像，accepted attempt、dispatch target authorization、hash 与 restart fence 不得丢失或改写
   排除集合。只有 exact confirmed-validation `InputRepair` 可开放自己的单一 target，其余输入不开放；create-only addition
   与合法实现修改仍走原事务。普通 `RuntimeImplementationWorkContent` 同样经
-  `RuntimeImplementationWorkContentExcludedTargets` 携带 canonical `ExcludedTargetRefs` 并在采集阶段跳过受保护输入读盘，使受保护验证输入不进入普通 `Snapshots`（仅显式 `InputRevision` 解锁的目标除外）；scope 采集、`observeImplementationWorkScope`、working/semantic 校验与 LLM wire 往返均强制一致性。Core 不解析文件名/语言，capability owner 不选择 SM-2/SM-3/SM-4 transition；SM-1 不变。
+  `RuntimeImplementationWorkContentExcludedTargets` 携带 canonical `ExcludedTargetRefs` 并在采集阶段跳过受保护输入写入可编辑 `Snapshots`，使受保护验证输入不进入普通可写 `Snapshots`（仅显式 `InputRevision` 解锁的目标除外）；当同 CWI 上一已提交回执轮次通过 `InputRevision` 修改了某个仍处于 `ExcludedTargetRefs` 中的受保护目标时，下一轮在保持 `ExcludedTargetRefs` 写排斥的前提下，通过 `RuntimeImplementationWorkContentReviewTargets` 在同一 manifest revision 边界只读采集该目标当前全文至 `Content.ReviewSnapshots` 专供 `PreviousRoundReview` 与 `ChangeReview` 核对 `before`/`after`；scope 采集、`observeImplementationWorkScope`、working/semantic 校验与 LLM wire 往返均强制一致性。Core 不解析文件名/语言，capability owner 不选择 SM-2/SM-3/SM-4 transition；SM-1 不变。
   这是普通修改准入，不是 LLM semantic review；越界重复只走既有 bounded candidate failure，不能制造治理 ticket。
 - 验收扩展只允许与原 Goal/DoD 一致的补充和细化，并与原义务合取；不允许通过 approval、输入版本或外部参考
   覆盖原准则。测试实现不等同于验收准则，修改输入不能从失败本身推导授权。shared contract 的

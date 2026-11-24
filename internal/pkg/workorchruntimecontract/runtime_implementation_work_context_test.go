@@ -215,3 +215,97 @@ func TestImplementationWorkContentExcludesProtectedValidationInputs(t *testing.T
 		})
 	}
 }
+
+func TestImplementationWorkContentReviewSnapshotsValidation(t *testing.T) {
+	revision, ledger := inputRevisionFixture(t)
+	catalogs := ledger.Manifest.OwnerCatalogs
+	inputTarget := revision.InputTargetRefs[0]
+	excluded := RuntimeImplementationWorkContentExcludedTargets(RuntimeModuleFile, catalogs, nil)
+	scope := RuntimeImplementationWorkScopeObservation{
+		Selection: RuntimeTargetSelection{
+			ObservedRevision: "tree-v2",
+			TargetRefs:       []string{"app.go", inputTarget, "helper.go"},
+		},
+	}
+	slices.Sort(scope.Selection.TargetRefs)
+
+	valid := RuntimeImplementationWorkContent{
+		ProtocolRef:        RuntimeImplementationWorkContentV1,
+		ManifestRevision:   "tree-v2",
+		ExcludedTargetRefs: slices.Clone(excluded),
+		Snapshots: []TargetSnapshot{
+			workContentSnapshot("app.go", "package work\n"),
+			workContentSnapshot("helper.go", "package work\n"),
+		},
+		ReviewSnapshots: []TargetSnapshot{
+			workContentSnapshot(inputTarget, "package checks\n// updated after round 1\n"),
+		},
+	}
+	if err := valid.Validate(scope); err != nil {
+		t.Fatalf("valid ReviewSnapshots rejected: %v", err)
+	}
+	cloned := valid.Clone()
+	cloned.ReviewSnapshots[0].Content = "tampered"
+	if valid.ReviewSnapshots[0].Content != "package checks\n// updated after round 1\n" {
+		t.Fatal("Clone aliased ReviewSnapshots")
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(*RuntimeImplementationWorkContent)
+	}{
+		{
+			name:   "empty non-nil ReviewSnapshots",
+			mutate: func(c *RuntimeImplementationWorkContent) { c.ReviewSnapshots = []TargetSnapshot{} },
+		},
+		{
+			name: "non-excluded target in ReviewSnapshots",
+			mutate: func(c *RuntimeImplementationWorkContent) {
+				c.ReviewSnapshots = []TargetSnapshot{workContentSnapshot("app.go", "package work\n")}
+			},
+		},
+		{
+			name: "target outside Selection.TargetRefs",
+			mutate: func(c *RuntimeImplementationWorkContent) {
+				c.ExcludedTargetRefs = normalizeStrings([]string{inputTarget, "outside_test.go"})
+				c.ReviewSnapshots = []TargetSnapshot{workContentSnapshot("outside_test.go", "package checks\n")}
+			},
+		},
+		{
+			name: "duplicate target in ReviewSnapshots",
+			mutate: func(c *RuntimeImplementationWorkContent) {
+				c.ReviewSnapshots = append(c.ReviewSnapshots, c.ReviewSnapshots[0])
+			},
+		},
+		{
+			name: "unsorted ReviewSnapshots",
+			mutate: func(c *RuntimeImplementationWorkContent) {
+				c.ExcludedTargetRefs = []string{"a_input_test.go", inputTarget}
+				if inputTarget < "a_input_test.go" {
+					c.ExcludedTargetRefs = []string{inputTarget, "z_input_test.go"}
+				}
+				c.ReviewSnapshots = []TargetSnapshot{
+					workContentSnapshot(c.ExcludedTargetRefs[1], "b\n"),
+					workContentSnapshot(c.ExcludedTargetRefs[0], "a\n"),
+				}
+			},
+		},
+		{
+			name:   "tampered ReviewSnapshot hash",
+			mutate: func(c *RuntimeImplementationWorkContent) { c.ReviewSnapshots[0].ContentHash = "tampered" },
+		},
+		{
+			name:   "tampered ReviewSnapshot size",
+			mutate: func(c *RuntimeImplementationWorkContent) { c.ReviewSnapshots[0].Size++ },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bad := valid.Clone()
+			tc.mutate(bad)
+			if err := bad.Validate(scope); err == nil {
+				t.Fatalf("invalid ReviewSnapshots accepted (%s)", tc.name)
+			}
+		})
+	}
+}

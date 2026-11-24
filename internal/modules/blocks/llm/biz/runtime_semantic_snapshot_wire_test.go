@@ -105,7 +105,66 @@ func TestSemanticWorkWirePreservesExcludedTargetRefs(t *testing.T) {
 	if err := json.Unmarshal(plainEncoded, &plainRestored); err != nil {
 		t.Fatal(err)
 	}
-	if plainRestored.Content == nil || plainRestored.Content.ExcludedTargetRefs != nil || !reflect.DeepEqual(plain, plainRestored) {
-		t.Fatalf("empty ExcludedTargetRefs decoded as non-nil or drifted: %+v", plainRestored.Content)
+	if plainRestored.Content == nil || plainRestored.Content.ExcludedTargetRefs != nil || plainRestored.Content.ReviewSnapshots != nil || !reflect.DeepEqual(plain, plainRestored) {
+		t.Fatalf("empty ExcludedTargetRefs/ReviewSnapshots decoded as non-nil or drifted: %+v", plainRestored.Content)
+	}
+
+	withReview := runtimeSemanticWorkProjection{
+		Content: &rc.RuntimeImplementationWorkContent{
+			ProtocolRef:        rc.RuntimeImplementationWorkContentV1,
+			ManifestRevision:   "rev-2",
+			ExcludedTargetRefs: []string{"checks/input_test.go"},
+			Snapshots:          content.Snapshots,
+			ReviewSnapshots: []rc.TargetSnapshot{
+				{TargetRef: "checks/input_test.go", Content: "package checks // updated\n", ContentHash: "hash-rev", ContentState: rc.SnapshotContentStateComplete, Size: 25},
+			},
+		},
+	}
+	withReviewEncoded, err := json.Marshal(withReview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var withReviewRestored runtimeSemanticWorkProjection
+	if err := json.Unmarshal(withReviewEncoded, &withReviewRestored); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(withReview, withReviewRestored) || withReviewRestored.Content.Hash() != withReview.Content.Hash() {
+		t.Fatalf("wire round-trip lost ReviewSnapshots: got=%+v want=%+v", withReviewRestored.Content, withReview.Content)
+	}
+	// cacheLayoutJSON must place reviewSnapshots before SnapshotObservations.
+	rawWrap, _ := json.Marshal(struct {
+		Work runtimeSemanticWorkProjection `json:"workContext"`
+	}{withReview})
+	laidOut, err := cacheLayoutJSON(rawWrap, "semantic-shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewPos := strings.Index(string(laidOut), `"reviewSnapshots":`)
+	obsPos := strings.Index(string(laidOut), `"SnapshotObservations":`)
+	reviewObsPos := strings.Index(string(laidOut), `"reviewSnapshotObservations":`)
+	if reviewPos < 0 || obsPos < 0 || reviewObsPos < 0 || !(reviewPos < obsPos && obsPos < reviewObsPos) {
+		t.Fatalf("unexpected cache layout order for reviewSnapshots: %s", string(laidOut))
+	}
+	for _, badCase := range []string{"missing-obs", "wrong-target", "mixed-body", "empty-non-nil"} {
+		var w runtimeSemanticWorkWire
+		_ = json.Unmarshal(withReviewEncoded, &w)
+		var badRaw []byte
+		switch badCase {
+		case "missing-obs":
+			w.Content.ReviewSnapshotObservations = nil
+			badRaw, _ = json.Marshal(w)
+		case "wrong-target":
+			w.Content.ReviewSnapshotObservations[0].TargetRef = "foreign"
+			badRaw, _ = json.Marshal(w)
+		case "mixed-body":
+			w.Content.ReviewSnapshotObservations[0].Content = "inline"
+			badRaw, _ = json.Marshal(w)
+		case "empty-non-nil":
+			badRaw = []byte(`{"content":{"ProtocolRef":"` + rc.RuntimeImplementationWorkContentV1 + `","Snapshots":[],"SnapshotObservations":[],"reviewSnapshots":[],"reviewSnapshotObservations":[],"ManifestRevision":"rev-2"}}`)
+		}
+		var out runtimeSemanticWorkProjection
+		if json.Unmarshal(badRaw, &out) == nil {
+			t.Fatalf("invalid reviewSnapshots wire accepted (%s)", badCase)
+		}
 	}
 }

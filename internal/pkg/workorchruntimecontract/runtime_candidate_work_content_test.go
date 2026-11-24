@@ -82,3 +82,33 @@ func TestCandidateWorkContentRejectsMissingChangedForeignAndIncomplete(t *testin
 		})
 	}
 }
+
+func TestCandidateWorkContentAllowsReviewSnapshotsWithoutWriteProjection(t *testing.T) {
+	c, m := workContentFixture()
+	h := sha256.Sum256([]byte("package checks\n"))
+	reviewSnap := TargetSnapshot{
+		TargetRef:    "checks/input_test.go",
+		Content:      "package checks\n",
+		ContentHash:  hex.EncodeToString(h[:]),
+		Size:         int64(len("package checks\n")),
+		ContentState: SnapshotContentStateComplete,
+	}
+	c.ImplementationWorkContent.ExcludedTargetRefs = []string{"checks/input_test.go"}
+	c.ImplementationWorkContent.ReviewSnapshots = []TargetSnapshot{reviewSnap}
+	m.ImplementationWorkingBinding.IntentBinding.Intent.ContentHash = c.ImplementationWorkContent.Hash()
+
+	got, err := ProjectRuntimeCandidateWorkContent(c, m)
+	if err != nil {
+		t.Fatalf("ProjectRuntimeCandidateWorkContent with ReviewSnapshots: %v", err)
+	}
+	if len(got.Snapshots) != 1 || got.Snapshots[0].TargetRef != "main.txt" {
+		t.Fatalf("projected Snapshots = %+v, want writable main.txt only", got.Snapshots)
+	}
+
+	// An operation targeting a write-excluded ReviewSnapshot must still be rejected.
+	writeReview := m
+	writeReview.RequiredOperationSequence = []RuntimeRequiredOperationVariant{{RequirementID: "edit-excluded", TargetRef: "checks/input_test.go"}}
+	if _, err := ProjectRuntimeCandidateWorkContent(c, writeReview); err == nil {
+		t.Fatal("ProjectRuntimeCandidateWorkContent projected excluded ReviewSnapshot as writable target")
+	}
+}

@@ -25,6 +25,12 @@ func RuntimeImplementationRepeatedWorkStates(preview RuntimeImplementationWorkSc
 	return count
 }
 
+func sameTargetSnapshots(a, b []TargetSnapshot) bool {
+	return slices.EqualFunc(a, b, func(a, b TargetSnapshot) bool {
+		return a.TargetRef == b.TargetRef && a.Content == b.Content && a.Size == b.Size && a.ContentHash == b.ContentHash
+	})
+}
+
 func sameImplementationResourceState(a, b RuntimeImplementationWorkContent) bool {
 	// Observed tree revisions intentionally differ after a real successor write.
 	// Compare original target identities and FULL bytes, not revision-sensitive
@@ -32,7 +38,5 @@ func sameImplementationResourceState(a, b RuntimeImplementationWorkContent) bool
 	// defines the physical scope within this owner/CWI; declaration/selector names
 	// and method limits must not erase a visit. Original source hashes remain
 	// independently validated by the work ledger and each transaction.
-	return slices.EqualFunc(a.Snapshots, b.Snapshots, func(a, b TargetSnapshot) bool {
-		return a.TargetRef == b.TargetRef && a.Content == b.Content && a.Size == b.Size && a.ContentHash == b.ContentHash
-	})
+	return sameTargetSnapshots(a.Snapshots, b.Snapshots) && sameTargetSnapshots(a.ReviewSnapshots, b.ReviewSnapshots)
 }

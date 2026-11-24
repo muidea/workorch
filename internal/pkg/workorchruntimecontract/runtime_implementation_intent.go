@@ -88,7 +88,8 @@ type RuntimeImplementationRoundReview struct {
 
 // Before snapshots contain only the preceding round's affected existing
 // targets. Absent targets were prospective in its original owner scope.
-// Current complete after-content is already carried by the current scope.
+// Current complete after-content is carried by the current scope (with excluded
+// targets modified by the preceding round carried read-only in ReviewSnapshots).
 type RuntimeImplementationRoundReviewSource struct {
 	Ordinal        int                                     `json:"ordinal"`
 	DispatchID     string                                  `json:"dispatchId"`

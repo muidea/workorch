@@ -290,6 +290,59 @@ func runtimeWorkInputExclusions(owner string, catalogs []RuntimeOperationAdmissi
 	return excluded
 }
 
+// RuntimeImplementationWorkContentReviewTargets selects write-excluded targets in
+// selectionTargets modified by the immediately preceding completed round of cwi
+// so PurposeChoiceOnly and ChangeReview receive exact after-bytes without
+// granting write access.
+func RuntimeImplementationWorkContentReviewTargets(selectionTargets, excludedTargets []string, rounds []RuntimeImplementationWorkRound, cwi common.CoverageWorkItemID, scopeRequestID string) []string {
+	if len(selectionTargets) == 0 || len(excludedTargets) == 0 {
+		return nil
+	}
+	var prior *RuntimeImplementationWorkRound
+	for i := range rounds {
+		r := &rounds[i]
+		if r.CoverageWorkItemID != cwi {
+			continue
+		}
+		if scopeRequestID != "" && r.ScopeRequest.RequestID == scopeRequestID {
+			break
+		}
+		if r.CompletedReceiptSetHash != "" && r.FailedReceiptHash == "" {
+			prior = r
+		}
+	}
+	if prior == nil || prior.WorkingBinding == nil {
+		return nil
+	}
+	var targets []string
+	for _, p := range prior.WorkingBinding.Proposals {
+		for _, target := range RuntimeSemanticProposalTargetRefs(p) {
+			if slices.Contains(excludedTargets, target) && slices.Contains(selectionTargets, target) {
+				targets = append(targets, target)
+			}
+		}
+	}
+	return normalizeStrings(targets)
+}
+
+func runtimePreviousRoundExcludedReviewTargets(selectionTargets, excludedTargets []string, prev *RuntimeImplementationRoundReviewSource) []string {
+	if prev == nil || len(selectionTargets) == 0 || len(excludedTargets) == 0 {
+		return nil
+	}
+	var targets []string
+	for _, s := range prev.Before {
+		if slices.Contains(excludedTargets, s.TargetRef) && slices.Contains(selectionTargets, s.TargetRef) {
+			targets = append(targets, s.TargetRef)
+		}
+	}
+	for _, target := range prev.AbsentTargets {
+		if slices.Contains(excludedTargets, target) && slices.Contains(selectionTargets, target) {
+			targets = append(targets, target)
+		}
+	}
+	return normalizeStrings(targets)
+}
+
 func validateRuntimeInputRevisionTargets(v *RuntimeValidationInputRevision, p RuntimeSemanticProofProposal) error {
 	if v == nil {
 		return nil

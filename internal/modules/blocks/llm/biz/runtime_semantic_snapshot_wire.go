@@ -18,17 +18,52 @@ type runtimeSemanticSnapshotBody struct {
 }
 
 type runtimeSemanticContentWire struct {
-	ProtocolRef          string
-	Snapshots            []runtimeSemanticSnapshotBody
-	SnapshotObservations []rc.TargetSnapshot
-	ExcludedTargetRefs   []string `json:"excludedTargetRefs,omitempty"`
-	ManifestRevision     string
+	ProtocolRef                string
+	Snapshots                  []runtimeSemanticSnapshotBody
+	ReviewSnapshots            []runtimeSemanticSnapshotBody `json:"reviewSnapshots,omitempty"`
+	SnapshotObservations       []rc.TargetSnapshot
+	ReviewSnapshotObservations []rc.TargetSnapshot `json:"reviewSnapshotObservations,omitempty"`
+	ExcludedTargetRefs         []string            `json:"excludedTargetRefs,omitempty"`
+	ManifestRevision           string
 }
 
 type runtimeSemanticWorkWire struct {
 	Content     *runtimeSemanticContentWire          `json:"content"`
 	PriorRounds []runtimeSemanticWorkRoundProjection `json:"priorRounds"`
 	Intent      *rc.RuntimeImplementationIntent      `json:"intent,omitempty"`
+}
+
+func splitSemanticSnapshotWire(items []rc.TargetSnapshot) ([]runtimeSemanticSnapshotBody, []rc.TargetSnapshot) {
+	if items == nil {
+		return nil, nil
+	}
+	bodies := make([]runtimeSemanticSnapshotBody, len(items))
+	obs := make([]rc.TargetSnapshot, len(items))
+	for i, s := range items {
+		bodies[i] = runtimeSemanticSnapshotBody{TargetRef: s.TargetRef, Content: s.Content}
+		s.Content = ""
+		obs[i] = s
+	}
+	return bodies, obs
+}
+
+func restoreSemanticSnapshotWire(bodies []runtimeSemanticSnapshotBody, observations []rc.TargetSnapshot) ([]rc.TargetSnapshot, error) {
+	if len(bodies) != len(observations) || (bodies == nil) != (observations == nil) {
+		return nil, fmt.Errorf("semantic snapshot observations do not match complete body inventory")
+	}
+	if bodies == nil {
+		return nil, nil
+	}
+	restored := make([]rc.TargetSnapshot, len(bodies))
+	for i, body := range bodies {
+		s := observations[i]
+		if s.Content != "" || s.TargetRef != body.TargetRef {
+			return nil, fmt.Errorf("semantic snapshot observation has mixed content or different target")
+		}
+		s.Content = body.Content
+		restored[i] = s
+	}
+	return restored, nil
 }
 
 func (p runtimeSemanticWorkProjection) MarshalJSON() ([]byte, error) {
@@ -43,14 +78,9 @@ func (p runtimeSemanticWorkProjection) MarshalJSON() ([]byte, error) {
 		if len(w.Content.ExcludedTargetRefs) == 0 {
 			w.Content.ExcludedTargetRefs = nil
 		}
-		if c.Snapshots != nil {
-			w.Content.Snapshots = make([]runtimeSemanticSnapshotBody, len(c.Snapshots))
-			w.Content.SnapshotObservations = make([]rc.TargetSnapshot, len(c.Snapshots))
-		}
-		for i, s := range c.Snapshots {
-			w.Content.Snapshots[i] = runtimeSemanticSnapshotBody{TargetRef: s.TargetRef, Content: s.Content}
-			s.Content = ""
-			w.Content.SnapshotObservations[i] = s
+		w.Content.Snapshots, w.Content.SnapshotObservations = splitSemanticSnapshotWire(c.Snapshots)
+		if len(c.ReviewSnapshots) > 0 {
+			w.Content.ReviewSnapshots, w.Content.ReviewSnapshotObservations = splitSemanticSnapshotWire(c.ReviewSnapshots)
 		}
 	}
 	return json.Marshal(w)
@@ -66,27 +96,26 @@ func (p *runtimeSemanticWorkProjection) UnmarshalJSON(raw []byte) error {
 	v := runtimeSemanticWorkProjection{PriorRounds: w.PriorRounds, Intent: w.Intent}
 	if w.Content != nil {
 		c := w.Content
-		if len(c.Snapshots) != len(c.SnapshotObservations) || (c.Snapshots == nil) != (c.SnapshotObservations == nil) {
-			return fmt.Errorf("semantic snapshot observations do not match complete body inventory")
+		if c.ReviewSnapshots != nil && len(c.ReviewSnapshots) == 0 {
+			return fmt.Errorf("semantic review snapshots must be omitted when empty")
+		}
+		snapshots, err := restoreSemanticSnapshotWire(c.Snapshots, c.SnapshotObservations)
+		if err != nil {
+			return err
+		}
+		reviewSnapshots, err := restoreSemanticSnapshotWire(c.ReviewSnapshots, c.ReviewSnapshotObservations)
+		if err != nil {
+			return err
 		}
 		v.Content = &rc.RuntimeImplementationWorkContent{
 			ProtocolRef:        c.ProtocolRef,
 			ExcludedTargetRefs: slices.Clone(c.ExcludedTargetRefs),
 			ManifestRevision:   c.ManifestRevision,
+			Snapshots:          snapshots,
+			ReviewSnapshots:    reviewSnapshots,
 		}
 		if len(v.Content.ExcludedTargetRefs) == 0 {
 			v.Content.ExcludedTargetRefs = nil
-		}
-		if c.Snapshots != nil {
-			v.Content.Snapshots = make([]rc.TargetSnapshot, len(c.Snapshots))
-		}
-		for i, body := range c.Snapshots {
-			s := c.SnapshotObservations[i]
-			if s.Content != "" || s.TargetRef != body.TargetRef {
-				return fmt.Errorf("semantic snapshot observation has mixed content or different target")
-			}
-			s.Content = body.Content
-			v.Content.Snapshots[i] = s
 		}
 	}
 	*p = v

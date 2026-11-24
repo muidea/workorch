@@ -191,3 +191,97 @@ func TestChangeReviewStageSelectionUsesExactCWIAndOwnerDependencyCorpus(t *testi
 		t.Fatal("unselected batch source escaped scope", err)
 	}
 }
+
+func TestSemanticChangeReviewContextIncludesPreviousRoundReviewSnapshots(t *testing.T) {
+	a := RuntimeAggregate{
+		Definition: rc.RuntimeDefinitionContext{Revision: "definition"},
+		Facts:      rc.RuntimeFacts{WorkspaceID: "ws", RunID: "run"},
+	}
+	target := "checks/input_test.go"
+	beforeBody := "package checks\n// before trimpath fix\n"
+	afterBody := "package checks\n// after trimpath fix\n"
+	beforeHash := rc.RuntimeValidationInputContentHash(beforeBody)
+	afterHash := rc.RuntimeValidationInputContentHash(afterBody)
+	op := rc.RuntimeOperation{
+		ID:         "op-1",
+		Kind:       rc.StepKindFileEdit,
+		TargetRefs: []string{target},
+		Parameters: []rc.OperationParameter{
+			{Name: "oldText", String: &beforeBody},
+			{Name: "newText", String: &afterBody},
+		},
+	}
+	receipt := rc.RuntimeOperationReceipt{
+		ExecutionKey:        "exec-round-1",
+		Fence:               1,
+		OperationID:         op.ID,
+		Outcome:             rc.RuntimeOperationOutcomeAccepted,
+		ObservedEffectScope: rc.RuntimeEffectWorkspaceDurable,
+		Changed:             true,
+		TargetRefs:          []string{target},
+		BeforeHash:          beforeHash,
+		AfterHash:           afterHash,
+	}
+	a.OperationReceipts = []rc.RuntimeOperationReceipt{receipt}
+	a.CompletedDispatches = []rc.RuntimeDispatchRecord{{
+		ID:          "dispatch-1",
+		WorkspaceID: "ws",
+		RunID:       "run",
+		Candidate:   rc.RuntimeCandidate{StateChange: &rc.StateChangeCandidate{Operations: []rc.StateChangingOperation{{Operation: op}}}},
+		OperationExecutions: []rc.RuntimeOperationExecutionRecord{{
+			OperationID:      op.ID,
+			OperationHash:    rc.StableRuntimeOperationHash(op),
+			ExecutionKey:     receipt.ExecutionKey,
+			Fence:            receipt.Fence,
+			State:            rc.OperationExecutionEvidenceCommitted,
+			OwnerReceiptRef:  "runtime-receipt/" + receipt.ExecutionKey,
+			OwnerReceiptHash: rc.StableRuntimeOperationReceiptHash(receipt),
+		}},
+		ImplementationWorkCommitment: &rc.RuntimeImplementationWorkRound{
+			ScopeObservation: &rc.RuntimeImplementationWorkScopeObservation{
+				Content: &rc.RuntimeImplementationWorkContent{
+					Snapshots: []rc.TargetSnapshot{{TargetRef: target, Content: beforeBody, ContentHash: beforeHash, ContentState: rc.SnapshotContentStateComplete, Size: int64(len(beforeBody))}},
+				},
+			},
+		},
+	}}
+
+	ordinaryBody := "package main\n"
+	ordinaryHash := rc.RuntimeValidationInputContentHash(ordinaryBody)
+	manifest := rc.RuntimeSemanticPlanManifest{
+		WorkspaceID: "ws",
+		RunID:       "run",
+		ProofObligations: []rc.RuntimeSemanticProofObligation{{
+			CoverageWorkItemID: "cwi-003",
+			ImplementationWork: &rc.RuntimeSemanticImplementationWork{
+				PurposeChoiceOnly: true,
+			},
+		}},
+	}
+	workContext := &rc.RuntimeSemanticWorkContext{
+		Content: &rc.RuntimeImplementationWorkContent{
+			ProtocolRef:        rc.RuntimeImplementationWorkContentV1,
+			ManifestRevision:   "tree-v2",
+			ExcludedTargetRefs: []string{target},
+			Snapshots:          []rc.TargetSnapshot{{TargetRef: "main.go", Content: ordinaryBody, ContentHash: ordinaryHash, ContentState: rc.SnapshotContentStateComplete, Size: int64(len(ordinaryBody))}},
+			ReviewSnapshots:    []rc.TargetSnapshot{{TargetRef: target, Content: afterBody, ContentHash: afterHash, ContentState: rc.SnapshotContentStateComplete, Size: int64(len(afterBody))}},
+		},
+	}
+
+	got, err := SemanticChangeReviewContext(a, rc.RuntimeSemanticPlanRequestContext{
+		PlanStep:    rc.RuntimeSemanticPlanStepCoverageOrder,
+		WorkContext: workContext,
+	}, manifest)
+	if err != nil {
+		t.Fatalf("SemanticChangeReviewContext: %v", err)
+	}
+	if got == nil || len(got.Current) != 2 || len(got.Changes) != 1 {
+		t.Fatalf("ChangeReview = %+v, want 2 current files and 1 change edge", got)
+	}
+	if got.Current[0].TargetRef != target || got.Current[0].Content != afterBody || got.Current[0].ContentHash != afterHash {
+		t.Fatalf("ChangeReview.Current[0] = %+v, want %s afterBody", got.Current[0], target)
+	}
+	if got.Changes[0].TargetRef != target || got.Changes[0].Baseline == nil || got.Changes[0].Baseline.Content != beforeBody {
+		t.Fatalf("ChangeReview.Changes[0] = %+v, want exact baseline beforeBody", got.Changes[0])
+	}
+}

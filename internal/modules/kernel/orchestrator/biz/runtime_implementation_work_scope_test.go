@@ -424,4 +424,36 @@ func TestImplementationWorkScopeWithExclusionsSkipsProtectedInputsUnlessRevised(
 		len(revisedObs.Content.Snapshots) != 2 || revisedObs.Content.Validate(revisedObs) != nil {
 		t.Fatalf("revision-unlocked scope observation unexpected: content=%+v", revisedObs.Content)
 	}
+
+	// Simulate a completed Round 1 where checks/input_test.go was modified under InputRevision,
+	// then acquire Round 2 scope (ordinary Request with InputRevision==nil):
+	// checks/input_test.go must stay in ExcludedTargetRefs and Snapshots-excluded, while being
+	// acquired read-only into Content.ReviewSnapshots at the same ManifestRevision.
+	rounds := []runtimecontract.RuntimeImplementationWorkRound{{
+		CoverageWorkItemID:      ordinaryReq.CoverageWorkItemID,
+		Ordinal:                 1,
+		ScopeRequest:            revisedReq,
+		CompletedReceiptSetHash: "receipt-set-round-1",
+		WorkingBinding: &runtimecontract.RuntimeImplementationWorkingBinding{
+			Proposals: []runtimecontract.RuntimeSemanticProofProposal{{
+				CoverageWorkItemID: ordinaryReq.CoverageWorkItemID,
+				Target: runtimecontract.RuntimeOperationTargetAuthorization{
+					Policy:               runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+					OwnerScopeTargetRefs: []string{"checks/input_test.go"},
+				},
+			}},
+		},
+	}}
+	nextObs, err := acquireRuntimeImplementationWorkScopeWithTargets(ctx, hub, directory, ordinaryReq, ordinarySource, excluded, rounds)
+	if err != nil {
+		t.Fatalf("acquireRuntimeImplementationWorkScopeWithTargets: %v", err)
+	}
+	if nextObs.Content == nil ||
+		!reflect.DeepEqual(nextObs.Content.ExcludedTargetRefs, []string{"checks/input_test.go"}) ||
+		len(nextObs.Content.Snapshots) != 1 || nextObs.Content.Snapshots[0].TargetRef != "implementation.go" ||
+		len(nextObs.Content.ReviewSnapshots) != 1 || nextObs.Content.ReviewSnapshots[0].TargetRef != "checks/input_test.go" ||
+		nextObs.Content.ManifestRevision != nextObs.Selection.ObservedRevision ||
+		nextObs.Content.Validate(nextObs) != nil {
+		t.Fatalf("round 2 excluded ReviewSnapshots unexpected: content=%+v", nextObs.Content)
+	}
 }

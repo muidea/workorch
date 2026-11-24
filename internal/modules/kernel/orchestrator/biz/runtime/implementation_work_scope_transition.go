@@ -325,6 +325,16 @@ func (c *authorityComponent) observeImplementationWorkScope(ctx context.Context,
 		if !slices.Equal(observation.Content.ExcludedTargetRefs, expectedExcluded) {
 			return RuntimeAggregate{}, fmt.Errorf("%w: implementation work content exclusions do not match current owner catalogs", common.ErrConflict)
 		}
+		expectedReviewTargets := runtimecontract.RuntimeImplementationWorkContentReviewTargets(
+			observation.Selection.TargetRefs,
+			expectedExcluded,
+			a.ImplementationWork.Rounds,
+			observation.Request.CoverageWorkItemID,
+			observation.Request.RequestID,
+		)
+		if !slices.Equal(runtimecontract.RuntimeImplementationWorkSnapshotTargets(observation.Content.ReviewSnapshots), expectedReviewTargets) {
+			return RuntimeAggregate{}, fmt.Errorf("%w: implementation work review snapshots do not match preceding round excluded targets", common.ErrConflict)
+		}
 	}
 	a.ImplementationWork = a.ImplementationWork.Clone()
 	if preview := a.ImplementationWork.ScopePreview; preview != nil && reflect.DeepEqual(preview.Request, observation.Request) {

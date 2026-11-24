@@ -25,9 +25,16 @@ func ProjectRuntimeCandidateWorkContent(c RuntimeCandidateContext, m RuntimeCand
 	if source == nil || b.IntentBinding == nil || b.IntentBinding.Intent == nil || source.Hash() != b.IntentBinding.Intent.ContentHash {
 		return nil, fmt.Errorf("implementation work source differs from accepted intent")
 	}
-	refs := make([]string, 0, len(source.Snapshots))
+	refs := make([]string, 0, len(source.Snapshots)+len(source.ReviewSnapshots))
 	seen := map[string]bool{}
 	for _, s := range source.Snapshots {
+		if seen[s.TargetRef] {
+			return nil, fmt.Errorf("duplicate implementation source target")
+		}
+		seen[s.TargetRef] = true
+		refs = append(refs, s.TargetRef)
+	}
+	for _, s := range source.ReviewSnapshots {
 		if seen[s.TargetRef] {
 			return nil, fmt.Errorf("duplicate implementation source target")
 		}
